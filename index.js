@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 const { App } = require("@slack/bolt");
 const { Pool } = require("pg");
@@ -31,10 +32,27 @@ function safeJsonParse(str) {
   }
 }
 
-// 通知抑止：@mk 等を表示したいが、メンション通知は飛ばしたくない
+// 通知抑止：@mk 等を表示したいが、メンション通知は飛ばしたくない（※全社タスク発行時は例外でメンションを有効にする）
 function noMention(s) {
   if (!s) return "";
   return String(s).replace(/@/g, "＠");
+}
+
+
+function excludeUsers(base, removeList) {
+  const rm = new Set(removeList || []);
+  return (base || []).filter((u) => u && !rm.has(u));
+}
+
+// Home再描画を少しずつ投げる（スマホの反映遅延対策）
+async function publishHomeForUsers(client, teamId, userIds, intervalMs = 200) {
+  const uniq = Array.from(new Set((userIds || []).filter(Boolean)));
+  for (let i = 0; i < uniq.length; i++) {
+    const u = uniq[i];
+    setTimeout(() => {
+      publishHome({ client, teamId, userId: u }).catch(() => {});
+    }, i * intervalMs);
+  }
 }
 
 // 期限を YYYY/MM/DD のみにする
@@ -132,6 +150,32 @@ async function prettifySlackText(text, teamId) {
   return out;
 }
 
+
+// ================================
+// User display name cache (for assignee labels)
+// ================================
+const userNameCache = new Map(); // `${teamId}:${userId}` -> { at, name }
+const USER_CACHE_MS = 60 * 60 * 1000;
+
+async function getUserDisplayName(teamId, userId) {
+  const key = `${teamId}:${userId}`;
+  const cached = userNameCache.get(key);
+  if (cached && Date.now() - cached.at < USER_CACHE_MS) return cached.name;
+
+  try {
+    const res = await app.client.users.info({ user: userId });
+    const u = res?.user;
+    const name =
+      (u?.profile?.display_name && u.profile.display_name.trim()) ||
+      (u?.real_name && u.real_name.trim()) ||
+      (u?.name && String(u.name).trim()) ||
+      userId;
+    userNameCache.set(key, { at: Date.now(), name });
+    return name;
+  } catch (_) {
+    return userId;
+  }
+}
 // ================================
 // Departments (A): "*-all" usergroups are department masters
 // ================================
@@ -274,7 +318,15 @@ async function listDeptKeys(teamId) {
 }
 
 // ================================
-// DB: Tasks
+// Broadcast env helpers
+// ================================
+const BROADCAST_VIEWER_USER_IDS = (process.env.BROADCAST_VIEWER_USER_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// ================================
+// DB: Tasks (+broadcast)
 // ================================
 async function dbCreateTask(task) {
   const q = `
@@ -284,7 +336,10 @@ async function dbCreateTask(task) {
       requester_user_id, created_by_user_id,
       assignee_id, assignee_label,
       status, due_date,
-      notified_at, requester_dept, assignee_dept,
+      requester_dept, assignee_dept,
+      task_type, broadcast_group_handle, broadcast_group_id,
+      total_count, completed_count,
+      notified_at,
       created_at, updated_at
     ) VALUES (
       $1,$2,$3,$4,$5,
@@ -292,7 +347,10 @@ async function dbCreateTask(task) {
       $8,$9,
       $10,$11,
       $12,$13,
-      $14,$15,$16,
+      $14,$15,
+      $16,$17,$18,
+      $19,$20,
+      $21,
       now(), now()
     )
     RETURNING *;
@@ -307,13 +365,18 @@ async function dbCreateTask(task) {
     task.description,
     task.requester_user_id,
     task.created_by_user_id,
-    task.assignee_id,
-    task.assignee_label,
+    task.assignee_id ?? null,
+    task.assignee_label ?? null,
     task.status,
     task.due_date,
-    task.notified_at ?? null,
     task.requester_dept ?? null,
     task.assignee_dept ?? null,
+    task.task_type ?? "personal",
+    task.broadcast_group_handle ?? null,
+    task.broadcast_group_id ?? null,
+    task.total_count ?? null,
+    task.completed_count ?? 0,
+    task.notified_at ?? null,
   ];
   const res = await dbQuery(q, params);
   return res.rows[0];
@@ -326,73 +389,77 @@ async function dbGetTaskById(teamId, taskId) {
 }
 
 async function dbListTasksForAssignee(teamId, assigneeId, status, limit = 10) {
+  // Phase2: 閲覧は誰でも可能（担当者で絞らない）
   const q = `
     SELECT * FROM tasks
-    WHERE team_id=$1 AND assignee_id=$2 AND status=$3
+    WHERE team_id=$1 AND status=$2 AND (task_type IS NULL OR task_type='personal')
     ORDER BY (due_date IS NULL) ASC, due_date ASC, created_at DESC
-    LIMIT $4;
+    LIMIT $3;
   `;
-  const res = await dbQuery(q, [teamId, assigneeId, status, limit]);
+  const res = await dbQuery(q, [teamId, status, limit]);
   return res.rows;
 }
 
-async function dbListTasksForRequester(teamId, requesterUserId, status, limit = 10) {
+async function dbListTasksForRequester(teamId, requesterId, status, limit = 10) {
+  // Phase2: 閲覧は誰でも可能（依頼者で絞らない）
   const q = `
     SELECT * FROM tasks
-    WHERE team_id=$1 AND requester_user_id=$2 AND status=$3
+    WHERE team_id=$1 AND status=$2
     ORDER BY (due_date IS NULL) ASC, due_date ASC, created_at DESC
-    LIMIT $4;
+    LIMIT $3;
   `;
-  const res = await dbQuery(q, [teamId, requesterUserId, status, limit]);
+  const res = await dbQuery(q, [teamId, status, limit]);
   return res.rows;
 }
 
-// dept filter
+// dept filter (personal only)
 async function dbListTasksForAssigneeWithDept(teamId, assigneeId, status, deptKey, limit = 20) {
+  // Phase2: 閲覧は誰でも可能（担当者で絞らない）
   if (!deptKey || deptKey === "all") {
     return await dbListTasksForAssignee(teamId, assigneeId, status, limit);
   }
   if (deptKey === "__none__") {
     const q = `
       SELECT * FROM tasks
-      WHERE team_id=$1 AND assignee_id=$2 AND status=$3 AND assignee_dept IS NULL
+      WHERE team_id=$1 AND status=$2 AND assignee_dept IS NULL AND (task_type IS NULL OR task_type='personal')
       ORDER BY (due_date IS NULL) ASC, due_date ASC, created_at DESC
-      LIMIT $4;
+      LIMIT $3;
     `;
-    const res = await dbQuery(q, [teamId, assigneeId, status, limit]);
+    const res = await dbQuery(q, [teamId, status, limit]);
     return res.rows;
   }
   const q = `
     SELECT * FROM tasks
-    WHERE team_id=$1 AND assignee_id=$2 AND status=$3 AND assignee_dept=$4
+    WHERE team_id=$1 AND status=$2 AND assignee_dept=$3 AND (task_type IS NULL OR task_type='personal')
     ORDER BY (due_date IS NULL) ASC, due_date ASC, created_at DESC
-    LIMIT $5;
+    LIMIT $4;
   `;
-  const res = await dbQuery(q, [teamId, assigneeId, status, deptKey, limit]);
+  const res = await dbQuery(q, [teamId, status, deptKey, limit]);
   return res.rows;
 }
 
-async function dbListTasksForRequesterWithDept(teamId, requesterUserId, status, deptKey, limit = 20) {
+async function dbListTasksForRequesterWithDept(teamId, requesterId, status, deptKey, limit = 20) {
+  // Phase2: 閲覧は誰でも可能（依頼者で絞らない）
   if (!deptKey || deptKey === "all") {
-    return await dbListTasksForRequester(teamId, requesterUserId, status, limit);
+    return await dbListTasksForRequester(teamId, requesterId, status, limit);
   }
   if (deptKey === "__none__") {
     const q = `
       SELECT * FROM tasks
-      WHERE team_id=$1 AND requester_user_id=$2 AND status=$3 AND requester_dept IS NULL
+      WHERE team_id=$1 AND status=$2 AND requester_dept IS NULL
       ORDER BY (due_date IS NULL) ASC, due_date ASC, created_at DESC
-      LIMIT $4;
+      LIMIT $3;
     `;
-    const res = await dbQuery(q, [teamId, requesterUserId, status, limit]);
+    const res = await dbQuery(q, [teamId, status, limit]);
     return res.rows;
   }
   const q = `
     SELECT * FROM tasks
-    WHERE team_id=$1 AND requester_user_id=$2 AND status=$3 AND requester_dept=$4
+    WHERE team_id=$1 AND status=$2 AND requester_dept=$3
     ORDER BY (due_date IS NULL) ASC, due_date ASC, created_at DESC
-    LIMIT $5;
+    LIMIT $4;
   `;
-  const res = await dbQuery(q, [teamId, requesterUserId, status, deptKey, limit]);
+  const res = await dbQuery(q, [teamId, status, deptKey, limit]);
   return res.rows;
 }
 
@@ -421,6 +488,153 @@ async function dbCancelTask(teamId, taskId, actorUserId) {
   `;
   const res = await dbQuery(q, [teamId, taskId, actorUserId]);
   return res.rows[0] || null;
+}
+
+async function dbUpdateBroadcastCounts(teamId, taskId, completedCount, totalCount) {
+  const q = `
+    UPDATE tasks
+    SET completed_count=$3,
+        total_count = COALESCE(total_count, $4),
+        updated_at=now()
+    WHERE team_id=$1 AND id=$2
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [teamId, taskId, completedCount, totalCount ?? null]);
+  return res.rows[0] || null;
+}
+
+async function dbMarkBroadcastDoneIfComplete(teamId, taskId) {
+  const q = `
+    UPDATE tasks
+    SET status='done',
+        completed_at=now(),
+        updated_at=now()
+    WHERE team_id=$1 AND id=$2 AND status <> 'done'
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [teamId, taskId]);
+  return res.rows[0] || null;
+}
+
+// ================================
+// DB: Broadcast targets/completions/watchers
+// ================================
+async function dbInsertTaskTargets(teamId, taskId, userIds) {
+  if (!userIds?.length) return;
+  const values = [];
+  const params = [];
+  let i = 1;
+  for (const uid of userIds) {
+    params.push(taskId, teamId, uid);
+    values.push(`($${i++},$${i++},$${i++})`);
+  }
+  const q = `
+    INSERT INTO task_targets (task_id, team_id, user_id)
+    VALUES ${values.join(",")}
+    ON CONFLICT (task_id, user_id) DO NOTHING;
+  `;
+  await dbQuery(q, params);
+}
+
+async function dbInsertTaskWatchers(teamId, taskId, userIds) {
+  if (!userIds?.length) return;
+  const values = [];
+  const params = [];
+  let i = 1;
+  for (const uid of userIds) {
+    params.push(taskId, teamId, uid);
+    values.push(`($${i++},$${i++},$${i++})`);
+  }
+  const q = `
+    INSERT INTO task_watchers (task_id, team_id, user_id)
+    VALUES ${values.join(",")}
+    ON CONFLICT (task_id, user_id) DO NOTHING;
+  `;
+  await dbQuery(q, params);
+}
+
+async function dbIsUserTarget(teamId, taskId, userId) {
+  const q = `SELECT 1 FROM task_targets WHERE team_id=$1 AND task_id=$2 AND user_id=$3 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, taskId, userId]);
+  return !!res.rows[0];
+}
+
+async function dbHasUserCompleted(teamId, taskId, userId) {
+  const q = `SELECT 1 FROM task_completions WHERE team_id=$1 AND task_id=$2 AND user_id=$3 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, taskId, userId]);
+  return !!res.rows[0];
+}
+
+async function dbUpsertCompletion(teamId, taskId, userId) {
+  const q = `
+    INSERT INTO task_completions (task_id, team_id, user_id)
+    VALUES ($1,$2,$3)
+    ON CONFLICT (task_id, user_id) DO NOTHING;
+  `;
+  await dbQuery(q, [taskId, teamId, userId]);
+}
+
+async function dbCountTargets(teamId, taskId) {
+  const q = `SELECT COUNT(*)::int AS c FROM task_targets WHERE team_id=$1 AND task_id=$2;`;
+  const res = await dbQuery(q, [teamId, taskId]);
+  return res.rows[0]?.c ?? 0;
+}
+async function dbCountCompletions(teamId, taskId) {
+  const q = `SELECT COUNT(*)::int AS c FROM task_completions WHERE team_id=$1 AND task_id=$2;`;
+  const res = await dbQuery(q, [teamId, taskId]);
+  return res.rows[0]?.c ?? 0;
+}
+
+async function dbListBroadcastTasksForUser(teamId, userId, status, limit = 20, deptKey = "all") {
+  // Phase2: 閲覧は誰でも可能（対象者/依頼者で絞らない）
+  let whereDept = "";
+  const params = [teamId, status, limit];
+  if (deptKey && deptKey !== "all") {
+    if (deptKey === "__none__") {
+      whereDept = "AND t.requester_dept IS NULL";
+    } else {
+      whereDept = "AND t.requester_dept = $4";
+      params.push(deptKey);
+    }
+  }
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    WHERE t.team_id=$1
+      AND t.task_type='broadcast'
+      AND t.status=$2
+      ${whereDept}
+    ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+async function dbListWatchedTasks(teamId, userId, status, limit = 20, deptKey = "all") {
+  let whereDept = "";
+  const params = [teamId, userId, status, limit];
+  if (deptKey && deptKey !== "all") {
+    if (deptKey === "__none__") {
+      whereDept = "AND t.requester_dept IS NULL";
+    } else {
+      whereDept = "AND t.requester_dept = $5";
+      params.push(deptKey);
+    }
+  }
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    JOIN task_watchers tw ON tw.task_id::text = t.id AND tw.team_id=t.team_id
+    WHERE t.team_id=$1
+      AND tw.user_id=$2
+      AND t.status=$3
+      ${whereDept}
+    ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
+    LIMIT $4;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
 }
 
 // ================================
@@ -475,6 +689,36 @@ function statusLabel(s) {
   return s || "-";
 }
 
+// broadcast: 進捗から状態を算出（ユーザーに status を意識させない）
+function calcBroadcastStateLabel(task) {
+  const status = task?.status;
+  if (status === "cancelled") return "取り下げ";
+  if (status === "done") return "完了";
+  const total = Number(task?.total_count || 0);
+  const done = Number(task?.completed_count || 0);
+  if (total > 0 && done >= total) return "確認待ち";
+  if (done > 0) return "対応中";
+  return "未着手";
+}
+
+function calcBroadcastStateKey(task) {
+  const label = calcBroadcastStateLabel(task);
+  switch (label) {
+    case "未着手":
+      return "open";
+    case "対応中":
+      return "in_progress";
+    case "確認待ち":
+      return "waiting";
+    case "取り下げ":
+      return "cancelled";
+    case "完了":
+      return "done";
+    default:
+      return "open";
+  }
+}
+
 function statusSelectElement(currentStatus) {
   return {
     type: "static_select",
@@ -492,7 +736,18 @@ function statusSelectElement(currentStatus) {
 }
 
 function assigneeDisplay(task) {
+  if (task?.task_type === "broadcast") {
+    // 表示は通知抑止（発行時通知は別で行う）
+    return noMention(task.assignee_label || "（複数対象）");
+  }
   return `<@${task.assignee_id}>`;
+}
+
+function progressLabel(task) {
+  const total = Number(task.total_count || 0);
+  const done = Number(task.completed_count || 0);
+  if (!total) return "0/0";
+  return `${done} / ${total}`;
 }
 
 async function safeEphemeral(client, channelId, userId, text) {
@@ -500,6 +755,39 @@ async function safeEphemeral(client, channelId, userId, text) {
     await client.chat.postEphemeral({ channel: channelId, user: userId, text });
   } catch (_) {}
 }
+
+async function postDM(userId, text) {
+  if (!userId) return;
+  try {
+    const dm = await app.client.conversations.open({ users: userId });
+    const channel = dm.channel?.id;
+    if (!channel) return;
+    await app.client.chat.postMessage({ channel, text });
+  } catch (_) {}
+}
+
+
+async function postRequesterConfirmDM({ teamId, taskId, requesterUserId, title }) {
+  if (!requesterUserId) return;
+  try {
+    const dm = await app.client.conversations.open({ users: requesterUserId });
+    const channel = dm.channel?.id;
+    if (!channel) return;
+
+    const value = JSON.stringify({ teamId, taskId });
+    await app.client.chat.postMessage({
+      channel,
+      text: `🎉 全員が完了しました！「${noMention(title)}」の確認をお願いします。`,
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text: `🎉 *全員が完了しました！*\n「*${noMention(title)}*」の確認をお願いします。` } },
+        { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "確認完了 ✅" }, style: "primary", action_id: "confirm_broadcast_done", value }] },
+      ],
+    });
+  } catch (e) {
+    console.error("postRequesterConfirmDM error:", e?.data || e);
+  }
+}
+
 
 // ================================
 // Thread Card (upsert)
@@ -534,149 +822,210 @@ async function buildThreadCardBlocks({ teamId, task }) {
     ? `<${task.source_permalink}|元メッセージを開く>`
     : noMention(`> ${(task.description || "").slice(0, 140)}`);
 
+  // スレッド側の「詳細」は閲覧専用（操作は Home から）
   const payload = JSON.stringify({
     teamId,
     taskId: task.id,
-    channelId: task.channel_id || "",
-    parentTs: task.message_ts || "",
+    origin: "thread",
   });
 
-  return [
+  const common = [
     { type: "header", text: { type: "plain_text", text: "⏱ タスク" } },
     { type: "section", text: { type: "mrkdwn", text: `*${noMention(task.title)}*` } },
     { type: "divider" },
-
-    // ★要望②：ラベル変更＋分離表示
     { type: "section", text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` } },
-    { type: "section", text: { type: "mrkdwn", text: `*依頼者部署*：${deptLabel(task.requester_dept)}` } },
     { type: "section", text: { type: "mrkdwn", text: `*期限*：${formatDueDateOnly(task.due_date)}` } },
     { type: "section", text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` } },
-    { type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } },
     { type: "section", text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` } },
+  ];
+  if (task.task_type !== "broadcast") {
+    common.push({ type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } });
+  }
 
+  return [
+    ...common,
     { type: "divider" },
     { type: "section", text: { type: "mrkdwn", text: `*元メッセージ*\n${src}` } },
     { type: "divider" },
-
     {
       type: "actions",
       elements: [
         { type: "button", text: { type: "plain_text", text: "詳細を開く" }, action_id: "open_detail_modal", value: payload },
       ],
     },
-    { type: "context", elements: [{ type: "mrkdwn", text: "✅ 完了は「詳細」画面から行います（誤操作防止）" }] },
+    { type: "context", elements: [{ type: "mrkdwn", text: "✅ 操作は「詳細」画面から行います（誤操作防止）" }] },
   ];
 }
 
 // ================================
 // Detail Modal（views.open）
 // ================================
-async function buildDetailModalView({ teamId, task }) {
+async function buildDetailModalView({ teamId, task, viewerUserId, origin = "home" }) {
   const srcLinesRaw = (task.description || "").split("\n").slice(0, 10).join("\n") || "（本文なし）";
   const srcLines = noMention(srcLinesRaw);
 
-  const base = {
-    teamId,
-    taskId: task.id,
-    channelId: task.channel_id || "",
-    parentTs: task.message_ts || "",
-  };
-
   const canCancel = task.status !== "done" && task.status !== "cancelled";
+  const isBroadcast = task.task_type === "broadcast";
+
+  // スレッドから開いた「詳細」は閲覧専用（操作は Home/一覧から）
+  const isReadOnly = origin === "thread";
+
+  // personal のステータス変更は「依頼者 or 対応者」のみ
+  const canEditPersonalStatus = !isReadOnly && !isBroadcast && (viewerUserId === task.requester_user_id || viewerUserId === task.assignee_id);
+
+  const meta = { teamId, taskId: task.id, origin };
+  const blocks = [
+    { type: "header", text: { type: "plain_text", text: "📘 タスク" } },
+    { type: "section", text: { type: "mrkdwn", text: `*${noMention(task.title)}*` } },
+    { type: "divider" },
+
+    { type: "section", text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` } },
+    { type: "section", text: { type: "mrkdwn", text: `*期限*：${formatDueDateOnly(task.due_date)}` } },
+
+    { type: "section", text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` } },
+  ];
+
+  if (isBroadcast) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*進捗*：${progressLabel(task)}` } });
+  }
+
+  blocks.push({ type: "section", text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` } });
+  blocks.push({ type: "divider" });
+
+  // ステータス変更：personalのみ（ウォッチャーは不可）
+  if (canEditPersonalStatus) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*ステータス変更*" }, accessory: statusSelectElement(task.status === "cancelled" ? "open" : task.status) });
+    blocks.push({ type: "divider" });
+  } else if (!isBroadcast && !isReadOnly) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "👀 このタスクは閲覧のみです（ステータス変更は依頼者/対応者のみ）" }] });
+    blocks.push({ type: "divider" });
+  }
+
+  blocks.push({ type: "section", text: { type: "mrkdwn", text: `*元メッセージ（全文）*\n\`\`\`\n${srcLines}\n\`\`\`` } });
+
+  // actions（スレッド起点は操作なし）
+  if (!isReadOnly) {
+    const base = { teamId, taskId: task.id };
+    const actions = [];
+
+    if (isBroadcast) {
+      const isTarget = await dbIsUserTarget(teamId, task.id, viewerUserId);
+      const already = await dbHasUserCompleted(teamId, task.id, viewerUserId);
+      if (isTarget && !already && task.status !== "done" && task.status !== "cancelled") {
+        actions.push({ type: "button", text: { type: "plain_text", text: "自分の完了 ✅" }, style: "primary", action_id: "complete_task", value: JSON.stringify(base) });
+      } else if (isTarget && already) {
+        actions.push({ type: "button", text: { type: "plain_text", text: "完了済み ✅" }, action_id: "noop", value: "noop" });
+      }
+      // 完了者/未完了者：依頼者/管理者向け（ウォッチャーは閲覧OKだが、操作導線は Home 側に寄せる）
+      const canSeeProgressList = true; // 仕様変更：誰でも閲覧可
+      if (canSeeProgressList) {
+        actions.push({ type: "button", text: { type: "plain_text", text: "完了/未完了一覧" }, action_id: "open_progress_modal", value: JSON.stringify(base) });
+      }
+
+      // 依頼者の確認完了（全員完了→確認待ちのとき）
+      if (task.status === "waiting" && task.requester_user_id === viewerUserId) {
+        actions.push({ type: "button", text: { type: "plain_text", text: "確認完了 ✅" }, style: "primary", action_id: "confirm_broadcast_done", value: JSON.stringify(base) });
+      }
+    }
+
+    if (actions.length) {
+      blocks.push({ type: "actions", elements: actions });
+    }
+
+    // 取り下げは依頼者のみ
+    if (canCancel && task.requester_user_id === viewerUserId) {
+      blocks.push({
+        type: "actions",
+        elements: [{ type: "button", text: { type: "plain_text", text: "取り下げ（依頼者のみ）" }, style: "danger", action_id: "cancel_task", value: JSON.stringify(base) }],
+      });
+    }
+  }
 
   return {
     type: "modal",
     callback_id: "detail_modal",
-    private_metadata: JSON.stringify({ teamId, taskId: task.id }),
+    private_metadata: JSON.stringify(meta),
     title: { type: "plain_text", text: "タスク" },
     close: { type: "plain_text", text: "閉じる" },
-    blocks: [
-      { type: "header", text: { type: "plain_text", text: "📘 タスク" } },
-      { type: "section", text: { type: "mrkdwn", text: `*${noMention(task.title)}*` } },
-      { type: "divider" },
-
-      { type: "section", text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` } },
-      { type: "section", text: { type: "mrkdwn", text: `*依頼者部署*：${deptLabel(task.requester_dept)}` } },
-
-      { type: "section", text: { type: "mrkdwn", text: `*期限*：${formatDueDateOnly(task.due_date)}` } },
-
-      { type: "section", text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } },
-
-      { type: "section", text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` } },
-
-      { type: "divider" },
-      { type: "section", text: { type: "mrkdwn", text: "*ステータス変更*" }, accessory: statusSelectElement(task.status === "cancelled" ? "open" : task.status) },
-      { type: "divider" },
-
-      { type: "section", text: { type: "mrkdwn", text: `*元メッセージ（全文）*\n\`\`\`\n${srcLines}\n\`\`\`` } },
-
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "完了 ✅" }, style: "primary", action_id: "complete_task", value: JSON.stringify(base) }] },
-
-      ...(canCancel
-        ? [
-            {
-              type: "actions",
-              elements: [{ type: "button", text: { type: "plain_text", text: "取り下げ（依頼者のみ）" }, style: "danger", action_id: "cancel_task", value: JSON.stringify(base) }],
-            },
-          ]
-        : []),
-    ],
+    blocks,
   };
 }
 
-async function openDetailModal(client, { trigger_id, teamId, taskId }) {
+async function openDetailModal(client, { trigger_id, teamId, taskId, viewerUserId, origin = "home" }) {
   const task = await dbGetTaskById(teamId, taskId);
   if (!task) return;
 
   await client.views.open({
     trigger_id,
-    view: await buildDetailModalView({ teamId, task }),
+    view: await buildDetailModalView({ teamId, task, viewerUserId, origin }),
   });
 }
 
-// ================================
-// Home: mode + dept filter (① Homeで部署フィルタ)
-// ================================
-const HOME_MODES = [
-  { key: "assigned_active", label: "担当タスク（未完了）", viewType: "assigned", tab: "active" },
-  { key: "assigned_done", label: "担当タスク（完了）", viewType: "assigned", tab: "done" },
-  { key: "requested_active", label: "依頼したタスク（未完了）", viewType: "requested", tab: "active" },
-  { key: "requested_done", label: "依頼したタスク（完了）", viewType: "requested", tab: "done" },
-];
-
-function getHomeMode(key) {
-  return HOME_MODES.find((m) => m.key === key) || HOME_MODES[0];
+// watcher helper
+async function dbIsWatcher(teamId, taskId, userId) {
+  const q = `SELECT 1 FROM task_watchers WHERE team_id=$1 AND task_id=$2 AND user_id=$3 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, taskId, userId]);
+  return !!res.rows[0];
 }
 
-function homeModeSelectElement(activeKey) {
-  const cur = getHomeMode(activeKey);
-  return {
-    type: "static_select",
-    action_id: "home_mode_select",
-    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
-    options: HOME_MODES.map((m) => ({ text: { type: "plain_text", text: m.label }, value: m.key })),
-  };
-}
+// ================================
+// Home: filters (Phase3)
+// ================================
 
 // Homeの状態を保持（ユーザーごと）
-const homeState = new Map(); // `${teamId}:${userId}` -> { modeKey, deptKey }
+// key: `${teamId}:${userId}`
+const homeState = new Map();
+
+// View種類
+const HOME_VIEWS = [
+  { key: "personal", label: "個人タスク" },
+  { key: "broadcast", label: "全社/複数タスク" },
+];
+
+// 状態（表示範囲）
+const HOME_SCOPES = [
+  { key: "active", label: "未完了" }, // done以外すべて
+  { key: "done", label: "完了" },
+];
+
+// 未完了 = done以外
+const NON_DONE_STATUSES = ["open", "in_progress", "waiting", "cancelled"];
 
 function getHomeState(teamId, userId) {
   const k = `${teamId}:${userId}`;
-  const s = homeState.get(k) || { modeKey: "assigned_active", deptKey: "all" };
+  const s =
+    homeState.get(k) || {
+      viewKey: "personal",
+      scopeKey: "active",
+      assigneeUserId: userId, // personalのみ
+      deptKey: "all",
+    };
   return s;
 }
+
 function setHomeState(teamId, userId, next) {
   const k = `${teamId}:${userId}`;
   homeState.set(k, { ...getHomeState(teamId, userId), ...next });
 }
 
-async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey }) {
-  if (viewType === "requested") {
-    return await dbListTasksForRequesterWithDept(teamId, userId, status, deptKey, limit);
-  }
-  return await dbListTasksForAssigneeWithDept(teamId, userId, status, deptKey, limit);
+function homeViewSelectElement(activeKey) {
+  const cur = HOME_VIEWS.find((v) => v.key === activeKey) || HOME_VIEWS[0];
+  return {
+    type: "static_select",
+    action_id: "home_view_select",
+    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
+    options: HOME_VIEWS.map((v) => ({ text: { type: "plain_text", text: v.label }, value: v.key })),
+  };
+}
+
+function homeScopeSelectElement(scopeKey) {
+  const cur = HOME_SCOPES.find((s) => s.key === scopeKey) || HOME_SCOPES[0];
+  return {
+    type: "static_select",
+    action_id: "home_scope_select",
+    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
+    options: HOME_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
+  };
 }
 
 function deptSelectElement(currentDeptKey, deptKeys) {
@@ -701,243 +1050,326 @@ function deptSelectElement(currentDeptKey, deptKeys) {
   };
 }
 
-async function publishHome({ client, teamId, userId }) {
-  const { modeKey, deptKey } = getHomeState(teamId, userId);
-  const mode = getHomeMode(modeKey);
-  const isDone = mode.tab === "done";
-  const listStartStatus = isDone ? "done" : "open";
+// personal: 担当者（任意） + 担当部署（ユーザーグループ） + 状態（done以外/ done）
+async function dbListPersonalTasksByAssigneeFiltered(teamId, assigneeId, statuses, deptKey = "all", limit = 30) {
+  // 未完了/完了の判定は statuses で渡す（未完了=done以外すべて）
+  const params = [teamId, statuses, limit];
+  const where = [];
 
-  const deptKeys = await listDeptKeys(teamId);
-
-const blocks = [
-  // 1行目：担当（固定ラベル） + モード選択（4択）
-  {
-    type: "section",
-    text: { type: "mrkdwn", text: "*担当*" }, // ← 固定
-    accessory: homeModeSelectElement(mode.key), // ← ここだけで切替
-  },
-
-  // 2行目：部署（固定ラベル） + 部署フィルタ
-  {
-    type: "section",
-    text: { type: "mrkdwn", text: "*部署*" }, // ← 固定
-    accessory: deptSelectElement(deptKey || "all", deptKeys),
-  },
-
-  // 3行目：一覧ボタン
-  {
-    type: "actions",
-    elements: [
-      {
-        type: "button",
-        text: { type: "plain_text", text: "一覧" },
-        action_id: "open_list_modal_from_home",
-        value: JSON.stringify({
-          teamId,
-          viewType: mode.viewType,
-          userId,
-          status: listStartStatus,
-          deptKey: deptKey || "all",
-        }),
-      },
-    ],
-  },
-
-  { type: "divider" },
-];
-
-
-  const listFn = async (status, limit) => fetchListTasks({ teamId, viewType: mode.viewType, userId, status, limit, deptKey: deptKey || "all" });
-
-  const cardLine = (t) =>
-    mode.viewType === "requested"
-      ? `*${noMention(t.title)}*\n期限：${formatDueDateOnly(t.due_date)} / 対応者：${assigneeDisplay(t)}`
-      : `*${noMention(t.title)}*\n期限：${formatDueDateOnly(t.due_date)} / 依頼者：<@${t.requester_user_id}>`;
-
-  if (!isDone) {
-    const openTasks = await listFn("open", 10);
-    const inProgress = await listFn("in_progress", 10);
-    const waiting = await listFn("waiting", 10);
-
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🟦 未着手*" } });
-    blocks.push(...(openTasks.length ? openTasks.map(t => ({
-      type: "section",
-      text: { type: "mrkdwn", text: cardLine(t) },
-      accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
-    })) : [{ type: "context", elements: [{ type: "mrkdwn", text: "（未着手なし）" }] }]));
-    blocks.push({ type: "divider" });
-
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🟨 対応中*" } });
-    blocks.push(...(inProgress.length ? inProgress.map(t => ({
-      type: "section",
-      text: { type: "mrkdwn", text: cardLine(t) },
-      accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
-    })) : [{ type: "context", elements: [{ type: "mrkdwn", text: "（対応中なし）" }] }]));
-    blocks.push({ type: "divider" });
-
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🟧 確認待ち*" } });
-    blocks.push(...(waiting.length ? waiting.map(t => ({
-      type: "section",
-      text: { type: "mrkdwn", text: cardLine(t) },
-      accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
-    })) : [{ type: "context", elements: [{ type: "mrkdwn", text: "（確認待ちなし）" }] }]));
-  } else {
-    const doneTasks = await listFn("done", 30);
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*✅ 完了済み*" } });
-    blocks.push(...(doneTasks.length ? doneTasks.map(t => ({
-      type: "section",
-      text: { type: "mrkdwn", text: cardLine(t) },
-      accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
-    })) : [{ type: "context", elements: [{ type: "mrkdwn", text: "（完了済みなし）" }] }]));
+  // 担当者が指定されている場合はそれを優先（※部署×担当者の厳密ルールは後で検討）
+  if (assigneeId) {
+    params.push(assigneeId);
+    where.push(`AND t.assignee_id = $${params.length}`);
+  } else if (deptKey && deptKey !== "all") {
+    // 担当部署＝Slackユーザーグループ（@mk など）に所属するユーザーのタスク
+    if (deptKey === "__none__") {
+      // 部署未設定の意味付けは今は使わない（0件）
+      return [];
+    }
+    const { membersByDeptKey } = await fetchDeptGroups(teamId);
+    const membersSet = membersByDeptKey.get(deptKey);
+    const members = membersSet ? Array.from(membersSet) : [];
+    if (!members.length) return [];
+    params.push(members);
+    where.push(`AND t.assignee_id = ANY($${params.length}::text[])`);
   }
 
-  await client.views.publish({
-    user_id: userId,
-    view: { type: "home", blocks },
-  });
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    WHERE t.team_id=$1
+      AND (t.task_type IS NULL OR t.task_type='personal')
+      AND t.status = ANY($2::text[])
+      ${where.join(" ")}
+    ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
 }
 
-// ================================
-// List Modal（status + dept filter）
-// ================================
-function viewTypeLabel(viewType) {
-  return viewType === "requested" ? "依頼したタスク" : "担当タスク";
+async function dbListBroadcastTasksByStatuses(teamId, statuses, deptKey = "all", limit = 30) {
+  const params = [teamId, statuses, limit];
+  let whereDept = "";
+  if (deptKey && deptKey !== "all") {
+    if (deptKey === "__none__") {
+      whereDept = "AND t.requester_dept IS NULL";
+    } else {
+      whereDept = "AND t.requester_dept = $4";
+      params.push(deptKey);
+    }
+  }
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    WHERE t.team_id=$1
+      AND t.task_type='broadcast'
+      AND t.status = ANY($2::text[])
+      ${whereDept}
+    ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
 }
 
-async function buildListModalView({ teamId, viewType, userId, status, deptKey }) {
-  const tasks = await fetchListTasks({ teamId, viewType, userId, status, limit: 20, deptKey: deptKey || "all" });
+
+async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey }) {
+  if (viewType === "requested") {
+    return await dbListTasksForRequesterWithDept(teamId, userId, status, deptKey, limit);
+  }
+  if (viewType === "broadcast") {
+    return await dbListBroadcastTasksForUser(teamId, userId, status, limit, deptKey);
+  }
+  return await dbListTasksForAssigneeWithDept(teamId, userId, status, deptKey, limit);
+}
+
+function taskLineForHome(task, viewKey) {
+  if (viewKey === "broadcast") {
+    return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
+  }
+  // personal
+  return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
+}
+
+async function publishHome({ client, teamId, userId }) {
+  const st = getHomeState(teamId, userId);
   const deptKeys = await listDeptKeys(teamId);
 
-  const deptOptions = [
-    { text: { type: "plain_text", text: "すべて" }, value: "all" },
-    { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
-    ...deptKeys.map((k) => ({ text: { type: "plain_text", text: `@${k}` }, value: k })),
-  ];
-  const deptText =
-    (deptKey || "all") === "all"
-      ? "すべて"
-      : (deptKey || "all") === "__none__"
-        ? "未設定"
-        : `@${deptKey}`;
+  const statuses = st.scopeKey === "done" ? ["done"] : NON_DONE_STATUSES;
 
-  const blocks = [
-    { type: "header", text: { type: "plain_text", text: `📋 ${viewTypeLabel(viewType)}（${statusLabel(status)}）` } },
-    { type: "context", elements: [{ type: "mrkdwn", text: "フィルタで切替できます。詳細から完了/ステータス/取り下げを操作できます。" }] },
-    { type: "divider" },
+  const blocks = [];
 
-    {
+  // 表示
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*表示*" },
+    accessory: homeViewSelectElement(st.viewKey),
+  });
+
+  // 部署（personal=担当部署 / broadcast=依頼部署）
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: st.viewKey === "broadcast" ? "*依頼部署*" : "*担当部署*" },
+    accessory: deptSelectElement(st.deptKey || "all", deptKeys),
+  });
+
+  // personal: 担当者（空欄=全員対象）
+  if (st.viewKey === "personal") {
+    blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: "*表示フィルタ*" },
+      text: { type: "mrkdwn", text: "*担当者*" },
       accessory: {
-        type: "static_select",
-        action_id: "list_filter_select",
-        initial_option: { text: { type: "plain_text", text: statusLabel(status) }, value: status },
-        options: [
-          { text: { type: "plain_text", text: "未着手" }, value: "open" },
-          { text: { type: "plain_text", text: "対応中" }, value: "in_progress" },
-          { text: { type: "plain_text", text: "確認待ち" }, value: "waiting" },
-          { text: { type: "plain_text", text: "完了" }, value: "done" },
-          { text: { type: "plain_text", text: "取り下げ" }, value: "cancelled" },
-        ],
+        type: "external_select",
+        action_id: "home_person_assignee_select",
+        placeholder: { type: "plain_text", text: "担当者を検索" },
+        min_query_length: 0,
+        ...(st.assigneeUserId
+          ? (() => {
+              const u = (homeUserListCache.get(teamId)?.users || []).find((x) => x.id === st.assigneeUserId);
+              return u
+                ? { initial_option: { text: { type: "plain_text", text: u.name }, value: u.id } }
+                : {};
+            })()
+          : {}),
       },
-    },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: "*部署フィルタ*" },
-      accessory: {
-        type: "static_select",
-        action_id: "dept_filter_select",
-        initial_option: { text: { type: "plain_text", text: deptText }, value: deptKey || "all" },
-        options: deptOptions,
-      },
-    },
-    { type: "divider" },
-  ];
+    });
 
-  if (!tasks.length) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "（該当タスクなし）" } });
+    // クリア（担当者=空欄にする）
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "home_person_assignee_clear",
+          text: { type: "plain_text", text: "担当者をクリア" },
+          value: "clear",
+        },
+      ],
+    });
+  }
+
+  // 状態（未完了/完了）
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*状態*" },
+    accessory: homeScopeSelectElement(st.scopeKey),
+  });
+
+  blocks.push({ type: "divider" });
+
+  // データ取得
+  let tasks = [];
+  if (st.viewKey === "broadcast") {
+    tasks = await dbListBroadcastTasksByStatuses(teamId, statuses, st.deptKey || "all", 60);
   } else {
-    for (const t of tasks) {
-      const deptLine =
-        viewType === "requested"
-          ? `対応者部署：${deptLabel(t.assignee_dept)}`
-          : `依頼者部署：${deptLabel(t.requester_dept)}`;
+    const assigneeId = st.assigneeUserId || null;
+    tasks = await dbListPersonalTasksByAssigneeFiltered(teamId, assigneeId, statuses, st.deptKey || "all", 60);
+  }
 
-      const metaLine =
-        viewType === "requested"
-          ? `対応者：${assigneeDisplay(t)}　｜　期限：${formatDueDateOnly(t.due_date)}　｜　ステータス：${statusLabel(t.status)}\n${deptLine}`
-          : `依頼者：<@${t.requester_user_id}>　｜　期限：${formatDueDateOnly(t.due_date)}　｜　ステータス：${statusLabel(t.status)}\n${deptLine}`;
+  // 表示：未完了はステータス別に分ける（doneはまとめ）
+  if (st.scopeKey === "done") {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*✅ 完了*" } });
+    if (!tasks.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（完了なし）" }] });
+    } else {
+      for (const t of tasks) {
+        blocks.push({
+          type: "section",
+          text: { type: "mrkdwn", text: taskLineForHome(t, st.viewKey) },
+          accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
+        });
+      }
+    }
+  } else {
+    const by = (s) => tasks.filter((t) => (st.viewKey === "broadcast" ? calcBroadcastStateKey(t) : t.status) === s);
+    const sections = [
+      { status: "open", title: "*🟦 未着手*" },
+      { status: "in_progress", title: "*🟨 対応中*" },
+      { status: "waiting", title: "*🟧 確認待ち*" },
+      { status: "cancelled", title: "*🟥 取り下げ*" },
+    ];
 
-      blocks.push({
-        type: "section",
-        text: { type: "mrkdwn", text: `*${noMention(t.title)}*\n${metaLine}` },
-        accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_in_list", value: JSON.stringify({ teamId, taskId: t.id }) },
-      });
+    for (const sec of sections) {
+      const items = by(sec.status);
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: sec.title } });
+      if (!items.length) {
+        blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（なし）" }] });
+      } else {
+        for (const t of items) {
+          blocks.push({
+            type: "section",
+            text: { type: "mrkdwn", text: taskLineForHome(t, st.viewKey) },
+            accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
+          });
+        }
+      }
       blocks.push({ type: "divider" });
     }
   }
 
-  return {
-    type: "modal",
-    callback_id: "list_modal",
-    private_metadata: JSON.stringify({ teamId, viewType, userId, status, deptKey: deptKey || "all" }),
-    title: { type: "plain_text", text: "一覧" },
-    close: { type: "plain_text", text: "閉じる" },
-    blocks,
-  };
-}
-
-// List modal -> detail (same modal)
-async function buildListDetailView({ teamId, task, returnState }) {
-  const srcLinesRaw = (task.description || "").split("\n").slice(0, 10).join("\n") || "（本文なし）";
-  const srcLines = noMention(srcLinesRaw);
-  const canCancel = task.status !== "done" && task.status !== "cancelled";
-
-  const meta = { mode: "list_detail", teamId, taskId: task.id, returnState };
-
-  const base = { teamId, taskId: task.id, channelId: task.channel_id || "", parentTs: task.message_ts || "" };
-
-  const backLabel = returnState?.viewType === "requested" ? "依頼一覧へ戻る" : "担当一覧へ戻る";
-
-  return {
-    type: "modal",
-    callback_id: "list_detail_modal",
-    private_metadata: JSON.stringify(meta),
-    title: { type: "plain_text", text: "一覧" },
-    close: { type: "plain_text", text: "閉じる" },
-    blocks: [
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: `← ${backLabel}` }, action_id: "back_to_list", value: JSON.stringify({ teamId }) }] },
-      { type: "header", text: { type: "plain_text", text: "📘 タスク詳細" } },
-      { type: "section", text: { type: "mrkdwn", text: `*${noMention(task.title)}*` } },
-      { type: "divider" },
-
-      { type: "section", text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` } },
-      { type: "section", text: { type: "mrkdwn", text: `*依頼者部署*：${deptLabel(task.requester_dept)}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*期限*：${formatDueDateOnly(task.due_date)}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` } },
-
-      { type: "divider" },
-      { type: "section", text: { type: "mrkdwn", text: "*ステータス変更*" }, accessory: statusSelectElement(task.status === "cancelled" ? "open" : task.status) },
-      { type: "divider" },
-
-      { type: "section", text: { type: "mrkdwn", text: `*元メッセージ（全文）*\n\`\`\`\n${srcLines}\n\`\`\`` } },
-
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "完了 ✅" }, style: "primary", action_id: "complete_task", value: JSON.stringify(base) }] },
-      ...(canCancel ? [{ type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "取り下げ（依頼者のみ）" }, style: "danger", action_id: "cancel_task", value: JSON.stringify(base) }] }] : []),
-    ],
-  };
+  await client.views.publish({
+    user_id: userId,
+    view: {
+      type: "home",
+      callback_id: "home",
+      blocks,
+    },
+  });
 }
 
 // ================================
-// Events
+// Broadcast: usergroup options (external_multi_select)
 // ================================
+async function searchUsergroups(query) {
+  const res = await app.client.usergroups.list({ include_users: false });
+  const groups = (res.usergroups || [])
+    .filter((g) => g?.id && g?.handle)
+    .map((g) => ({ id: g.id, handle: String(g.handle).replace(/^@/, "") }));
+
+  const q = String(query || "").toLowerCase().trim();
+  const filtered = !q
+    ? groups
+    : groups.filter((g) => g.handle.toLowerCase().includes(q));
+
+  // 上限はSlack推奨に合わせて適当に絞る
+  return filtered.slice(0, 100);
+}
+
+app.options("assignee_groups_select", async ({ ack, payload }) => {
+  try {
+    const q = payload?.value || "";
+    const groups = await searchUsergroups(q);
+    await ack({
+      options: groups.map((g) => ({
+        text: { type: "plain_text", text: `@${g.handle}` },
+        value: g.id,
+      })),
+    });
+  } catch (e) {
+    console.error("options error:", e?.data || e);
+    await ack({ options: [] });
+  }
+});
+
+// ================================
+// Home personal assignee (external_select) options
+// - If deptKey != "all": only members in that dept (usergroup) are candidates
+// - If deptKey == "all": A案として、未入力時は候補を出さない（検索して選ぶ）
+// ================================
+const HOME_USERLIST_CACHE_MS = 5 * 60 * 1000;
+const homeUserListCache = new Map(); // teamId -> { at, users: [{id, name}] }
+
+async function listUsersCached(teamId) {
+  const now = Date.now();
+  const cached = homeUserListCache.get(teamId);
+  if (cached && now - cached.at < HOME_USERLIST_CACHE_MS) return cached.users;
+
+  const res = await app.client.users.list();
+  const users = (res.members || [])
+    .filter((u) => u && !u.deleted && !u.is_bot)
+    .map((u) => {
+      const name =
+        (u.profile?.display_name && u.profile.display_name.trim()) ||
+        (u.real_name && u.real_name.trim()) ||
+        (u.name && String(u.name).trim()) ||
+        u.id;
+      return { id: u.id, name };
+    });
+
+  homeUserListCache.set(teamId, { at: now, users });
+  return users;
+}
+
+app.options("home_person_assignee_select", async ({ ack, body, payload }) => {
+  try {
+    const teamId = body.team?.id || body.team_id;
+    const userId = body.user?.id;
+    const st = getHomeState(teamId, userId);
+    const deptKey = st?.deptKey || "all";
+
+    const q = String(payload?.value || "").trim().toLowerCase();
+    // 初期候補：未入力でも上位5件を返す（担当部署があればその所属から、なければ全員から）
+    const allUsers = await listUsersCached(teamId);
+
+    // dept 絞り込み用の許可集合（null=絞り込みなし）
+    let allowed = null;
+    if (deptKey && deptKey !== "all" && deptKey !== "__none__") {
+      const { membersByDeptKey } = await fetchDeptGroups(teamId);
+      const set = membersByDeptKey.get(deptKey);
+      allowed = set ? new Set(Array.from(set)) : new Set();
+    } else if (deptKey === "__none__") {
+      // 未設定を実用にしていないため候補なし
+      await ack({ options: [] });
+      return;
+    }
+
+    const filtered = allUsers
+      .filter((u) => {
+        if (allowed && !allowed.has(u.id)) return false;
+        if (!q) return true; // dept指定時は空検索でも候補を出す
+        return u.name.toLowerCase().includes(q);
+      })
+      .sort((a,b)=>{ if(a.id===userId) return -1; if(b.id===userId) return 1; return a.name.localeCompare(b.name); }).slice(0, q ? 100 : 5)
+      .map((u) => ({
+        text: { type: "plain_text", text: u.name },
+        value: u.id,
+      }));
+
+    await ack({ options: filtered });
+  } catch (e) {
+    console.error("home_person_assignee_select options error:", e?.data || e);
+    await ack({ options: [] });
+  }
+});
+
+
+
 app.event("app_home_opened", async ({ event, client, body }) => {
   try {
     const teamId = body.team_id || body.team?.id || event.team;
     const userId = event.user;
-    setHomeState(teamId, userId, { modeKey: "assigned_active", deptKey: "all" });
+    setHomeState(teamId, userId, { viewKey: "personal", scopeKey: "active", assigneeUserId: userId, deptKey: "all" });
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("app_home_opened error:", e?.data || e);
@@ -979,9 +1411,34 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
         blocks: [
           { type: "input", block_id: "title", label: { type: "plain_text", text: "タイトル（自動候補）" }, element: { type: "plain_text_input", action_id: "title_input", initial_value: titleCandidate } },
           { type: "input", block_id: "desc", label: { type: "plain_text", text: "詳細（元メッセージ全文）" }, element: { type: "plain_text_input", action_id: "desc_input", multiline: true, initial_value: prettyText || "" } },
-          { type: "input", block_id: "assignee_user", label: { type: "plain_text", text: "対応者" }, element: { type: "users_select", action_id: "assignee_user_select", placeholder: { type: "plain_text", text: "ユーザーを選択" } } },
+
+          // 対応者（個人：複数OK）
+          {
+            type: "input",
+            optional: true,
+            block_id: "assignee_users",
+            label: { type: "plain_text", text: "対応者（個人・複数OK）" },
+            element: { type: "multi_users_select", action_id: "assignee_users_select", placeholder: { type: "plain_text", text: "ユーザーを選択" } },
+          },
+
+          // 対応者（グループ：@ALL-xxx / @mk-all 等）
+          {
+            type: "input",
+            optional: true,
+            block_id: "assignee_groups",
+            label: { type: "plain_text", text: "対応者（グループ：@ALL-xxx / @mk-all など）" },
+            element: {
+              type: "multi_external_select",
+              action_id: "assignee_groups_select",
+              placeholder: { type: "plain_text", text: "ユーザーグループを検索" },
+              min_query_length: 0,
+            },
+          },
+
           { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: { type: "datepicker", action_id: "due_date", placeholder: { type: "plain_text", text: "日付を選択" } } },
           { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
+
+          { type: "context", elements: [{ type: "mrkdwn", text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。" }] },
         ],
       },
     });
@@ -993,6 +1450,32 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
 // ================================
 // Modal submit: create task -> DB -> thread + ephemeral
 // ================================
+async function expandTargetsFromGroups(teamId, groupIds) {
+  if (!groupIds?.length) return { users: new Set(), groupHandles: [], groupIdToHandle: new Map() };
+
+  const idToHandle = await getSubteamIdMap(teamId);
+  const groupHandles = [];
+  const groupIdToHandle = new Map();
+
+  const users = new Set();
+  for (const gid of groupIds) {
+    try {
+      const handle = idToHandle.get(gid) || gid;
+      groupIdToHandle.set(gid, handle);
+      groupHandles.push(handle);
+      const usersRes = await app.client.usergroups.users.list({ usergroup: gid });
+      for (const uid of usersRes.users || []) users.add(uid);
+    } catch (e) {
+      console.error("expandTargetsFromGroups error:", e?.data || e);
+    }
+  }
+  return { users, groupHandles, groupIdToHandle };
+}
+
+function uniq(arr) {
+  return Array.from(new Set((arr || []).filter(Boolean)));
+}
+
 app.view("task_modal", async ({ ack, body, view, client }) => {
   await ack();
 
@@ -1011,16 +1494,49 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       meta.messageText ||
       "";
 
-    const assigneeUserId = view.state.values.assignee_user?.assignee_user_select?.selected_user;
-    if (!assigneeUserId) return;
+    const selectedUsers = view.state.values.assignee_users?.assignee_users_select?.selected_users || [];
+    const selectedGroupOptions = view.state.values.assignee_groups?.assignee_groups_select?.selected_options || [];
+    const selectedGroupIds = selectedGroupOptions.map((o) => o?.value).filter(Boolean);
 
     const due = view.state.values.due?.due_date?.selected_date || null;
     const status = view.state.values.status?.status_select?.selected_option?.value || "open";
     const requesterUserId = meta.requesterUserId || actorUserId;
 
-    // dept resolve (A)
+
+    if (!selectedUsers.length && !selectedGroupIds.length) {
+      // ここはUIにエラーを返すのが理想だけど、MVPはエフェメラルで案内
+      await safeEphemeral(client, channelId || body.user.id, actorUserId, "🥺 対応者（個人 or グループ）を1つ以上選んでね！");
+      return;
+    }
+
+    // Expand group members
+    const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(teamId, selectedGroupIds);
+
+    // targets = selectedUsers + groupUsers
+    const targets = new Set();
+    for (const u of selectedUsers) targets.add(u);
+    for (const u of groupUsers) targets.add(u);
+
+    const targetList = Array.from(targets);
+
+    const isPersonal = (targetList.length === 1) && (selectedGroupIds.length === 0);
+    const taskType = isPersonal ? "personal" : "broadcast";
+
+    // label for display (no mention)
+// - broadcastは「選択された対象（個人/グループ）」だけをラベル化（グループの全員は展開しない）
+// - メンション通知を避けるため、表示は noMention() を通す
+const labelParts = [];
+for (const gidHandle of groupHandles) labelParts.push(`@${String(gidHandle).replace(/^@/, "")}`);
+for (const u of selectedUsers) {
+  const name = await getUserDisplayName(teamId, u);
+  labelParts.push(`@${name}`);
+}
+const assigneeLabelRaw = labelParts.join(" ");
+
+    // dept resolve (A): requester + (personalのみ assignee)
     const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
-    const assigneeDept = await resolveDeptForUser(teamId, assigneeUserId);
+    const personalAssigneeId = isPersonal ? targetList[0] : null;
+    const assigneeDept = isPersonal ? await resolveDeptForUser(teamId, personalAssigneeId) : null;
 
     let permalink = "";
     if (channelId && parentTs) {
@@ -1042,23 +1558,33 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       description,
       requester_user_id: requesterUserId,
       created_by_user_id: actorUserId,
-      assignee_id: assigneeUserId,
-      assignee_label: null,
+      assignee_id: personalAssigneeId,
+      assignee_label: assigneeLabelRaw || null,
       status,
       due_date: due,
       requester_dept: requesterDept,
       assignee_dept: assigneeDept,
+      task_type: taskType,
+      broadcast_group_handle: groupHandles.length ? `@${groupHandles[0]}` : null,
+      broadcast_group_id: selectedGroupIds.length ? selectedGroupIds[0] : null,
+      total_count: taskType === "broadcast" ? targetList.length : null,
+      completed_count: 0,
+      notified_at: null,
     });
+
+    // broadcast: snapshot targets
+    if (taskType === "broadcast") {
+      await dbInsertTaskTargets(teamId, taskId, targetList);
+      // 안전派：DBに 저장된 targets 수로 total_count を確定
+      const total = await dbCountTargets(teamId, taskId);
+      await dbUpdateBroadcastCounts(teamId, taskId, 0, total);
+      created.total_count = total;
+      created.completed_count = 0;
+    }
 
     // Create feedback (no auto detail modal)
     try {
-      const payload = JSON.stringify({
-        teamId,
-        taskId,
-        channelId: channelId || "",
-        parentTs: parentTs || "",
-      });
-
+      const payload = JSON.stringify({ teamId, taskId });
       await client.chat.postEphemeral({
         channel: channelId || body.user.id,
         user: body.user.id,
@@ -1069,6 +1595,33 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
         ],
       });
     } catch (_) {}
+
+    // broadcast creation notify: allow mention (only once)
+    if (taskType === "broadcast" && channelId) {
+      try {
+        const mentionParts = [];
+        // usergroups: ensure mention works using subteam token
+        const idToHandle = await getSubteamIdMap(teamId);
+        for (const gid of selectedGroupIds) {
+          const handle = idToHandle.get(gid);
+          if (handle) mentionParts.push(`<!subteam^${gid}|@${handle}>`);
+        }
+        // users: normal mention
+        for (const u of selectedUsers) mentionParts.push(`<@${u}>`);
+        const mentionText = mentionParts.join(" ");
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: parentTs || undefined,
+          text: `📣 全社/複数タスクが発行されました！ ${mentionText}`,
+        });
+      } catch (e) {
+        if (e?.data?.error === "not_in_channel") {
+          await safeEphemeral(client, channelId, actorUserId, "🥺 このチャンネルにボットが参加してないよ…！ `/invite @アプリ名` してから試してね✨");
+        } else {
+          console.error("broadcast notify error:", e?.data || e);
+        }
+      }
+    }
 
     // thread card
     if (channelId && parentTs) {
@@ -1084,11 +1637,9 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       }
     }
 
-    // Best-effort home refresh (作成者/対応者のHomeに反映しやすくする)
-    try { await publishHome({ client, teamId, userId: requesterUserId }); } catch (_) {}
-    try { await publishHome({ client, teamId, userId: assigneeUserId }); } catch (_) {}
-
-  } catch (e) {
+    // Home refresh（スマホ反映対策：関係者＋対象者へ再描画）
+    publishHomeForUsers(client, teamId, [actorUserId, requesterUserId, ...targetList]);
+} catch (e) {
     console.error("view submit error:", e?.data || e);
   }
 });
@@ -1101,37 +1652,91 @@ app.action("open_detail_modal", async ({ ack, body, action, client }) => {
   const p = safeJsonParse(action.value || "{}") || {};
   const teamId = p.teamId || body.team?.id || body.team_id;
   const taskId = p.taskId;
+  const origin = p.origin || "home";
   if (!teamId || !taskId) return;
 
   try {
-    await openDetailModal(client, { trigger_id: body.trigger_id, teamId, taskId });
+    await openDetailModal(client, { trigger_id: body.trigger_id, teamId, taskId, viewerUserId: body.user.id, origin });
   } catch (e) {
     console.error("open_detail_modal error:", e?.data || e);
   }
 });
 
+app.action("noop", async ({ ack }) => {
+  await ack();
+});
+
 // Home: mode change
-app.action("home_mode_select", async ({ ack, body, action, client }) => {
+
+app.action("home_view_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team?.id || body.team_id;
+    const teamId = body.team.id;
     const userId = body.user.id;
-    const modeKey = action?.selected_option?.value || "assigned_active";
-    setHomeState(teamId, userId, { modeKey });
+    const selected = body.actions?.[0]?.selected_option?.value || "personal";
+
+    // view切替時：personalなら担当者を自分に戻す（初期値に寄せる）
+    if (selected === "personal") {
+      setHomeState(teamId, userId, { viewKey: "personal", assigneeUserId: userId });
+    } else {
+      setHomeState(teamId, userId, { viewKey: "broadcast" });
+    }
+
     await publishHome({ client, teamId, userId });
   } catch (e) {
-    console.error("home_mode_select error:", e?.data || e);
+    console.error("home_view_select error:", e?.data || e);
   }
 });
 
-// Home: dept change
-app.action("home_dept_select", async ({ ack, body, action, client }) => {
+app.action("home_person_assignee_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team?.id || body.team_id;
+    const teamId = body.team.id;
     const userId = body.user.id;
-    const deptKey = action?.selected_option?.value || "all";
-    setHomeState(teamId, userId, { deptKey });
+    const selectedUser = body.actions?.[0]?.selected_option?.value || userId;
+
+    setHomeState(teamId, userId, { assigneeUserId: selectedUser });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_person_assignee_select error:", e?.data || e);
+  }
+});
+
+// personal: 担当者クリア（空欄=全員対象）
+app.action("home_person_assignee_clear", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team.id;
+    const userId = body.user.id;
+    setHomeState(teamId, userId, { assigneeUserId: null });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_person_assignee_clear error:", e?.data || e);
+  }
+});
+
+app.action("home_scope_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team.id;
+    const userId = body.user.id;
+    const selected = body.actions?.[0]?.selected_option?.value || "active";
+
+    setHomeState(teamId, userId, { scopeKey: selected });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_scope_select error:", e?.data || e);
+  }
+});
+
+app.action("home_dept_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team.id;
+    const userId = body.user.id;
+    const selected = body.actions?.[0]?.selected_option?.value || "all";
+
+    setHomeState(teamId, userId, { deptKey: selected });
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("home_dept_select error:", e?.data || e);
@@ -1211,7 +1816,7 @@ app.action("open_detail_in_list", async ({ ack, body, action, client }) => {
     const task = await dbGetTaskById(teamId, taskId);
     if (!task) return;
 
-    const nextView = await buildListDetailView({ teamId, task, returnState });
+    const nextView = await buildListDetailView({ teamId, task, returnState, viewerUserId: body.user.id });
     await client.views.update({ view_id: body.view.id, hash: body.view.hash, view: nextView });
   } catch (e) {
     console.error("open_detail_in_list error:", e?.data || e);
@@ -1239,18 +1844,86 @@ app.action("back_to_list", async ({ ack, body, client }) => {
   }
 });
 
-// complete (detail only)
+// complete (detail only) - personal: status done / broadcast: per-user completion + recount
 app.action("complete_task", async ({ ack, body, action, client }) => {
   await ack();
   const p = safeJsonParse(action.value || "{}") || {};
   const teamId = p.teamId || body.team?.id || body.team_id;
   const taskId = p.taskId;
-  const channelId = p.channelId;
-  const parentTs = p.parentTs;
 
   if (!teamId || !taskId) return;
 
   try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    if (task.task_type === "broadcast") {
+      const userId = body.user.id;
+
+      const isTarget = await dbIsUserTarget(teamId, taskId, userId);
+      if (!isTarget) {
+        await safeEphemeral(client, task.channel_id || body.user.id, userId, "🥺 このタスクの対象者じゃないみたい…！");
+        return;
+      }
+
+      await dbUpsertCompletion(teamId, taskId, userId);
+
+      // 안전派：再集計
+      const total = task.total_count || (await dbCountTargets(teamId, taskId));
+      const doneCount = await dbCountCompletions(teamId, taskId);
+
+      const updatedCounts = await dbUpdateBroadcastCounts(teamId, taskId, doneCount, total);
+
+      // 全員完了（= 依頼者の確認待ちへ）
+      if (doneCount >= total && total > 0) {
+        const fresh = await dbGetTaskById(teamId, taskId);
+        if (fresh && !["waiting", "done", "cancelled"].includes(fresh.status)) {
+          await dbUpdateStatus(teamId, taskId, "waiting");
+        }
+        // 依頼者へ通知（1回だけ）
+        if (fresh && !fresh.notified_at) {
+          await dbQuery(`UPDATE tasks SET notified_at=now() WHERE team_id=$1 AND id=$2 AND notified_at IS NULL`, [teamId, taskId]);
+          await postRequesterConfirmDM({ teamId, taskId, requesterUserId: fresh.requester_user_id, title: fresh.title });
+        }
+      }
+
+// スレッドカード更新（進捗表示更新）
+      if (task.channel_id && task.message_ts) {
+        const refreshed = await dbGetTaskById(teamId, taskId);
+        if (refreshed) {
+          const blocks = await buildThreadCardBlocks({ teamId, task: refreshed });
+          await upsertThreadCard(client, { teamId, channelId: refreshed.channel_id, parentTs: refreshed.message_ts, blocks });
+        }
+      }
+
+      // modal refresh
+      if (body.view?.id) {
+        const refreshed = await dbGetTaskById(teamId, taskId);
+        if (refreshed) {
+          if (body.view.callback_id === "list_detail_modal") {
+            const meta2 = safeJsonParse(body.view?.private_metadata || "{}") || {};
+            const returnState = meta2.returnState || { viewType: "assigned", userId, status: "open", deptKey: "all" };
+            await client.views.update({
+              view_id: body.view.id,
+              hash: body.view.hash,
+              view: await buildListDetailView({ teamId, task: refreshed, returnState, viewerUserId: userId }),
+            });
+          } else {
+            await client.views.update({
+              view_id: body.view.id,
+              hash: body.view.hash,
+              view: await buildDetailModalView({ teamId, task: refreshed, viewerUserId: body.user.id }),
+            });
+          }
+        }
+      }
+
+      // Home refresh（スマホ反映対策：関係者へまとめて再描画）
+      publishHomeForUsers(client, teamId, [userId, task.requester_user_id]);
+return;
+    }
+
+    // personal
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
 
@@ -1260,18 +1933,18 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
       await client.views.update({
         view_id: body.view.id,
         hash: body.view.hash,
-        view: await buildListDetailView({ teamId, task: updated, returnState }),
+        view: await buildListDetailView({ teamId, task: updated, returnState, viewerUserId: body.user.id }),
       });
       return;
     }
 
-    if (channelId && parentTs) {
+    if (updated.channel_id && updated.message_ts) {
       // スレッドカードは完了ボタンが無いので、表示だけ更新
       const doneBlocks = [
         { type: "header", text: { type: "plain_text", text: "✅ 完了しました" } },
         { type: "section", text: { type: "mrkdwn", text: `*${noMention(updated.title)}*\nタスクを完了にしました✨` } },
       ];
-      await upsertThreadCard(client, { teamId, channelId, parentTs, blocks: doneBlocks });
+      await upsertThreadCard(client, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks: doneBlocks });
     }
 
     if (body.view?.id && body.view.callback_id === "detail_modal") {
@@ -1280,7 +1953,7 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
         await client.views.update({
           view_id: body.view.id,
           hash: body.view.hash,
-          view: await buildDetailModalView({ teamId, task: refreshed }),
+          view: await buildDetailModalView({ teamId, task: refreshed, viewerUserId: body.user.id }),
         });
       }
     }
@@ -1289,13 +1962,87 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
   }
 });
 
+
+// broadcast: requester confirms after all targets completed (waiting -> done)
+app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
+  await ack();
+
+  const p = safeJsonParse(action.value || "{}") || {};
+  const teamId = p.teamId || body.team?.id || body.team_id;
+  const taskId = p.taskId;
+  if (!teamId || !taskId) return;
+
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    // only requester can confirm
+    if (task.requester_user_id !== body.user.id) {
+      await safeEphemeral(client, task.channel_id || body.user.id, body.user.id, "🥺 確認完了できるのは依頼者だけだよ…！");
+      return;
+    }
+
+    if (task.task_type !== "broadcast") return;
+    if (task.status !== "waiting") {
+      await safeEphemeral(client, task.channel_id || body.user.id, body.user.id, "まだ確認待ち状態じゃないよ…！");
+      return;
+    }
+
+    const updated = await dbUpdateStatus(teamId, taskId, "done");
+    if (!updated) return;
+
+    // thread card update
+    if (updated.channel_id && updated.message_ts) {
+      const blocks = await buildThreadCardBlocks({ teamId, task: updated });
+      await upsertThreadCard(client, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks });
+    }
+
+    // refresh open modal if any
+    if (body.view?.id) {
+      if (body.view.callback_id === "list_detail_modal") {
+        const meta2 = safeJsonParse(body.view?.private_metadata || "{}") || {};
+        const returnState = meta2.returnState || { viewType: "assigned", userId: body.user.id, status: "open", deptKey: "all" };
+        await client.views.update({
+          view_id: body.view.id,
+          hash: body.view.hash,
+          view: await buildListDetailView({ teamId, task: updated, returnState, viewerUserId: body.user.id }),
+        });
+      } else if (body.view.callback_id === "detail_modal") {
+        await client.views.update({
+          view_id: body.view.id,
+          hash: body.view.hash,
+          view: await buildDetailModalView({ teamId, task: updated, viewerUserId: body.user.id }),
+        });
+      }
+    }
+
+    // home refresh
+    try { await publishHome({ client, teamId, userId: body.user.id }); } catch (_) {}
+    try { await publishHome({ client, teamId, userId: updated.requester_user_id }); } catch (_) {}
+
+    // best effort: update original DM message if action came from DM
+    if (body.channel?.id && body.message?.ts) {
+      try {
+        await client.chat.update({
+          channel: body.channel.id,
+          ts: body.message.ts,
+          text: "✅ 確認完了しました",
+          blocks: [
+            { type: "section", text: { type: "mrkdwn", text: `✅ *確認完了しました*\n「*${noMention(updated.title)}*」を完了にしました。` } },
+          ],
+        });
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("confirm_broadcast_done error:", e?.data || e);
+  }
+});
+
 app.action("cancel_task", async ({ ack, body, action, client }) => {
   await ack();
   const p = safeJsonParse(action.value || "{}") || {};
   const teamId = p.teamId || body.team?.id || body.team_id;
   const taskId = p.taskId;
-  const channelId = p.channelId;
-  const parentTs = p.parentTs;
 
   if (!teamId || !taskId) return;
 
@@ -1304,7 +2051,7 @@ app.action("cancel_task", async ({ ack, body, action, client }) => {
     if (!task) return;
 
     if (task.requester_user_id !== body.user.id) {
-      await safeEphemeral(client, channelId || body.user.id, body.user.id, "🥺 取り下げできるのは依頼者だけだよ…！");
+      await safeEphemeral(client, task.channel_id || body.user.id, body.user.id, "🥺 取り下げできるのは依頼者だけだよ…！");
       return;
     }
 
@@ -1317,24 +2064,24 @@ app.action("cancel_task", async ({ ack, body, action, client }) => {
       await client.views.update({
         view_id: body.view.id,
         hash: body.view.hash,
-        view: await buildListDetailView({ teamId, task: cancelled, returnState }),
+        view: await buildListDetailView({ teamId, task: cancelled, returnState, viewerUserId: body.user.id }),
       });
       return;
     }
 
-    if (channelId && parentTs) {
+    if (cancelled.channel_id && cancelled.message_ts) {
       const blocks = [
         { type: "header", text: { type: "plain_text", text: "🚫 取り下げました" } },
         { type: "section", text: { type: "mrkdwn", text: `*${noMention(cancelled.title)}*\n依頼者により取り下げられました。` } },
       ];
-      await upsertThreadCard(client, { teamId, channelId, parentTs, blocks });
+      await upsertThreadCard(client, { teamId, channelId: cancelled.channel_id, parentTs: cancelled.message_ts, blocks });
     }
 
     if (body.view?.id && body.view.callback_id === "detail_modal") {
       await client.views.update({
         view_id: body.view.id,
         hash: body.view.hash,
-        view: await buildDetailModalView({ teamId, task: cancelled }),
+        view: await buildDetailModalView({ teamId, task: cancelled, viewerUserId: body.user.id }),
       });
     }
   } catch (e) {
@@ -1352,6 +2099,22 @@ app.action("status_select", async ({ ack, body, action, client }) => {
 
     if (!teamId || !taskId || !nextStatus) return;
 
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    // broadcast はステータス手動変更しない（検収フローで自動遷移）
+    if (task.task_type === "broadcast") {
+      await safeEphemeral(client, task.channel_id || body.user.id, body.user.id, "🥺 複数タスクのステータスは自動で進むよ（全員完了→確認待ち→依頼者の確認完了）");
+      return;
+    }
+
+    // personal：ウォッチャー等はステータス変更不可（依頼者 or 対応者のみ）
+    const actor = body.user.id;
+    if (task.requester_user_id !== actor && task.assignee_id !== actor) {
+      await safeEphemeral(client, task.channel_id || body.user.id, actor, "🥺 ステータス変更できるのは依頼者か対応者だけだよ…！");
+      return;
+    }
+
     const updated = await dbUpdateStatus(teamId, taskId, nextStatus);
     if (!updated) return;
 
@@ -1361,7 +2124,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
       await client.views.update({
         view_id: body.view.id,
         hash: body.view.hash,
-        view: await buildListDetailView({ teamId, task: updated, returnState }),
+        view: await buildListDetailView({ teamId, task: updated, returnState, viewerUserId: body.user.id }),
       });
       return;
     }
@@ -1369,10 +2132,10 @@ app.action("status_select", async ({ ack, body, action, client }) => {
     await client.views.update({
       view_id: body.view.id,
       hash: body.view.hash,
-      view: await buildDetailModalView({ teamId, task: updated }),
+      view: await buildDetailModalView({ teamId, task: updated, viewerUserId: body.user.id }),
     });
 
-    // スレッドカードは完了ボタンなしで、表示だけ更新する
+    // スレッドカード：表示更新
     if (updated.channel_id && updated.message_ts) {
       const blocks = await buildThreadCardBlocks({ teamId, task: updated });
       await upsertThreadCard(client, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks });
@@ -1382,8 +2145,119 @@ app.action("status_select", async ({ ack, body, action, client }) => {
   }
 });
 
+// progress modal: MVP placeholder (実装は後で拡張しやすいように入口だけ)
+app.action("open_progress_modal", async ({ ack, body, action, client }) => {
+  await ack();
+
+  // value から取れないケースがあるので、modal meta も参照する（堅牢化）
+  const p = safeJsonParse(action?.value || "{}") || {};
+  const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+  const teamId = p.teamId || meta.teamId || body.team?.id || body.team_id;
+  const taskId = p.taskId || meta.taskId;
+  if (!teamId || !taskId) return;
+
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+    if (task.task_type !== "broadcast") return;
+
+    // 仕様変更：誰でも閲覧可（依頼者・対応者・対象者・ウォッチャー・その他）
+    // targets / completions
+    const targetsRes = await dbQuery(
+      `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+      [teamId, taskId]
+    );
+    const completionsRes = await dbQuery(
+      `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+      [teamId, taskId]
+    );
+
+    const targets = (targetsRes.rows || []).map((r) => r.user_id).filter(Boolean);
+    const doneSet = new Set((completionsRes.rows || []).map((r) => r.user_id).filter(Boolean));
+
+    const done = targets.filter((u) => doneSet.has(u));
+    const todo = targets.filter((u) => !doneSet.has(u));
+
+    const total = targets.length;
+    const doneCount = done.length;
+
+    const listText = (arr, emptyText) => {
+      if (!arr.length) return emptyText;
+      const MAX = 50;
+      const head = arr.slice(0, MAX).map((u) => `• <@${u}>`).join("\n");
+      const more = arr.length > MAX ? `\n…ほか ${arr.length - MAX} 名` : "";
+      return `${head}${more}`;
+    };
+
+    const meta2 = { teamId, taskId, origin: "progress" };
+
+    const view = {
+      type: "modal",
+      callback_id: "progress_modal",
+      private_metadata: JSON.stringify(meta2),
+      title: { type: "plain_text", text: "完了状況" },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "← 詳細に戻る" },
+              action_id: "back_to_detail_from_progress",
+              value: JSON.stringify({ teamId, taskId }),
+            },
+          ],
+        },
+        { type: "header", text: { type: "plain_text", text: "📊 完了/未完了一覧" } },
+        { type: "section", text: { type: "mrkdwn", text: `*${noMention(task.title)}*` } },
+        { type: "divider" },
+        { type: "section", text: { type: "mrkdwn", text: `進捗：*${doneCount} / ${total}*` } },
+        { type: "divider" },
+
+        { type: "section", text: { type: "mrkdwn", text: `✅ *完了済み（${done.length}）*` } },
+        { type: "section", text: { type: "mrkdwn", text: listText(done, "（まだいません）") } },
+        { type: "divider" },
+
+        { type: "section", text: { type: "mrkdwn", text: `⏳ *未完了（${todo.length}）*` } },
+        { type: "section", text: { type: "mrkdwn", text: listText(todo, "（全員完了！🎉）") } },
+      ],
+    };
+
+    // modal 上からの遷移は push を優先（挙動が安定）
+    if (body.view?.id) {
+      await client.views.push({ trigger_id: body.trigger_id, view });
+    } else {
+      await client.views.open({ trigger_id: body.trigger_id, view });
+    }
+  } catch (e) {
+    console.error("open_progress_modal error:", e?.data || e);
+  }
+});
+
+app.action("back_to_detail_from_progress", async ({ ack, body, action, client }) => {
+  await ack();
+  try {
+    const p = safeJsonParse(action.value || "{}") || {};
+    const teamId = p.teamId || body.team?.id || body.team_id;
+    const taskId = p.taskId;
+    if (!teamId || !taskId || !body.view?.id) return;
+
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    await client.views.update({
+      view_id: body.view.id,
+      hash: body.view.hash,
+      view: await buildDetailModalView({ teamId, task, viewerUserId: body.user.id, origin: "home" }),
+    });
+  } catch (e) {
+    console.error("back_to_detail_from_progress error:", e?.data || e);
+  }
+});
+
 // ================================
-// Due notify (09:00 JST)
+// Due notify (09:00 JST) - personal tasks only (broadcastは完了トラッキングのため別通知設計にする想定)
 // ================================
 function todayJstYmd() {
   const now = new Date();
@@ -1420,6 +2294,7 @@ async function runDueNotifyJob() {
     WHERE due_date = $1
       AND status NOT IN ('done','cancelled')
       AND (notified_at IS NULL)
+      AND (task_type IS NULL OR task_type='personal')
     ORDER BY created_at ASC
     LIMIT 500;
   `;

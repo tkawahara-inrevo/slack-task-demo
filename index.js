@@ -36,6 +36,21 @@ function safeJsonParse(str) {
   }
 }
 
+function getTeamIdFromBody(body) {
+  return (
+    body?.team?.id ||
+    body?.team_id ||
+    body?.team?.team_id ||
+    body?.authorizations?.[0]?.team_id ||
+    null
+  );
+}
+
+function getUserIdFromBody(body) {
+  return body?.user?.id || body?.user_id || body?.user?.user_id || null;
+}
+
+
 // 通知抑止：@mk 等を表示したいが、メンション通知は飛ばしたくない（※全社タスク発行時は例外でメンションを有効にする）
 function noMention(s) {
   if (!s) return "";
@@ -1251,8 +1266,6 @@ async function publishHome({ client, teamId, userId }) {
     accessory: homeScopeSelectElement(st.scopeKey),
   });
 
-  blocks.push({ type: "divider" });
-
   // Phase8-5: 操作ボタン配置調整（担当者クリア＋フィルタリセットを横並び）
   blocks.push({
     type: "actions",
@@ -1802,8 +1815,8 @@ app.action("noop", async ({ ack }) => {
 app.action("home_view_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
     const selected = body.actions?.[0]?.selected_option?.value || "personal";
 
     // view切替時：personalなら担当者を自分に戻す（初期値に寄せる）
@@ -1822,8 +1835,8 @@ app.action("home_view_select", async ({ ack, body, client }) => {
 app.action("home_person_assignee_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
     const selectedUser = body.actions?.[0]?.selected_option?.value || userId;
 
     setHomeState(teamId, userId, { assigneeUserId: selectedUser });
@@ -1837,8 +1850,8 @@ app.action("home_person_assignee_select", async ({ ack, body, client }) => {
 app.action("home_person_assignee_clear", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
     setHomeState(teamId, userId, { assigneeUserId: null });
     await publishHome({ client, teamId, userId });
   } catch (e) {
@@ -1849,8 +1862,8 @@ app.action("home_person_assignee_clear", async ({ ack, body, client }) => {
 app.action("home_scope_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
     const selected = body.actions?.[0]?.selected_option?.value || "active";
 
     setHomeState(teamId, userId, { scopeKey: selected });
@@ -1863,8 +1876,8 @@ app.action("home_scope_select", async ({ ack, body, client }) => {
 app.action("home_dept_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
     const selected = body.actions?.[0]?.selected_option?.value || "all";
 
     setHomeState(teamId, userId, { deptKey: selected });
@@ -1878,8 +1891,8 @@ app.action("home_dept_select", async ({ ack, body, client }) => {
 app.action("home_broadcast_scope_select", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
     const selected = body.actions?.[0]?.selected_option?.value || "to_me";
 
     setHomeState(teamId, userId, { broadcastScopeKey: selected });
@@ -1893,8 +1906,8 @@ app.action("home_broadcast_scope_select", async ({ ack, body, client }) => {
 app.action("home_reset_filters", async ({ ack, body, client }) => {
   await ack();
   try {
-    const teamId = body.team.id;
-    const userId = body.user.id;
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
 
     setHomeState(teamId, userId, {
       viewKey: "personal",
@@ -2406,7 +2419,7 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
     if (!task) return;
 
     if (task.task_type === "broadcast") {
-      const userId = body.user.id;
+      const userId = getUserIdFromBody(body);
 
       const isTarget = await dbIsUserTarget(teamId, taskId, userId);
       if (!isTarget) {

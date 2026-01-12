@@ -951,6 +951,48 @@ async function buildDetailModalView({ teamId, task, viewerUserId, origin = "home
 
   blocks.push({ type: "section", text: { type: "mrkdwn", text: `*元メッセージ（全文）*\n\`\`\`\n${srcLines}\n\`\`\`` } });
 
+
+// ===== コメント表示（元メッセージの下）=====
+let __comments = [];
+try {
+  __comments = await dbListTaskComments(teamId, task.id, 10);
+} catch (e) {
+  console.error("load comments error", e);
+}
+
+blocks.push({ type: "divider" });
+blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🗨 コメント*" } });
+
+if (!__comments.length) {
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（コメントなし）" }] });
+} else {
+  for (const c of __comments) {
+    const name = await getUserDisplayName(teamId, c.user_id);
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*${name}*\n${noMention(c.comment)}` },
+    });
+  }
+}
+
+if (!isReadOnly) {
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        action_id: "open_comment_modal",
+        text: { type: "plain_text", text: "コメントを書く" },
+        value: JSON.stringify({ teamId, taskId: task.id }),
+      },
+    ],
+  });
+}
+
+blocks.push({ type: "divider" });
+// ===== コメント表示ここまで =====
+
+
   // actions（スレッド起点は操作なし）
   if (!isReadOnly) {
     const base = { teamId, taskId: task.id };
@@ -999,14 +1041,19 @@ async function buildDetailModalView({ teamId, task, viewerUserId, origin = "home
   };
 }
 
-async function openDetailModal(client, { trigger_id, teamId, taskId, viewerUserId, origin = "home" }) {
+async function openDetailModal(client, { trigger_id, teamId, taskId, viewerUserId, origin = "home", isFromModal = false }) {
   const task = await dbGetTaskById(teamId, taskId);
   if (!task) return;
 
-  await client.views.open({
-    trigger_id,
-    view: await buildDetailModalView({ teamId, task, viewerUserId, origin }),
-  });
+  const view = await buildDetailModalView({ teamId, task, viewerUserId, origin });
+
+  // モーダル上のボタンからは views.open ではなく views.push（Slack仕様）
+  if (isFromModal) {
+    await client.views.push({ trigger_id, view });
+    return;
+  }
+
+  await client.views.open({ trigger_id, view });
 }
 
 // watcher helper
@@ -1832,7 +1879,7 @@ app.action("open_detail_modal", async ({ ack, body, action, client }) => {
   if (!teamId || !taskId) return;
 
   try {
-    await openDetailModal(client, { trigger_id: body.trigger_id, teamId, taskId, viewerUserId: body.user.id, origin });
+    await openDetailModal(client, { trigger_id: body.trigger_id, teamId, taskId, viewerUserId: body.user.id, origin, isFromModal: !!body.view?.id });
   } catch (e) {
     console.error("open_detail_modal error:", e?.data || e);
   }
@@ -2944,6 +2991,195 @@ cron.schedule(
 if (process.env.RUN_NOTIFY_NOW === "true") {
   runDueNotifyJob().catch(console.error);
 }
+
+
+// ================================
+// DB: Task comments
+// ================================
+
+
+// ================================
+// Comment modal
+// ================================
+app.action("open_detail_modal", async ({ ack, body, action, client }) => {
+  //await ack();
+
+  const p = safeJsonParse(action.value || "{}") || {};
+  const teamId = p.teamId || body.team?.id || body.team_id;
+  const taskId = p.taskId;
+  const viewerUserId = body.user?.id;
+  const origin = p.origin || "home";
+  if (!teamId || !taskId || !viewerUserId) return;
+
+  // ① まず trigger_id を即消費して “ローディング” を開く（expired_trigger_id 対策）
+  let opened;
+  try {
+    opened = await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: "modal",
+        callback_id: "detail_modal_loading",
+        title: { type: "plain_text", text: "タスク" },
+        close: { type: "plain_text", text: "閉じる" },
+        blocks: [
+          { type: "section", text: { type: "mrkdwn", text: "⌛ 読み込み中..." } },
+        ],
+      },
+    });
+  } catch (e) {
+    console.error("open_detail_modal views.open error:", e?.data || e);
+    return;
+  }
+
+  const viewId = opened?.view?.id;
+  if (!viewId) return;
+
+  // ② そのあとでDB取得（重くてもOK）
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    await client.views.update({
+      view_id: viewId,
+      view: await buildDetailModalView({ teamId, task, viewerUserId, origin }),
+    });
+  } catch (e) {
+    console.error("open_detail_modal views.update error:", e?.data || e);
+    // エラー表示に差し替え（任意）
+    try {
+      await client.views.update({
+        view_id: viewId,
+        view: {
+          type: "modal",
+          callback_id: "detail_modal_error",
+          title: { type: "plain_text", text: "タスク" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            { type: "section", text: { type: "mrkdwn", text: "🥺 読み込みに失敗しました…" } },
+          ],
+        },
+      });
+    } catch (_) {}
+  }
+});
+
+
+
+
+
+// ================================
+// DB: Task comments
+// ================================
+async function dbListTaskComments(teamId, taskId, limit = 10) {
+  const q = `
+    SELECT user_id, comment, created_at
+    FROM task_comments
+    WHERE team_id=$1 AND task_id=$2
+    ORDER BY created_at ASC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, [teamId, taskId, limit]);
+  return res.rows || [];
+}
+
+async function dbInsertTaskComment(teamId, taskId, userId, comment) {
+  const q = `
+    INSERT INTO task_comments (id, team_id, task_id, user_id, comment)
+    VALUES ($1,$2,$3,$4,$5);
+  `;
+  await dbQuery(q, [randomUUID(), teamId, taskId, userId, String(comment || "").trim()]);
+}
+
+// ================================
+// Comment modal
+// ================================
+app.action("open_comment_modal", async ({ ack, body, action, client }) => {
+  await ack();
+
+  const meta = safeJsonParse(action.value || "{}") || {};
+
+  // 詳細モーダル上からは push が正解（モーダル二重 open は不可）
+  await client.views.push({
+    trigger_id: body.trigger_id,
+    view: {
+      type: "modal",
+      callback_id: "comment_modal",
+      private_metadata: JSON.stringify(meta),
+      title: { type: "plain_text", text: "コメント" },
+      submit: { type: "plain_text", text: "投稿" },
+      close: { type: "plain_text", text: "キャンセル" },
+      blocks: [
+        {
+          type: "input",
+          block_id: "comment",
+          label: { type: "plain_text", text: "コメント内容" },
+          element: { type: "plain_text_input", action_id: "body", multiline: true },
+        },
+      ],
+    },
+  });
+});
+
+app.view("comment_modal", async ({ ack, body, view, client }) => {
+  const meta = safeJsonParse(view.private_metadata || "{}") || {};
+  const comment = view.state.values.comment?.body?.value?.trim() || "";
+
+  if (!comment) {
+    await ack({
+      response_action: "errors",
+      errors: { comment: "コメントを入力してください" },
+    });
+    return;
+  }
+
+  // ① まず3秒以内に軽い画面へ差し替え（確実にUIを落とさない）
+  await ack({
+    response_action: "update",
+    view: {
+      type: "modal",
+      callback_id: "comment_modal_saving",
+      title: { type: "plain_text", text: "コメント" },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "💾 保存中…" } }],
+    },
+  });
+
+  try {
+    // ② 重い処理は ack 後にやる
+    await dbInsertTaskComment(meta.teamId, meta.taskId, body.user.id, comment);
+
+    const task = await dbGetTaskById(meta.teamId, meta.taskId);
+    if (!task) return;
+
+    // ③ trigger_id は使わない。view_id で update（ここが安全）
+await client.views.update({
+  view_id: view.id,
+  view: await buildDetailModalView({
+    teamId: meta.teamId,
+    task,
+    viewerUserId: body.user.id,
+  }),
+});
+
+  } catch (e) {
+    console.error("comment_modal post-save error:", e?.data || e);
+    // 失敗表示だけ更新（任意）
+    try {
+      await client.views.update({
+        view_id: view.id,
+        hash: view.hash,
+        view: {
+          type: "modal",
+          callback_id: "comment_modal_error",
+          title: { type: "plain_text", text: "コメント" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "🥺 保存に失敗しました…" } }],
+        },
+      });
+    } catch (_) {}
+  }
+});
+
 
 // ================================
 // Start

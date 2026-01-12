@@ -988,6 +988,13 @@ const HOME_SCOPES = [
   { key: "done", label: "完了" },
 ];
 
+// broadcast: 範囲（Phase8-3）
+const BROADCAST_SCOPES = [
+  { key: "to_me", label: "自分あて" },
+  { key: "requested_by_me", label: "自分が発行" },
+  { key: "all", label: "すべて" },
+];
+
 // 未完了 = done以外
 const NON_DONE_STATUSES = ["open", "in_progress", "waiting", "cancelled"];
 
@@ -999,6 +1006,7 @@ function getHomeState(teamId, userId) {
       scopeKey: "active",
       assigneeUserId: userId, // personalのみ
       deptKey: "all",
+      broadcastScopeKey: "to_me", // Phase8-3: broadcastのみ
     };
   return s;
 }
@@ -1025,6 +1033,16 @@ function homeScopeSelectElement(scopeKey) {
     action_id: "home_scope_select",
     initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
     options: HOME_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
+  };
+}
+
+function broadcastScopeSelectElement(scopeKey) {
+  const cur = BROADCAST_SCOPES.find((s) => s.key === scopeKey) || BROADCAST_SCOPES[0];
+  return {
+    type: "static_select",
+    action_id: "home_broadcast_scope_select",
+    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
+    options: BROADCAST_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
   };
 }
 
@@ -1113,6 +1131,40 @@ async function dbListBroadcastTasksByStatuses(teamId, statuses, deptKey = "all",
   return res.rows;
 }
 
+// Phase8-3: broadcast 範囲フィルタ（依頼部署フィルタは廃止）
+async function dbListBroadcastTasksByStatusesWithScope(teamId, statuses, scopeKey, viewerUserId, limit = 30) {
+  const params = [teamId, statuses, limit];
+  let joinTargets = "";
+  let whereScope = "";
+
+  if (scopeKey === "to_me") {
+    // 対象者に自分を含む
+    joinTargets = "JOIN task_targets tt ON tt.task_id::text = t.id AND tt.team_id=t.team_id";
+    whereScope = "AND tt.user_id = $4";
+    params.push(viewerUserId);
+  } else if (scopeKey === "requested_by_me") {
+    // 依頼者が自分
+    whereScope = "AND t.requester_user_id = $4";
+    params.push(viewerUserId);
+  } else {
+    // all: no scope filter
+  }
+
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    ${joinTargets}
+    WHERE t.team_id=$1
+      AND t.task_type='broadcast'
+      AND t.status = ANY($2::text[])
+      ${whereScope}
+    ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
 
 async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey }) {
   if (viewType === "requested") {
@@ -1147,12 +1199,24 @@ async function publishHome({ client, teamId, userId }) {
     accessory: homeViewSelectElement(st.viewKey),
   });
 
-  // 部署（personal=担当部署 / broadcast=依頼部署）
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: st.viewKey === "broadcast" ? "*依頼部署*" : "*担当部署*" },
-    accessory: deptSelectElement(st.deptKey || "all", deptKeys),
-  });
+  // 部署（personalのみ：担当部署）
+  if (st.viewKey === "personal") {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: "*担当部署*" },
+      accessory: deptSelectElement(st.deptKey || "all", deptKeys),
+    });
+  }
+
+  // Phase8-3: broadcast 範囲（自分あて/自分が発行/すべて）
+  if (st.viewKey === "broadcast") {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: "*範囲*" },
+      accessory: broadcastScopeSelectElement(st.broadcastScopeKey || "to_me"),
+    });
+  }
+
 
   // personal: 担当者（空欄=全員対象）
   if (st.viewKey === "personal") {
@@ -1174,19 +1238,6 @@ async function publishHome({ client, teamId, userId }) {
           : {}),
       },
     });
-
-    // クリア（担当者=空欄にする）
-    blocks.push({
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          action_id: "home_person_assignee_clear",
-          text: { type: "plain_text", text: "担当者をクリア" },
-          value: "clear",
-        },
-      ],
-    });
   }
 
   // 状態（未完了/完了）
@@ -1196,12 +1247,36 @@ async function publishHome({ client, teamId, userId }) {
     accessory: homeScopeSelectElement(st.scopeKey),
   });
 
+  // Phase8-5: 操作ボタン配置調整（担当者クリア＋フィルタリセットを横並び）
+  blocks.push({
+    type: "actions",
+    elements: [
+      ...(st.viewKey === "personal"
+        ? [
+            {
+              type: "button",
+              action_id: "home_person_assignee_clear",
+              text: { type: "plain_text", text: "担当者クリア" },
+              value: "clear",
+            },
+          ]
+        : []),
+      {
+        type: "button",
+        action_id: "home_reset_filters",
+        text: { type: "plain_text", text: "リセット" },
+        value: "reset",
+      },
+    ],
+  });
+
+
   blocks.push({ type: "divider" });
 
   // データ取得
   let tasks = [];
   if (st.viewKey === "broadcast") {
-    tasks = await dbListBroadcastTasksByStatuses(teamId, statuses, st.deptKey || "all", 60);
+    tasks = await dbListBroadcastTasksByStatusesWithScope(teamId, statuses, st.broadcastScopeKey || "to_me", userId, 60);
   } else {
     const assigneeId = st.assigneeUserId || null;
     tasks = await dbListPersonalTasksByAssigneeFiltered(teamId, assigneeId, statuses, st.deptKey || "all", 60);
@@ -1219,6 +1294,11 @@ async function publishHome({ client, teamId, userId }) {
           text: { type: "mrkdwn", text: taskLineForHome(t, st.viewKey) },
           accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
         });
+          // タスクごとの区切り（薄めの罫線：dividerではなくテキストで差を付ける）
+          blocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: "────────────────────────" }],
+          });
       }
     }
   } else {
@@ -1241,6 +1321,11 @@ async function publishHome({ client, teamId, userId }) {
             type: "section",
             text: { type: "mrkdwn", text: taskLineForHome(t, st.viewKey) },
             accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
+          });
+          // タスクごとの区切り（薄めの罫線：dividerではなくテキストで差を付ける）
+          blocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: "────────────────────────" }],
           });
         }
       }
@@ -1369,7 +1454,12 @@ app.event("app_home_opened", async ({ event, client, body }) => {
   try {
     const teamId = body.team_id || body.team?.id || event.team;
     const userId = event.user;
-    setHomeState(teamId, userId, { viewKey: "personal", scopeKey: "active", assigneeUserId: userId, deptKey: "all" });
+    // Phase8-4: Homeの検索条件を保持（初回のみ初期化）
+    const k = `${teamId}:${userId}`;
+    if (!homeState.has(k)) {
+      setHomeState(teamId, userId, { viewKey: "personal", scopeKey: "active", assigneeUserId: userId, deptKey: "all", broadcastScopeKey: "to_me" });
+    }
+
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("app_home_opened error:", e?.data || e);
@@ -1477,7 +1567,6 @@ function uniq(arr) {
 }
 
 app.view("task_modal", async ({ ack, body, view, client }) => {
-  await ack();
 
   try {
     const meta = safeJsonParse(view.private_metadata || "{}") || {};
@@ -1504,10 +1593,29 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
 
 
     if (!selectedUsers.length && !selectedGroupIds.length) {
-      // ここはUIにエラーを返すのが理想だけど、MVPはエフェメラルで案内
-      await safeEphemeral(client, channelId || body.user.id, actorUserId, "🥺 対応者（個人 or グループ）を1つ以上選んでね！");
+
+      // Phase8-2: 対応者（個人 or グループ）必須。モーダル内エラー表示で送信をブロックする
+
+      await ack({
+
+        response_action: "errors",
+
+        errors: {
+
+          assignee_users: "対応者（個人 or グループ）を1つ以上選んでください",
+
+          assignee_groups: "対応者（個人 or グループ）を1つ以上選んでください",
+
+        },
+
+      });
+
       return;
+
     }
+
+    // Phase8-2: バリデーション通過後にack（このハンドラ内でackは1回のみ）
+    await ack();
 
     // Expand group members
     const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(teamId, selectedGroupIds);
@@ -1679,7 +1787,7 @@ app.action("home_view_select", async ({ ack, body, client }) => {
     if (selected === "personal") {
       setHomeState(teamId, userId, { viewKey: "personal", assigneeUserId: userId });
     } else {
-      setHomeState(teamId, userId, { viewKey: "broadcast" });
+      setHomeState(teamId, userId, { viewKey: "broadcast", broadcastScopeKey: "to_me" });
     }
 
     await publishHome({ client, teamId, userId });
@@ -1740,6 +1848,42 @@ app.action("home_dept_select", async ({ ack, body, client }) => {
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("home_dept_select error:", e?.data || e);
+  }
+});
+
+// Home: broadcast 範囲 change（Phase8-3）
+app.action("home_broadcast_scope_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team.id;
+    const userId = body.user.id;
+    const selected = body.actions?.[0]?.selected_option?.value || "to_me";
+
+    setHomeState(teamId, userId, { broadcastScopeKey: selected });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_broadcast_scope_select error:", e?.data || e);
+  }
+});
+
+// Home: フィルタをリセット（Phase8-4）
+app.action("home_reset_filters", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team.id;
+    const userId = body.user.id;
+
+    setHomeState(teamId, userId, {
+      viewKey: "personal",
+      scopeKey: "active",
+      assigneeUserId: userId,
+      deptKey: "all",
+      broadcastScopeKey: "to_me",
+    });
+
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_reset_filters error:", e?.data || e);
   }
 });
 
@@ -1957,6 +2101,14 @@ return;
         });
       }
     }
+
+    // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
+    try {
+      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      setTimeout(() => {
+        publishHomeForUsers(client, teamId, [body.user.id], 200);
+      }, 200);
+    } catch (_) {}
   } catch (e) {
     console.error("complete_task error:", e?.data || e);
   }
@@ -2015,10 +2167,13 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
         });
       }
     }
-
-    // home refresh
-    try { await publishHome({ client, teamId, userId: body.user.id }); } catch (_) {}
-    try { await publishHome({ client, teamId, userId: updated.requester_user_id }); } catch (_) {}
+    // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
+    try {
+      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      setTimeout(() => {
+        publishHomeForUsers(client, teamId, [body.user.id], 200);
+      }, 200);
+    } catch (_) {}
 
     // best effort: update original DM message if action came from DM
     if (body.channel?.id && body.message?.ts) {
@@ -2084,6 +2239,14 @@ app.action("cancel_task", async ({ ack, body, action, client }) => {
         view: await buildDetailModalView({ teamId, task: cancelled, viewerUserId: body.user.id }),
       });
     }
+
+    // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
+    try {
+      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      setTimeout(() => {
+        publishHomeForUsers(client, teamId, [body.user.id], 200);
+      }, 200);
+    } catch (_) {}
   } catch (e) {
     console.error("cancel_task error:", e?.data || e);
   }
@@ -2140,6 +2303,14 @@ app.action("status_select", async ({ ack, body, action, client }) => {
       const blocks = await buildThreadCardBlocks({ teamId, task: updated });
       await upsertThreadCard(client, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks });
     }
+
+    // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
+    try {
+      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      setTimeout(() => {
+        publishHomeForUsers(client, teamId, [body.user.id], 200);
+      }, 200);
+    } catch (_) {}
   } catch (e) {
     console.error("status_select error:", e?.data || e);
   }

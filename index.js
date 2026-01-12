@@ -117,6 +117,7 @@ function generateTitleCandidate(text, maxLen = 22) {
   const cut = s.split(/[\n。！？!?]/)[0].trim();
   let title = cut || s;
   title = title.replace(/(お願いします|ください|してもらえますか|して下さい|お願いします。?)$/g, "").trim();
+  title = title.replace(/^@\S+\s*/, "");
 
   if (!title) title = "（タスク）";
   if (title.length > maxLen) title = title.slice(0, maxLen) + "…";
@@ -168,6 +169,34 @@ async function prettifySlackText(text, teamId) {
 
   return out;
 }
+
+
+// ================================
+// Slack text prettifier (user): <@UXXXX> -> @display_name (for modal readability)
+// Note: Plain text inputs in modals do NOT render mrkdwn mentions, so we replace them ourselves.
+// ================================
+async function prettifyUserMentions(text, teamId) {
+  if (!text) return "";
+
+  const ids = Array.from(
+    new Set(
+      Array.from(String(text).matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)).map((m) => m[1])
+    )
+  );
+  if (!ids.length) return String(text);
+
+  const idToName = {};
+  for (const uid of ids) {
+    const name = await getUserDisplayName(teamId, uid);
+    idToName[uid] = (name && String(name).trim()) ? String(name).trim() : uid;
+  }
+
+  return String(text).replace(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g, (m, uid) => {
+    const nm = idToName[uid] || uid;
+    return `@${String(nm).replace(/^@/, "")}`;
+  });
+}
+
 
 
 // ================================
@@ -1266,6 +1295,8 @@ async function publishHome({ client, teamId, userId }) {
     accessory: homeScopeSelectElement(st.scopeKey),
   });
 
+  blocks.push({ type: "divider" });
+
   // Phase8-5: 操作ボタン配置調整（担当者クリア＋フィルタリセットを横並び）
   blocks.push({
     type: "actions",
@@ -1515,7 +1546,8 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     const rawText = shortcut.message?.text || "";
     const requesterUserId = shortcut.message?.user || "";
 
-    const prettyText = await prettifySlackText(rawText, teamId);
+    let prettyText = await prettifySlackText(rawText, teamId);
+    prettyText = await prettifyUserMentions(prettyText, teamId);
     const titleCandidate = generateTitleCandidate(prettyText);
 
     await client.views.open({

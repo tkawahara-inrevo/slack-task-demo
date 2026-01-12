@@ -4,6 +4,10 @@ const { App } = require("@slack/bolt");
 const { Pool } = require("pg");
 const { randomUUID } = require("crypto");
 const cron = require("node-cron");
+const ExcelJS = require("exceljs");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 // ================================
 // Slack Bolt App
@@ -1247,6 +1251,8 @@ async function publishHome({ client, teamId, userId }) {
     accessory: homeScopeSelectElement(st.scopeKey),
   });
 
+  blocks.push({ type: "divider" });
+
   // Phase8-5: 操作ボタン配置調整（担当者クリア＋フィルタリセットを横並び）
   blocks.push({
     type: "actions",
@@ -1267,6 +1273,23 @@ async function publishHome({ client, teamId, userId }) {
         text: { type: "plain_text", text: "リセット" },
         value: "reset",
       },
+      ...(st.viewKey === "personal"
+        ? [
+            {
+              type: "button",
+              action_id: "gantt_export",
+              text: { type: "plain_text", text: "ガント出力" },
+              value: JSON.stringify({
+                teamId,
+                userId,
+                viewKey: st.viewKey,
+                scopeKey: st.scopeKey,
+                deptKey: st.deptKey || "all",
+                assigneeUserId: st.assigneeUserId || null,
+              }),
+            },
+          ]
+        : []),
     ],
   });
 
@@ -1886,6 +1909,387 @@ app.action("home_reset_filters", async ({ ack, body, client }) => {
     console.error("home_reset_filters error:", e?.data || e);
   }
 });
+
+// ================================
+// Phase9: Gantt export (personal only)
+// ================================
+
+// JST date-only helpers
+function jstYmdParts(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(dt);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const dd = parts.find((p) => p.type === "day")?.value;
+  if (!y || !m || !dd) return null;
+  return { y: Number(y), m: Number(m), d: Number(dd) };
+}
+
+function jstDateOnly(d) {
+  const p = jstYmdParts(d);
+  if (!p) return null;
+  return new Date(`${String(p.y).padStart(4, "0")}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}T00:00:00+09:00`);
+}
+
+function addDays(dateObj, days) {
+  const d = new Date(dateObj.getTime());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function startOfWeekMonday(dateObj) {
+  const d = new Date(dateObj.getTime());
+  const day = d.getDay(); // 0=Sun
+  const diff = (day === 0 ? -6 : 1 - day); // back to Monday
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function endOfWeekSunday(dateObj) {
+  const mon = startOfWeekMonday(dateObj);
+  return addDays(mon, 6);
+}
+
+function formatMd(d) {
+  const p = jstYmdParts(d);
+  if (!p) return "";
+  return `${String(p.m).padStart(2, "0")}/${String(p.d).padStart(2, "0")}`;
+}
+
+function formatYmd(d) {
+  const p = jstYmdParts(d);
+  if (!p) return "";
+  return `${p.y}/${String(p.m).padStart(2, "0")}/${String(p.d).padStart(2, "0")}`;
+}
+
+function isBefore(a, b) {
+  return a.getTime() < b.getTime();
+}
+function isAfter(a, b) {
+  return a.getTime() > b.getTime();
+}
+function clampDate(d, min, max) {
+  if (isBefore(d, min)) return min;
+  if (isAfter(d, max)) return max;
+  return d;
+}
+
+
+// ガント出力用：Homeと同じフィルタ（担当者/担当部署/状態）を反映しつつ、期限ありのタスクのみ対象
+async function dbListPersonalTasksForGantt(teamId, { assigneeId = null, deptKey = "all", statuses = ["open", "in_progress", "waiting"] } = {}) {
+  const params = [teamId, statuses];
+  const where = [];
+
+  // 担当者が指定されている場合はそれを優先
+  if (assigneeId) {
+    params.push(assigneeId);
+    where.push(`AND t.assignee_id = $${params.length}`);
+  } else if (deptKey && deptKey !== "all") {
+    // 担当部署（ユーザーグループ）に所属するユーザーのタスク
+    if (deptKey === "__none__") return [];
+    const { membersByDeptKey } = await fetchDeptGroups(teamId);
+    const set = membersByDeptKey && typeof membersByDeptKey.get === "function" ? membersByDeptKey.get(deptKey) : null;
+    const members = set ? Array.from(set) : [];
+    if (!members.length) return [];
+    params.push(members);
+    where.push(`AND t.assignee_id = ANY($${params.length}::text[])`);
+  }
+
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    WHERE t.team_id=$1
+      AND (t.task_type IS NULL OR t.task_type='personal')
+      AND t.status = ANY($2::text[])
+      AND t.due_date IS NOT NULL
+      ${where.join(" ")}
+    ORDER BY t.due_date ASC, t.created_at ASC;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+async function generateGanttXlsx({ teamId, tasks, windowStart, windowEnd }) {
+  const ExcelJS = require("exceljs");
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Slack Task App";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("ガント");
+
+  // ==== 表示枠（日単位）====
+  // 「S列くらいまで」に収めるため、14日分の表示枠にする（A〜Eが属性、F〜Sが日別ガント）
+  // windowStart/windowEnd は「出力日±2週間」で受け取っているが、日別はその中心付近を切り出す
+  const totalDays = 14;
+  // windowStart〜windowEnd の中央を、totalDays に収める
+  const mid = addDays(windowStart, Math.floor((diffDays(windowStart, windowEnd) + 1) / 2));
+  const ganttStart = addDays(mid, -Math.floor(totalDays / 2));
+  const ganttEnd = addDays(ganttStart, totalDays - 1);
+
+  // 列定義
+  const dayHeaders = [];
+  for (let i = 0; i < totalDays; i++) {
+    const d = addDays(ganttStart, i);
+    dayHeaders.push({
+      header: formatMdDay(d), // 例: 01/12(月)
+      key: `d${i}`,
+      width: 4
+    });
+  }
+
+  ws.columns = [
+    { header: "タスク名", key: "title", width: 44 },
+    { header: "依頼者", key: "requester", width: 18 },
+    { header: "対応者", key: "assignee", width: 18 },
+    { header: "作成", key: "created", width: 12 },
+    { header: "期限", key: "due", width: 12 },
+    { header: "状態", key: "status", width: 14 },
+    { header: "遅延", key: "delay", width: 10 },
+    ...dayHeaders,
+  ];
+
+  // ヘッダー装飾（色つけ）
+  const headerRow = ws.getRow(1);
+  headerRow.height = 20;
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.alignment = { vertical: "middle", horizontal: "center" };
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF2F5597" }, // 濃いめブルー
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FF1F1F1F" } },
+      left: { style: "thin", color: { argb: "FF1F1F1F" } },
+      bottom: { style: "thin", color: { argb: "FF1F1F1F" } },
+      right: { style: "thin", color: { argb: "FF1F1F1F" } },
+    };
+  });
+
+  // フィルタ（依頼者/対応者/状態/遅延）
+  ws.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: 7 },
+  };
+
+  // 罫線（薄め）
+  const thinBorder = {
+    top: { style: "thin", color: { argb: "FFD9D9D9" } },
+    left: { style: "thin", color: { argb: "FFD9D9D9" } },
+    bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+    right: { style: "thin", color: { argb: "FFD9D9D9" } },
+  };
+
+  // データ行
+  for (const t of tasks) {
+    const requesterId = t.requester_user_id || t.requester_id || "";
+    const assigneeId = t.assignee_id || "";
+
+    const requesterName = requesterId ? `@${await getUserDisplayName(teamId, requesterId)}` : "";
+    const assigneeName = assigneeId ? `@${await getUserDisplayName(teamId, assigneeId)}` : "";
+
+    const created = jstDateOnly(new Date(t.created_at));
+    const due = jstDateOnly(new Date(t.due_date));
+    const isDelayed = due < jstDateOnly(new Date());
+
+    const rowData = {
+      title: t.title || "",
+      requester: requesterName,
+      assignee: assigneeName,
+      created: created ? formatYmd(created) : "",
+      due: due ? formatYmd(due) : "",
+      status: statusToJa(t.status),
+      delay: isDelayed ? "遅延" : "",
+    };
+
+    // ガント（日ごと）
+    for (let i = 0; i < totalDays; i++) {
+      const d = addDays(ganttStart, i);
+      // created〜due の範囲を塗る（当日含む）
+      const on = (created <= d) && (d <= due);
+      rowData[`d${i}`] = on ? "■" : "";
+    }
+
+    const r = ws.addRow(rowData);
+
+    // 行の見やすさ
+    r.height = 18;
+    r.alignment = { vertical: "middle" };
+    r.eachCell((cell, colNumber) => {
+      cell.border = thinBorder;
+
+      if (colNumber >= 8) {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.font = { bold: true };
+      }
+    });
+
+    // 遅延を目立たせる
+    const delayCell = r.getCell(7);
+    if (rowData.delay) {
+      delayCell.font = { bold: true, color: { argb: "FFC00000" } };
+    }
+  }
+
+  // 先頭行固定
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  // 情報シート
+  const info = wb.addWorksheet("INFO");
+  info.columns = [
+    { header: "項目", key: "k", width: 18 },
+    { header: "値", key: "v", width: 60 },
+  ];
+  info.getRow(1).font = { bold: true };
+  info.addRow({ k: "出力日(JST)", v: formatYmd(jstDateOnly(new Date())) });
+  info.addRow({ k: "ガント表示(日)", v: `${formatYmd(ganttStart)} 〜 ${formatYmd(ganttEnd)}（${totalDays}日）` });
+  info.addRow({ k: "基準(仕様)", v: "personalのみ / open,in_progress,waiting / dueなし除外 / created_at〜due_date / 遅延=due<今日(JST)" });
+
+  // ファイル保存
+  const p = getJstParts(new Date());
+  const ymd = `${p.y}${String(p.m).padStart(2, "0")}${String(p.d).padStart(2, "0")}`;
+  const filename = `ガント_${ymd}.xlsx`;
+  const tmpDir = os.tmpdir();
+  const filePath = path.join(tmpDir, `${filename}`);
+
+  await wb.xlsx.writeFile(filePath);
+  return { filePath, filename };
+}
+
+// ---- Excel用フォーマット helper ----
+function getJstParts(date){
+  const dtf = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" });
+  const parts = dtf.formatToParts(date);
+  const y = parseInt(parts.find(p=>p.type==="year")?.value||"0",10);
+  const m = parseInt(parts.find(p=>p.type==="month")?.value||"0",10);
+  const d = parseInt(parts.find(p=>p.type==="day")?.value||"0",10);
+  return { y, m, d };
+}
+
+function diffDays(a, b) {
+  const ms = 24 * 60 * 60 * 1000;
+  const aa = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const bb = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((bb - aa) / ms);
+}
+function formatMdDay(d) {
+  const p = getJstParts(d);
+  const w = ["日", "月", "火", "水", "木", "金", "土"][new Date(d.getFullYear(), d.getMonth(), d.getDate()).getDay()];
+  return `${String(p.m).padStart(2, "0")}/${String(p.d).padStart(2, "0")}(${w})`;
+}
+function statusToJa(status) {
+  switch (status) {
+    case "open": return "未着手";
+    case "in_progress": return "対応中";
+    case "waiting": return "確認待ち";
+    case "done": return "完了";
+    case "cancelled": return "取り下げ";
+    default: return String(status || "");
+  }
+}
+
+
+
+async function uploadToUserDM({ client, userId, filePath, filename, initialComment }) {
+  const dm = await client.conversations.open({ users: userId });
+  const channel = dm.channel?.id;
+  if (!channel) throw new Error("DM channel not found");
+
+  // Try v2 first
+  try {
+    await client.files.uploadV2({
+      channel_id: channel,
+      file: fs.createReadStream(filePath),
+      filename,
+      title: filename,
+      initial_comment: initialComment || "",
+    });
+    return;
+  } catch (e) {
+    // fall back
+    try {
+      await client.files.upload({
+        channels: channel,
+        file: fs.createReadStream(filePath),
+        filename,
+        title: filename,
+        initial_comment: initialComment || "",
+      });
+      return;
+    } catch (e2) {
+      throw e2;
+    }
+  }
+}
+
+// Home: ガント出力（Phase9）
+app.action("gantt_export", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team?.id || body.team_id;
+    const userId = body.user?.id;
+
+    // Window: today ±14 days, snapped to Monday start / Sunday end (JST)
+    const today = jstDateOnly(new Date());
+    const rawStart = addDays(today, -14);
+    const rawEnd = addDays(today, 14);
+    const windowStart = startOfWeekMonday(rawStart);
+    const windowEnd = endOfWeekSunday(rawEnd);
+
+
+    const action = (body.actions && body.actions[0]) || {};
+    const payload = safeJsonParse(action.value || "{}") || {};
+    const st = getHomeState(teamId, userId);
+
+    const viewKey = payload.viewKey || st.viewKey || "personal";
+    if (viewKey !== "personal") {
+      await postDM(userId, "📭 ガント出力：personal タスクのみ対象です（Homeの「表示」を個人タスクにしてから実行してね）。");
+      return;
+    }
+
+    const deptKey = payload.deptKey ?? st.deptKey ?? "all";
+    const assigneeId = payload.assigneeUserId ?? st.assigneeUserId ?? null;
+    const scopeKey = payload.scopeKey || st.scopeKey || "active";
+
+    const statuses = scopeKey === "done" ? ["done"] : ["open", "in_progress", "waiting"];
+
+    const tasks = await dbListPersonalTasksForGantt(teamId, { assigneeId, deptKey, statuses });
+    if (!tasks.length) {
+      const label = scopeKey === "done" ? "完了" : "未着手/対応中/確認待ち";
+      await postDM(userId, `📭 ガント出力：対象の personal タスク（${label} & 期限あり）が0件でした。`);
+      return;
+    }
+
+const { filePath, filename } = await generateGanttXlsx({ teamId, tasks, windowStart, windowEnd });
+
+    await uploadToUserDM({
+      client,
+      userId,
+      filePath,
+      filename,
+      initialComment: `📎 ガントを出力しました（personalのみ / ${formatYmd(windowStart)}〜${formatYmd(windowEnd)} / JST）`,
+    });
+
+    // clean up
+    try { fs.unlinkSync(filePath); } catch (_) {}
+  } catch (e) {
+    console.error("gantt_export error:", e?.data || e);
+    const userId = body.user?.id;
+    await postDM(userId, "⚠️ ガント出力でエラーが発生しました。管理者に連絡してください。");
+  }
+});
+
 
 // Home: open list modal
 app.action("open_list_modal_from_home", async ({ ack, body, action, client }) => {

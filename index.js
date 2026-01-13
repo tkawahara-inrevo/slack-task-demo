@@ -1506,6 +1506,12 @@ async function publishHome({ client, teamId, userId }) {
         text: { type: "plain_text", text: "リセット" },
         value: "reset",
       },
+      {
+        type: "button",
+        action_id: "home_create_task",
+        text: { type: "plain_text", text: "タスク作成" },
+        value: JSON.stringify({ teamId, userId }),
+      },
       ...(st.viewKey === "personal" && (st.personalScopeKey || "to_me") === "all"
         ? [
             {
@@ -2499,6 +2505,99 @@ async function uploadToUserDM({ client, userId, filePath, filename, initialComme
     }
   }
 }
+
+// Home: タスク作成（メッセージなし）
+app.action("home_create_task", async ({ ack, body, client }) => {
+  await ack();
+
+  try {
+    const teamId = body.team?.id || body.team_id;
+    const userId = body.user?.id;
+    if (!teamId || !userId) return;
+
+    const today = jstDateOnly(new Date());
+    const initDue = slackDateYmd(today);
+
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: "modal",
+        callback_id: "task_modal",
+        private_metadata: JSON.stringify({
+          teamId,
+          channelId: "",
+          msgTs: "",
+          requesterUserId: userId,
+          messageText: "",
+          messageTextPretty: "",
+        }),
+        title: { type: "plain_text", text: "タスク作成" },
+        submit: { type: "plain_text", text: "決定" },
+        close: { type: "plain_text", text: "キャンセル" },
+        blocks: [
+          {
+            type: "input",
+            block_id: "title",
+            label: { type: "plain_text", text: "タイトル（自動候補）" },
+            element: { type: "plain_text_input", action_id: "title_input", initial_value: "" },
+          },
+          {
+            type: "input",
+            block_id: "desc",
+            label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
+            element: { type: "plain_text_input", action_id: "desc_input", multiline: true, initial_value: "" },
+          },
+
+          // 対応者（個人：複数OK）
+          {
+            type: "input",
+            optional: true,
+            block_id: "assignee_users",
+            label: { type: "plain_text", text: "対応者（個人・複数OK）" },
+            element: {
+              type: "multi_users_select",
+              action_id: "assignee_users_select",
+              placeholder: { type: "plain_text", text: "ユーザーを選択" },
+            },
+          },
+
+          // 対応者（グループ：@ALL-xxx / @mk-all 等）
+          {
+            type: "input",
+            optional: true,
+            block_id: "assignee_groups",
+            label: { type: "plain_text", text: "対応者（グループ：@ALL-xxx / @mk-all など）" },
+            element: {
+              type: "multi_external_select",
+              action_id: "assignee_groups_select",
+              placeholder: { type: "plain_text", text: "ユーザーグループを検索" },
+              min_query_length: 0,
+            },
+          },
+
+          {
+            type: "input",
+            block_id: "due",
+            label: { type: "plain_text", text: "期限" },
+            element: {
+              type: "datepicker",
+              action_id: "due_date",
+              ...(initDue ? { initial_date: initDue } : {}),
+              placeholder: { type: "plain_text", text: "日付を選択" },
+            },
+          },
+          { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
+
+          { type: "context", elements: [{ type: "mrkdwn", text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。" }] },
+        ],
+      },
+    });
+  } catch (e) {
+    console.error("home_create_task error:", e?.data || e);
+  }
+});
+
+
 
 // Home: ガント出力（Phase9）
 app.action("gantt_export", async ({ ack, body, client }) => {

@@ -886,9 +886,9 @@ async function buildThreadCardBlocks({ teamId, task }) {
     { type: "section", text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` } },
     { type: "section", text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` } },
   ];
-  if (task.task_type !== "broadcast") {
-    common.push({ type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } });
-  }
+  //if (task.task_type !== "broadcast") {
+  //  common.push({ type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } });
+  //}
 
   return [
     ...common,

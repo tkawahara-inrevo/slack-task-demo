@@ -949,6 +949,15 @@ async function buildDetailModalView({ teamId, task, viewerUserId, origin = "home
     blocks.push({ type: "divider" });
   }
 
+    // ★追加：元メッセージへジャンプ（permalinkがある場合だけ表示）
+  if (task?.source_permalink) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `🔗 <${task.source_permalink}|元メッセージへ>` },
+    });
+    blocks.push({ type: "divider" });
+  }
+
   blocks.push({ type: "section", text: { type: "mrkdwn", text: `*元メッセージ（全文）*\n\`\`\`\n${srcLines}\n\`\`\`` } });
 
 
@@ -1272,13 +1281,21 @@ async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey
 }
 
 function taskLineForHome(task, viewKey) {
+  let base = "";
   if (viewKey === "broadcast") {
-    return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
+    base = `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
+  } else {
+    // personal
+    base = `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
   }
-  // personal
-  return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
-}
 
+  // ★追加：元メッセージへジャンプ（Home一覧から飛べる）
+  if (task?.source_permalink) {
+    base += `\n🔗 <${task.source_permalink}|元メッセージへ>`;
+  }
+
+  return base;
+}
 async function publishHome({ client, teamId, userId }) {
   const st = getHomeState(teamId, userId);
   const deptKeys = await listDeptKeys(teamId);

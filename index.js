@@ -46,16 +46,6 @@ function getTeamIdFromBody(body) {
   );
 }
 
-// Slack datepicker用：今日をYYYY-MM-DDで返す（JST基準）
-function todayYmdJst() {
-  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-
-
 function getUserIdFromBody(body) {
   return body?.user?.id || body?.user_id || body?.user?.user_id || null;
 }
@@ -106,6 +96,29 @@ function formatDueDateOnly(due) {
     return `${y}/${mm}/${dd}`;
   }
   return String(due);
+}
+
+function slackDateYmd(due) {
+  if (!due) return null;
+  if (typeof due === "string") {
+    const m = due.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const d = new Date(due);
+    if (!Number.isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${y}-${mm}-${dd}`;
+    }
+    return null;
+  }
+  if (due instanceof Date) {
+    const y = due.getFullYear();
+    const mm = String(due.getMonth() + 1).padStart(2, "0");
+    const dd = String(due.getDate()).padStart(2, "0");
+    return `${y}-${mm}-${dd}`;
+  }
+  return null;
 }
 
 function generateTitleCandidate(text, maxLen = 22) {
@@ -534,6 +547,33 @@ async function dbUpdateStatus(teamId, taskId, status) {
   return res.rows[0] || null;
 }
 
+
+async function dbUpdateTaskContent(teamId, taskId, patch) {
+  const q = `
+    UPDATE tasks
+    SET
+      assignee_id = COALESCE($3, assignee_id),
+      assignee_dept = COALESCE($4, assignee_dept),
+      due_date = $5,
+      description = COALESCE($6, description),
+      updated_at = now()
+    WHERE team_id=$1 AND id=$2
+    RETURNING *;
+  `;
+  // due_date は「未設定にする」ケースがあるため COALESCE しない
+  const res = await dbQuery(q, [
+    teamId,
+    taskId,
+    patch?.assignee_id ?? null,
+    patch?.assignee_dept ?? null,
+    patch?.due_date ?? null,
+    patch?.description ?? null,
+  ]);
+  return res.rows[0] || null;
+}
+
+
+
 async function dbCancelTask(teamId, taskId, actorUserId) {
   const q = `
     UPDATE tasks
@@ -959,16 +999,30 @@ async function buildDetailModalView({ teamId, task, viewerUserId, origin = "home
     blocks.push({ type: "divider" });
   }
 
-    // ★追加：元メッセージへジャンプ（permalinkがある場合だけ表示）
-  if (task?.source_permalink) {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `🔗 <${task.source_permalink}|元メッセージへ>` },
-    });
-    blocks.push({ type: "divider" });
-  }
+  blocks.push({ type: "section", text: { type: "mrkdwn", text: `*タスク内容*\n\`\`\`\n${srcLines}\n\`\`\`` } });
 
-  blocks.push({ type: "section", text: { type: "mrkdwn", text: `*元メッセージ（全文）*\n\`\`\`\n${srcLines}\n\`\`\`` } });
+// ★追加：タスク内容の編集（personal: 依頼者/対応者, broadcast: 依頼者のみ / thread起点は表示しない）
+if (!isReadOnly) {
+  const canEditTask =
+    (!isBroadcast && (viewerUserId === task.requester_user_id || viewerUserId === task.assignee_id)) ||
+    (isBroadcast && viewerUserId === task.requester_user_id);
+
+  if (canEditTask) {
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "open_edit_task_modal",
+          text: { type: "plain_text", text: "内容を編集" },
+          value: JSON.stringify({ teamId, taskId: task.id }),
+        },
+      ],
+    });
+  }
+}
+
+
 
 
 // ===== コメント表示（元メッセージの下）=====
@@ -979,7 +1033,7 @@ try {
   console.error("load comments error", e);
 }
 
-blocks.push({ type: "divider" });
+  blocks.push({ type: "divider" });
 blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🗨 コメント*" } });
 
 if (!__comments.length) {
@@ -1008,7 +1062,7 @@ if (!isReadOnly) {
   });
 }
 
-blocks.push({ type: "divider" });
+  blocks.push({ type: "divider" });
 // ===== コメント表示ここまで =====
 
 
@@ -1109,6 +1163,14 @@ const BROADCAST_SCOPES = [
   { key: "all", label: "すべて" },
 ];
 
+
+// personal: 範囲（PhaseX）
+const PERSONAL_SCOPES = [
+  { key: "to_me", label: "自分が対応" },
+  { key: "requested_by_me", label: "自分が発行" },
+  { key: "all", label: "すべて" },
+];
+
 // 未完了 = done以外
 const NON_DONE_STATUSES = ["open", "in_progress", "waiting", "cancelled"];
 
@@ -1118,12 +1180,14 @@ function getHomeState(teamId, userId) {
     homeState.get(k) || {
       viewKey: "personal",
       scopeKey: "active",
-      assigneeUserId: userId, // personalのみ
+      personalScopeKey: "to_me",
+      assigneeUserId: userId,
       deptKey: "all",
-      broadcastScopeKey: "to_me", // Phase8-3: broadcastのみ
+      broadcastScopeKey: "to_me",
     };
   return s;
 }
+
 
 function setHomeState(teamId, userId, next) {
   const k = `${teamId}:${userId}`;
@@ -1157,6 +1221,16 @@ function broadcastScopeSelectElement(scopeKey) {
     action_id: "home_broadcast_scope_select",
     initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
     options: BROADCAST_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
+  };
+}
+
+function personalScopeSelectElement(scopeKey) {
+  const cur = PERSONAL_SCOPES.find((s) => s.key === scopeKey) || PERSONAL_SCOPES[0];
+  return {
+    type: "static_select",
+    action_id: "home_personal_scope_select",
+    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
+    options: PERSONAL_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
   };
 }
 
@@ -1279,6 +1353,36 @@ async function dbListBroadcastTasksByStatusesWithScope(teamId, statuses, scopeKe
   return res.rows;
 }
 
+// PhaseX: personal 範囲フィルタ（to_me / requested_by_me / all）
+async function dbListPersonalTasksByStatusesWithScope(teamId, statuses, scopeKey, viewerUserId, limit = 60) {
+  const params = [teamId, statuses, limit];
+  let whereScope = "";
+
+  if (scopeKey === "to_me") {
+    whereScope = "AND t.assignee_id = $4";
+    params.push(viewerUserId);
+  } else if (scopeKey === "requested_by_me") {
+    whereScope = "AND t.requester_user_id = $4";
+    params.push(viewerUserId);
+  } else {
+    // all: no scope filter
+  }
+
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    WHERE t.team_id=$1
+      AND (t.task_type IS NULL OR t.task_type='personal')
+      AND t.status = ANY($2::text[])
+      ${whereScope}
+    ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+
 
 async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey }) {
   if (viewType === "requested") {
@@ -1291,21 +1395,13 @@ async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey
 }
 
 function taskLineForHome(task, viewKey) {
-  let base = "";
   if (viewKey === "broadcast") {
-    base = `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
-  } else {
-    // personal
-    base = `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
+    return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
   }
-
-  // ★追加：元メッセージへジャンプ（Home一覧から飛べる）
-  if (task?.source_permalink) {
-    base += `\n🔗 <${task.source_permalink}|元メッセージへ>`;
-  }
-
-  return base;
+  // personal
+  return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
 }
+
 async function publishHome({ client, teamId, userId }) {
   const st = getHomeState(teamId, userId);
   const deptKeys = await listDeptKeys(teamId);
@@ -1321,27 +1417,26 @@ async function publishHome({ client, teamId, userId }) {
     accessory: homeViewSelectElement(st.viewKey),
   });
 
-  // 部署（personalのみ：担当部署）
-  if (st.viewKey === "personal") {
+  // 範囲（personal/broadcast）
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*範囲*" },
+    accessory:
+      st.viewKey === "broadcast"
+        ? broadcastScopeSelectElement(st.broadcastScopeKey || "to_me")
+        : personalScopeSelectElement(st.personalScopeKey || "to_me"),
+  });
+
+  // 範囲=すべて のときだけ、検索UIを出す（personalのみ）
+  if (st.viewKey === "personal" && (st.personalScopeKey || "to_me") === "all") {
+    // 担当部署
     blocks.push({
       type: "section",
       text: { type: "mrkdwn", text: "*担当部署*" },
       accessory: deptSelectElement(st.deptKey || "all", deptKeys),
     });
-  }
 
-  // Phase8-3: broadcast 範囲（自分あて/自分が発行/すべて）
-  if (st.viewKey === "broadcast") {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: "*範囲*" },
-      accessory: broadcastScopeSelectElement(st.broadcastScopeKey || "to_me"),
-    });
-  }
-
-
-  // personal: 担当者（空欄=全員対象）
-  if (st.viewKey === "personal") {
+    // 担当者（空欄=全員対象）
     blocks.push({
       type: "section",
       text: { type: "mrkdwn", text: "*担当者*" },
@@ -1362,6 +1457,7 @@ async function publishHome({ client, teamId, userId }) {
     });
   }
 
+
   // 状態（未完了/完了）
   blocks.push({
     type: "section",
@@ -1371,11 +1467,12 @@ async function publishHome({ client, teamId, userId }) {
 
   blocks.push({ type: "divider" });
 
+
   // Phase8-5: 操作ボタン配置調整（担当者クリア＋フィルタリセットを横並び）
   blocks.push({
     type: "actions",
     elements: [
-      ...(st.viewKey === "personal"
+      ...(st.viewKey === "personal" && (st.personalScopeKey || "to_me") === "all"
         ? [
             {
               type: "button",
@@ -1391,7 +1488,7 @@ async function publishHome({ client, teamId, userId }) {
         text: { type: "plain_text", text: "リセット" },
         value: "reset",
       },
-      ...(st.viewKey === "personal"
+      ...(st.viewKey === "personal" && (st.personalScopeKey || "to_me") === "all"
         ? [
             {
               type: "button",
@@ -1419,8 +1516,13 @@ async function publishHome({ client, teamId, userId }) {
   if (st.viewKey === "broadcast") {
     tasks = await dbListBroadcastTasksByStatusesWithScope(teamId, statuses, st.broadcastScopeKey || "to_me", userId, 60);
   } else {
-    const assigneeId = st.assigneeUserId || null;
-    tasks = await dbListPersonalTasksByAssigneeFiltered(teamId, assigneeId, statuses, st.deptKey || "all", 60);
+    const scope = st.personalScopeKey || "to_me";
+    if (scope === "all") {
+      const assigneeId = st.assigneeUserId || null;
+      tasks = await dbListPersonalTasksByAssigneeFiltered(teamId, assigneeId, statuses, st.deptKey || "all", 60);
+    } else {
+      tasks = await dbListPersonalTasksByStatusesWithScope(teamId, statuses, scope, userId, 60);
+    }
   }
 
   // 表示：未完了はステータス別に分ける（doneはまとめ）
@@ -1598,7 +1700,7 @@ app.event("app_home_opened", async ({ event, client, body }) => {
     // Phase8-4: Homeの検索条件を保持（初回のみ初期化）
     const k = `${teamId}:${userId}`;
     if (!homeState.has(k)) {
-      setHomeState(teamId, userId, { viewKey: "personal", scopeKey: "active", assigneeUserId: userId, deptKey: "all", broadcastScopeKey: "to_me" });
+      setHomeState(teamId, userId, { viewKey: "personal", scopeKey: "active", personalScopeKey: "to_me", assigneeUserId: userId, deptKey: "all", broadcastScopeKey: "to_me" });
     }
 
     await publishHome({ client, teamId, userId });
@@ -1667,7 +1769,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
             },
           },
 
-          { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: { type: "datepicker", action_id: "due_date", initial_date: todayYmdJst(), placeholder: { type: "plain_text", text: "日付を選択" } } },
+          { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: { type: "datepicker", action_id: "due_date", placeholder: { type: "plain_text", text: "日付を選択" } } },
           { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
 
           { type: "context", elements: [{ type: "mrkdwn", text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。" }] },
@@ -1927,7 +2029,7 @@ app.action("home_view_select", async ({ ack, body, client }) => {
 
     // view切替時：personalなら担当者を自分に戻す（初期値に寄せる）
     if (selected === "personal") {
-      setHomeState(teamId, userId, { viewKey: "personal", assigneeUserId: userId });
+      setHomeState(teamId, userId, { viewKey: "personal", personalScopeKey: "to_me", deptKey: "all", assigneeUserId: userId });
     } else {
       setHomeState(teamId, userId, { viewKey: "broadcast", broadcastScopeKey: "to_me" });
     }
@@ -2018,6 +2120,7 @@ app.action("home_reset_filters", async ({ ack, body, client }) => {
     setHomeState(teamId, userId, {
       viewKey: "personal",
       scopeKey: "active",
+      personalScopeKey: "to_me",
       assigneeUserId: userId,
       deptKey: "all",
       broadcastScopeKey: "to_me",
@@ -2028,6 +2131,33 @@ app.action("home_reset_filters", async ({ ack, body, client }) => {
     console.error("home_reset_filters error:", e?.data || e);
   }
 });
+
+// personal: 範囲（自分が対応/自分が発行/すべて）
+app.action("home_personal_scope_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const selected = body.actions?.[0]?.selected_option?.value || "to_me";
+
+    if (selected === "all") {
+      // すべて：検索UIが有効（dept/assignee）
+      setHomeState(teamId, userId, { personalScopeKey: "all" });
+    } else {
+      // すべて以外：隠れフィルタ事故を防ぐため検索条件をリセット
+      setHomeState(teamId, userId, {
+        personalScopeKey: selected,
+        deptKey: "all",
+        assigneeUserId: userId,
+      });
+    }
+
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_personal_scope_select error:", e?.data || e);
+  }
+});
+
 
 // ================================
 // Phase9: Gantt export (personal only)
@@ -3019,6 +3149,267 @@ if (process.env.RUN_NOTIFY_NOW === "true") {
   runDueNotifyJob().catch(console.error);
 }
 
+
+
+
+// ================================
+// Edit Task modal
+// ================================
+app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
+  await ack();
+
+  const meta = safeJsonParse(action.value || "{}") || {};
+  const teamId = meta.teamId || getTeamIdFromBody(body);
+  const taskId = meta.taskId;
+  const viewerUserId = getUserIdFromBody(body);
+
+  if (!teamId || !taskId || !viewerUserId) return;
+
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    const isBroadcast = task.task_type === "broadcast";
+    const canEditTask =
+      (!isBroadcast && (viewerUserId === task.requester_user_id || viewerUserId === task.assignee_id)) ||
+      (isBroadcast && viewerUserId === task.requester_user_id);
+
+    if (!canEditTask) return;
+
+    const initDue = slackDateYmd(task.due_date);
+
+    const blocks = [];
+
+    // personal のみ：対応者を変更できる（broadcastは対象者集合の整合性があるため変更しない）
+    if (!isBroadcast) {
+      blocks.push({
+        type: "input",
+        block_id: "assignee",
+        label: { type: "plain_text", text: "対応者" },
+        element: {
+          type: "users_select",
+          action_id: "assignee_user",
+          initial_user: task.assignee_id,
+        },
+      });
+    }
+
+    blocks.push({
+      type: "input",
+      block_id: "due",
+      optional: true,
+      label: { type: "plain_text", text: "期限" },
+      element: {
+        type: "datepicker",
+        action_id: "due_date",
+        ...(initDue ? { initial_date: initDue } : {}),
+        placeholder: { type: "plain_text", text: "日付を選択" },
+      },
+    });
+
+    blocks.push({
+      type: "input",
+      block_id: "content",
+      label: { type: "plain_text", text: "タスク内容" },
+      element: {
+        type: "plain_text_input",
+        action_id: "content_text",
+        multiline: true,
+        initial_value: task.description || "",
+      },
+    });
+
+    await client.views.push({
+      trigger_id: body.trigger_id,
+      view: {
+        type: "modal",
+        callback_id: "edit_task_modal",
+        private_metadata: JSON.stringify({ teamId, taskId }),
+        title: { type: "plain_text", text: "タスク編集" },
+        submit: { type: "plain_text", text: "保存" },
+        close: { type: "plain_text", text: "キャンセル" },
+        blocks,
+      },
+    });
+  } catch (e) {
+    console.error("open_edit_task_modal error:", e?.data || e);
+  }
+});
+
+app.view("edit_task_modal", async ({ ack, body, view, client }) => {
+  const meta = safeJsonParse(view.private_metadata || "{}") || {};
+  const teamId = meta.teamId || getTeamIdFromBody(body);
+  const taskId = meta.taskId;
+  const actorUserId = getUserIdFromBody(body);
+
+  const nextAssignee = view.state.values.assignee?.assignee_user?.selected_user || null;
+  const nextDue = view.state.values.due?.due_date?.selected_date || null;
+  const nextContent = (view.state.values.content?.content_text?.value || "").trim();
+
+  if (!nextContent) {
+    await ack({ response_action: "errors", errors: { content: "タスク内容を入力してください" } });
+    return;
+  }
+
+  // ① まず軽い画面へ差し替え（hash_conflict回避）
+  await ack({
+    response_action: "update",
+    view: {
+      type: "modal",
+      callback_id: "edit_task_modal_saving",
+      title: { type: "plain_text", text: "保存中..." },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "更新しています。" } }],
+    },
+  });
+
+  try {
+    const before = await dbGetTaskById(teamId, taskId);
+    if (!before) return;
+
+    const isBroadcast = before.task_type === "broadcast";
+    const canEditTask =
+      (!isBroadcast && (actorUserId === before.requester_user_id || actorUserId === before.assignee_id)) ||
+      (isBroadcast && actorUserId === before.requester_user_id);
+
+    if (!canEditTask) return;
+
+    // personal だけ対応者変更を許可（broadcastは対象者集合の整合性があるため変更しない）
+    let patchAssigneeId = null;
+    let patchAssigneeDept = null;
+    if (!isBroadcast) {
+      if (!nextAssignee) {
+        // users_select なので通常は入るが、万一の保険
+        return;
+      }
+      patchAssigneeId = nextAssignee;
+      try {
+        patchAssigneeDept = await resolveDeptForUser(teamId, nextAssignee);
+      } catch (_) {}
+    }
+
+    const updated = await dbUpdateTaskContent(teamId, taskId, {
+      assignee_id: patchAssigneeId,
+      assignee_dept: patchAssigneeDept,
+      due_date: nextDue,
+      description: nextContent,
+    });
+    if (!updated) return;
+
+    // スレッドカード更新 + 変更通知（証跡）
+    if (updated.channel_id && updated.message_ts) {
+      const cardBlocks = await buildThreadCardBlocks({ teamId, task: updated });
+      await upsertThreadCard(client, {
+        teamId,
+        channelId: updated.channel_id,
+        parentTs: updated.message_ts,
+        blocks: cardBlocks,
+      });
+
+      // 変更点を作る（証跡用）
+      const changes = [];
+      if (!isBroadcast && before.assignee_id && updated.assignee_id && before.assignee_id !== updated.assignee_id) {
+        changes.push(`• *対応者*：<@${before.assignee_id}> → <@${updated.assignee_id}>`);
+      }
+      if (String(before.due_date || "") !== String(updated.due_date || "")) {
+        changes.push(`• *期限*：${formatDueDateOnly(before.due_date)} → ${formatDueDateOnly(updated.due_date)}`);
+      }
+      if ((before.description || "") !== (updated.description || "")) {
+        changes.push("• *タスク内容*：変更あり");
+      }
+      const changesText = changes.length ? changes.join("\n") : "• 変更点：軽微な更新";
+
+      const beforeDesc = noMention(String(before.description || "").slice(0, 400));
+      const afterDesc = noMention(String(updated.description || "").slice(0, 400));
+
+      const blocks = [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `:鉛筆_2: *タスク内容が更新されました*\n更新者：<@${actorUserId}>\n*変更点*\n${changesText}`,
+          },
+        },
+      ];
+
+      if ((before.description || "") !== (updated.description || "")) {
+        blocks.push({
+          type: "section",
+          text: { type: "mrkdwn", text: `*変更前*\n\`\`\`\n${beforeDesc}\n\`\`\`\n*変更後*\n\`\`\`\n${afterDesc}\n\`\`\`` },
+        });
+      }
+
+      await client.chat.postMessage({
+        channel: updated.channel_id,
+        thread_ts: updated.message_ts,
+        text: "タスク内容が更新されました",
+        blocks,
+      });
+    }
+
+    // Home再描画（操作者のみ）
+    try {
+      publishHomeForUsers(client, teamId, [actorUserId], 200);
+      setTimeout(() => publishHomeForUsers(client, teamId, [actorUserId], 200), 200);
+    } catch (_) {}
+
+    // ② 最後に「更新後の詳細」を表示（不安解消・hash_conflict回避）
+    try {
+            const detailView = await buildDetailModalView({
+        teamId,
+        task: updated,
+        viewerUserId: actorUserId,
+        origin: "home",
+      });
+
+      // ✅ コメント保存と同じ考え方：
+      // - まず「前の詳細モーダル」を最新内容で更新しておく
+      // - いま表示中（保存中/保存完了）のモーダルは「保存しました✅」だけにする
+      //   → 閉じると、更新済みの詳細モーダルに戻る（古いモーダルが残らない）
+      const prevViewId = body?.view?.previous_view_id;
+
+      // ① 前の詳細モーダルを更新（あれば）
+      if (prevViewId) {
+        try {
+          await client.views.update({
+            view_id: prevViewId,
+            view: detailView,
+          });
+        } catch (e) {
+          console.error("update previous detail view error:", e?.data || e);
+        }
+      }
+
+      // ② 現在のモーダルは「保存しました✅」最小UI
+      await client.views.update({
+        view_id: body.view.id,
+        view: {
+          type: "modal",
+          callback_id: "edit_task_modal_done",
+          title: { type: "plain_text", text: "保存しました✅" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "タスク内容を更新しました。" } }],
+        },
+      });
+    } catch (_) {}
+  } catch (e) {
+    console.error("edit_task_modal submit error:", e?.data || e);
+
+    // 失敗画面（最小UI）
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: {
+          type: "modal",
+          callback_id: "edit_task_modal_error",
+          title: { type: "plain_text", text: "保存できませんでした" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "もう一度お試しください。" } }],
+        },
+      });
+    } catch (_) {}
+  }
+});
 
 // ================================
 // DB: Task comments

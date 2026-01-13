@@ -999,6 +999,12 @@ async function buildDetailModalView({ teamId, task, viewerUserId, origin = "home
     blocks.push({ type: "divider" });
   }
 
+  // ★復活：元メッセージへ（permalinkがある場合のみ表示）
+  if (task?.source_permalink) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `🔗 <${task.source_permalink}|元メッセージへ>` } });
+    blocks.push({ type: "divider" });
+  }
+
   blocks.push({ type: "section", text: { type: "mrkdwn", text: `*タスク内容*\n\`\`\`\n${srcLines}\n\`\`\`` } });
 
 // ★追加：タスク内容の編集（personal: 依頼者/対応者, broadcast: 依頼者のみ / thread起点は表示しない）
@@ -1033,7 +1039,7 @@ try {
   console.error("load comments error", e);
 }
 
-  blocks.push({ type: "divider" });
+blocks.push({ type: "divider" });
 blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🗨 コメント*" } });
 
 if (!__comments.length) {
@@ -1062,7 +1068,7 @@ if (!isReadOnly) {
   });
 }
 
-  blocks.push({ type: "divider" });
+blocks.push({ type: "divider" });
 // ===== コメント表示ここまで =====
 
 
@@ -1395,12 +1401,24 @@ async function fetchListTasks({ teamId, viewType, userId, status, limit, deptKey
 }
 
 function taskLineForHome(task, viewKey) {
+  // 既存表示文言は維持しつつ、「元メッセージへ」リンクだけ追加（source_permalink がある場合のみ）
+  let base = "";
   if (viewKey === "broadcast") {
-    return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
+    base = `*${noMention(task.title)}*
+期限：${formatDueDateOnly(task.due_date)} / 進捗：${progressLabel(task)} / 依頼者：<@${task.requester_user_id}>`;
+  } else {
+    // personal
+    base = `*${noMention(task.title)}*
+期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
   }
-  // personal
-  return `*${noMention(task.title)}*\n期限：${formatDueDateOnly(task.due_date)} / 依頼者：<@${task.requester_user_id}>`;
+
+  if (task?.source_permalink) {
+    base += `
+🔗 <${task.source_permalink}|元メッセージへ>`;
+  }
+  return base;
 }
+
 
 async function publishHome({ client, teamId, userId }) {
   const st = getHomeState(teamId, userId);
@@ -1425,6 +1443,13 @@ async function publishHome({ client, teamId, userId }) {
       st.viewKey === "broadcast"
         ? broadcastScopeSelectElement(st.broadcastScopeKey || "to_me")
         : personalScopeSelectElement(st.personalScopeKey || "to_me"),
+  });
+
+  // 状態（未完了/完了）
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*状態*" },
+    accessory: homeScopeSelectElement(st.scopeKey),
   });
 
   // 範囲=すべて のときだけ、検索UIを出す（personalのみ）
@@ -1456,14 +1481,6 @@ async function publishHome({ client, teamId, userId }) {
       },
     });
   }
-
-
-  // 状態（未完了/完了）
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: "*状態*" },
-    accessory: homeScopeSelectElement(st.scopeKey),
-  });
 
   blocks.push({ type: "divider" });
 

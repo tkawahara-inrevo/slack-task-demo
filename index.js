@@ -1445,13 +1445,6 @@ async function publishHome({ client, teamId, userId }) {
         : personalScopeSelectElement(st.personalScopeKey || "to_me"),
   });
 
-  // 状態（未完了/完了）
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: "*状態*" },
-    accessory: homeScopeSelectElement(st.scopeKey),
-  });
-
   // 範囲=すべて のときだけ、検索UIを出す（personalのみ）
   if (st.viewKey === "personal" && (st.personalScopeKey || "to_me") === "all") {
     // 担当部署
@@ -1481,6 +1474,14 @@ async function publishHome({ client, teamId, userId }) {
       },
     });
   }
+
+  
+  // 状態（未完了/完了）
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*状態*" },
+    accessory: homeScopeSelectElement(st.scopeKey),
+  });
 
   blocks.push({ type: "divider" });
 

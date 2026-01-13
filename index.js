@@ -1879,7 +1879,7 @@ app.action("open_detail_modal", async ({ ack, body, action, client }) => {
   if (!teamId || !taskId) return;
 
   try {
-    await openDetailModal(client, { trigger_id: body.trigger_id, teamId, taskId, viewerUserId: body.user.id, origin, isFromModal: !!body.view?.id });
+    await openDetailModal(client, { trigger_id: body.trigger_id, teamId, taskId, viewerUserId: body.user.id, origin, isFromModal: body.view?.type === "modal" });
   } catch (e) {
     console.error("open_detail_modal error:", e?.data || e);
   }
@@ -3001,67 +3001,7 @@ if (process.env.RUN_NOTIFY_NOW === "true") {
 // ================================
 // Comment modal
 // ================================
-app.action("open_detail_modal", async ({ ack, body, action, client }) => {
-  //await ack();
 
-  const p = safeJsonParse(action.value || "{}") || {};
-  const teamId = p.teamId || body.team?.id || body.team_id;
-  const taskId = p.taskId;
-  const viewerUserId = body.user?.id;
-  const origin = p.origin || "home";
-  if (!teamId || !taskId || !viewerUserId) return;
-
-  // ① まず trigger_id を即消費して “ローディング” を開く（expired_trigger_id 対策）
-  let opened;
-  try {
-    opened = await client.views.open({
-      trigger_id: body.trigger_id,
-      view: {
-        type: "modal",
-        callback_id: "detail_modal_loading",
-        title: { type: "plain_text", text: "タスク" },
-        close: { type: "plain_text", text: "閉じる" },
-        blocks: [
-          { type: "section", text: { type: "mrkdwn", text: "⌛ 読み込み中..." } },
-        ],
-      },
-    });
-  } catch (e) {
-    console.error("open_detail_modal views.open error:", e?.data || e);
-    return;
-  }
-
-  const viewId = opened?.view?.id;
-  if (!viewId) return;
-
-  // ② そのあとでDB取得（重くてもOK）
-  try {
-    const task = await dbGetTaskById(teamId, taskId);
-    if (!task) return;
-
-    await client.views.update({
-      view_id: viewId,
-      view: await buildDetailModalView({ teamId, task, viewerUserId, origin }),
-    });
-  } catch (e) {
-    console.error("open_detail_modal views.update error:", e?.data || e);
-    // エラー表示に差し替え（任意）
-    try {
-      await client.views.update({
-        view_id: viewId,
-        view: {
-          type: "modal",
-          callback_id: "detail_modal_error",
-          title: { type: "plain_text", text: "タスク" },
-          close: { type: "plain_text", text: "閉じる" },
-          blocks: [
-            { type: "section", text: { type: "mrkdwn", text: "🥺 読み込みに失敗しました…" } },
-          ],
-        },
-      });
-    } catch (_) {}
-  }
-});
 
 
 
@@ -3097,6 +3037,11 @@ app.action("open_comment_modal", async ({ ack, body, action, client }) => {
   await ack();
 
   const meta = safeJsonParse(action.value || "{}") || {};
+
+  // 親（詳細モーダル）を更新するために保持（閉じた時に古いモーダルへ戻らないようにする）
+  meta.parent_view_id = body.view?.id || null;
+  meta.parent_view_type = body.view?.type || null;
+
 
   // 詳細モーダル上からは push が正解（モーダル二重 open は不可）
   await client.views.push({
@@ -3151,15 +3096,33 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
     const task = await dbGetTaskById(meta.teamId, meta.taskId);
     if (!task) return;
 
-    // ③ trigger_id は使わない。view_id で update（ここが安全）
-await client.views.update({
-  view_id: view.id,
-  view: await buildDetailModalView({
-    teamId: meta.teamId,
-    task,
-    viewerUserId: body.user.id,
-  }),
-});
+    // ③ 親（詳細モーダル）を更新して、コメントモーダルは「投稿完了」表示にする
+    // こうすると、閉じた時に古い詳細モーダルが出てくる問題を防げる
+    if (meta.parent_view_id && meta.parent_view_type === "modal") {
+      await client.views.update({
+        view_id: meta.parent_view_id,
+        view: await buildDetailModalView({
+          teamId: meta.teamId,
+          task,
+          viewerUserId: body.user.id,
+          origin: "home",
+        }),
+      });
+    }
+
+    // コメントモーダル側は完了メッセージ（自動で詳細に戻さない）
+    await client.views.update({
+      view_id: view.id,
+      view: {
+        type: "modal",
+        callback_id: "comment_modal_done",
+        title: { type: "plain_text", text: "コメント" },
+        close: { type: "plain_text", text: "閉じる" },
+        blocks: [
+          { type: "section", text: { type: "mrkdwn", text: "✅ 投稿しました！「閉じる」で詳細画面に戻れます。" } },
+        ],
+      },
+    });
 
   } catch (e) {
     console.error("comment_modal post-save error:", e?.data || e);
@@ -3167,7 +3130,6 @@ await client.views.update({
     try {
       await client.views.update({
         view_id: view.id,
-        hash: view.hash,
         view: {
           type: "modal",
           callback_id: "comment_modal_error",

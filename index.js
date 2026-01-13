@@ -46,6 +46,16 @@ function getTeamIdFromBody(body) {
   );
 }
 
+// Slack datepicker用：今日をYYYY-MM-DDで返す（JST基準）
+function todayYmdJst() {
+  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+
 function getUserIdFromBody(body) {
   return body?.user?.id || body?.user_id || body?.user?.user_id || null;
 }
@@ -1657,7 +1667,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
             },
           },
 
-          { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: { type: "datepicker", action_id: "due_date", placeholder: { type: "plain_text", text: "日付を選択" } } },
+          { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: { type: "datepicker", action_id: "due_date", initial_date: todayYmdJst(), placeholder: { type: "plain_text", text: "日付を選択" } } },
           { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
 
           { type: "context", elements: [{ type: "mrkdwn", text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。" }] },

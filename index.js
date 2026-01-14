@@ -1158,8 +1158,9 @@ const HOME_VIEWS = [
 
 // 状態（表示範囲）
 const HOME_SCOPES = [
-  { key: "active", label: "未完了" }, // done以外すべて
+  { key: "active", label: "未完了" },
   { key: "done", label: "完了" },
+  { key: "cancelled", label: "取り下げ" },
 ];
 
 // broadcast: 範囲（Phase8-3）
@@ -1178,7 +1179,9 @@ const PERSONAL_SCOPES = [
 ];
 
 // 未完了 = done以外
-const NON_DONE_STATUSES = ["open", "in_progress", "waiting", "cancelled"];
+const ACTIVE_STATUSES = ["open", "in_progress", "waiting"];
+const DONE_STATUSES = ["done"];
+const CANCELLED_STATUSES = ["cancelled"];
 
 function getHomeState(teamId, userId) {
   const k = `${teamId}:${userId}`;
@@ -1415,7 +1418,12 @@ function taskLineForHome(task, viewKey) {
 
 async function publishHome({ client, teamId, userId }) {
   const st = getHomeState(teamId, userId);
-  const statuses = st.scopeKey === "done" ? ["done"] : NON_DONE_STATUSES;
+  const statuses =
+    st.scopeKey === "done"
+      ? DONE_STATUSES
+      : st.scopeKey === "cancelled"
+        ? CANCELLED_STATUSES
+        : ACTIVE_STATUSES;
 
   const blocks = [];
 
@@ -1554,7 +1562,7 @@ blocks.push({
     }
   }
 
-  // 表示：未完了はステータス別に分ける（doneはまとめ）
+  // 表示：未完了はステータス別に分ける（完了/取り下げはまとめ）
   if (st.scopeKey === "done") {
     blocks.push({ type: "section", text: { type: "mrkdwn", text: "*✅ 完了*" } });
     if (!tasks.length) {
@@ -1566,11 +1574,29 @@ blocks.push({
           text: { type: "mrkdwn", text: taskLineForHome(t, st.viewKey) },
           accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
         });
-          // タスクごとの区切り（薄めの罫線：dividerではなくテキストで差を付ける）
-          blocks.push({
-            type: "context",
-            elements: [{ type: "mrkdwn", text: "────────────────────────" }],
-          });
+        // タスクごとの区切り（薄めの罫線：dividerではなくテキストで差を付ける）
+        blocks.push({
+          type: "context",
+          elements: [{ type: "mrkdwn", text: "────────────────────────" }],
+        });
+      }
+    }
+  } else if (st.scopeKey === "cancelled") {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🟥 取り下げ*" } });
+    if (!tasks.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（取り下げなし）" }] });
+    } else {
+      for (const t of tasks) {
+        blocks.push({
+          type: "section",
+          text: { type: "mrkdwn", text: taskLineForHome(t, st.viewKey) },
+          accessory: { type: "button", text: { type: "plain_text", text: "詳細" }, action_id: "open_detail_modal", value: JSON.stringify({ teamId, taskId: t.id }) },
+        });
+        // タスクごとの区切り（薄めの罫線：dividerではなくテキストで差を付ける）
+        blocks.push({
+          type: "context",
+          elements: [{ type: "mrkdwn", text: "────────────────────────" }],
+        });
       }
     }
   } else {
@@ -1579,7 +1605,6 @@ blocks.push({
       { status: "open", title: "*🟦 未着手*" },
       { status: "in_progress", title: "*🟨 対応中*" },
       { status: "waiting", title: "*🟧 確認待ち*" },
-      { status: "cancelled", title: "*🟥 取り下げ*" },
     ];
 
     for (const sec of sections) {
@@ -1605,7 +1630,8 @@ blocks.push({
     }
   }
 
-  await client.views.publish({
+
+await client.views.publish({
     user_id: userId,
     view: {
       type: "home",
@@ -1759,7 +1785,7 @@ app.options("home_person_assignee_select", async ({ ack, body, payload }) => {
         if (!q) return true; // dept指定時は空検索でも候補を出す
         return u.name.toLowerCase().includes(q);
       })
-      .sort((a,b)=>{ if(a.id===userId) return -1; if(b.id===userId) return 1; return a.name.localeCompare(b.name); }).slice(0, q ? 100 : 5)
+      .sort((a,b)=>{ if(a.id===userId) return -1; if(b.id===userId) return 1; return a.name.localeCompare(b.name); }).slice(0, 100)
       .map((u) => ({
         text: { type: "plain_text", text: u.name },
         value: u.id,
@@ -2169,7 +2195,7 @@ app.action("home_dept_select", async ({ ack, body, client }) => {
     const userId = getUserIdFromBody(body);
     const selected = body.actions?.[0]?.selected_option?.value || "all";
 
-    setHomeState(teamId, userId, { deptKey: selected });
+    setHomeState(teamId, userId, { deptKey: selected, assigneeUserId: null });
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("home_dept_select error:", e?.data || e);

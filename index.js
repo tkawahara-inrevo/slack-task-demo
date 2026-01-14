@@ -1240,25 +1240,20 @@ function personalScopeSelectElement(scopeKey) {
   };
 }
 
-function deptSelectElement(currentDeptKey, deptKeys) {
-  const options = [
-    { text: { type: "plain_text", text: "すべて" }, value: "all" },
-    { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
-    ...deptKeys.map((k) => ({ text: { type: "plain_text", text: `@${k}` }, value: k })),
-  ];
-
-  const text =
-    currentDeptKey === "all"
-      ? "すべて"
-      : currentDeptKey === "__none__"
-        ? "未設定"
-        : `@${currentDeptKey}`;
+function deptSelectElement(currentDeptValue, currentDeptText) {
+  const text = currentDeptText || "部署（@グループ）を検索";
+  const value = currentDeptValue || "all";
+  const initial =
+    value === "all" || value === "__none__"
+      ? { text: { type: "plain_text", text }, value }
+      : (currentDeptText ? { text: { type: "plain_text", text }, value } : null);
 
   return {
-    type: "static_select",
+    type: "external_select",
     action_id: "home_dept_select",
-    initial_option: { text: { type: "plain_text", text }, value: currentDeptKey || "all" },
-    options,
+    placeholder: { type: "plain_text", text: "部署（@グループ）を検索" },
+    min_query_length: 0,
+    ...(initial ? { initial_option: initial } : {}),
   };
 }
 
@@ -1278,9 +1273,7 @@ async function dbListPersonalTasksByAssigneeFiltered(teamId, assigneeId, statuse
       // 部署未設定の意味付けは今は使わない（0件）
       return [];
     }
-    const { membersByDeptKey } = await fetchDeptGroups(teamId);
-    const membersSet = membersByDeptKey.get(deptKey);
-    const members = membersSet ? Array.from(membersSet) : [];
+    const members = await getUsergroupMembers(teamId, deptKey);
     if (!members.length) return [];
     params.push(members);
     where.push(`AND t.assignee_id = ANY($${params.length}::text[])`);
@@ -1422,8 +1415,6 @@ function taskLineForHome(task, viewKey) {
 
 async function publishHome({ client, teamId, userId }) {
   const st = getHomeState(teamId, userId);
-  const deptKeys = await listDeptKeys(teamId);
-
   const statuses = st.scopeKey === "done" ? ["done"] : NON_DONE_STATUSES;
 
   const blocks = [];
@@ -1447,12 +1438,26 @@ async function publishHome({ client, teamId, userId }) {
 
   // 範囲=すべて のときだけ、検索UIを出す（personalのみ）
   if (st.viewKey === "personal" && (st.personalScopeKey || "to_me") === "all") {
-    // 担当部署
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: "*担当部署*" },
-      accessory: deptSelectElement(st.deptKey || "all", deptKeys),
-    });
+    
+// 担当部署（Homeの部署フィルタ：ユーザーグループを直接選べるようにする）
+const deptValue = st.deptKey || "all";
+let deptText =
+  deptValue === "all"
+    ? "すべて"
+    : deptValue === "__none__"
+      ? "未設定"
+      : null;
+if (!deptText && deptValue) {
+  const idToHandle = await getSubteamIdMap(teamId);
+  const h = idToHandle.get(deptValue);
+  deptText = h ? `@${h}` : "部署（@グループ）を検索";
+}
+
+blocks.push({
+  type: "section",
+  text: { type: "mrkdwn", text: "*担当部署*" },
+  accessory: deptSelectElement(deptValue, deptText),
+});
 
     // 担当者（空欄=全員対象）
     blocks.push({
@@ -1628,6 +1633,59 @@ async function searchUsergroups(query) {
   return filtered.slice(0, 100);
 }
 
+
+// ================================
+// Usergroup members cache (for Home dept filter by group_id)
+// ================================
+const USERGROUP_MEMBERS_CACHE_MS = 10 * 60 * 1000;
+const usergroupMembersCache = new Map(); // `${teamId}:${groupId}` -> { at, users: string[] }
+
+async function getUsergroupMembers(teamId, groupId) {
+  if (!groupId) return [];
+  const key = `${teamId}:${groupId}`;
+  const cached = usergroupMembersCache.get(key);
+  if (cached && Date.now() - cached.at < USERGROUP_MEMBERS_CACHE_MS) return cached.users || [];
+
+  try {
+    const res = await app.client.usergroups.users.list({ usergroup: groupId });
+    const users = res?.users || [];
+    usergroupMembersCache.set(key, { at: Date.now(), users });
+    return users;
+  } catch (e) {
+    console.error("usergroups.users.list error:", e?.data || e);
+    usergroupMembersCache.set(key, { at: Date.now(), users: [] });
+    return [];
+  }
+}
+
+
+
+app.options("home_dept_select", async ({ ack, payload }) => {
+  try {
+    const q = payload?.value || "";
+    const groups = await searchUsergroups(q);
+
+    const options = [
+      { text: { type: "plain_text", text: "すべて" }, value: "all" },
+      { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
+      ...groups.map((g) => ({
+        text: { type: "plain_text", text: `@${g.handle}` },
+        value: g.id,
+      })),
+    ];
+
+    await ack({ options });
+  } catch (e) {
+    console.error("home_dept_select options error:", e?.data || e);
+    await ack({
+      options: [
+        { text: { type: "plain_text", text: "すべて" }, value: "all" },
+        { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
+      ],
+    });
+  }
+});
+
 app.options("assignee_groups_select", async ({ ack, payload }) => {
   try {
     const q = payload?.value || "";
@@ -1687,9 +1745,8 @@ app.options("home_person_assignee_select", async ({ ack, body, payload }) => {
     // dept 絞り込み用の許可集合（null=絞り込みなし）
     let allowed = null;
     if (deptKey && deptKey !== "all" && deptKey !== "__none__") {
-      const { membersByDeptKey } = await fetchDeptGroups(teamId);
-      const set = membersByDeptKey.get(deptKey);
-      allowed = set ? new Set(Array.from(set)) : new Set();
+      const members = await getUsergroupMembers(teamId, deptKey);
+      allowed = new Set(members || []);
     } else if (deptKey === "__none__") {
       // 未設定を実用にしていないため候補なし
       await ack({ options: [] });
@@ -3216,15 +3273,25 @@ async function notifyUserDM(userId, task, roleLabel) {
   const channel = dm.channel?.id;
   if (!channel) return;
 
-  const due = String(task.due_date || "").replaceAll("-", "/");
+  // 期限表示：JST基準で「今日」を優先。DB/pgの型差（Date/文字列）にも耐える。
+  const today = todayJstYmd();
+  const dueYmd = slackDateYmd(task.due_date) || (typeof task.due_date === "string" ? task.due_date.slice(0, 10) : "");
+  const dueLabel = dueYmd ? (dueYmd === today ? "今日" : dueYmd.replaceAll("-", "/")) : "未設定";
+
   const text =
-    `⏰ 期限リマインド（${roleLabel}）\n` +
-    `・タイトル：${noMention(task.title)}\n` +
-    `・期限：${due}\n` +
-    `・ステータス：${task.status}\n`;
+    `⏰ 期限リマインド（${roleLabel}）
+` +
+    `・タイトル：${noMention(task.title)}
+` +
+    `・期限：${dueLabel}
+` +
+    `・ステータス：${task.status}
+`;
 
   await app.client.chat.postMessage({ channel, text });
 }
+
+
 
 async function runDueNotifyJob() {
   const today = todayJstYmd();
@@ -3527,20 +3594,6 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     } catch (_) {}
   }
 });
-
-// ================================
-// DB: Task comments
-// ================================
-
-
-// ================================
-// Comment modal
-// ================================
-
-
-
-
-
 
 // ================================
 // DB: Task comments

@@ -1850,7 +1850,6 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
         submit: { type: "plain_text", text: "決定" },
         close: { type: "plain_text", text: "キャンセル" },
         blocks: [
-          { type: "input", block_id: "title", label: { type: "plain_text", text: "タイトル（自動候補）" }, element: { type: "plain_text_input", action_id: "title_input", initial_value: titleCandidate } },
           { type: "input", block_id: "desc", label: { type: "plain_text", text: "詳細（元メッセージ全文）" }, element: { type: "plain_text_input", action_id: "desc_input", multiline: true, initial_value: prettyText || "" } },
 
           // 対応者（個人：複数OK）
@@ -1876,7 +1875,13 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
             },
           },
 
-          { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: { type: "datepicker", action_id: "due_date", placeholder: { type: "plain_text", text: "日付を選択" } } },
+          { type: "input", block_id: "due", label: { type: "plain_text", text: "期限" }, element: {
+  type: "datepicker",
+  action_id: "due_date",
+  placeholder: { type: "plain_text", text: "期限" },
+  initial_date: slackDateYmd(new Date()),
+}
+ },
           { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
 
           { type: "context", elements: [{ type: "mrkdwn", text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。" }] },
@@ -1927,12 +1932,13 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     const channelId = meta.channelId || "";
     const parentTs = meta.msgTs || "";
 
-    const title = view.state.values.title?.title_input?.value?.trim() || "（無題タスク）";
     const description =
       view.state.values.desc?.desc_input?.value?.trim() ||
       meta.messageTextPretty ||
       meta.messageText ||
       "";
+
+    const title = generateTitleCandidate(description);
 
     const selectedUsers = view.state.values.assignee_users?.assignee_users_select?.selected_users || [];
     const selectedGroupOptions = view.state.values.assignee_groups?.assignee_groups_select?.selected_options || [];
@@ -2618,12 +2624,6 @@ app.action("home_create_task", async ({ ack, body, client }) => {
         submit: { type: "plain_text", text: "決定" },
         close: { type: "plain_text", text: "キャンセル" },
         blocks: [
-          {
-            type: "input",
-            block_id: "title",
-            label: { type: "plain_text", text: "タイトル（自動候補）" },
-            element: { type: "plain_text_input", action_id: "title_input", initial_value: "" },
-          },
           {
             type: "input",
             block_id: "desc",

@@ -683,6 +683,14 @@ async function dbCountCompletions(teamId, taskId) {
   return res.rows[0]?.c ?? 0;
 }
 
+
+async function dbListTargetUserIds(teamId, taskId) {
+  const q = `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2;`;
+  const res = await dbQuery(q, [teamId, taskId]);
+  return (res.rows || []).map((r) => r.user_id).filter(Boolean);
+}
+
+
 async function dbListBroadcastTasksForUser(teamId, userId, status, limit = 20, deptKey = "all") {
   // Phase2: 閲覧は誰でも可能（対象者/依頼者で絞らない）
   let whereDept = "";
@@ -1892,6 +1900,158 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     console.error("shortcut error:", e?.data || e);
   }
 });
+// ================================
+// Global Shortcut: Open Task List (Home-like modal)
+// ================================
+function myTasksScopeSelectElement(scopeKey) {
+  const cur = PERSONAL_SCOPES.find((s) => s.key === scopeKey) || PERSONAL_SCOPES[0];
+  return {
+    type: "static_select",
+    action_id: "my_tasks_scope_select",
+    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
+    options: PERSONAL_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
+  };
+}
+
+function myTasksStatusSelectElement(scopeKey) {
+  const cur = HOME_SCOPES.find((s) => s.key === scopeKey) || HOME_SCOPES[0];
+  return {
+    type: "static_select",
+    action_id: "my_tasks_status_select",
+    initial_option: { text: { type: "plain_text", text: cur.label }, value: cur.key },
+    options: HOME_SCOPES.map((s) => ({ text: { type: "plain_text", text: s.label }, value: s.key })),
+  };
+}
+
+async function buildTaskListModalView({ teamId, userId, personalScopeKey = "to_me", scopeKey = "active" }) {
+  const statuses =
+    scopeKey === "done" ? DONE_STATUSES :
+    scopeKey === "cancelled" ? CANCELLED_STATUSES :
+    ACTIVE_STATUSES;
+
+  // personal only (Homeの初期と同じ思想)
+  const tasks = await dbListPersonalTasksByStatusesWithScope(teamId, statuses, personalScopeKey, userId, 60);
+
+  const blocks = [];
+
+  // filters (簡略版：範囲＋状態だけ)
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*範囲*" },
+    accessory: myTasksScopeSelectElement(personalScopeKey),
+  });
+
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "*状態*" },
+    accessory: myTasksStatusSelectElement(scopeKey),
+  });
+
+  blocks.push({ type: "divider" });
+
+  // list (Homeの表示ロジックを踏襲)
+  if (scopeKey === "done") {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*✅ 完了*" } });
+    if (!tasks.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（完了なし）" }] });
+    } else {
+      for (const t of tasks) {
+        blocks.push({
+          type: "section",
+          text: { type: "mrkdwn", text: taskLineForHome(t, "personal") },
+          accessory: {
+            type: "button",
+            text: { type: "plain_text", text: "詳細" },
+            action_id: "open_detail_modal",
+            value: JSON.stringify({ teamId, taskId: t.id, origin: "task_list_modal" }),
+          },
+        });
+        blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "────────────────────────" }] });
+      }
+    }
+  } else if (scopeKey === "cancelled") {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "*🟥 取り下げ*" } });
+    if (!tasks.length) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（取り下げなし）" }] });
+    } else {
+      for (const t of tasks) {
+        blocks.push({
+          type: "section",
+          text: { type: "mrkdwn", text: taskLineForHome(t, "personal") },
+          accessory: {
+            type: "button",
+            text: { type: "plain_text", text: "詳細" },
+            action_id: "open_detail_modal",
+            value: JSON.stringify({ teamId, taskId: t.id, origin: "task_list_modal" }),
+          },
+        });
+        blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "────────────────────────" }] });
+      }
+    }
+  } else {
+    const by = (s) => tasks.filter((t) => t.status === s);
+    const sections = [
+      { status: "open", title: "*🟦 未着手*" },
+      { status: "in_progress", title: "*🟨 対応中*" },
+      { status: "waiting", title: "*🟧 確認待ち*" },
+    ];
+
+    for (const sec of sections) {
+      const items = by(sec.status);
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: sec.title } });
+      if (!items.length) {
+        blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "（なし）" }] });
+      } else {
+        for (const t of items) {
+          blocks.push({
+            type: "section",
+            text: { type: "mrkdwn", text: taskLineForHome(t, "personal") },
+            accessory: {
+              type: "button",
+              text: { type: "plain_text", text: "詳細" },
+              action_id: "open_detail_modal",
+              value: JSON.stringify({ teamId, taskId: t.id, origin: "task_list_modal" }),
+            },
+          });
+          blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "────────────────────────" }] });
+        }
+      }
+      blocks.push({ type: "divider" });
+    }
+  }
+
+  const meta = { teamId, userId, personalScopeKey, scopeKey };
+
+  return {
+    type: "modal",
+    callback_id: "task_list_modal",
+    private_metadata: JSON.stringify(meta),
+    title: { type: "plain_text", text: "タスク一覧" },
+    close: { type: "plain_text", text: "閉じる" },
+    blocks,
+  };
+}
+
+app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
+  await ack();
+  try {
+    const teamId = shortcut?.team?.id || body?.team_id || body?.team?.id || null;
+    const userId = shortcut?.user?.id || body?.user?.id || null;
+    if (!teamId || !userId) return;
+
+    // 初期値：personal / to_me / active
+    const view = await buildTaskListModalView({ teamId, userId, personalScopeKey: "to_me", scopeKey: "active" });
+
+    await client.views.open({
+      trigger_id: shortcut.trigger_id,
+      view,
+    });
+  } catch (e) {
+    console.error("open_my_tasks shortcut error:", e?.data || e);
+  }
+});
+
+
 
 // ================================
 // Modal submit: create task -> DB -> thread + ephemeral
@@ -2130,6 +2290,42 @@ app.action("open_detail_modal", async ({ ack, body, action, client }) => {
 app.action("noop", async ({ ack }) => {
   await ack();
 });
+
+
+app.action("my_tasks_scope_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const selected = body.actions?.[0]?.selected_option?.value || "to_me";
+
+    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+    const scopeKey = meta.scopeKey || "active";
+
+    const view = await buildTaskListModalView({ teamId, userId, personalScopeKey: selected, scopeKey });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+  } catch (e) {
+    console.error("my_tasks_scope_select error:", e?.data || e);
+  }
+});
+
+app.action("my_tasks_status_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const selected = body.actions?.[0]?.selected_option?.value || "active";
+
+    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+    const personalScopeKey = meta.personalScopeKey || "to_me";
+
+    const view = await buildTaskListModalView({ teamId, userId, personalScopeKey, scopeKey: selected });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+  } catch (e) {
+    console.error("my_tasks_status_select error:", e?.data || e);
+  }
+});
+
 
 // Home: mode change
 
@@ -2881,6 +3077,16 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
         if (fresh && !fresh.notified_at) {
           await dbQuery(`UPDATE tasks SET notified_at=now() WHERE team_id=$1 AND id=$2 AND notified_at IS NULL`, [teamId, taskId]);
           await postRequesterConfirmDM({ teamId, taskId, requesterUserId: fresh.requester_user_id, title: fresh.title });
+// ★Home再描画：全員完了→確認待ち（依頼者/対象者にも反映）
+try {
+  const targets = await dbListTargetUserIds(teamId, taskId);
+  const toRefresh = Array.from(new Set([fresh.requester_user_id, ...(targets || [])].filter(Boolean)));
+  publishHomeForUsers(client, teamId, toRefresh, 200);
+  setTimeout(() => {
+    publishHomeForUsers(client, teamId, toRefresh, 200);
+  }, 200);
+} catch (_) {}
+
         }
       }
 
@@ -2924,6 +3130,15 @@ return;
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
 
+
+// ★通知：完了（personal）
+try {
+  const toNotify = Array.from(new Set([updated.requester_user_id, updated.assignee_id].filter(Boolean)));
+  for (const uid of toNotify) {
+    await postDM(uid, `✅ 完了になったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`);
+  }
+} catch (_) {}
+
     if (body.view?.callback_id === "list_detail_modal") {
       const meta2 = safeJsonParse(body.view?.private_metadata || "{}") || {};
       const returnState = meta2.returnState || { viewType: "assigned", userId: body.user.id, status: "open", deptKey: "all" };
@@ -2957,9 +3172,10 @@ return;
 
     // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
     try {
-      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      const relatedIds = Array.from(new Set([body.user.id, task.requester_user_id, task.assignee_id].filter(Boolean)));
+      publishHomeForUsers(client, teamId, relatedIds, 200);
       setTimeout(() => {
-        publishHomeForUsers(client, teamId, [body.user.id], 200);
+        publishHomeForUsers(client, teamId, relatedIds, 200);
       }, 200);
     } catch (_) {}
   } catch (e) {
@@ -2995,6 +3211,26 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
 
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
+
+
+// ★通知：完了（broadcast）
+try {
+  const targets = await dbListTargetUserIds(teamId, taskId);
+  const toNotify = Array.from(new Set([updated.requester_user_id, ...(targets || [])].filter(Boolean)));
+  for (const uid of toNotify) {
+    await postDM(uid, `✅ 完了になったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`);
+  }
+} catch (_) {}
+
+// ★Home再描画：依頼者/対象者にも反映
+try {
+  const targets = await dbListTargetUserIds(teamId, taskId);
+  const toRefresh = Array.from(new Set([updated.requester_user_id, ...(targets || [])].filter(Boolean)));
+  publishHomeForUsers(client, teamId, toRefresh, 200);
+  setTimeout(() => {
+    publishHomeForUsers(client, teamId, toRefresh, 200);
+  }, 200);
+} catch (_) {}
 
     // thread card update
     if (updated.channel_id && updated.message_ts) {
@@ -3095,9 +3331,10 @@ app.action("cancel_task", async ({ ack, body, action, client }) => {
 
     // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
     try {
-      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      const relatedIds = Array.from(new Set([body.user.id, cancelled.requester_user_id, cancelled.assignee_id].filter(Boolean)));
+      publishHomeForUsers(client, teamId, relatedIds, 200);
       setTimeout(() => {
-        publishHomeForUsers(client, teamId, [body.user.id], 200);
+        publishHomeForUsers(client, teamId, relatedIds, 200);
       }, 200);
     } catch (_) {}
   } catch (e) {
@@ -3157,11 +3394,27 @@ app.action("status_select", async ({ ack, body, action, client }) => {
       await upsertThreadCard(client, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks });
     }
 
-    // Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
+    
+// ★通知：確認待ち/完了（personalのみ）
+try {
+  if (nextStatus === "waiting") {
+    if (updated.requester_user_id) {
+      await postDM(updated.requester_user_id, `⏳ 確認待ちになったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`);
+    }
+  } else if (nextStatus === "done") {
+    const toNotify = Array.from(new Set([updated.requester_user_id, updated.assignee_id].filter(Boolean)));
+    for (const uid of toNotify) {
+      await postDM(uid, `✅ 完了になったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`);
+    }
+  }
+} catch (_) {}
+
+// Phase8-1: Homeリアルタイム再描画（操作した本人のみ / モバイル反映遅延対策）
     try {
-      publishHomeForUsers(client, teamId, [body.user.id], 200);
+      const relatedIds = Array.from(new Set([body.user.id, updated.requester_user_id, updated.assignee_id].filter(Boolean)));
+      publishHomeForUsers(client, teamId, relatedIds, 200);
       setTimeout(() => {
-        publishHomeForUsers(client, teamId, [body.user.id], 200);
+        publishHomeForUsers(client, teamId, relatedIds, 200);
       }, 200);
     } catch (_) {}
   } catch (e) {

@@ -1535,7 +1535,7 @@ function taskLineForHome(task, viewKey) {
   // 改行が多すぎると読みにくいので少し整える（潰しすぎない）
   preview = preview.replace(/\n{3,}/g, "\n\n");
 
-  const MAX_PREVIEW_CHARS = 140;
+  const MAX_PREVIEW_CHARS = 200;
   if (preview.length > MAX_PREVIEW_CHARS) preview = preview.slice(0, MAX_PREVIEW_CHARS) + "…";
 
   // @通知抑止（本文内の@を全角に）
@@ -1545,7 +1545,7 @@ function taskLineForHome(task, viewKey) {
   if (!preview) preview = noMention(String(task.title || "（本文なし）"));
 
   base = `${preview}
-${requester} ⇒ ${assignee}`;
+  👤${requester} ⇒ ${assignee}`;
 
   if (task?.source_permalink) {
     base += `

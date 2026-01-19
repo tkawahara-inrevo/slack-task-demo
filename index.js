@@ -2145,28 +2145,46 @@ app.event("reaction_added", async ({ event, client, body }) => {
       return;
     }
 
-    // reaction_added には trigger_id が無いので、エフェメラルにボタンを出す
-    const payload = JSON.stringify({ teamId, channelId, msgTs });
+// ✅リアクション → スレッド内に「タスク化」カードを出す
+const payload = JSON.stringify({ teamId, channelId, msgTs });
 
-    await client.chat.postEphemeral({
-      channel: channelId,
-      user: actorUserId,
-      text: "タスク化する？",
-      blocks: [
-        { type: "section", text: { type: "mrkdwn", text: "✅ このメッセージをタスク化する？" } },
+// どのスレッドに出すか決めるために、元メッセージを取得して thread_ts を確認
+let parentTs = msgTs;
+try {
+  const hist = await client.conversations.history({
+    channel: channelId,
+    latest: msgTs,
+    inclusive: true,
+    limit: 1,
+  });
+  const m = (hist.messages || [])[0];
+  // リアクションが「返信」に付いた場合は、スレッド親にそろえる
+  parentTs = m?.thread_ts || msgTs;
+} catch (e) {
+  console.error("conversations.history error:", e?.data || e);
+}
+
+// スレッドにボタン付きメッセージを投稿（※エフェメラルじゃない）
+await client.chat.postMessage({
+  channel: channelId,
+  thread_ts: parentTs,
+  text: "✅ タスク化",
+  blocks: [
+    { type: "section", text: { type: "mrkdwn", text: "✅ *タスク化しますか？*" } },
+    {
+      type: "actions",
+      elements: [
         {
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "タスク化する" },
-              action_id: "reaction_task_create",
-              value: payload,
-            },
-          ],
+          type: "button",
+          text: { type: "plain_text", text: "タスク化する" },
+          action_id: "reaction_task_create",
+          value: payload,
         },
       ],
-    });
+    },
+  ],
+});
+
   } catch (e) {
     // bot未参加などは握りつぶし
     if (e?.data?.error !== "not_in_channel") console.error("reaction_added error:", e?.data || e);
@@ -4057,20 +4075,40 @@ async function notifyUserDM(userId, task, roleLabel) {
   const dueYmd = slackDateYmd(task.due_date) || (typeof task.due_date === "string" ? task.due_date.slice(0, 10) : "");
   const dueLabel = dueYmd ? (dueYmd === today ? "今日" : dueYmd.replaceAll("-", "/")) : "未設定";
 
-  const text =
-    `⏰ 期限リマインド（${roleLabel}）
-` +
-    `・タイトル：${noMention(task.title)}
-` +
-    `・期限：${dueLabel}
-` +
-    `・ステータス：${task.status}
-`;
+  const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
+  const hasLink = !!task?.source_permalink;
 
-  await app.client.chat.postMessage({ channel, text });
+  await app.client.chat.postMessage({
+    channel,
+    text: `⏰ 今日が期限です（${roleLabel}）: ${noMention(task.title)}`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `⏰ *今日が期限です*（${roleLabel}）\n*${noMention(task.title)}*` },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "詳細を開く" },
+            action_id: "open_detail_modal",
+            value: payload,
+          },
+          ...(hasLink
+            ? [
+                {
+                  type: "button",
+                  text: { type: "plain_text", text: "元メッセージへ" },
+                  url: task.source_permalink,
+                },
+              ]
+            : []),
+        ],
+      },
+    ],
+  });
 }
-
-
 
 async function runDueNotifyJob() {
   const today = todayJstYmd();
@@ -4111,8 +4149,6 @@ cron.schedule(
 if (process.env.RUN_NOTIFY_NOW === "true") {
   runDueNotifyJob().catch(console.error);
 }
-
-
 
 
 // ================================

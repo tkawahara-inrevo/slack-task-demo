@@ -1545,7 +1545,9 @@ function taskLineForHome(task, viewKey) {
   if (!preview) preview = noMention(String(task.title || "（本文なし）"));
 
   base = `${preview}
-  👤${requester} ⇒ ${assignee}`;
+  · · · · · · · · · ·
+  ${requester} → ${assignee}`;
+
 
   if (task?.source_permalink) {
     base += `
@@ -1778,7 +1780,13 @@ const pushTaskList = (title, list) => {
 
   const canAdd = (n) => (blocks.length + n) <= (MAX_BLOCKS - SAFETY);
 
-  blocks.push({ type: "section", text: { type: "mrkdwn", text: title } });
+  const titlePlain = String(title || "").replace(/\*/g, "").trim();
+  blocks.push({
+  type: "header",
+  text: { type: "plain_text", text: `${titlePlain}（${list.length}件）` },
+});
+blocks.push({ type: "divider" });
+
 
   if (!list.length) {
     if (canAdd(2)) {
@@ -2416,7 +2424,13 @@ const pushTaskList = (title, list) => {
 
   const canAdd = (n) => (blocks.length + n) <= (MAX_BLOCKS - SAFETY);
 
-  blocks.push({ type: "section", text: { type: "mrkdwn", text: title } });
+  const titlePlain = String(title || "").replace(/\*/g, "").trim();
+blocks.push({
+  type: "header",
+  text: { type: "plain_text", text: `${titlePlain}（${list.length}件）` },
+});
+blocks.push({ type: "divider" });
+
 
   if (!list.length) {
     if (canAdd(2)) {

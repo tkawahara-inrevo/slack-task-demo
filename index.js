@@ -953,7 +953,8 @@ async function postRequesterConfirmDM({ teamId, taskId, requesterUserId, title }
 // ================================
 // Thread Card (upsert)
 // ================================
-async function upsertThreadCard(client, { teamId, channelId, parentTs, blocks }) {
+async function upsertThreadCard(client, { teamId, channelId, parentTs, threadTs = null, blocks }) {
+  // parentTs は「カードの一意キー」（= 1メッセージ1回の判定に使う）
   const existing = await dbGetThreadCard(teamId, channelId, parentTs);
   if (existing?.card_ts) {
     await client.chat.update({
@@ -965,9 +966,12 @@ async function upsertThreadCard(client, { teamId, channelId, parentTs, blocks })
     return existing.card_ts;
   }
 
+  // threadTs は「投稿先のスレッド親」（未指定なら parentTs と同じ）
+  const postThreadTs = threadTs || parentTs;
+
   const res = await client.chat.postMessage({
     channel: channelId,
-    thread_ts: parentTs,
+    thread_ts: postThreadTs,
     text: "タスク表示",
     blocks,
   });
@@ -976,6 +980,7 @@ async function upsertThreadCard(client, { teamId, channelId, parentTs, blocks })
   if (cardTs) await dbUpsertThreadCard(teamId, channelId, parentTs, cardTs);
   return cardTs;
 }
+
 
 // ★要望②：スレッドから完了ボタン削除（詳細からのみ）
 async function buildThreadCardBlocks({ teamId, task }) {
@@ -2234,7 +2239,40 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
 // ✅ のリアクション名（Slack内部名）
 const TASK_REACTION_NAME = "white_check_mark";
 
-// ✅が付いたら「タスク化する」ボタンを出す（モーダルはボタンから開く）
+// メッセージ本文から「個人メンション」だけ拾う（ユーザーグループ/ here/channel は除外）
+function inferAssigneeFromMessageText(rawText, fallbackUserId) {
+  const text = String(rawText || "");
+  const userIds = [];
+  const re = /<@([A-Z0-9]+)>/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const uid = m[1];
+    if (!uid) continue;
+    if (!userIds.includes(uid)) userIds.push(uid);
+  }
+  // @個人 + @ユーザーグループ の場合でも、個人メンションがいれば個人優先
+  return userIds[0] || fallbackUserId;
+}
+
+function buildReactionPromptBlocks({ previewText, assigneeId, dueYmd, payloadCreate, payloadEdit }) {
+  const safePreview = noMention((previewText || "").trim()) || "（本文なし）";
+  const short = safePreview.length > 300 ? (safePreview.slice(0, 300) + "…") : safePreview;
+
+  return [
+    { type: "header", text: { type: "plain_text", text: "✅ タスク化の確認" } },
+    { type: "section", text: { type: "mrkdwn", text: `*内容*\n>${short.replace(/\n/g, "\n>")}` } },
+    { type: "context", elements: [{ type: "mrkdwn", text: `👤 *対応者*：<@${assigneeId}>　　📅 *期限*：${dueYmd}（今日）` }] },
+    { type: "divider" },
+    {
+      type: "actions",
+      elements: [
+        { type: "button", text: { type: "plain_text", text: "タスク化" }, style: "primary", action_id: "reaction_task_confirm_create", value: payloadCreate },
+        { type: "button", text: { type: "plain_text", text: "内容編集" }, action_id: "reaction_task_open_edit_modal", value: payloadEdit },
+      ],
+    },
+  ];
+}
+
 app.event("reaction_added", async ({ event, client, body }) => {
   try {
     if ((event?.reaction || "") !== TASK_REACTION_NAME) return;
@@ -2243,59 +2281,172 @@ app.event("reaction_added", async ({ event, client, body }) => {
     const channelId = event?.item?.channel;
     const msgTs = event?.item?.ts;
     const actorUserId = event?.user; // リアクションした人
-
     if (!teamId || !channelId || !msgTs || !actorUserId) return;
 
-    // すでにタスク化済みなら、軽く案内して終わり
-    const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
-    if (existing?.id) {
+    // すでに「確認UI（スレッドカード）」を出していたら何もしない（1メッセージ1回）
+    const existingCard = await dbGetThreadCard(teamId, channelId, msgTs);
+    if (existingCard?.card_ts) return;
+
+    // すでにタスク化済みなら案内だけ（ここは現行踏襲）
+    const existingTask = await dbGetTaskBySource(teamId, channelId, msgTs);
+    if (existingTask?.id) {
       await safeEphemeral(client, channelId, actorUserId, "✅ それ、もうタスク化済みだよ〜！");
       return;
     }
 
-// ✅リアクション → スレッド内に「タスク化」カードを出す
-const payload = JSON.stringify({ teamId, channelId, msgTs });
+    // 元メッセージ取得（本文＋発言者）
+    let rawText = "";
+    let requesterUserId = "";
+    try {
+      const hist = await client.conversations.history({
+        channel: channelId,
+        latest: msgTs,
+        inclusive: true,
+        limit: 1,
+      });
+      const mm = (hist.messages || [])[0];
+      rawText = mm?.text || "";
+      requesterUserId = mm?.user || "";
+    } catch (e) {
+      console.error("reaction_added conversations.history error:", e?.data || e);
+    }
 
-// ✅リアクション → 「そのスレッド」に確実にカードを出す（reactions.get を使う）
-let parentTs = msgTs;
-try {
-  const rg = await client.reactions.get({
-    channel: channelId,
-    timestamp: msgTs,
-    full: true,
-  });
-  const m = rg?.message;
-  parentTs = (m?.thread_ts || m?.ts || msgTs);
-} catch (e) {
-  console.error("reactions.get error:", e?.data || e);
-}
+    // 対応者推定（個人メンション優先、なければリアクションした本人）
+    const assigneeId = inferAssigneeFromMessageText(rawText, actorUserId);
 
-// スレッド内カード（1スレッド1枚に固定）
-const blocks = [
-  { type: "section", text: { type: "mrkdwn", text: "✅ *タスク化しますか？*" } },
-  {
-    type: "actions",
-    elements: [
-      {
-        type: "button",
-        text: { type: "plain_text", text: "タスク化する" },
-        action_id: "reaction_task_create",
-        value: payload,
-      },
-    ],
-  },
-];
+    // 期限は今日固定
+    const dueYmd = slackDateYmd(new Date());
 
-await upsertThreadCard(client, { teamId, channelId, parentTs, blocks });
+    // スレッド親（そのスレッドに出す）
+    let threadRootTs = msgTs;
+    try {
+      const rg = await client.reactions.get({
+        channel: channelId,
+        timestamp: msgTs,
+        full: true,
+      });
+      const m = rg?.message;
+      threadRootTs = (m?.thread_ts || m?.ts || msgTs);
+    } catch (e) {
+      console.error("reactions.get error:", e?.data || e);
+    }
+
+    // プレビュー用（モーダル用のprettyは編集時に作るのでここでは生テキストでもOK）
+    const previewText = rawText;
+
+    // payload（create は即作成、edit はモーダル）
+    const payloadBase = {
+      teamId,
+      channelId,
+      msgTs,
+      requesterUserId: requesterUserId || actorUserId,
+      assigneeId,
+      dueYmd,
+      messageText: rawText,
+    };
+
+    const payloadCreate = JSON.stringify({ ...payloadBase, mode: "create" });
+    const payloadEdit = JSON.stringify({ ...payloadBase, mode: "edit" });
+
+    const blocks = buildReactionPromptBlocks({
+      previewText,
+      assigneeId,
+      dueYmd,
+      payloadCreate,
+      payloadEdit,
+    });
+
+    // ★キーは msgTs（= 1メッセージ1回）、投稿先は threadRootTs
+    await upsertThreadCard(client, { teamId, channelId, parentTs: msgTs, threadTs: threadRootTs, blocks });
 
   } catch (e) {
-    // bot未参加などは握りつぶし
     if (e?.data?.error !== "not_in_channel") console.error("reaction_added error:", e?.data || e);
   }
 });
 
-// ボタン押下 → いつもの task_modal を開く
-app.action("reaction_task_create", async ({ ack, body, client }) => {
+
+app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
+  await ack();
+
+  try {
+    const payload = safeJsonParse(body.actions?.[0]?.value || "{}") || {};
+    const teamId = payload.teamId || getTeamIdFromBody(body);
+    const channelId = payload.channelId;
+    const msgTs = payload.msgTs;
+    const actorUserId = body.user?.id;
+
+    const requesterUserId = payload.requesterUserId || actorUserId;
+    const assigneeId = payload.assigneeId || actorUserId;
+    const dueYmd = payload.dueYmd || slackDateYmd(new Date());
+    const rawText = payload.messageText || "";
+
+    if (!teamId || !channelId || !msgTs || !actorUserId) return;
+
+    // すでにタスク化済みなら何もしない（痕跡は残ってる想定）
+    const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
+    if (existing?.id) return;
+
+    // permalink
+    let permalink = "";
+    try {
+      const r = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs });
+      permalink = r?.permalink || "";
+    } catch (_) {}
+
+    let prettyText = await prettifySlackText(rawText, teamId);
+    prettyText = await prettifyUserMentions(prettyText, teamId);
+    const title = generateTitleCandidate(prettyText || rawText || "");
+
+    const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+    const assigneeDept = await resolveDeptForUser(teamId, assigneeId);
+
+    const taskId = randomUUID();
+
+    await dbCreateTask({
+      id: taskId,
+      team_id: teamId,
+      channel_id: channelId,
+      message_ts: msgTs,
+      source_permalink: permalink || null,
+      title,
+      description: prettyText || rawText || "",
+      requester_user_id: requesterUserId,
+      created_by_user_id: actorUserId,
+      assignee_id: assigneeId,
+      assignee_label: null,
+      status: "in_progress",
+      due_date: dueYmd,
+      requester_dept: requesterDept,
+      assignee_dept: assigneeDept,
+      task_type: "personal",
+      broadcast_group_handle: null,
+      broadcast_group_id: null,
+      total_count: null,
+      completed_count: 0,
+      notified_at: null,
+    });
+
+    // スレッドカードを「タスク化しました」に更新（キーは msgTs）
+    const doneBlocks = [
+      { type: "header", text: { type: "plain_text", text: "✅ タスク化しました" } },
+      { type: "context", elements: [{ type: "mrkdwn", text: `👤 *対応者*：<@${assigneeId}>　　📅 *期限*：${dueYmd}（今日）` }] },
+      { type: "divider" },
+      { type: "section", text: { type: "mrkdwn", text: `*${noMention(title)}*` } },
+      { type: "context", elements: [{ type: "mrkdwn", text: "（必要なら「内容編集」から変更できます）" }] },
+    ];
+
+    // どのスレッドにあるカードかは dbGetThreadCard で分かるので update だけでOK（upsertThreadCard でもOK）
+    const tc = await dbGetThreadCard(teamId, channelId, msgTs);
+    if (tc?.card_ts) {
+      await client.chat.update({ channel: channelId, ts: tc.card_ts, text: "タスク表示（更新）", blocks: doneBlocks });
+    }
+
+  } catch (e) {
+    console.error("reaction_task_confirm_create error:", e?.data || e);
+  }
+});
+
+app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
   await ack();
 
   try {
@@ -2307,41 +2458,14 @@ app.action("reaction_task_create", async ({ ack, body, client }) => {
 
     if (!teamId || !channelId || !msgTs || !actorUserId) return;
 
-    // 二重押し/同時押し対策：すでにタスク化済みなら詳細を開く
-    const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
-    if (existing?.id) {
-      await openDetailModal(client, {
-        trigger_id: body.trigger_id,
-        teamId,
-        taskId: existing.id,
-        viewerUserId: actorUserId,
-        origin: "home",
-        isFromModal: false,
-      });
-      return;
-    }
-
     // 元メッセージ取得
-    let rawText = "";
-    let requesterUserId = "";
-    try {
-      const hist = await client.conversations.history({
-        channel: channelId,
-        latest: msgTs,
-        inclusive: true,
-        limit: 1,
-      });
-      const m = (hist.messages || [])[0];
-      rawText = m?.text || "";
-      requesterUserId = m?.user || "";
-    } catch (e) {
-      console.error("conversations.history error:", e?.data || e);
-    }
+    const rawText = payload.messageText || "";
+    const requesterUserId = payload.requesterUserId || actorUserId;
 
     let prettyText = await prettifySlackText(rawText, teamId);
     prettyText = await prettifyUserMentions(prettyText, teamId);
 
-    // ★create_task_from_message と同じ modal（完成形）を開く
+    // task_modal を開く（初期値入り）
     await client.views.open({
       trigger_id: body.trigger_id,
       view: {
@@ -2351,7 +2475,7 @@ app.action("reaction_task_create", async ({ ack, body, client }) => {
           teamId,
           channelId,
           msgTs,
-          requesterUserId: requesterUserId || actorUserId,
+          requesterUserId,
           messageText: rawText,
           messageTextPretty: prettyText,
         }),
@@ -2361,7 +2485,6 @@ app.action("reaction_task_create", async ({ ack, body, client }) => {
         blocks: [
           { type: "input", block_id: "desc", label: { type: "plain_text", text: "詳細（元メッセージ全文）" }, element: { type: "plain_text_input", action_id: "desc_input", multiline: true, initial_value: prettyText || "" } },
 
-          // 対応者（個人：複数OK）
           {
             type: "input",
             optional: true,
@@ -2369,8 +2492,6 @@ app.action("reaction_task_create", async ({ ack, body, client }) => {
             label: { type: "plain_text", text: "対応者（個人・複数OK）" },
             element: { type: "multi_users_select", action_id: "assignee_users_select", placeholder: { type: "plain_text", text: "ユーザーを選択" } },
           },
-
-          // 対応者（グループ：@ALL-xxx / @mk-all 等）
           {
             type: "input",
             optional: true,
@@ -2395,10 +2516,13 @@ app.action("reaction_task_create", async ({ ack, body, client }) => {
         ],
       },
     });
+
   } catch (e) {
-    console.error("reaction_task_create error:", e?.data || e);
+    console.error("reaction_task_open_edit_modal error:", e?.data || e);
   }
 });
+
+
 
 // ================================
 // Global Shortcut: Open Task List (Home-like modal)

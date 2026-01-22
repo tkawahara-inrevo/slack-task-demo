@@ -1465,17 +1465,27 @@ async function dbListBroadcastTasksByStatuses(teamId, statuses, deptKey = "all",
   return res.rows;
 }
 
-// Phase8-3: broadcast 範囲フィルタ（依頼部署フィルタは廃止）
 async function dbListBroadcastTasksByStatusesWithScope(teamId, statuses, scopeKey, viewerUserId, limit = 30) {
   const params = [teamId, statuses, limit];
   let joinTargets = "";
   let whereScope = "";
+
+  // ★⑤：未完了一覧（statusesにdoneが含まれない）なら、自分が完了済みのbroadcastを除外
+  let joinCompletions = "";
+  let whereNotCompleted = "";
+  const wantsNotCompleted = !(statuses || []).includes("done");
 
   if (scopeKey === "to_me") {
     // 対象者に自分を含む
     joinTargets = "JOIN task_targets tt ON tt.task_id::text = t.id AND tt.team_id=t.team_id";
     whereScope = "AND tt.user_id = $4";
     params.push(viewerUserId);
+
+    // ★自分が完了済みなら「自分あて未完了」には出さない
+    if (wantsNotCompleted) {
+      joinCompletions = "LEFT JOIN task_completions tc ON tc.task_id::text = t.id AND tc.team_id=t.team_id AND tc.user_id = $4";
+      whereNotCompleted = "AND tc.user_id IS NULL";
+    }
   } else if (scopeKey === "requested_by_me") {
     // 依頼者が自分
     whereScope = "AND t.requester_user_id = $4";
@@ -1490,10 +1500,12 @@ const q = `
     SELECT DISTINCT ON (t.id) t.*
     FROM tasks t
     ${joinTargets}
+    ${joinCompletions}
     WHERE t.team_id=$1
       AND t.task_type='broadcast'
       AND t.status = ANY($2::text[])
       ${whereScope}
+      ${whereNotCompleted}
     ORDER BY
       t.id,
       (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC
@@ -1501,7 +1513,6 @@ const q = `
   ORDER BY (x.due_date IS NULL) ASC, x.due_date ASC, x.created_at DESC
   LIMIT $3;
 `;
-
 
   const res = await dbQuery(q, params);
   return res.rows;
@@ -2234,6 +2245,11 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
 
 // ================================
 // Reaction ✅ -> Task create (via ephemeral button)
+
+// reaction prompt: memory dedupe (no DB)
+const reactionPromptSentAt = new Map(); // key -> epoch ms
+const REACTION_PROMPT_TTL_MS = 10 * 60 * 1000;
+
 // ================================
 
 // ✅ のリアクション名（Slack内部名）
@@ -2335,15 +2351,17 @@ app.event("reaction_added", async ({ event, client, body }) => {
     const previewText = rawText;
 
     // payload（create は即作成、edit はモーダル）
-    const payloadBase = {
-      teamId,
-      channelId,
-      msgTs,
-      requesterUserId: requesterUserId || actorUserId,
-      assigneeId,
-      dueYmd,
-      messageText: rawText,
-    };
+const payloadBase = {
+  teamId,
+  channelId,
+  msgTs,
+  threadTs: threadRootTs, // ← 追加
+  requesterUserId: requesterUserId || actorUserId,
+  assigneeId,
+  dueYmd,
+  messageText: rawText,
+};
+
 
     const payloadCreate = JSON.stringify({ ...payloadBase, mode: "create" });
     const payloadEdit = JSON.stringify({ ...payloadBase, mode: "edit" });
@@ -2356,8 +2374,13 @@ app.event("reaction_added", async ({ event, client, body }) => {
       payloadEdit,
     });
 
-    // ★キーは msgTs（= 1メッセージ1回）、投稿先は threadRootTs
-    await upsertThreadCard(client, { teamId, channelId, parentTs: msgTs, threadTs: threadRootTs, blocks });
+const key = `${teamId}:${channelId}:${msgTs}`;
+const now = Date.now();
+const last = reactionPromptSentAt.get(key) || 0;
+if (now - last < REACTION_PROMPT_TTL_MS) return;
+reactionPromptSentAt.set(key, now);
+
+await upsertThreadCard(client, { teamId, channelId, parentTs: msgTs, threadTs: threadRootTs, blocks });
 
   } catch (e) {
     if (e?.data?.error !== "not_in_channel") console.error("reaction_added error:", e?.data || e);
@@ -2365,7 +2388,7 @@ app.event("reaction_added", async ({ event, client, body }) => {
 });
 
 
-app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
+app.action("reaction_task_confirm_create", async ({ ack, body, client, respond }) => {
   await ack();
 
   try {
@@ -2382,9 +2405,29 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
 
     if (!teamId || !channelId || !msgTs || !actorUserId) return;
 
-    // すでにタスク化済みなら何もしない（痕跡は残ってる想定）
-    const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
-    if (existing?.id) return;
+    // ✅ まずUIを即置き換え（ボタン多重押し防止）
+// ※重い処理の前にやるのがコツ！
+if (typeof respond === "function") {
+  await respond({
+    replace_original: true,
+    text: "⏳ タスク化しています…",
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: "タスク化しました。" } },
+    ],
+  });
+}
+
+const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
+if (existing?.id) {
+  if (typeof respond === "function") {
+    await respond({
+      replace_original: true,
+      text: "✅ すでにタスク化済み",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "✅ *すでにタスク化済みだよ*（スレッドを見てね）" } }],
+    });
+  }
+  return;
+}
 
     // permalink
     let permalink = "";
@@ -2402,44 +2445,43 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
 
     const taskId = randomUUID();
 
-    await dbCreateTask({
-      id: taskId,
-      team_id: teamId,
-      channel_id: channelId,
-      message_ts: msgTs,
-      source_permalink: permalink || null,
-      title,
-      description: prettyText || rawText || "",
-      requester_user_id: requesterUserId,
-      created_by_user_id: actorUserId,
-      assignee_id: assigneeId,
-      assignee_label: null,
-      status: "in_progress",
-      due_date: dueYmd,
-      requester_dept: requesterDept,
-      assignee_dept: assigneeDept,
-      task_type: "personal",
-      broadcast_group_handle: null,
-      broadcast_group_id: null,
-      total_count: null,
-      completed_count: 0,
-      notified_at: null,
-    });
+const createdTask = await dbCreateTask({
+  id: taskId,
+  team_id: teamId,
+  channel_id: channelId,
+  message_ts: msgTs,
+  source_permalink: permalink || null,
+  title,
+  description: prettyText || rawText || "",
+  requester_user_id: requesterUserId,
+  created_by_user_id: actorUserId,
+  assignee_id: assigneeId,
+  assignee_label: null,
+  status: "in_progress",
+  due_date: dueYmd,
+  requester_dept: requesterDept,
+  assignee_dept: assigneeDept,
+  task_type: "personal",
+  broadcast_group_handle: null,
+  broadcast_group_id: null,
+  total_count: null,
+  completed_count: 0,
+  notified_at: null,
+});
 
     // スレッドカードを「タスク化しました」に更新（キーは msgTs）
-    const doneBlocks = [
-      { type: "header", text: { type: "plain_text", text: "✅ タスク化しました" } },
-      { type: "context", elements: [{ type: "mrkdwn", text: `👤 *対応者*：<@${assigneeId}>　　📅 *期限*：${dueYmd}（今日）` }] },
-      { type: "divider" },
-      { type: "section", text: { type: "mrkdwn", text: `*${noMention(title)}*` } },
-      { type: "context", elements: [{ type: "mrkdwn", text: "（必要なら「内容編集」から変更できます）" }] },
-    ];
+// ★正式通知（モーダル作成と同じ表示）
+const doneBlocks = await buildThreadCardBlocks({ teamId, task: createdTask });
 
     // どのスレッドにあるカードかは dbGetThreadCard で分かるので update だけでOK（upsertThreadCard でもOK）
-    const tc = await dbGetThreadCard(teamId, channelId, msgTs);
-    if (tc?.card_ts) {
-      await client.chat.update({ channel: channelId, ts: tc.card_ts, text: "タスク表示（更新）", blocks: doneBlocks });
-    }
+await upsertThreadCard(client, {
+  teamId,
+  channelId,
+  parentTs: msgTs,
+  threadTs: payload.threadTs || msgTs,
+  blocks: doneBlocks,
+});
+
 
   } catch (e) {
     console.error("reaction_task_confirm_create error:", e?.data || e);
@@ -2987,7 +3029,7 @@ const assigneeLabelRaw = labelParts.join(" ");
     // broadcast: snapshot targets
     if (taskType === "broadcast") {
       await dbInsertTaskTargets(teamId, taskId, targetList);
-      // 안전派：DBに 저장된 targets 수로 total_count を確定
+
       const total = await dbCountTargets(teamId, taskId);
       await dbUpdateBroadcastCounts(teamId, taskId, 0, total);
       created.total_count = total;
@@ -3007,7 +3049,6 @@ try {
         type: "actions",
         elements: [
           { type: "button", text: { type: "plain_text", text: "詳細を開く" }, action_id: "open_detail_modal", value: payload },
-          { type: "button", text: { type: "plain_text", text: "一覧を開く" }, action_id: "open_task_list_modal", value: JSON.stringify({ teamId, userId: body.user.id }) },
         ],
       },
     ],
@@ -3932,7 +3973,6 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
 
       await dbUpsertCompletion(teamId, taskId, userId);
 
-      // 안전派：再集計
       const total = task.total_count || (await dbCountTargets(teamId, taskId));
       const doneCount = await dbCountCompletions(teamId, taskId);
 

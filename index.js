@@ -1840,7 +1840,7 @@ await Promise.all(
   })
 );
 
-const pushTaskList = (title, list) => {
+const pushTaskList = async (title, list) => {
   // Slack Home view は blocks <= 100 制限がある
   const MAX_BLOCKS = 100;
   const SAFETY = 8; // 見出しや末尾の余裕
@@ -1870,6 +1870,12 @@ for (const t of list) {
   if (!canAdd(5)) break;
 
   const viewKey = (t.task_type === "broadcast" ? "broadcast" : "personal");
+
+    // ★ broadcastで「自分が完了済みか？」を判定
+  const viewerCompleted =
+    (t.task_type === "broadcast")
+      ? await dbHasUserCompleted(teamId, t.id, userId)
+      : false;
 
   // ✅ 主：タスク内容（本文）
   blocks.push({
@@ -1914,23 +1920,18 @@ for (const t of list) {
     elements: metaElems.length ? metaElems : [{ type: "mrkdwn", text: " " }],
   });
 
-  // ✅ 最後：完了（緑）＋ 詳細（並び順的に最後に来る）
+// ✅ 最後：完了（緑）＋ 詳細（broadcastで自分完了済みなら完了ボタンは出さない）
+if (t?.task_type === "broadcast" && viewerCompleted) {
+  // 「完了済み」表示（グレー相当）
+  blocks.push({
+    type: "context",
+    elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
+  });
+
+  // 詳細だけ
   blocks.push({
     type: "actions",
     elements: [
-      // {
-      //   type: "button",
-      //   text: { type: "plain_text", text: (t.task_type === "broadcast" ? "自分だけ完了" : "完了") },
-      //   style: "primary",
-      //   action_id: "complete_task",
-      //   value: JSON.stringify({ teamId, taskId: t.id }),
-      //   confirm: {
-      //     title: { type: "plain_text", text: "確認" },
-      //     text: { type: "mrkdwn", text: "このタスクを*完了*にしますか？" },
-      //     confirm: { type: "plain_text", text: "完了にする" },
-      //     deny: { type: "plain_text", text: "やめる" },
-      //   },
-      // },
       {
         type: "button",
         text: { type: "plain_text", text: "詳細" },
@@ -1939,6 +1940,33 @@ for (const t of list) {
       },
     ],
   });
+} else {
+  // 完了 + 詳細（通常）
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: { type: "plain_text", text: "完了 ✅" },
+        style: "primary",
+        action_id: "complete_task",
+        value: JSON.stringify({ teamId, taskId: t.id }),
+        confirm: {
+          title: { type: "plain_text", text: "確認" },
+          text: { type: "mrkdwn", text: "このタスクを*完了*にしますか？" },
+          confirm: { type: "plain_text", text: "完了にする" },
+          deny: { type: "plain_text", text: "やめる" },
+        },
+      },
+      {
+        type: "button",
+        text: { type: "plain_text", text: "詳細" },
+        action_id: "open_detail_modal",
+        value: JSON.stringify({ teamId, taskId: t.id }),
+      },
+    ],
+  });
+}
 
   blocks.push({
     type: "context",
@@ -1963,9 +1991,9 @@ for (const t of list) {
 
 
 // スマホ優先：期限切れ → 今日 → 明日以降
-pushTaskList("*🚨 期限切れ*", overdue);
-pushTaskList("*🟨 今日*", todayTasks);
-pushTaskList("*🟩 明日以降*", laterTasks);
+await pushTaskList("*🚨 期限切れ*", overdue);
+await pushTaskList("*🟨 今日*", todayTasks);
+await pushTaskList("*🟩 明日以降*", laterTasks);
 
 }
 
@@ -2363,8 +2391,8 @@ const payloadBase = {
 };
 
 
-    const payloadCreate = JSON.stringify({ ...payloadBase, mode: "create" });
-    const payloadEdit = JSON.stringify({ ...payloadBase, mode: "edit" });
+const payloadCreate = JSON.stringify({ ...payloadBase, mode: "create" });
+const payloadEdit = JSON.stringify({ ...payloadBase, mode: "edit" });
 
     const blocks = buildReactionPromptBlocks({
       previewText,
@@ -2792,23 +2820,18 @@ for (const t of list) {
     elements: metaElems.length ? metaElems : [{ type: "mrkdwn", text: " " }],
   });
 
-  // ✅ 最後：完了（緑）＋ 詳細（並び順的に最後に来る）
+// ✅ 最後：完了（緑）＋ 詳細（broadcastで自分完了済みなら完了ボタンは出さない）
+if (t?.task_type === "broadcast" && viewerCompleted) {
+  // 「完了済み」表示（グレー相当）
+  blocks.push({
+    type: "context",
+    elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
+  });
+
+  // 詳細だけ
   blocks.push({
     type: "actions",
     elements: [
-      // {
-      //   type: "button",
-      //   text: { type: "plain_text", text: (t.task_type === "broadcast" ? "自分だけ完了" : "完了") },
-      //   style: "primary",
-      //   action_id: "complete_task",
-      //   value: JSON.stringify({ teamId, taskId: t.id }),
-      //   confirm: {
-      //     title: { type: "plain_text", text: "確認" },
-      //     text: { type: "mrkdwn", text: "このタスクを*完了*にしますか？" },
-      //     confirm: { type: "plain_text", text: "完了にする" },
-      //     deny: { type: "plain_text", text: "やめる" },
-      //   },
-      // },
       {
         type: "button",
         text: { type: "plain_text", text: "詳細" },
@@ -2817,6 +2840,33 @@ for (const t of list) {
       },
     ],
   });
+} else {
+  // 完了 + 詳細（通常）
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: { type: "plain_text", text: "完了 ✅" },
+        style: "primary",
+        action_id: "complete_task",
+        value: JSON.stringify({ teamId, taskId: t.id }),
+        confirm: {
+          title: { type: "plain_text", text: "確認" },
+          text: { type: "mrkdwn", text: "このタスクを*完了*にしますか？" },
+          confirm: { type: "plain_text", text: "完了にする" },
+          deny: { type: "plain_text", text: "やめる" },
+        },
+      },
+      {
+        type: "button",
+        text: { type: "plain_text", text: "詳細" },
+        action_id: "open_detail_modal",
+        value: JSON.stringify({ teamId, taskId: t.id }),
+      },
+    ],
+  });
+}
 
   blocks.push({
     type: "context",
@@ -2839,9 +2889,9 @@ for (const t of list) {
 };
 
 // スマホ優先：期限切れ → 今日 → 明日以降
-pushTaskList("*🚨 期限切れ*", overdue);
-pushTaskList("*🟨 今日*", todayTasks);
-pushTaskList("*🟩 明日以降*", laterTasks);
+await pushTaskList("*🚨 期限切れ*", overdue);
+await pushTaskList("*🟨 今日*", todayTasks);
+await pushTaskList("*🟩 明日以降*", laterTasks);
 
 }
 

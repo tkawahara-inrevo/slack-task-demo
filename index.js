@@ -4794,17 +4794,6 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
         {
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "← 詳細に戻る" },
-              action_id: "back_to_detail_from_progress",
-              value: JSON.stringify({ teamId, taskId }),
-            },
-          ],
-        },
-        {
           type: "header",
           text: { type: "plain_text", text: "📊 完了/未完了一覧" },
         },
@@ -4850,35 +4839,6 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
     console.error("open_progress_modal error:", e?.data || e);
   }
 });
-
-app.action(
-  "back_to_detail_from_progress",
-  async ({ ack, body, action, client }) => {
-    await ack();
-    try {
-      const p = safeJsonParse(action.value || "{}") || {};
-      const teamId = p.teamId || body.team?.id || body.team_id;
-      const taskId = p.taskId;
-      if (!teamId || !taskId || !body.view?.id) return;
-
-      const task = await dbGetTaskById(teamId, taskId);
-      if (!task) return;
-
-      await client.views.update({
-        view_id: body.view.id,
-        hash: body.view.hash,
-        view: await buildDetailModalView({
-          teamId,
-          task,
-          viewerUserId: body.user.id,
-          origin: "home",
-        }),
-      });
-    } catch (e) {
-      console.error("back_to_detail_from_progress error:", e?.data || e);
-    }
-  },
-);
 
 // ================================
 // Due notify (09:00 JST) - personal tasks only (broadcastは完了トラッキングのため別通知設計にする想定)

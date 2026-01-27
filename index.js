@@ -899,6 +899,45 @@ async function postDM(userId, text) {
   } catch (_) {}
 }
 
+async function notifyTaskSimpleDM(
+  userId,
+  task,
+  headerText = "✅ 完了になったよ",
+) {
+  if (!userId || !task?.team_id || !task?.id) return;
+
+  try {
+    const dm = await app.client.conversations.open({ users: userId });
+    const channel = dm.channel?.id;
+    if (!channel) return;
+
+    const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
+
+    await app.client.chat.postMessage({
+      channel,
+      text: `${headerText}: ${noMention(task.title)}`,
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text: `${headerText}` } },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: `*${noMention(task.title)}*` },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "詳細を開く" },
+              action_id: "open_detail_modal",
+              value: payload,
+            },
+          ],
+        },
+      ],
+    });
+  } catch (_) {}
+}
+
 async function postRequesterConfirmDM({
   teamId,
   taskId,
@@ -1800,21 +1839,18 @@ async function publishHome({ client, teamId, userId }) {
     tasks.push(t);
   }
 
-  // ★範囲=すべて のときは、本人が見れるチャンネルのタスクだけ表示（DM/Private漏えい防止）
-  if (rangeKey === "all") {
+  // public は参加していなくても表示する / private・DM は表示しない
+  {
     const uniqChannels = Array.from(
       new Set((tasks || []).map((t) => t.channel_id).filter(Boolean)),
     );
     const okMap = new Map();
+
     for (const ch of uniqChannels) {
-      const ok = await canUserSeeChannel({
-        client,
-        teamId,
-        userId,
-        channelId: ch,
-      });
+      const ok = await canUserSeeChannel({ client, teamId, channelId: ch });
       okMap.set(ch, ok);
     }
+
     tasks = (tasks || []).filter((t) => {
       if (!t.channel_id) return true;
       return okMap.get(t.channel_id) === true;
@@ -2206,27 +2242,32 @@ async function getUsergroupMembers(teamId, groupId) {
 }
 
 // ================================
-// Channel visibility cache (for range=all privacy)
+// Channel visibility cache（publicは表示OK / private・DMは表示NG）
 // ================================
 const CHANNEL_VIS_CACHE_MS = 10 * 60 * 1000;
-const channelVisCache = new Map(); // `${teamId}:${userId}:${channelId}` -> { at, ok }
+const channelVisCache = new Map(); // `${teamId}:${channelId}` -> { at, ok }
 
-async function canUserSeeChannel({ client, teamId, userId, channelId }) {
+async function canUserSeeChannel({ client, teamId, channelId }) {
   if (!channelId) return true;
 
-  const key = `${teamId}:${userId}:${channelId}`;
+  // まずIDプレフィックスで高速判定（API節約）
+  const id0 = String(channelId)[0];
+  if (id0 === "C") return true; // public channel
+  if (id0 === "G") return false; // private channel
+  if (id0 === "D") return false; // DM
+
+  // 想定外のID（例：共有チャンネル等）は conversations.info で確定
+  const key = `${teamId}:${channelId}`;
   const cached = channelVisCache.get(key);
   if (cached && Date.now() - cached.at < CHANNEL_VIS_CACHE_MS)
     return !!cached.ok;
 
   try {
     const info = await client.conversations.info({ channel: channelId });
-    const ok =
-      !!info?.channel?.is_member ||
-      !!info?.channel?.is_im ||
-      !!info?.channel?.is_mpim;
-    channelVisCache.set(key, { at: Date.now(), ok });
-    return ok;
+    const ch = info?.channel;
+    const isPublic = !!ch?.is_channel && !ch?.is_private;
+    channelVisCache.set(key, { at: Date.now(), ok: isPublic });
+    return isPublic;
   } catch (_) {
     channelVisCache.set(key, { at: Date.now(), ok: false });
     return false;
@@ -3533,6 +3574,27 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       created.completed_count = 0;
     }
 
+    // ① 発行通知（personal / broadcast）
+    // - 自分が発行して自分が対象の場合は通知しない（うるささ回避）
+    try {
+      if (taskType === "personal") {
+        const to = personalAssigneeId;
+        if (to && to !== actorUserId) {
+          await notifyTaskSimpleDM(to, created, "📝 タスクが届いたよ");
+        }
+      } else if (taskType === "broadcast") {
+        // 対象者へ通知（必要ならここで数が多い場合は抑止もできる）
+        const targets = (targetList || []).filter(
+          (u) => u && u !== actorUserId,
+        );
+        for (const uid of targets) {
+          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+        }
+      }
+    } catch (e) {
+      console.error("create notify error:", e?.data || e);
+    }
+
     // broadcast creation notify: allow mention (only once)
     if (taskType === "broadcast" && channelId) {
       try {
@@ -4272,7 +4334,7 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
 
-    // ★通知：完了（personal）
+    // ★通知：完了（personal）…タイトル＋詳細ボタンだけ
     try {
       const toNotify = Array.from(
         new Set(
@@ -4280,10 +4342,7 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
         ),
       );
       for (const uid of toNotify) {
-        await postDM(
-          uid,
-          `✅ 完了になったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`,
-        );
+        await notifyTaskSimpleDM(uid, updated, "✅ 完了になったよ");
       }
     } catch (_) {}
 
@@ -4398,7 +4457,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
 
-    // ★通知：完了（broadcast）
+    // ★通知：完了（broadcast）…タイトル＋詳細ボタンだけ
     try {
       const targets = await dbListTargetUserIds(teamId, taskId);
       const toNotify = Array.from(
@@ -4407,10 +4466,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
         ),
       );
       for (const uid of toNotify) {
-        await postDM(
-          uid,
-          `✅ 完了になったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`,
-        );
+        await notifyTaskSimpleDM(uid, updated, "✅ 完了になったよ");
       }
     } catch (_) {}
 

@@ -1159,13 +1159,29 @@ async function buildDetailModalView({
     blocks.push({ type: "divider" });
   }
 
-  // personal：完了ボタン（権限者のみ）
-  if (!isBroadcast) {
-    if (
-      canCompletePersonal &&
-      task.status !== "done" &&
-      task.status !== "cancelled"
-    ) {
+// personal：完了 / 未完了に戻す（権限者のみ）
+if (!isBroadcast) {
+  if (canCompletePersonal && task.status !== "cancelled") {
+    if (task.status === "done") {
+      blocks.push({
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "未完了に戻す ↩️" },
+            action_id: "reopen_task",
+            value: JSON.stringify({ teamId, taskId: task.id }),
+            confirm: {
+              title: { type: "plain_text", text: "確認" },
+              text: { type: "mrkdwn", text: "このタスクを*未完了*に戻します。" },
+              confirm: { type: "plain_text", text: "戻す" },
+              deny: { type: "plain_text", text: "やめる" },
+            },
+          },
+        ],
+      });
+      blocks.push({ type: "divider" });
+    } else {
       blocks.push({
         type: "actions",
         elements: [
@@ -1179,19 +1195,21 @@ async function buildDetailModalView({
         ],
       });
       blocks.push({ type: "divider" });
-    } else if (!canCompletePersonal) {
-      blocks.push({
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: "👀 このタスクは閲覧のみです（完了操作は依頼者/対応者のみ）",
-          },
-        ],
-      });
-      blocks.push({ type: "divider" });
     }
+  } else if (!canCompletePersonal) {
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "👀 このタスクは閲覧のみです（完了操作は依頼者/対応者のみ）",
+        },
+      ],
+    });
+    blocks.push({ type: "divider" });
   }
+}
+
 
   // 元メッセージへ（permalinkがある場合のみ表示）
   if (task?.source_permalink) {
@@ -1869,68 +1887,84 @@ async function publishHome({ client, teamId, userId }) {
   }
 
   // 表示：未完了はステータス別に分ける（完了/取り下げはまとめ）
-  if (st.scopeKey === "done") {
-    // ★追加：完了は「直近24時間」だけ表示する（履歴はDBに残す）
-    const DONE_VISIBLE_HOURS = 24;
-    const cutoffMs = Date.now() - DONE_VISIBLE_HOURS * 60 * 60 * 1000;
+if (st.scopeKey === "done") {
+  // ★完了は直近N時間だけ表示（ここはあなたが2週間=336時間に変更する想定でOK）
+  const DONE_VISIBLE_HOURS = 168; // ←あなたの方針でここを336にしてね
+  const cutoffMs = Date.now() - DONE_VISIBLE_HOURS * 60 * 60 * 1000;
 
-    const recentDoneTasks = (tasks || []).filter((t) => {
-      const ts = t?.completed_at || t?.updated_at || t?.created_at;
-      if (!ts) return false;
-      const d = new Date(ts);
-      if (Number.isNaN(d.getTime())) return false;
-      return d.getTime() >= cutoffMs;
-    });
+  const recentDoneTasks = (tasks || []).filter((t) => {
+    const ts = t?.completed_at || t?.updated_at || t?.created_at;
+    if (!ts) return false;
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return false;
+    return d.getTime() >= cutoffMs;
+  });
 
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: `*✅ 完了（直近${DONE_VISIBLE_HOURS}時間）*` },
+  });
+
+  if (!recentDoneTasks.length) {
     blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*✅ 完了（直近${DONE_VISIBLE_HOURS}時間）*`,
-      },
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "（直近の完了なし）" }],
     });
+  } else {
+    for (const t of recentDoneTasks) {
+      const isBroadcast = t.task_type === "broadcast";
 
-    if (!recentDoneTasks.length) {
+      // 「未完了に戻せる」権限
+      const canReopen = isBroadcast
+        ? userId === t.requester_user_id
+        : userId === t.requester_user_id || userId === t.assignee_id;
+
+      // 本文（行）
       blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: "（直近24時間の完了なし）" }],
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text:
+            st.viewKey === "all"
+              ? taskLineForHome(t, isBroadcast ? "broadcast" : "personal")
+              : taskLineForHome(t, st.viewKey),
+        },
       });
-    } else {
-      for (const t of recentDoneTasks) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text:
-              st.viewKey === "all"
-                ? taskLineForHome(
-                    t,
-                    t.task_type === "broadcast" ? "broadcast" : "personal",
-                  )
-                : taskLineForHome(t, st.viewKey),
-          },
 
-          accessory: {
-            type: "overflow",
-            action_id: "task_row_overflow",
-            options: [
-              {
-                text: { type: "plain_text", text: "詳細" },
-                value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
-              },
-            ],
+      // ボタン行：未完了に戻す / 詳細
+      const elems = [];
+
+      if (canReopen) {
+        elems.push({
+          type: "button",
+          text: { type: "plain_text", text: "未完了に戻す ↩️" },
+          action_id: "reopen_task",
+          value: JSON.stringify({ teamId, taskId: t.id }),
+          confirm: {
+            title: { type: "plain_text", text: "確認" },
+            text: { type: "mrkdwn", text: "このタスクを*未完了*に戻します。" },
+            confirm: { type: "plain_text", text: "戻す" },
+            deny: { type: "plain_text", text: "やめる" },
           },
-        });
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: " " }],
-        });
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
         });
       }
+
+      elems.push({
+        type: "button",
+        text: { type: "plain_text", text: "詳細" },
+        action_id: "open_detail_modal",
+        value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
+      });
+
+      blocks.push({ type: "actions", elements: elems });
+
+      // 区切り（軽量）
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
+      });
     }
+  }
   } else {
     // ================================
     // ②：未完了は「期限切れ / 期限内」でグルーピング（JST 기준）
@@ -2999,400 +3033,6 @@ function myTasksStatusSelectElement(scopeKey) {
   };
 }
 
-async function buildTaskListModalView({
-  teamId,
-  userId,
-  rangeKey = "to_me",
-  scopeKey = "active",
-}) {
-  const statuses =
-    scopeKey === "done"
-      ? DONE_STATUSES
-      : scopeKey === "cancelled"
-        ? CANCELLED_STATUSES
-        : ACTIVE_STATUSES;
-
-  // ★一覧は personal + broadcast を混在（Home思想）
-  const personalScope =
-    rangeKey === "to_me" || rangeKey === "requested_by_me" ? rangeKey : "all";
-  const personalTasks = await dbListPersonalTasksByStatusesWithScope(
-    teamId,
-    statuses,
-    personalScope,
-    userId,
-    60,
-  );
-
-  const broadcastTasks =
-    rangeKey === "to_me" || rangeKey === "requested_by_me"
-      ? await dbListBroadcastTasksByStatusesWithScope(
-          teamId,
-          statuses,
-          rangeKey,
-          userId,
-          60,
-        )
-      : await dbListBroadcastTasksByStatuses(teamId, statuses, "all", 60);
-
-  // ★保険：同一IDは必ず1つにする（重複完全排除）
-  const seen = new Set();
-  const tasks = [];
-  for (const t of [...personalTasks, ...broadcastTasks]) {
-    const key = `${t.task_type || "personal"}:${t.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    tasks.push(t);
-  }
-
-  const blocks = [];
-
-  // filters（範囲＋状態だけ）
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: "*範囲*" },
-    accessory: myTasksScopeSelectElement(rangeKey),
-  });
-
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: "*状態*" },
-    accessory: myTasksStatusSelectElement(scopeKey),
-  });
-
-  blocks.push({ type: "divider" });
-
-  // list（Homeの表示ロジックを踏襲）
-
-  // list (Homeの表示ロジックを踏襲)
-  if (scopeKey === "done") {
-    // ★追加：完了は「直近24時間」だけ表示する（履歴はDBに残す）
-    const DONE_VISIBLE_HOURS = 24;
-    const cutoffMs = Date.now() - DONE_VISIBLE_HOURS * 60 * 60 * 1000;
-
-    const recentDoneTasks = (tasks || []).filter((t) => {
-      const ts = t?.completed_at || t?.updated_at || t?.created_at;
-      if (!ts) return false;
-      const d = new Date(ts);
-      if (Number.isNaN(d.getTime())) return false;
-      return d.getTime() >= cutoffMs;
-    });
-
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*✅ 完了（直近${DONE_VISIBLE_HOURS}時間）*`,
-      },
-    });
-
-    if (!recentDoneTasks.length) {
-      blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: "（直近24時間の完了なし）" }],
-      });
-    } else {
-      for (const t of recentDoneTasks) {
-        blocks.push({
-          type: "section",
-          text: { type: "mrkdwn", text: taskLineForHome(t, "personal") },
-          accessory: {
-            type: "overflow",
-            action_id: "task_row_overflow",
-            options: [
-              {
-                text: { type: "plain_text", text: "詳細" },
-                value: JSON.stringify({
-                  teamId,
-                  taskId: t.id,
-                  origin: "list_modal",
-                }),
-              },
-            ],
-          },
-        });
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: "────────────────────────" }],
-        });
-      }
-    }
-  } else if (scopeKey === "cancelled") {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: "*🟥 取り下げ*" },
-    });
-    if (!tasks.length) {
-      blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: "（取り下げなし）" }],
-      });
-    } else {
-      for (const t of tasks) {
-        blocks.push({
-          type: "section",
-          text: { type: "mrkdwn", text: taskLineForHome(t, "personal") },
-          accessory: {
-            type: "button",
-            text: { type: "plain_text", text: "詳細" },
-            action_id: "open_detail_modal",
-            value: JSON.stringify({
-              teamId,
-              taskId: t.id,
-              origin: "task_list_modal",
-            }),
-          },
-        });
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: "────────────────────────" }],
-        });
-      }
-    }
-  } else {
-    // ================================
-    // ②：未完了は「期限切れ / 期限内」でグルーピング（JST 기준）
-    // ================================
-    const today = todayJstYmd(); // 既存関数（JSTのYYYY-MM-DD）を使う :contentReference[oaicite:2]{index=2}
-
-    const dueYmdOf = (t) =>
-      slackDateYmd(t?.due_date) ||
-      (typeof t?.due_date === "string" ? t.due_date.slice(0, 10) : "");
-
-    const isOverdue = (t) => {
-      const due = dueYmdOf(t);
-      if (!due) return false; // dueなしは「期限内」扱い（仕様確定後に変えられる）
-      return due < today;
-    };
-
-    const overdue = tasks.filter((t) => isOverdue(t));
-
-    const todayTasks = tasks.filter((t) => {
-      const due = dueYmdOf(t);
-      return due && !isOverdue(t) && due === today;
-    });
-
-    const laterTasks = tasks.filter((t) => {
-      const due = dueYmdOf(t);
-      return !isOverdue(t) && (!due || due > today);
-    });
-    const pushTaskList = async (title, list) => {
-      // Slack Home view は blocks <= 100 制限がある
-      const MAX_BLOCKS = 100;
-      const SAFETY = 8; // 見出しや末尾の余裕
-
-      const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
-
-      const titlePlain = String(title || "")
-        .replace(/\*/g, "")
-        .trim();
-      blocks.push({
-        type: "header",
-        text: { type: "plain_text", text: `${titlePlain}（${list.length}件）` },
-      });
-      blocks.push({ type: "divider" });
-
-      if (!list.length) {
-        if (canAdd(2)) {
-          blocks.push({
-            type: "context",
-            elements: [{ type: "mrkdwn", text: "（なし）" }],
-          });
-          blocks.push({ type: "divider" });
-        }
-        return;
-      }
-
-      let shown = 0;
-
-      for (const t of list) {
-        // 1タスクあたり最低5ブロック（本文 + 人 + 期限/link + actions + 区切り）
-        if (!canAdd(5)) break;
-
-        const viewKey = t.task_type === "broadcast" ? "broadcast" : "personal";
-
-        // ★ broadcastで「自分が完了済みか？」を判定（範囲=自分あて の時だけ）
-        const viewerCompleted =
-          rangeKey === "to_me" && t.task_type === "broadcast"
-            ? await dbHasUserCompleted(teamId, t.id, userId)
-            : false;
-
-        // ✅ 主：タスク内容（本文）
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: taskLineForHome(t, viewKey),
-          },
-        });
-
-        // ✅ 小：アイコン + 依頼者 ⇒ アイコン + 対応者（既存のアイコンMapを利用）
-        const requesterId = t?.requester_user_id;
-        const assigneeId = t?.assignee_id;
-
-        const requesterIcon = requesterId
-          ? requesterIconMap.get(requesterId)
-          : null;
-        const assigneeIcon =
-          t?.task_type !== "broadcast" && assigneeId
-            ? assigneeIconMap.get(assigneeId)
-            : null;
-
-        const assigneeText =
-          viewKey === "broadcast"
-            ? assigneeDisplay(t)
-            : assigneeId
-              ? `<@${assigneeId}>`
-              : "-";
-
-        const peopleElements = [];
-        if (requesterIcon)
-          peopleElements.push({
-            type: "image",
-            image_url: requesterIcon,
-            alt_text: "requester",
-          });
-        if (requesterId)
-          peopleElements.push({ type: "mrkdwn", text: `<@${requesterId}>` });
-        peopleElements.push({ type: "mrkdwn", text: "⇒" });
-        if (assigneeIcon)
-          peopleElements.push({
-            type: "image",
-            image_url: assigneeIcon,
-            alt_text: "assignee",
-          });
-        peopleElements.push({ type: "mrkdwn", text: assigneeText });
-
-        blocks.push({ type: "context", elements: peopleElements });
-
-        // ✅ 小：期限 + 元メッセージへリンク
-        const dueText = t?.due_date
-          ? `（${formatDueDateOnly(t.due_date)}）まで`
-          : "";
-        const linkText = t?.source_permalink
-          ? `🔗 <${t.source_permalink}|元メッセージへ>`
-          : "";
-
-        const metaElems = [];
-        if (dueText) metaElems.push({ type: "mrkdwn", text: dueText });
-        if (linkText) metaElems.push({ type: "mrkdwn", text: linkText });
-
-        blocks.push({
-          type: "context",
-          elements: metaElems.length
-            ? metaElems
-            : [{ type: "mrkdwn", text: " " }],
-        });
-
-        // ✅ Homeの完了ボタンは「範囲=自分あて（to_me）」の時だけ
-        if (rangeKey !== "to_me") {
-          blocks.push({
-            type: "actions",
-            elements: [
-              {
-                type: "button",
-                text: { type: "plain_text", text: "詳細" },
-                action_id: "open_detail_modal",
-                value: JSON.stringify({ teamId, taskId: t.id }),
-              },
-            ],
-          });
-        } else {
-          // rangeKey === "to_me"
-          if (t.task_type === "broadcast" && viewerCompleted) {
-            // 「完了済み」表示（グレー相当）
-            blocks.push({
-              type: "context",
-              elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
-            });
-
-            // 詳細だけ
-            blocks.push({
-              type: "actions",
-              elements: [
-                {
-                  type: "button",
-                  text: { type: "plain_text", text: "詳細" },
-                  action_id: "open_detail_modal",
-                  value: JSON.stringify({ teamId, taskId: t.id }),
-                },
-              ],
-            });
-          } else {
-            // 完了 + 詳細（自分あての時だけ）
-            blocks.push({
-              type: "actions",
-              elements: [
-                {
-                  type: "button",
-                  text: {
-                    type: "plain_text",
-                    text:
-                      t.task_type === "broadcast"
-                        ? "自分だけ完了 ✅"
-                        : "完了 ✅",
-                  },
-                  style: "primary",
-                  action_id: "complete_task",
-                  value: JSON.stringify({ teamId, taskId: t.id }),
-                  confirm: {
-                    title: { type: "plain_text", text: "確認" },
-                    text: {
-                      type: "mrkdwn",
-                      text: "このタスクを*完了*にしますか？",
-                    },
-                    confirm: { type: "plain_text", text: "完了にする" },
-                    deny: { type: "plain_text", text: "やめる" },
-                  },
-                },
-                {
-                  type: "button",
-                  text: { type: "plain_text", text: "詳細" },
-                  action_id: "open_detail_modal",
-                  value: JSON.stringify({ teamId, taskId: t.id }),
-                },
-              ],
-            });
-          }
-        }
-
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
-        });
-
-        shown++;
-      }
-      const remaining = Math.max(0, list.length - shown);
-      if (remaining > 0 && canAdd(1)) {
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: `（他 ${remaining} 件）` }],
-        });
-      }
-
-      if (canAdd(1)) {
-        blocks.push({ type: "divider" });
-      }
-    };
-
-    // スマホ優先：期限切れ → 今日 → 明日以降
-    await pushTaskList("*🚨 期限切れ*", overdue);
-    await pushTaskList("*🟨 今日*", todayTasks);
-    await pushTaskList("*🟩 明日以降*", laterTasks);
-  }
-
-  const meta = { teamId, userId, rangeKey, scopeKey };
-
-  return {
-    type: "modal",
-    callback_id: "task_list_modal",
-    private_metadata: JSON.stringify(meta),
-    title: { type: "plain_text", text: "タスク一覧" },
-    close: { type: "plain_text", text: "閉じる" },
-    blocks,
-  };
-}
-
 app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
   await ack();
   try {
@@ -3941,13 +3581,6 @@ app.action("task_row_overflow", async ({ ack, body, action, client }) => {
       const task = await dbGetTaskById(teamId, taskId);
       if (!task) return;
 
-      const nextView = await buildListDetailView({
-        teamId,
-        task,
-        returnState,
-        viewerUserId: body.user.id,
-      });
-
       await client.views.update({
         view_id: body.view.id,
         hash: body.view.hash,
@@ -4074,146 +3707,6 @@ app.action("home_create_task", async ({ ack, body, client }) => {
   }
 });
 
-// Home: open list modal
-app.action(
-  "open_list_modal_from_home",
-  async ({ ack, body, action, client }) => {
-    await ack();
-    const p = safeJsonParse(action.value || "{}") || {};
-    const teamId = p.teamId || body.team?.id || body.team_id;
-    const viewType = p.viewType || "assigned";
-    const userId = p.userId || body.user.id;
-    const status = p.status || "open";
-    const deptKey = p.deptKey || "all";
-
-    await client.views.open({
-      trigger_id: body.trigger_id,
-      view: await buildListModalView({
-        teamId,
-        viewType,
-        userId,
-        status,
-        deptKey,
-      }),
-    });
-  },
-);
-
-// list modal: status filter
-app.action("list_filter_select", async ({ ack, body, action, client }) => {
-  await ack();
-  const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
-  const teamId = meta.teamId || body.team?.id || body.team_id;
-  const viewType = meta.viewType || "assigned";
-  const userId = meta.userId || body.user.id;
-  const deptKey = meta.deptKey || "all";
-  const nextStatus = action?.selected_option?.value || "open";
-
-  const nextView = await buildListModalView({
-    teamId,
-    viewType,
-    userId,
-    status: nextStatus,
-    deptKey,
-  });
-
-  await client.views.update({
-    view_id: body.view.id,
-    hash: body.view.hash,
-    view: nextView,
-  });
-});
-
-// list modal: dept filter
-app.action("dept_filter_select", async ({ ack, body, action, client }) => {
-  await ack();
-  const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
-  const teamId = meta.teamId || body.team?.id || body.team_id;
-  const viewType = meta.viewType || "assigned";
-  const userId = meta.userId || body.user.id;
-  const status = meta.status || "open";
-  const nextDept = action?.selected_option?.value || "all";
-
-  const nextView = await buildListModalView({
-    teamId,
-    viewType,
-    userId,
-    status,
-    deptKey: nextDept,
-  });
-
-  await client.views.update({
-    view_id: body.view.id,
-    hash: body.view.hash,
-    view: nextView,
-  });
-});
-
-// list modal -> detail (same modal)
-app.action("open_detail_in_list", async ({ ack, body, action, client }) => {
-  await ack();
-  try {
-    const p = safeJsonParse(action.value || "{}") || {};
-    const teamId = p.teamId || body.team?.id || body.team_id;
-    const taskId = p.taskId;
-
-    const listMeta = safeJsonParse(body.view?.private_metadata || "{}") || {};
-    const returnState = {
-      viewType: listMeta.viewType || "assigned",
-      userId: listMeta.userId || body.user.id,
-      status: listMeta.status || "open",
-      deptKey: listMeta.deptKey || "all",
-    };
-
-    const task = await dbGetTaskById(teamId, taskId);
-    if (!task) return;
-
-    const nextView = await buildListDetailView({
-      teamId,
-      task,
-      returnState,
-      viewerUserId: body.user.id,
-    });
-    await client.views.update({
-      view_id: body.view.id,
-      hash: body.view.hash,
-      view: nextView,
-    });
-  } catch (e) {
-    console.error("open_detail_in_list error:", e?.data || e);
-  }
-});
-
-app.action("back_to_list", async ({ ack, body, client }) => {
-  await ack();
-  try {
-    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
-    const teamId = meta.teamId || body.team?.id || body.team_id;
-    const returnState = meta.returnState || {
-      viewType: "assigned",
-      userId: body.user.id,
-      status: "open",
-      deptKey: "all",
-    };
-
-    const listView = await buildListModalView({
-      teamId,
-      viewType: returnState.viewType,
-      userId: returnState.userId,
-      status: returnState.status,
-      deptKey: returnState.deptKey,
-    });
-
-    await client.views.update({
-      view_id: body.view.id,
-      hash: body.view.hash,
-      view: listView,
-    });
-  } catch (e) {
-    console.error("back_to_list error:", e?.data || e);
-  }
-});
-
 // complete (detail only) - personal: status done / broadcast: per-user completion + recount
 app.action("complete_task", async ({ ack, body, action, client }) => {
   await ack();
@@ -4299,43 +3792,22 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
         }
       }
 
-      // modal refresh
-      if (body.view?.id) {
-        const refreshed = await dbGetTaskById(teamId, taskId);
-        if (refreshed) {
-          if (body.view.callback_id === "list_detail_modal") {
-            const meta2 =
-              safeJsonParse(body.view?.private_metadata || "{}") || {};
-            const returnState = meta2.returnState || {
-              viewType: "assigned",
-              userId,
-              status: "open",
-              deptKey: "all",
-            };
-            await client.views.update({
-              view_id: body.view.id,
-              hash: body.view.hash,
-              view: await buildListDetailView({
-                teamId,
-                task: refreshed,
-                returnState,
-                viewerUserId: userId,
-              }),
-            });
-          } else {
-            await client.views.update({
-              view_id: body.view.id,
-              hash: body.view.hash,
-              view: await buildDetailModalView({
-                teamId,
-                task: refreshed,
-                viewerUserId: body.user.id,
-              }),
-            });
-          }
-        }
-      }
-
+// modal refresh（一覧モーダル廃止：常に detail_modal を更新）
+if (body.view?.id) {
+  const refreshed = await dbGetTaskById(teamId, taskId);
+  if (refreshed) {
+    await client.views.update({
+      view_id: body.view.id,
+      hash: body.view.hash,
+      view: await buildDetailModalView({
+        teamId,
+        task: refreshed,
+        viewerUserId: body.user.id,
+        origin: "home",
+      }),
+    });
+  }
+}
       // Home refresh（スマホ反映対策：関係者へまとめて再描画）
       publishHomeForUsers(client, teamId, [userId, task.requester_user_id]);
       return;
@@ -4508,38 +3980,22 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
       }
     }
 
-    // refresh open modal if any
-    if (body.view?.id) {
-      if (body.view.callback_id === "list_detail_modal") {
-        const meta2 = safeJsonParse(body.view?.private_metadata || "{}") || {};
-        const returnState = meta2.returnState || {
-          viewType: "assigned",
-          userId: body.user.id,
-          status: "open",
-          deptKey: "all",
-        };
-        await client.views.update({
-          view_id: body.view.id,
-          hash: body.view.hash,
-          view: await buildListDetailView({
-            teamId,
-            task: updated,
-            returnState,
-            viewerUserId: body.user.id,
-          }),
-        });
-      } else if (body.view.callback_id === "detail_modal") {
-        await client.views.update({
-          view_id: body.view.id,
-          hash: body.view.hash,
-          view: await buildDetailModalView({
-            teamId,
-            task: updated,
-            viewerUserId: body.user.id,
-          }),
-        });
-      }
-    }
+// modal refresh（一覧モーダル廃止：常に detail_modal を更新）
+if (body.view?.id) {
+  const refreshed = await dbGetTaskById(teamId, taskId);
+  if (refreshed) {
+    await client.views.update({
+      view_id: body.view.id,
+      hash: body.view.hash,
+      view: await buildDetailModalView({
+        teamId,
+        task: refreshed,
+        viewerUserId: body.user.id,
+        origin: "home",
+      }),
+    });
+  }
+}
     try {
       publishHomeForUsers(client, teamId, [body.user.id], 200);
       setTimeout(() => {
@@ -5724,6 +5180,90 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
     } catch (_) {}
   }
 });
+
+// reopen (detail) - personal: status in_progress / broadcast: requester only（今回は personal 前提）
+app.action("reopen_task", async ({ ack, body, action, client }) => {
+  await ack();
+
+  const p = safeJsonParse(action.value || "{}") || {};
+  const teamId = p.teamId || body.team?.id || body.team_id;
+  const taskId = p.taskId;
+  const actor = getUserIdFromBody(body);
+
+  if (!teamId || !taskId || !actor) return;
+
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    // personal：依頼者 or 対応者のみ
+    if (task.task_type !== "broadcast") {
+      if (task.requester_user_id !== actor && task.assignee_id !== actor) {
+        await safeEphemeral(
+          client,
+          task.channel_id || body.user.id,
+          actor,
+          "未完了に戻せるのは依頼者か対応者だけだよ…！",
+        );
+        return;
+      }
+    } else {
+      // broadcast を戻したいなら、まずは依頼者だけにしておくのが安全
+      if (task.requester_user_id !== actor) {
+        await safeEphemeral(
+          client,
+          task.channel_id || body.user.id,
+          actor,
+          " 複数タスクを未完了に戻せるのは依頼者だけだよ…！",
+        );
+        return;
+      }
+    }
+
+    // 未完了へ戻す（open でもいいけど、UI的には in_progress が自然）
+    const updated = await dbUpdateStatus(teamId, taskId, "in_progress");
+    if (!updated) return;
+
+    // 詳細モーダルを再描画（今開いてるモーダル）
+    if (body.view?.id) {
+      await client.views.update({
+        view_id: body.view.id,
+        hash: body.view.hash,
+        view: await buildDetailModalView({
+          teamId,
+          task: updated,
+          viewerUserId: actor,
+          origin: "home",
+        }),
+      });
+    }
+
+    // スレッドカード：表示更新
+    if (updated.channel_id && updated.message_ts) {
+      const blocks = await buildThreadCardBlocks({ teamId, task: updated });
+      if (!updated.channel_id?.startsWith("D")) {
+        await upsertThreadCard(client, {
+          teamId,
+          channelId: updated.channel_id,
+          parentTs: updated.message_ts,
+          blocks,
+        });
+      }
+    }
+
+    // Home 再描画（関係者）
+    try {
+      const relatedIds = Array.from(
+        new Set([actor, updated.requester_user_id, updated.assignee_id].filter(Boolean)),
+      );
+      publishHomeForUsers(client, teamId, relatedIds, 200);
+      setTimeout(() => publishHomeForUsers(client, teamId, relatedIds, 200), 200);
+    } catch (_) {}
+  } catch (e) {
+    console.error("reopen_task error:", e?.data || e);
+  }
+});
+
 
 // ================================
 // Start

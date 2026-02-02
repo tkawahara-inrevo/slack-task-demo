@@ -1109,16 +1109,17 @@ async function buildDetailModalView({
 
   const isBroadcast = task.task_type === "broadcast";
 
-  // スレッド起点でも「完了」は許可、編集系だけ禁止したい
-  const isThreadOrigin = origin === "thread";
-  const isReadOnly = isThreadOrigin;
+  // ★統一方針A：origin による readOnly 分岐はしない（どこから開いても同じ詳細）
+  // 操作可否は「権限（依頼者/対応者/対象者）」だけで決める
 
-  // ✅ 完了は thread 起点でもOK（編集系は isReadOnly で別途ブロック）
+  // personal 完了権限（依頼者 or 対応者）
   const canCompletePersonal =
     !isBroadcast &&
     (viewerUserId === task.requester_user_id ||
       viewerUserId === task.assignee_id);
+
   const meta = { teamId, taskId: task.id, origin };
+
   const blocks = [
     {
       type: "section",
@@ -1131,21 +1132,34 @@ async function buildDetailModalView({
         text: `*期限*：${formatDueDateOnly(task.due_date)}`,
       },
     },
-
     {
       type: "section",
       text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` },
     },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` },
+    },
+    { type: "divider" },
   ];
 
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: `*ステータス*：${statusLabel(task.status)}` },
-  });
-  blocks.push({ type: "divider" });
+  // ✅ 期限変更ボタン：broadcast のときだけ（personalは「内容を編集」に期限があるため不要）
+  if (task.status !== "cancelled" && task.task_type === "broadcast") {
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "open_edit_due_modal",
+          text: { type: "plain_text", text: "期限を変更 🗓️" },
+          value: JSON.stringify({ teamId, taskId: task.id, origin }),
+        },
+      ],
+    });
+    blocks.push({ type: "divider" });
+  }
 
-  // personal：完了ボタン（スレッド起点でもOK）
-  // ※編集系（内容編集/コメント）は isReadOnly を維持して抑止する
+  // personal：完了ボタン（権限者のみ）
   if (!isBroadcast) {
     if (
       canCompletePersonal &&
@@ -1165,7 +1179,7 @@ async function buildDetailModalView({
         ],
       });
       blocks.push({ type: "divider" });
-    } else if (!canCompletePersonal && !isReadOnly) {
+    } else if (!canCompletePersonal) {
       blocks.push({
         type: "context",
         elements: [
@@ -1179,7 +1193,7 @@ async function buildDetailModalView({
     }
   }
 
-  // ★復活：元メッセージへ（permalinkがある場合のみ表示）
+  // 元メッセージへ（permalinkがある場合のみ表示）
   if (task?.source_permalink) {
     blocks.push({
       type: "section",
@@ -1196,8 +1210,10 @@ async function buildDetailModalView({
     text: { type: "mrkdwn", text: `*タスク内容*\n\`\`\`\n${srcLines}\n\`\`\`` },
   });
 
-  // ★追加：タスク内容の編集（personal: 依頼者/対応者, broadcast: 依頼者のみ / thread起点は表示しない）
-  if (!isReadOnly) {
+  // 内容編集ボタン
+  // personal：依頼者 or 対応者
+  // broadcast：依頼者のみ
+  {
     const canEditTask =
       (!isBroadcast &&
         (viewerUserId === task.requester_user_id ||
@@ -1219,7 +1235,7 @@ async function buildDetailModalView({
     }
   }
 
-  // ===== コメント表示（元メッセージの下）=====
+  // ===== コメント表示 =====
   let __comments = [];
   try {
     __comments = await dbListTaskComments(teamId, task.id, 10);
@@ -1248,121 +1264,115 @@ async function buildDetailModalView({
     }
   }
 
-  if (!isReadOnly) {
-    blocks.push({
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          action_id: "open_comment_modal",
-          text: { type: "plain_text", text: "コメントを書く" },
-          value: JSON.stringify({ teamId, taskId: task.id }),
-        },
-      ],
-    });
-  }
+  // コメントを書く：統一方針Aなので、起点で隠さず常に出す（安全ならOK）
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        action_id: "open_comment_modal",
+        text: { type: "plain_text", text: "コメントを書く" },
+        value: JSON.stringify({ teamId, taskId: task.id }),
+      },
+    ],
+  });
 
   blocks.push({ type: "divider" });
   // ===== コメント表示ここまで =====
 
-  // actions（スレッド起点は操作なし）
-  if (!isReadOnly) {
-    const base = { teamId, taskId: task.id };
-    const actions = [];
-    // ===== broadcast 操作（誤操作防止版）=====
-    if (isBroadcast) {
-      const isTarget = await dbIsUserTarget(teamId, task.id, viewerUserId);
-      const already = await dbHasUserCompleted(teamId, task.id, viewerUserId);
+  // ===== broadcast 操作（誤操作防止版）=====
+  if (isBroadcast) {
+    const isTarget = await dbIsUserTarget(teamId, task.id, viewerUserId);
+    const already = await dbHasUserCompleted(teamId, task.id, viewerUserId);
 
-      // ① 自分の完了（対象者だけ / 既に完了してたら非活性表示）
-      if (
-        isTarget &&
-        !already &&
-        task.status !== "done" &&
-        task.status !== "cancelled"
-      ) {
-        blocks.push({
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "自分だけ完了 ✅" },
-              style: "primary",
-              action_id: "complete_task",
-              value: JSON.stringify({ teamId, taskId: task.id }),
-            },
-          ],
-        });
-      } else if (isTarget && already) {
-        blocks.push({
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "自分は完了済み ✅" },
-              action_id: "noop",
-              value: "noop",
-            },
-          ],
-        });
-      }
-
-      // ② 進捗一覧（既存のまま：誰でも閲覧可）
+    // ① 自分の完了（対象者だけ / 既に完了してたら非活性表示）
+    if (
+      isTarget &&
+      !already &&
+      task.status !== "done" &&
+      task.status !== "cancelled"
+    ) {
       blocks.push({
         type: "actions",
         elements: [
           {
             type: "button",
-            text: { type: "plain_text", text: "完了/未完了一覧" },
-            action_id: "open_progress_modal",
+            text: { type: "plain_text", text: "自分だけ完了 ✅" },
+            style: "primary",
+            action_id: "complete_task",
             value: JSON.stringify({ teamId, taskId: task.id }),
           },
         ],
       });
-
-      // ③ 全体を完了（強制）＋ 取り下げ（依頼者のみ）を同じ行に
-      if (task.status !== "done" && task.status !== "cancelled") {
-        const elems = [
+    } else if (isTarget && already) {
+      blocks.push({
+        type: "actions",
+        elements: [
           {
             type: "button",
-            text: { type: "plain_text", text: "全体を完了（強制）⚠️" },
-            style: "primary",
-            action_id: "confirm_broadcast_done",
-            value: JSON.stringify({ teamId, taskId: task.id }),
-            confirm: {
-              title: { type: "plain_text", text: "確認" },
-              text: {
-                type: "mrkdwn",
-                text: "⚠️ 未完了の人がいても、このタスクを*完了*にします。",
-              },
-              confirm: { type: "plain_text", text: "完了にする" },
-              deny: { type: "plain_text", text: "やめる" },
-            },
+            text: { type: "plain_text", text: "自分は完了済み ✅" },
+            action_id: "noop",
+            value: "noop",
           },
-        ];
-
-        // 取り下げは依頼者のみ（既存ルール維持）
-        if (task.requester_user_id === viewerUserId) {
-          elems.push({
-            type: "button",
-            text: { type: "plain_text", text: "取り下げ" },
-            style: "danger",
-            action_id: "cancel_task",
-            value: JSON.stringify({ teamId, taskId: task.id }),
-            confirm: {
-              title: { type: "plain_text", text: "確認" },
-              text: { type: "mrkdwn", text: "このタスクを*取り下げ*ます。" },
-              confirm: { type: "plain_text", text: "取り下げる" },
-              deny: { type: "plain_text", text: "やめる" },
-            },
-          });
-        }
-
-        blocks.push({ type: "actions", elements: elems });
-      }
+        ],
+      });
     }
-    // ===== broadcast 操作（誤操作防止版）ここまで =====
+
+    // ② 進捗一覧（誰でも閲覧可）
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "完了/未完了一覧" },
+          action_id: "open_progress_modal",
+          value: JSON.stringify({ teamId, taskId: task.id }),
+        },
+      ],
+    });
+
+    // ③ 全体を完了（強制）＋ 取り下げ（依頼者のみ）
+    if (task.status !== "done" && task.status !== "cancelled") {
+      const elems = [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "全体を完了（強制）⚠️" },
+          style: "primary",
+          action_id: "confirm_broadcast_done",
+          value: JSON.stringify({ teamId, taskId: task.id }),
+          confirm: {
+            title: { type: "plain_text", text: "確認" },
+            text: {
+              type: "mrkdwn",
+              text: "⚠️ 未完了の人がいても、このタスクを*完了*にします。",
+            },
+            confirm: { type: "plain_text", text: "完了にする" },
+            deny: { type: "plain_text", text: "やめる" },
+          },
+        },
+      ];
+
+      if (task.requester_user_id === viewerUserId) {
+        elems.push({
+          type: "button",
+          text: { type: "plain_text", text: "取り下げ" },
+          style: "danger",
+          action_id: "cancel_task",
+          value: JSON.stringify({ teamId, taskId: task.id }),
+          confirm: {
+            title: { type: "plain_text", text: "確認" },
+            text: { type: "mrkdwn", text: "このタスクを*取り下げ*ます。" },
+            confirm: { type: "plain_text", text: "取り下げる" },
+            deny: { type: "plain_text", text: "やめる" },
+          },
+        });
+      }
+
+      blocks.push({ type: "actions", elements: elems });
+    }
   }
+  // ===== broadcast 操作ここまで =====
+
   return {
     type: "modal",
     callback_id: "detail_modal",
@@ -1372,6 +1382,7 @@ async function buildDetailModalView({
     blocks,
   };
 }
+
 
 async function openDetailModal(
   client,
@@ -5022,11 +5033,11 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
     if (!task) return;
 
     const isBroadcast = task.task_type === "broadcast";
-    const canEditTask =
-      (!isBroadcast &&
-        (viewerUserId === task.requester_user_id ||
-          viewerUserId === task.assignee_id)) ||
-      (isBroadcast && viewerUserId === task.requester_user_id);
+
+    // ✅ 修正ポイント：broadcast は「だれでも」編集OK
+    const canEditTask = isBroadcast
+      ? true
+      : viewerUserId === task.requester_user_id || viewerUserId === task.assignee_id;
 
     if (!canEditTask) return;
 
@@ -5090,6 +5101,7 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
   }
 });
 
+
 app.view("edit_task_modal", async ({ ack, body, view, client }) => {
   const meta = safeJsonParse(view.private_metadata || "{}") || {};
   const teamId = meta.teamId || getTeamIdFromBody(body);
@@ -5117,7 +5129,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     view: {
       type: "modal",
       callback_id: "edit_task_modal_saving",
-      title: { type: "plain_text", text: "保存中..." },
+      title: { type: "plain_text", text: "保存中." },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
         { type: "section", text: { type: "mrkdwn", text: "更新しています。" } },
@@ -5130,11 +5142,11 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     if (!before) return;
 
     const isBroadcast = before.task_type === "broadcast";
-    const canEditTask =
-      (!isBroadcast &&
-        (actorUserId === before.requester_user_id ||
-          actorUserId === before.assignee_id)) ||
-      (isBroadcast && actorUserId === before.requester_user_id);
+
+    // ✅ 修正ポイント：broadcast は「だれでも」保存OK
+    const canEditTask = isBroadcast
+      ? true
+      : actorUserId === before.requester_user_id || actorUserId === before.assignee_id;
 
     if (!canEditTask) return;
 
@@ -5163,110 +5175,33 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     // スレッドカード更新 + 変更通知（証跡）
     if (updated.channel_id && updated.message_ts) {
       const cardBlocks = await buildThreadCardBlocks({ teamId, task: updated });
-      if (!updated.channel_id?.startsWith("D")) {
+      if (!updated.channel_id || !updated.message_ts) return;
+
+      try {
         await upsertThreadCard(client, {
           teamId,
           channelId: updated.channel_id,
           parentTs: updated.message_ts,
+          threadTs: updated.message_ts,
           blocks: cardBlocks,
         });
+      } catch (e) {
+        console.error("upsertThreadCard error:", e?.data || e);
       }
-      // 変更点を作る（証跡用）
-      const changes = [];
-      if (
-        !isBroadcast &&
-        before.assignee_id &&
-        updated.assignee_id &&
-        before.assignee_id !== updated.assignee_id
-      ) {
-        changes.push(
-          `• *対応者*：<@${before.assignee_id}> → <@${updated.assignee_id}>`,
-        );
-      }
-      if (String(before.due_date || "") !== String(updated.due_date || "")) {
-        changes.push(
-          `• *期限*：${formatDueDateOnly(before.due_date)} → ${formatDueDateOnly(updated.due_date)}`,
-        );
-      }
-      if ((before.description || "") !== (updated.description || "")) {
-        changes.push("• *タスク内容*：変更あり");
-      }
-      const changesText = changes.length
-        ? changes.join("\n")
-        : "• 変更点：軽微な更新";
-
-      const beforeDesc = noMention(
-        String(before.description || "").slice(0, 400),
-      );
-      const afterDesc = noMention(
-        String(updated.description || "").slice(0, 400),
-      );
-
-      const blocks = [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `:鉛筆_2: *タスク内容が更新されました*\n更新者：<@${actorUserId}>\n*変更点*\n${changesText}`,
-          },
-        },
-      ];
-
-      if ((before.description || "") !== (updated.description || "")) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*変更前*\n\`\`\`\n${beforeDesc}\n\`\`\`\n*変更後*\n\`\`\`\n${afterDesc}\n\`\`\``,
-          },
-        });
-      }
-
-      await client.chat.postMessage({
-        channel: updated.channel_id,
-        thread_ts: updated.message_ts,
-        text: "タスク内容が更新されました",
-        blocks,
-      });
     }
 
-    // Home再描画（操作者のみ）
+    // Home を更新（対象者/依頼者に広く）
     try {
-      publishHomeForUsers(client, teamId, [actorUserId], 200);
-      setTimeout(
-        () => publishHomeForUsers(client, teamId, [actorUserId], 200),
-        200,
-      );
+      const users = [
+        updated.requester_user_id,
+        updated.assignee_id,
+        actorUserId,
+      ].filter(Boolean);
+      await publishHomeForUsers(client, teamId, users, 250);
     } catch (_) {}
 
-    // ② 最後に「更新後の詳細」を表示（不安解消・hash_conflict回避）
+    // ② 現在のモーダルは「保存しました✅」最小UI
     try {
-      const detailView = await buildDetailModalView({
-        teamId,
-        task: updated,
-        viewerUserId: actorUserId,
-        origin: "home",
-      });
-
-      // ✅ コメント保存と同じ考え方：
-      // - まず「前の詳細モーダル」を最新内容で更新しておく
-      // - いま表示中（保存中/保存完了）のモーダルは「保存しました✅」だけにする
-      //   → 閉じると、更新済みの詳細モーダルに戻る（古いモーダルが残らない）
-      const prevViewId = body?.view?.previous_view_id;
-
-      // ① 前の詳細モーダルを更新（あれば）
-      if (prevViewId) {
-        try {
-          await client.views.update({
-            view_id: prevViewId,
-            view: detailView,
-          });
-        } catch (e) {
-          console.error("update previous detail view error:", e?.data || e);
-        }
-      }
-
-      // ② 現在のモーダルは「保存しました✅」最小UI
       await client.views.update({
         view_id: body.view.id,
         view: {
@@ -5451,17 +5386,68 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
         }
       }
 
-      // DM本文（DMなので @mention は不要。DM自体が通知になる）
-      const title = task.title || "（タスク）";
-      const msg =
-        `💬 タスクにコメントがありました\n` +
-        `「${title}」\n` +
-        `---\n` +
-        `${comment}`;
+// DM本文：どのタスクか分かるように blocks +「詳細を開く」ボタンを付ける
+const title = task.title || "（タスク）";
+const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
+// ★追加：コメント内の <@UXXXX> を @表示名 に変換
+const prettyComment = await prettifyUserMentions(comment || "", task.team_id);
 
-      for (const uid of recipients) {
-        await postDM(uid, msg);
-      }
+for (const uid of recipients) {
+  try {
+    const dm = await app.client.conversations.open({ users: uid });
+    const channel = dm.channel?.id;
+    if (!channel) continue;
+
+    const blocks = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "💬 *タスクにコメントがありました*" },
+      },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `*${noMention(title)}*` },
+      },
+{
+  type: "section",
+  text: {
+    type: "mrkdwn",
+    text: `*コメント*\n>${noMention(String(prettyComment).slice(0, 800))}`,
+  },
+}
+    ];
+
+    // 元メッセージリンク（あれば）
+    if (task.source_permalink) {
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `🔗 <${task.source_permalink}|元メッセージへ>`,
+        },
+      });
+    }
+
+    // 詳細を開くボタン
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "詳細を開く" },
+          action_id: "open_detail_modal",
+          value: payload,
+        },
+      ],
+    });
+
+    await app.client.chat.postMessage({
+      channel,
+      text: `💬 コメント: ${noMention(title)}`,
+      blocks,
+    });
+  } catch (_) {}
+}
+
     } catch (e) {
       console.error("comment DM notify error:", e?.data || e);
     }
@@ -5515,6 +5501,223 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
               type: "section",
               text: { type: "mrkdwn", text: "🥺 保存に失敗しました…" },
             },
+          ],
+        },
+      });
+    } catch (_) {}
+  }
+});
+
+app.action("open_edit_due_modal", async ({ ack, body, action, client }) => {
+  await ack();
+
+  const p = safeJsonParse(action?.value || "{}") || {};
+  const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+
+  const teamId = p.teamId || meta.teamId || getTeamIdFromBody(body);
+  const taskId = p.taskId || meta.taskId;
+  const viewerUserId = getUserIdFromBody(body);
+  const origin = p.origin || meta.origin || "home";
+
+  if (!teamId || !taskId || !viewerUserId) return;
+
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    // ✅ 仕様：broadcast は「だれでも」期限変更OK
+    // personal は依頼者/対応者のみ（必要なら personal も true にしてOK）
+    const isBroadcast = task.task_type === "broadcast";
+    const canChangeDue = isBroadcast
+      ? true
+      : viewerUserId === task.requester_user_id || viewerUserId === task.assignee_id;
+
+    if (!canChangeDue) return;
+
+    const initDue = slackDateYmd(task.due_date);
+
+    // ★親（詳細モーダル）の view_id を保持しておく（後で再描画する）
+    const parentViewId = body.view?.id || null;
+
+    const blocks = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `*${noMention(task.title || "（タスク）")}*` },
+      },
+      {
+        type: "input",
+        block_id: "due",
+        optional: true,
+        label: { type: "plain_text", text: "期限" },
+        element: {
+          type: "datepicker",
+          action_id: "due_date",
+          ...(initDue ? { initial_date: initDue } : {}),
+          placeholder: { type: "plain_text", text: "日付を選択" },
+        },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: "※ 期限だけ変更します（本文は変更しません）",
+          },
+        ],
+      },
+    ];
+
+    const view = {
+      type: "modal",
+      callback_id: "edit_due_modal",
+      private_metadata: JSON.stringify({
+        teamId,
+        taskId,
+        origin,
+        parentViewId,
+      }),
+      title: { type: "plain_text", text: "期限変更" },
+      submit: { type: "plain_text", text: "保存" },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks,
+    };
+
+    // 詳細モーダル上のボタンからなので push が自然（trigger_id必須）
+    await client.views.push({ trigger_id: body.trigger_id, view });
+  } catch (e) {
+    console.error("open_edit_due_modal error:", e?.data || e);
+  }
+});
+
+
+app.view("edit_due_modal", async ({ ack, body, view, client }) => {
+  const meta = safeJsonParse(view.private_metadata || "{}") || {};
+  const teamId = meta.teamId || getTeamIdFromBody(body);
+  const taskId = meta.taskId;
+  const origin = meta.origin || "home";
+  const actorUserId = getUserIdFromBody(body);
+
+  const nextDue = view.state.values.due?.due_date?.selected_date || null;
+
+  // ① まず軽い画面へ差し替え（hash_conflict回避）
+  await ack({
+    response_action: "update",
+    view: {
+      type: "modal",
+      callback_id: "edit_due_modal_saving",
+      title: { type: "plain_text", text: "保存中." },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "更新しています。" } }],
+    },
+  });
+
+  try {
+    const before = await dbGetTaskById(teamId, taskId);
+    if (!before) return;
+
+    const isBroadcast = before.task_type === "broadcast";
+
+    // ✅ 仕様：broadcast は「だれでも」期限変更OK
+    const canChangeDue = isBroadcast
+      ? true
+      : actorUserId === before.requester_user_id || actorUserId === before.assignee_id;
+
+    if (!canChangeDue) return;
+
+    // ✅ due_date だけ更新（本文は触らない）
+    const updated = await dbUpdateTaskContent(teamId, taskId, {
+      due_date: nextDue,
+      description: null,
+      assignee_id: null,
+      assignee_dept: null,
+    });
+    if (!updated) return;
+
+    // スレッドカード更新（証跡）
+    if (updated.channel_id && updated.message_ts) {
+      try {
+        const cardBlocks = await buildThreadCardBlocks({ teamId, task: updated });
+        await upsertThreadCard(client, {
+          teamId,
+          channelId: updated.channel_id,
+          parentTs: updated.message_ts,
+          threadTs: updated.message_ts,
+          blocks: cardBlocks,
+        });
+      } catch (e) {
+        console.error("upsertThreadCard error:", e?.data || e);
+      }
+    }
+
+    // Home 再描画（広めに）
+    try {
+      const users = [updated.requester_user_id, updated.assignee_id, actorUserId].filter(Boolean);
+      await publishHomeForUsers(client, teamId, users, 250);
+    } catch (_) {}
+
+    // ===== ★ここが本題：背面の詳細モーダルを最新で再描画 =====
+    // Slack が提供する previous_view_id が取れるならそれが最優先
+    const prevViewId = body.view?.previous_view_id || null;
+
+    // 念のため open 側で持たせた parentViewId もフォールバックに使う
+    const parentViewId = meta.parentViewId || null;
+
+    const targetDetailViewId = prevViewId || parentViewId;
+
+    if (targetDetailViewId) {
+      try {
+        const detailView = await buildDetailModalView({
+          teamId,
+          task: updated,
+          viewerUserId: actorUserId,
+          origin,
+        });
+
+        await client.views.update({
+          view_id: targetDetailViewId,
+          view: detailView,
+        });
+      } catch (e) {
+        console.error("refresh detail modal error:", e?.data || e);
+      }
+    }
+    // ===== ★ここまで =====
+
+    // ② 現在のモーダルは「保存しました✅」最小UI
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: {
+          type: "modal",
+          callback_id: "edit_due_modal_done",
+          title: { type: "plain_text", text: "保存しました✅" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `期限を更新しました 🗓️\n*${formatDueDateOnly(nextDue)}*`,
+              },
+            },
+          ],
+        },
+      });
+    } catch (_) {}
+  } catch (e) {
+    console.error("edit_due_modal error:", e?.data || e);
+
+    // 失敗画面（最小UI）
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: {
+          type: "modal",
+          callback_id: "edit_due_modal_error",
+          title: { type: "plain_text", text: "保存できませんでした" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            { type: "section", text: { type: "mrkdwn", text: "もう一度お試しください。" } },
           ],
         },
       });

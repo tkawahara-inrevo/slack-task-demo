@@ -2547,7 +2547,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
               type: "datepicker",
               action_id: "due_date",
               placeholder: { type: "plain_text", text: "期限" },
-              initial_date: slackDateYmd(new Date()),
+              initial_date: todayJstYmd(),
             },
           },
           //  { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
@@ -2596,23 +2596,80 @@ function extractUserIdsFromBlocks(blocks) {
   return out;
 }
 
-// メッセージ本文から「個人メンション」だけ拾う（ユーザーグループ/ here/channel は除外）
-function inferAssigneeFromMessageText(rawText, fallbackUserId, blocks = null) {
-  // ① blocks の user_id を最優先（textにIDが出ない投稿を救う）
-  const fromBlocks = extractUserIdsFromBlocks(blocks);
-  if (fromBlocks.length) return fromBlocks[0];
+// blocks から user_id を拾う（既存）
+function extractUserIdsFromBlocks(blocks) {
+  const out = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
 
-  // ② text の <@Uxxx> を拾う（保険）
+    if (node.type === "user" && node.user_id) {
+      if (!out.includes(node.user_id)) out.push(node.user_id);
+    }
+    for (const v of Object.values(node)) walk(v);
+  };
+  walk(blocks);
+  return out;
+}
+
+// ★追加：blocks から usergroup_id を拾う（rich_text の usergroup）
+function extractUserGroupIdsFromBlocks(blocks) {
+  const out = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
+
+    // Slackのrich_textで usergroup は type: "usergroup" が来ることがある
+    if (node.type === "usergroup" && node.usergroup_id) {
+      if (!out.includes(node.usergroup_id)) out.push(node.usergroup_id);
+    }
+    for (const v of Object.values(node)) walk(v);
+  };
+  walk(blocks);
+  return out;
+}
+
+// ★追加：text から usergroup token を拾う（<!subteam^ID|@handle> / <!subteam^ID>）
+function extractUserGroupIdsFromText(rawText) {
   const text = String(rawText || "");
-  const userIds = [];
-  const re = /<@([A-Z0-9]+)(?:\|[^>]+)?>/g;
+  const out = [];
+  const re = /<!subteam\^([A-Z0-9]+)(?:\|[^>]+)?>/g;
   let m;
   while ((m = re.exec(text)) !== null) {
-    const uid = m[1];
-    if (!uid) continue;
-    if (!userIds.includes(uid)) userIds.push(uid);
+    const gid = m[1];
+    if (gid && !out.includes(gid)) out.push(gid);
   }
-  return userIds[0] || fallbackUserId;
+  return out;
+}
+
+function inferTargetsFromMessage(rawText, fallbackUserId, blocks = null) {
+  const users = [];
+  const groups = [];
+
+  // ① blocks 優先（textにIDが出ない投稿を救う）
+  for (const u of extractUserIdsFromBlocks(blocks)) users.push(u);
+  for (const g of extractUserGroupIdsFromBlocks(blocks)) groups.push(g);
+
+  // ② text の <@Uxxx> と <!subteam^...> を拾う（保険）
+  {
+    const text = String(rawText || "");
+    const ure = /<@([A-Z0-9]+)(?:\|[^>]+)?>/g;
+    let m;
+    while ((m = ure.exec(text)) !== null) {
+      const uid = m[1];
+      if (uid && !users.includes(uid)) users.push(uid);
+    }
+  }
+  for (const g of extractUserGroupIdsFromText(rawText)) {
+    if (!groups.includes(g)) groups.push(g);
+  }
+
+  // ③ 何も無ければ fallback（リアクションした人）
+  if (!users.length) users.push(fallbackUserId);
+
+  return { userIds: users.filter(Boolean), groupIds: groups.filter(Boolean) };
 }
 
 function buildReactionPromptBlocks({
@@ -2976,7 +3033,7 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
               type: "datepicker",
               action_id: "due_date",
               placeholder: { type: "plain_text", text: "期限" },
-              initial_date: slackDateYmd(new Date()),
+              initial_date: todayJstYmd(),
             },
           },
 

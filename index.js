@@ -2577,7 +2577,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
 // ================================
 
 // ✅ のリアクション名（Slack内部名）
-const TASK_REACTION_NAME = "tasks";
+const TASK_REACTION_NAME = "task";
 
 // blocks から user_id を拾う（rich_text の user mention を拾う）
 function extractUserIdsFromBlocks(blocks) {

@@ -1703,7 +1703,7 @@ function taskLineForHome(task, viewKey) {
 
   preview = preview.replace(/\n{3,}/g, "\n\n");
 
-  const MAX_PREVIEW_CHARS = 200;
+  const MAX_PREVIEW_CHARS = 100;
   if (preview.length > MAX_PREVIEW_CHARS)
     preview = preview.slice(0, MAX_PREVIEW_CHARS) + "…";
 

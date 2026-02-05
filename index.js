@@ -1102,12 +1102,27 @@ async function buildDetailModalView({
   viewerUserId,
   origin = "home",
 }) {
-  const srcLinesRaw =
-    (task.description || "").split("\n").slice(0, 10).join("\n") ||
-    "（本文なし）";
-  const srcLines = noMention(srcLinesRaw);
+  // ----------------------------
+  // Slack mrkdwn text は 3000文字制限
+  // ここ（詳細モーダルの「タスク内容」）で超えがちなので安全に切る
+  // ----------------------------
+  const raw = String(task.description || "").replace(/\r\n/g, "\n");
+
+  // まず「最大行数」
+  const MAX_LINES = 10;
+  let srcLinesRaw = raw.split("\n").slice(0, MAX_LINES).join("\n") || "（本文なし）";
+
+  // メンション抑止 + コードフェンス混入対策（``` があると表示崩れやすい）
+  let srcLines = noMention(srcLinesRaw).replace(/```/g, "´´´");
+
+  // 次に「最大文字数」：見出しや ``` の分を引いて余裕を持たせる
+  const MAX_DETAIL_CHARS = 2600;
+  if (srcLines.length > MAX_DETAIL_CHARS) {
+    srcLines = srcLines.slice(0, MAX_DETAIL_CHARS) + "\n…";
+  }
 
   const isBroadcast = task.task_type === "broadcast";
+
 
   // ★統一方針A：origin による readOnly 分岐はしない（どこから開いても同じ詳細）
   // 操作可否は「権限（依頼者/対応者/対象者）」だけで決める
@@ -1485,6 +1500,18 @@ function getHomeState(teamId, userId) {
     assigneeUserId: userId,
     deptKey: "all",
     broadcastScopeKey: "to_me",
+
+    // ★追加：Home「もっと見る」展開状態（範囲=すべて の時だけUIで使う）
+    homeMore: {
+      overdue: false,
+      today: false,
+    },
+  };
+
+  // 後方互換：昔のstateに homeMore が無い場合に備える
+  const homeMore = {
+    overdue: !!s?.homeMore?.overdue,
+    today: !!s?.homeMore?.today,
   };
 
   // ★表示は常に「すべて」に固定（personal/broadcastの切替を使わない）
@@ -1494,6 +1521,7 @@ function getHomeState(teamId, userId) {
     viewKey: "all",
     broadcastScopeKey: s.broadcastScopeKey || "to_me",
     personalScopeKey: s.broadcastScopeKey || s.personalScopeKey || "to_me",
+    homeMore,
   };
 }
 
@@ -1501,10 +1529,18 @@ function setHomeState(teamId, userId, next) {
   const k = `${teamId}:${userId}`;
 
   // ★viewKey は固定、範囲は broadcastScopeKey に統一
+  const prev = getHomeState(teamId, userId);
+
   const merged = {
-    ...getHomeState(teamId, userId),
+    ...prev,
     ...next,
     viewKey: "all",
+  };
+
+  // homeMore はネストなので shallow merge だと壊れる → 明示的にmerge
+  merged.homeMore = {
+    ...(prev.homeMore || { overdue: false, today: false }),
+    ...(next.homeMore || {}),
   };
 
   if (merged.broadcastScopeKey) {
@@ -1513,6 +1549,7 @@ function setHomeState(teamId, userId, next) {
 
   homeState.set(k, merged);
 }
+
 
 function homeScopeSelectElement(scopeKey) {
   const cur = HOME_SCOPES.find((s) => s.key === scopeKey) || HOME_SCOPES[0];
@@ -1695,23 +1732,34 @@ async function dbListPersonalTasksByStatusesWithScope(
 }
 
 function taskLineForHome(task, viewKey) {
-  // 一覧の主役は「本文」だけ（人/期限/リンクは context で小さく出す）
   const rawDesc = String(task.description || "")
     .replace(/\r\n/g, "\n")
     .trim();
-  let preview = rawDesc;
 
+  let preview = rawDesc || String(task.title || "（本文なし）");
+
+  // 改行を整理
   preview = preview.replace(/\n{3,}/g, "\n\n");
 
+  // ★ まず「最大5行」に制限
+  const MAX_LINES = 5;
+  const lines = preview.split("\n");
+  if (lines.length > MAX_LINES) {
+    preview = lines.slice(0, MAX_LINES).join("\n") + "\n…";
+  }
+
+  // ★ 次に「最大文字数」に制限
   const MAX_PREVIEW_CHARS = 100;
-  if (preview.length > MAX_PREVIEW_CHARS)
+  if (preview.length > MAX_PREVIEW_CHARS) {
     preview = preview.slice(0, MAX_PREVIEW_CHARS) + "…";
+  }
 
   preview = noMention(preview);
 
   if (!preview) preview = noMention(String(task.title || "（本文なし）"));
   return preview;
 }
+
 
 async function publishHome({ client, teamId, userId }) {
   const st = getHomeState(teamId, userId);
@@ -1854,8 +1902,11 @@ async function publishHome({ client, teamId, userId }) {
     tasks.push(t);
   }
 
-  // public は参加していなくても表示する / private・DM は表示しない
+  // public は参加していなくても表示する / private は表示しない
+  // DM（Dxxxx）は基本表示しないが、「範囲=自分あて(to_me)」かつ personal で自分担当のものだけ表示する
   {
+    const isToMe = rangeKey === "to_me";
+
     const uniqChannels = Array.from(
       new Set((tasks || []).map((t) => t.channel_id).filter(Boolean)),
     );
@@ -1867,86 +1918,98 @@ async function publishHome({ client, teamId, userId }) {
     }
 
     tasks = (tasks || []).filter((t) => {
-      if (!t.channel_id) return true;
-      return okMap.get(t.channel_id) === true;
+      const ch = String(t.channel_id || "");
+
+      // チャンネル情報が無いものは落とさない
+      if (!ch) return true;
+
+      // ✅ DMは例外許可：to_me の personal で、自分が担当のものだけ通す
+      if (ch.startsWith("D")) {
+        const isPersonal = t.task_type !== "broadcast";
+        const isMine = t.assignee_id && t.assignee_id === userId;
+        return isToMe && isPersonal && isMine;
+      }
+
+      // 通常ルール：publicのみOK（private/その他はNG）
+      return okMap.get(ch) === true;
     });
   }
 
   // 表示：未完了はステータス別に分ける（完了/取り下げはまとめ）
-if (st.scopeKey === "done") {
-  // ★完了は直近N時間だけ表示（ここはあなたが2週間=336時間に変更する想定でOK）
-  const DONE_VISIBLE_HOURS = 168; // ←あなたの方針でここを336にしてね
-  const cutoffMs = Date.now() - DONE_VISIBLE_HOURS * 60 * 60 * 1000;
+  if (st.scopeKey === "done") {
+    // ★完了は直近N時間だけ表示（ここはあなたが2週間=336時間に変更する想定でOK）
+    const DONE_VISIBLE_HOURS = 168; // ←あなたの方針でここを336にしてね
+    const cutoffMs = Date.now() - DONE_VISIBLE_HOURS * 60 * 60 * 1000;
 
-  const recentDoneTasks = (tasks || []).filter((t) => {
-    const ts = t?.completed_at || t?.updated_at || t?.created_at;
-    if (!ts) return false;
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return false;
-    return d.getTime() >= cutoffMs;
-  });
-
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: `*✅ 完了（直近${DONE_VISIBLE_HOURS}時間）*` },
-  });
-
-  if (!recentDoneTasks.length) {
-    blocks.push({
-      type: "context",
-      elements: [{ type: "mrkdwn", text: "（直近の完了なし）" }],
+    const recentDoneTasks = (tasks || []).filter((t) => {
+      const ts = t?.completed_at || t?.updated_at || t?.created_at;
+      if (!ts) return false;
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return false;
+      return d.getTime() >= cutoffMs;
     });
-  } else {
-    for (const t of recentDoneTasks) {
-      const isBroadcast = t.task_type === "broadcast";
 
-      // 「未完了に戻せる」権限
-      const canReopen = isBroadcast
-        ? userId === t.requester_user_id
-        : userId === t.requester_user_id || userId === t.assignee_id;
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*✅ 完了（直近${DONE_VISIBLE_HOURS}時間）*` },
+    });
 
-      // 本文（行）
+    if (!recentDoneTasks.length) {
       blocks.push({
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text:
-            st.viewKey === "all"
-              ? taskLineForHome(t, isBroadcast ? "broadcast" : "personal")
-              : taskLineForHome(t, st.viewKey),
-        },
+        type: "context",
+        elements: [{ type: "mrkdwn", text: "（直近の完了なし）" }],
       });
+    } else {
+      for (const t of recentDoneTasks) {
+        const isBroadcast = t.task_type === "broadcast";
 
-      // ボタン行：未完了に戻す / 詳細
-      const elems = [];
+        // 「未完了に戻せる」権限
+        const canReopen = isBroadcast
+          ? userId === t.requester_user_id
+          : userId === t.requester_user_id || userId === t.assignee_id;
 
-      if (canReopen) {
-        elems.push({
-          type: "button",
-          text: { type: "plain_text", text: "未完了に戻す ↩️" },
-          action_id: "reopen_task",
-          value: JSON.stringify({ teamId, taskId: t.id }),
-          confirm: {
-            title: { type: "plain_text", text: "確認" },
-            text: { type: "mrkdwn", text: "このタスクを*未完了*に戻します。" },
-            confirm: { type: "plain_text", text: "戻す" },
-            deny: { type: "plain_text", text: "やめる" },
+        // 本文（行）
+        blocks.push({
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text:
+              st.viewKey === "all"
+                ? taskLineForHome(t, isBroadcast ? "broadcast" : "personal")
+                : taskLineForHome(t, st.viewKey),
           },
         });
+
+        // ボタン行：未完了に戻す / 詳細
+        const elems = [];
+
+        if (canReopen) {
+          elems.push({
+            type: "button",
+            text: { type: "plain_text", text: "未完了に戻す ↩️" },
+            action_id: "reopen_task",
+            value: JSON.stringify({ teamId, taskId: t.id }),
+            confirm: {
+              title: { type: "plain_text", text: "確認" },
+              text: { type: "mrkdwn", text: "このタスクを*未完了*に戻します。" },
+              confirm: { type: "plain_text", text: "戻す" },
+              deny: { type: "plain_text", text: "やめる" },
+            },
+          });
+        }
+
+        elems.push({
+          type: "button",
+          text: { type: "plain_text", text: "詳細" },
+          action_id: "open_detail_modal",
+          value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
+        });
+
+        blocks.push({ type: "actions", elements: elems });
+
+        blocks.push({ type: "divider" });
       }
-
-      elems.push({
-        type: "button",
-        text: { type: "plain_text", text: "詳細" },
-        action_id: "open_detail_modal",
-        value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
-      });
-
-      blocks.push({ type: "actions", elements: elems });
-
-     blocks.push({ type: "divider" });
     }
-  }
   } else {
     // ================================
     // ②：未完了は「期限切れ / 期限内」でグルーピング（JST 기준）
@@ -1993,225 +2056,285 @@ if (st.scopeKey === "done") {
       ),
     );
 
-    await Promise.all(
-      requesterIds.map(async (uid) => {
-        const url = await getUserIconUrl(teamId, uid);
-        if (url) requesterIconMap.set(uid, url);
-      }),
-    );
+    // ★範囲=すべて(all) の時はアイコン取得しない（大量呼び出しで固まりやすいので）
+    if (rangeKey !== "all") {
+      await Promise.all(
+        requesterIds.map(async (uid) => {
+          const url = await getUserIconUrl(teamId, uid);
+          if (url) requesterIconMap.set(uid, url);
+        }),
+      );
 
-    await Promise.all(
-      assigneeIds.map(async (uid) => {
-        const url = await getUserIconUrl(teamId, uid);
-        if (url) assigneeIconMap.set(uid, url);
-      }),
-    );
+      await Promise.all(
+        assigneeIds.map(async (uid) => {
+          const url = await getUserIconUrl(teamId, uid);
+          if (url) assigneeIconMap.set(uid, url);
+        }),
+      );
+    }
 
- const pushTaskList = async (title, list) => {
-  // Slack Home view は blocks <= 100 制限がある
-  const MAX_BLOCKS = 100;
-  const SAFETY = 8; // 見出しや末尾の余裕
+    const pushTaskList = async (title, list, totalCount = null) => {
+      // Slack Home view は blocks <= 100 制限がある
+      const MAX_BLOCKS = 100;
+      const SAFETY = 8; // 見出しや末尾の余裕
 
-  const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
+      const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
 
-  const titlePlain = String(title || "")
-    .replace(/\*/g, "")
-    .trim();
+      const titlePlain = String(title || "")
+        .replace(/\*/g, "")
+        .trim();
 
-  blocks.push({
-    type: "header",
-    text: { type: "plain_text", text: `${titlePlain}（${list.length}件）` },
-  });
-  blocks.push({ type: "divider" });
-
-  if (!list.length) {
-    if (canAdd(2)) {
       blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: "（なし）" }],
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: `${titlePlain}（${totalCount ?? list.length}件）`,
+        },
       });
       blocks.push({ type: "divider" });
-    }
-    return;
-  }
 
-  let shown = 0;
-
-  // ★範囲=すべて のときだけ、詳細を右に出す（下には出さない）
-  const showDetailOnRight = rangeKey === "all";
-
-  for (const t of list) {
-    const viewKey = t.task_type === "broadcast" ? "broadcast" : "personal";
-
-    // ★ broadcastで「自分が完了済みか？」を判定（範囲=自分あて の時だけ）
-    const viewerCompleted =
-      rangeKey === "to_me" && t.task_type === "broadcast"
-        ? await dbHasUserCompleted(teamId, t.id, userId)
-        : false;
-
-    // 詳細ボタン（共通）
-    const detailBtn = {
-      type: "button",
-      text: { type: "plain_text", text: "詳細" },
-      action_id: "open_detail_modal",
-      value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
-    };
-
-    // 追加ブロック数を見積もる（※range=all は actions を省けるので軽くなる）
-    // 本文(section) + 人(context) + 期限/link(context) + 区切り(context) = 4
-    // to_me は完了/詳細 actions が基本つくので +1 (完了済み表示があると +1)
-    const needsActions =
-      !showDetailOnRight && rangeKey !== "to_me"
-        ? true // (詳細を下に出す)
-        : rangeKey === "to_me"; // (完了/詳細が必要)
-
-    const needsCompletedHint =
-      rangeKey === "to_me" && t.task_type === "broadcast" && viewerCompleted;
-
-    const estimated =
-      1 + // section
-      1 + // people context
-      1 + // meta context
-      (needsCompletedHint ? 1 : 0) + // "あなたは完了済み" context
-      (needsActions ? 1 : 0) + // actions
-      1; // separator context
-
-    if (!canAdd(estimated)) break;
-
-    // ✅ 主：タスク内容（本文）
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: taskLineForHome(t, viewKey),
-      },
-      ...(showDetailOnRight ? { accessory: detailBtn } : {}),
-    });
-
-    // ✅ 小：アイコン + 依頼者 ⇒ アイコン + 対応者（既存のアイコンMapを利用）
-    const requesterId = t?.requester_user_id;
-    const assigneeId = t?.assignee_id;
-
-    const requesterIcon = requesterId ? requesterIconMap.get(requesterId) : null;
-    const assigneeIcon =
-      t?.task_type !== "broadcast" && assigneeId
-        ? assigneeIconMap.get(assigneeId)
-        : null;
-
-    const assigneeText =
-      viewKey === "broadcast"
-        ? assigneeDisplay(t)
-        : assigneeId
-          ? `<@${assigneeId}>`
-          : "-";
-
-    const peopleElements = [];
-    if (requesterIcon)
-      peopleElements.push({
-        type: "image",
-        image_url: requesterIcon,
-        alt_text: "requester",
-      });
-    if (requesterId)
-      peopleElements.push({ type: "mrkdwn", text: `<@${requesterId}>` });
-    peopleElements.push({ type: "mrkdwn", text: "⇒" });
-    if (assigneeIcon)
-      peopleElements.push({
-        type: "image",
-        image_url: assigneeIcon,
-        alt_text: "assignee",
-      });
-    peopleElements.push({ type: "mrkdwn", text: assigneeText });
-
-    blocks.push({ type: "context", elements: peopleElements });
-
-    // ✅ 小：期限 + 元メッセージへリンク
-    const dueText = t?.due_date ? `（${formatDueDateOnly(t.due_date)}）まで` : "";
-    const linkText = t?.source_permalink
-      ? `🔗 <${t.source_permalink}|元メッセージへ>`
-      : "";
-
-    const metaElems = [];
-    if (dueText) metaElems.push({ type: "mrkdwn", text: dueText });
-    if (linkText) metaElems.push({ type: "mrkdwn", text: linkText });
-
-    blocks.push({
-      type: "context",
-      elements: metaElems.length ? metaElems : [{ type: "mrkdwn", text: " " }],
-    });
-
-    // ✅ Homeの完了ボタンは「範囲=自分あて（to_me）」の時だけ
-    if (rangeKey !== "to_me") {
-      // rangeKey: requested_by_me / all など
-      // ★範囲=all のときは「詳細」は右に出してるので、actions自体を省略する（ブロック節約）
-      if (!showDetailOnRight) {
-        blocks.push({
-          type: "actions",
-          elements: [detailBtn],
-        });
+      if (!list.length) {
+        if (canAdd(2)) {
+          blocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: "（なし）" }],
+          });
+          blocks.push({ type: "divider" });
+        }
+        return;
       }
-    } else {
-      // rangeKey === "to_me"
-      if (t.task_type === "broadcast" && viewerCompleted) {
-        // 「完了済み」表示（グレー相当）
+
+      let shown = 0;
+
+      // ★範囲=すべて のときだけ、詳細を右に出す（下には出さない）
+      const showDetailOnRight = rangeKey === "all";
+
+      for (const t of list) {
+        const viewKey = t.task_type === "broadcast" ? "broadcast" : "personal";
+
+        // ★ broadcastで「自分が完了済みか？」を判定（範囲=自分あて の時だけ）
+        const viewerCompleted =
+          rangeKey === "to_me" && t.task_type === "broadcast"
+            ? await dbHasUserCompleted(teamId, t.id, userId)
+            : false;
+
+        // 詳細ボタン（共通）
+        const detailBtn = {
+          type: "button",
+          text: { type: "plain_text", text: "詳細" },
+          action_id: "open_detail_modal",
+          value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
+        };
+
+        // 追加ブロック数を見積もる（※range=all は actions を省けるので軽くなる）
+        // 本文(section) + 人(context) + 期限/link(context) + 区切り(context) = 4
+        // to_me は完了/詳細 actions が基本つくので +1 (完了済み表示があると +1)
+        const needsActions =
+          !showDetailOnRight && rangeKey !== "to_me"
+            ? true // (詳細を下に出す)
+            : rangeKey === "to_me"; // (完了/詳細が必要)
+
+        const needsCompletedHint =
+          rangeKey === "to_me" && t.task_type === "broadcast" && viewerCompleted;
+
+        const estimated =
+          1 + // section
+          1 + // people context
+          1 + // meta context
+          (needsCompletedHint ? 1 : 0) + // "あなたは完了済み" context
+          (needsActions ? 1 : 0) + // actions
+          1; // separator context
+
+        if (!canAdd(estimated)) break;
+
+        // ✅ 主：タスク内容（本文）
+        blocks.push({
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: taskLineForHome(t, viewKey),
+          },
+          ...(showDetailOnRight ? { accessory: detailBtn } : {}),
+        });
+
+        // ✅ 小：アイコン + 依頼者 ⇒ アイコン + 対応者（既存のアイコンMapを利用）
+        const requesterId = t?.requester_user_id;
+        const assigneeId = t?.assignee_id;
+
+        const requesterIcon = requesterId ? requesterIconMap.get(requesterId) : null;
+        const assigneeIcon =
+          t?.task_type !== "broadcast" && assigneeId
+            ? assigneeIconMap.get(assigneeId)
+            : null;
+
+        const assigneeText =
+          viewKey === "broadcast"
+            ? assigneeDisplay(t)
+            : assigneeId
+              ? `<@${assigneeId}>`
+              : "-";
+
+        const peopleElements = [];
+        if (requesterIcon)
+          peopleElements.push({
+            type: "image",
+            image_url: requesterIcon,
+            alt_text: "requester",
+          });
+        if (requesterId)
+          peopleElements.push({ type: "mrkdwn", text: `<@${requesterId}>` });
+        peopleElements.push({ type: "mrkdwn", text: "⇒" });
+        if (assigneeIcon)
+          peopleElements.push({
+            type: "image",
+            image_url: assigneeIcon,
+            alt_text: "assignee",
+          });
+        peopleElements.push({ type: "mrkdwn", text: assigneeText });
+
+        blocks.push({ type: "context", elements: peopleElements });
+
+        // ✅ 小：期限 + 元メッセージへリンク
+        const dueText = t?.due_date ? `（${formatDueDateOnly(t.due_date)}）まで` : "";
+        const linkText = t?.source_permalink
+          ? `🔗 <${t.source_permalink}|元メッセージへ>`
+          : "";
+
+        const metaElems = [];
+        if (dueText) metaElems.push({ type: "mrkdwn", text: dueText });
+        if (linkText) metaElems.push({ type: "mrkdwn", text: linkText });
+
         blocks.push({
           type: "context",
-          elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
+          elements: metaElems.length ? metaElems : [{ type: "mrkdwn", text: " " }],
         });
 
-        // 詳細だけ（※showDetailOnRight の場合は下に出さない）
-        if (!showDetailOnRight) {
-          blocks.push({
-            type: "actions",
-            elements: [detailBtn],
-          });
+        // ✅ Homeの完了ボタンは「範囲=自分あて（to_me）」の時だけ
+        if (rangeKey !== "to_me") {
+          // rangeKey: requested_by_me / all など
+          // ★範囲=all のときは「詳細」は右に出してるので、actions自体を省略する（ブロック節約）
+          if (!showDetailOnRight) {
+            blocks.push({
+              type: "actions",
+              elements: [detailBtn],
+            });
+          }
+        } else {
+          // rangeKey === "to_me"
+          if (t.task_type === "broadcast" && viewerCompleted) {
+            // 「完了済み」表示（グレー相当）
+            blocks.push({
+              type: "context",
+              elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
+            });
+
+            // 詳細だけ（※showDetailOnRight の場合は下に出さない）
+            if (!showDetailOnRight) {
+              blocks.push({
+                type: "actions",
+                elements: [detailBtn],
+              });
+            }
+          } else {
+            // 完了 +（必要なら）詳細（自分あての時だけ）
+            const elems = [
+              {
+                type: "button",
+                text: {
+                  type: "plain_text",
+                  text: t.task_type === "broadcast" ? "自分だけ完了 ✅" : "完了 ✅",
+                },
+                style: "primary",
+                action_id: "complete_task",
+                value: JSON.stringify({ teamId, taskId: t.id }),
+              },
+              detailBtn,
+            ];
+
+            blocks.push({ type: "actions", elements: elems });
+          }
         }
+
+blocks.push({ type: "divider" });
+        shown++;
+      }
+
+      if (shown < list.length && canAdd(2)) {
+        blocks.push({
+          type: "context",
+          elements: [{ type: "mrkdwn", text: `…他 ${list.length - shown}件` }],
+        });
+        blocks.push({ type: "divider" });
       } else {
-        // 完了 +（必要なら）詳細（自分あての時だけ）
-        const elems = [
+        blocks.push({ type: "divider" });
+      }
+    };
+
+    // スマホ優先：期限切れ → 今日 → 明日以降
+    const MORE_LIMIT = 10; // ★範囲=すべて(all) のときだけ「もっと見る」で段階表示
+
+    const isAllRange = rangeKey === "all";
+
+    const overdueTotal = overdue.length;
+    const todayTotal = todayTasks.length;
+
+    const overdueExpanded = !!st.homeMore?.overdue;
+    const todayExpanded = !!st.homeMore?.today;
+
+    const overdueVisible =
+      isAllRange && !overdueExpanded ? overdue.slice(0, MORE_LIMIT) : overdue;
+
+    const todayVisible =
+      isAllRange && !todayExpanded
+        ? todayTasks.slice(0, MORE_LIMIT)
+        : todayTasks;
+
+    await pushTaskList("*🚨 期限切れ*", overdueVisible, overdueTotal);
+
+    // ★「もっと見る（期限切れ）」は “今日” の見出しの直前（= 今日の上）に出す
+    if (isAllRange && overdueTotal > MORE_LIMIT) {
+      const hidden = Math.max(0, overdueTotal - overdueVisible.length);
+      blocks.push({
+        type: "actions",
+        elements: [
           {
             type: "button",
             text: {
               type: "plain_text",
-              text: t.task_type === "broadcast" ? "自分だけ完了 ✅" : "完了 ✅",
+              text: overdueExpanded
+                ? "閉じる"
+                : `もっと見る（残り${hidden}件）`,
             },
-            style: "primary",
-            action_id: "complete_task",
-            value: JSON.stringify({ teamId, taskId: t.id }),
-            confirm: {
-              title: { type: "plain_text", text: "確認" },
-              text: { type: "mrkdwn", text: "このタスクを*完了*にしますか？" },
-              confirm: { type: "plain_text", text: "完了にする" },
-              deny: { type: "plain_text", text: "やめる" },
-            },
+            action_id: "home_toggle_more",
+            value: JSON.stringify({ section: "overdue" }),
           },
-        ];
-
-        // ★範囲=all のときは詳細は右にあるので、下に追加しない
-        if (!showDetailOnRight) elems.push(detailBtn);
-
-        blocks.push({ type: "actions", elements: elems });
-      }
+        ],
+      });
+      blocks.push({ type: "divider" });
     }
 
-blocks.push({ type: "divider" });
-    shown++;
-  }
+    await pushTaskList("*🟨 今日*", todayVisible, todayTotal);
 
-  const remaining = Math.max(0, list.length - shown);
-  if (remaining > 0 && canAdd(1)) {
-    blocks.push({
-      type: "context",
-      elements: [{ type: "mrkdwn", text: `（他 ${remaining} 件）` }],
-    });
-  }
+    // ★「もっと見る（今日）」は “明日以降” の見出しの直前（= 明日以降の上）に出す
+    if (isAllRange && todayTotal > MORE_LIMIT) {
+      const hidden = Math.max(0, todayTotal - todayVisible.length);
+      blocks.push({
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: {
+              type: "plain_text",
+              text: todayExpanded ? "閉じる" : `もっと見る（残り${hidden}件）`,
+            },
+            action_id: "home_toggle_more",
+            value: JSON.stringify({ section: "today" }),
+          },
+        ],
+      });
+      blocks.push({ type: "divider" });
+    }
 
-};
-
-
-    // スマホ優先：期限切れ → 今日 → 明日以降
-    await pushTaskList("*🚨 期限切れ*", overdue);
-    await pushTaskList("*🟨 今日*", todayTasks);
     await pushTaskList("*🟩 明日以降*", laterTasks);
   }
 
@@ -2458,21 +2581,61 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     const rawText = shortcut.message?.text || "";
     const requesterUserId = shortcut.message?.user || "";
 
+    const msgBlocks = shortcut.message?.blocks || null;
+
     let prettyText = await prettifySlackText(rawText, teamId);
     prettyText = await prettifyUserMentions(prettyText, teamId);
+
+    // ============================
+    // ✅ メンション初期値（ユーザー / ユーザーグループ）
+    // - 「メンションがある時だけ」初期値に入れる（勝手に自分が入らないように）
+    // ============================
+    const hasUserMention =
+      extractUserIdsFromBlocks(msgBlocks || []).length > 0 ||
+      /<@([A-Z0-9]+)(?:\|[^>]+)?>/.test(String(rawText || ""));
+
+    const hasGroupMention =
+      extractUserGroupIdsFromBlocks(msgBlocks || []).length > 0 ||
+      /<!subteam\^([A-Z0-9]+)(?:\|[^>]+)?>/.test(String(rawText || ""));
+
+    let initialUserIds = [];
+    let initialGroupIds = [];
+    let initialGroupOptions = [];
+
+    if (hasUserMention || hasGroupMention) {
+      const targets = inferTargetsFromMessage(rawText, requesterUserId, msgBlocks);
+      initialUserIds = Array.isArray(targets.userIds) ? targets.userIds.filter(Boolean) : [];
+      initialGroupIds = Array.isArray(targets.groupIds) ? targets.groupIds.filter(Boolean) : [];
+
+      // user_select の初期値が多すぎると邪魔なので一応上限（任意）
+      initialUserIds = initialUserIds.slice(0, 10);
+      initialGroupIds = initialGroupIds.slice(0, 10);
+
+      // groupId -> handle へ（@mk-all みたいな表示用）
+      if (initialGroupIds.length) {
+        const idToHandle = await getSubteamIdMap(teamId);
+        initialGroupOptions = initialGroupIds.map((gid) => {
+          const handle = idToHandle.get(gid) || gid;
+          const label = `@${String(handle).replace(/^@/, "")}`;
+          return {
+            text: { type: "plain_text", text: label },
+            value: gid,
+          };
+        });
+      }
+    }
 
     await client.views.open({
       trigger_id: shortcut.trigger_id,
       view: {
         type: "modal",
         callback_id: "task_modal",
+        // ✅ private_metadata は軽量に（3000文字制限対策）
         private_metadata: JSON.stringify({
           teamId,
           channelId,
           msgTs,
           requesterUserId,
-          messageText: rawText,
-          messageTextPretty: prettyText,
         }),
         title: { type: "plain_text", text: "タスク作成" },
         submit: { type: "plain_text", text: "決定" },
@@ -2500,6 +2663,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
               type: "multi_users_select",
               action_id: "assignee_users_select",
               placeholder: { type: "plain_text", text: "ユーザーを選択" },
+              ...(initialUserIds.length ? { initial_users: initialUserIds } : {}),
             },
           },
 
@@ -2520,6 +2684,9 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
                 text: "ユーザーグループを検索",
               },
               min_query_length: 0,
+              ...(initialGroupOptions.length
+                ? { initial_options: initialGroupOptions }
+                : {}),
             },
           },
 
@@ -2534,7 +2701,6 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
               initial_date: todayJstYmd(),
             },
           },
-          //  { type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
 
           {
             type: "context",
@@ -2552,6 +2718,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     console.error("shortcut error:", e?.data || e);
   }
 });
+
 
 // ================================
 // Reaction ✅ -> Task create (via ephemeral button)
@@ -2951,34 +3118,34 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
     prettyText = await prettifyUserMentions(prettyText, teamId);
 
     // task_modal を開く（初期値入り）
-    await client.views.open({
-      trigger_id: body.trigger_id,
-      view: {
-        type: "modal",
-        callback_id: "task_modal",
-        private_metadata: JSON.stringify({
-          teamId,
-          channelId,
-          msgTs,
-          requesterUserId,
-          messageText: rawText,
-          messageTextPretty: prettyText,
-        }),
-        title: { type: "plain_text", text: "タスク作成" },
-        submit: { type: "plain_text", text: "決定" },
-        close: { type: "plain_text", text: "キャンセル" },
-        blocks: [
-          {
-            type: "input",
-            block_id: "desc",
-            label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
-            element: {
-              type: "plain_text_input",
-              action_id: "desc_input",
-              multiline: true,
-              initial_value: prettyText || "",
-            },
-          },
+await client.views.open({
+  trigger_id: body.trigger_id,
+  view: {
+    type: "modal",
+    callback_id: "task_modal",
+    // ✅ private_metadata は軽量に（3000文字制限対策）
+    private_metadata: JSON.stringify({
+      teamId,
+      channelId,
+      msgTs,
+      requesterUserId,
+    }),
+    title: { type: "plain_text", text: "タスク作成" },
+    submit: { type: "plain_text", text: "決定" },
+    close: { type: "plain_text", text: "キャンセル" },
+    blocks: [
+      {
+        type: "input",
+        block_id: "desc",
+        label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
+        element: {
+          type: "plain_text_input",
+          action_id: "desc_input",
+          multiline: true,
+          // ✅ 本文は input に入ってるのでOK
+          initial_value: prettyText || "",
+        },
+      },
 
           {
             type: "input",
@@ -3141,13 +3308,20 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     const channelId = meta.channelId || "";
     const parentTs = meta.msgTs || "";
 
-    const description =
-      view.state.values.desc?.desc_input?.value?.trim() ||
-      meta.messageTextPretty ||
-      meta.messageText ||
-      "";
+    // ✅ 本文は view.state から読む（private_metadata には入れない）
+    const description = (view.state.values.desc?.desc_input?.value || "").trim();
+
+    // ✅ 空はブロック（ユーザーに分かるようにモーダル内エラー）
+    if (!description) {
+      await ack({
+        response_action: "errors",
+        errors: { desc: "詳細を入力してください" },
+      });
+      return;
+    }
 
     const title = generateTitleCandidate(description);
+
 
     const selectedUsers =
       view.state.values.assignee_users?.assignee_users_select?.selected_users ||
@@ -3194,8 +3368,35 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     const targets = new Set();
     for (const u of selectedUsers) targets.add(u);
     for (const u of groupUsers) targets.add(u);
+    let targetList = Array.from(targets);
 
-    const targetList = Array.from(targets);
+    // ============================
+    // ✅ DM特別ルール：personal固定（=自分あて固定）
+    // - DMで「自分の作業メモ → タスク化」を成立させる
+    // - ここでは "Dxxxx" を DM として扱う（Group DMもDになる運用前提）
+    // ============================
+    const isDmChannel = String(channelId || "")[0] === "D";
+
+    if (isDmChannel) {
+      // DMは「自分あて」固定にしたいので、他人/グループが選ばれてたら弾く（事故防止）
+      const hasOthers =
+        (selectedUsers || []).some((u) => u && u !== actorUserId) ||
+        (selectedGroupIds || []).length > 0;
+
+      if (hasOthers) {
+        await ack({
+          response_action: "errors",
+          errors: {
+            assignee_users: "DMでは「自分あての個人タスク」固定だよ🙏（他ユーザー/グループは選べないよ）",
+            assignee_groups: "DMでは「自分あての個人タスク」固定だよ🙏",
+          },
+        });
+        return;
+      }
+
+      // 選択が空でもOKにして、自分を入れる
+      targetList = [actorUserId];
+    }
 
     const isPersonal = targetList.length === 1 && selectedGroupIds.length === 0;
     const taskType = isPersonal ? "personal" : "broadcast";
@@ -3211,6 +3412,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       labelParts.push(`@${name}`);
     }
     const assigneeLabelRaw = labelParts.join(" ");
+
 
     // dept resolve (A): requester + (personalのみ assignee)
     const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
@@ -3267,6 +3469,19 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       created.completed_count = 0;
     }
 
+        // ✅ DMでの作成は「作ったよ」エフェメラルだけは必ず出す（作成DMは出さない）
+    try {
+      const isDmChannel = String(channelId || "")[0] === "D";
+      if (isDmChannel) {
+        await safeEphemeral(
+          client,
+          channelId,
+          actorUserId,
+          "📝 DMのメモ、タスクにしたよ！Homeの「自分あて」に出るよ☺️",
+        );
+      }
+    } catch (_) {}
+
     // ① 発行通知（personal / broadcast）
     // - 自分が発行して自分が対象の場合は通知しない（うるささ回避）
     try {
@@ -3276,7 +3491,6 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
           await notifyTaskSimpleDM(to, created, "📝 タスクが届いたよ");
         }
       } else if (taskType === "broadcast") {
-        // 対象者へ通知（必要ならここで数が多い場合は抑止もできる）
         const targets = (targetList || []).filter(
           (u) => u && u !== actorUserId,
         );
@@ -3528,28 +3742,49 @@ app.action("home_dept_select", async ({ ack, body, client }) => {
   }
 });
 
-// Home: broadcast 範囲 change（Phase8-3）
 app.action("home_broadcast_scope_select", async ({ ack, body, client }) => {
   await ack();
   try {
     const teamId = getTeamIdFromBody(body);
     const userId = getUserIdFromBody(body);
-    const selected = body.actions?.[0]?.selected_option?.value || "to_me";
+    const scopeKey = body.actions?.[0]?.selected_option?.value;
 
-    // ★範囲は共通キーとして使う（表示は常に all）
-    // ★範囲が all 以外なら dept は意味が薄いので初期化しておく
-    setHomeState(teamId, userId, {
-      viewKey: "all",
-      broadcastScopeKey: selected,
-      personalScopeKey: selected,
-      ...(selected === "all" ? {} : { deptKey: "all" }),
-    });
+    if (!teamId || !userId || !scopeKey) return;
 
+    setHomeState(teamId, userId, { broadcastScopeKey: scopeKey });
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("home_broadcast_scope_select error:", e?.data || e);
   }
 });
+
+// Home: 「もっと見る / 閉じる」トグル（範囲=すべて(all) の時だけUI上に出す想定）
+app.action("home_toggle_more", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+
+    const payload = safeJsonParse(body.actions?.[0]?.value || "");
+    const section = payload?.section; // "overdue" | "today"
+    if (!teamId || !userId) return;
+    if (section !== "overdue" && section !== "today") return;
+
+    const st = getHomeState(teamId, userId);
+    const next = {
+      homeMore: {
+        ...(st.homeMore || { overdue: false, today: false }),
+        [section]: !(st.homeMore?.[section]),
+      },
+    };
+
+    setHomeState(teamId, userId, next);
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_toggle_more error:", e?.data || e);
+  }
+});
+
 
 // Home: フィルタをリセット（Phase8-4）
 app.action("home_reset_filters", async ({ ack, body, client }) => {
@@ -5201,7 +5436,6 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
     console.error("reopen_task error:", e?.data || e);
   }
 });
-
 
 // ================================
 // Start

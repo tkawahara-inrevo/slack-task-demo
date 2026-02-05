@@ -2770,11 +2770,12 @@ app.event("reaction_added", async ({ event, client, body }) => {
     }
 
     // ✅ 対応者推定（blocks優先 → text → fallback）
-    const assigneeId = inferAssigneeFromMessageText(
-      rawText,
-      actorUserId,
-      mm?.blocks || null,
-    );
+const { userIds: initialUsers, groupIds: initialGroupIds } =
+  inferTargetsFromMessage(rawText, actorUserId, mm?.blocks || null);
+
+// 代表1名（既存ロジック互換用）
+const assigneeId = initialUsers[0] || actorUserId;
+
 
     // 期限は今日固定
     const dueYmd = slackDateYmd(new Date());

@@ -1762,20 +1762,6 @@ async function publishHome({ client, teamId, userId }) {
 
   blocks.push({ type: "divider" });
 
-  blocks.push({
-    type: "actions",
-    elements: [
-      {
-        type: "button",
-        action_id: "home_create_task",
-        text: { type: "plain_text", text: "タスク作成" },
-        value: JSON.stringify({ teamId, userId }),
-      },
-    ],
-  });
-
-  blocks.push({ type: "divider" });
-
   // データ取得
   let tasks = [];
 
@@ -2025,205 +2011,215 @@ if (st.scopeKey === "done") {
       }),
     );
 
-    const pushTaskList = async (title, list) => {
-      // Slack Home view は blocks <= 100 制限がある
-      const MAX_BLOCKS = 100;
-      const SAFETY = 8; // 見出しや末尾の余裕
+ const pushTaskList = async (title, list) => {
+  // Slack Home view は blocks <= 100 制限がある
+  const MAX_BLOCKS = 100;
+  const SAFETY = 8; // 見出しや末尾の余裕
 
-      const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
+  const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
 
-      const titlePlain = String(title || "")
-        .replace(/\*/g, "")
-        .trim();
+  const titlePlain = String(title || "")
+    .replace(/\*/g, "")
+    .trim();
+
+  blocks.push({
+    type: "header",
+    text: { type: "plain_text", text: `${titlePlain}（${list.length}件）` },
+  });
+  blocks.push({ type: "divider" });
+
+  if (!list.length) {
+    if (canAdd(2)) {
       blocks.push({
-        type: "header",
-        text: { type: "plain_text", text: `${titlePlain}（${list.length}件）` },
+        type: "context",
+        elements: [{ type: "mrkdwn", text: "（なし）" }],
       });
       blocks.push({ type: "divider" });
+    }
+    return;
+  }
 
-      if (!list.length) {
-        if (canAdd(2)) {
-          blocks.push({
-            type: "context",
-            elements: [{ type: "mrkdwn", text: "（なし）" }],
-          });
-          blocks.push({ type: "divider" });
-        }
-        return;
-      }
+  let shown = 0;
 
-      let shown = 0;
+  // ★範囲=すべて のときだけ、詳細を右に出す（下には出さない）
+  const showDetailOnRight = rangeKey === "all";
 
-      for (const t of list) {
-        // 1タスクあたり最低5ブロック（本文 + 人 + 期限/link + actions + 区切り）
-        if (!canAdd(5)) break;
+  for (const t of list) {
+    const viewKey = t.task_type === "broadcast" ? "broadcast" : "personal";
 
-        const viewKey = t.task_type === "broadcast" ? "broadcast" : "personal";
+    // ★ broadcastで「自分が完了済みか？」を判定（範囲=自分あて の時だけ）
+    const viewerCompleted =
+      rangeKey === "to_me" && t.task_type === "broadcast"
+        ? await dbHasUserCompleted(teamId, t.id, userId)
+        : false;
 
-        // ★ broadcastで「自分が完了済みか？」を判定（範囲=自分あて の時だけ）
-        const viewerCompleted =
-          rangeKey === "to_me" && t.task_type === "broadcast"
-            ? await dbHasUserCompleted(teamId, t.id, userId)
-            : false;
+    // 詳細ボタン（共通）
+    const detailBtn = {
+      type: "button",
+      text: { type: "plain_text", text: "詳細" },
+      action_id: "open_detail_modal",
+      value: JSON.stringify({ teamId, taskId: t.id, origin: "home" }),
+    };
 
-        // ✅ 主：タスク内容（本文）
+    // 追加ブロック数を見積もる（※range=all は actions を省けるので軽くなる）
+    // 本文(section) + 人(context) + 期限/link(context) + 区切り(context) = 4
+    // to_me は完了/詳細 actions が基本つくので +1 (完了済み表示があると +1)
+    const needsActions =
+      !showDetailOnRight && rangeKey !== "to_me"
+        ? true // (詳細を下に出す)
+        : rangeKey === "to_me"; // (完了/詳細が必要)
+
+    const needsCompletedHint =
+      rangeKey === "to_me" && t.task_type === "broadcast" && viewerCompleted;
+
+    const estimated =
+      1 + // section
+      1 + // people context
+      1 + // meta context
+      (needsCompletedHint ? 1 : 0) + // "あなたは完了済み" context
+      (needsActions ? 1 : 0) + // actions
+      1; // separator context
+
+    if (!canAdd(estimated)) break;
+
+    // ✅ 主：タスク内容（本文）
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: taskLineForHome(t, viewKey),
+      },
+      ...(showDetailOnRight ? { accessory: detailBtn } : {}),
+    });
+
+    // ✅ 小：アイコン + 依頼者 ⇒ アイコン + 対応者（既存のアイコンMapを利用）
+    const requesterId = t?.requester_user_id;
+    const assigneeId = t?.assignee_id;
+
+    const requesterIcon = requesterId ? requesterIconMap.get(requesterId) : null;
+    const assigneeIcon =
+      t?.task_type !== "broadcast" && assigneeId
+        ? assigneeIconMap.get(assigneeId)
+        : null;
+
+    const assigneeText =
+      viewKey === "broadcast"
+        ? assigneeDisplay(t)
+        : assigneeId
+          ? `<@${assigneeId}>`
+          : "-";
+
+    const peopleElements = [];
+    if (requesterIcon)
+      peopleElements.push({
+        type: "image",
+        image_url: requesterIcon,
+        alt_text: "requester",
+      });
+    if (requesterId)
+      peopleElements.push({ type: "mrkdwn", text: `<@${requesterId}>` });
+    peopleElements.push({ type: "mrkdwn", text: "⇒" });
+    if (assigneeIcon)
+      peopleElements.push({
+        type: "image",
+        image_url: assigneeIcon,
+        alt_text: "assignee",
+      });
+    peopleElements.push({ type: "mrkdwn", text: assigneeText });
+
+    blocks.push({ type: "context", elements: peopleElements });
+
+    // ✅ 小：期限 + 元メッセージへリンク
+    const dueText = t?.due_date ? `（${formatDueDateOnly(t.due_date)}）まで` : "";
+    const linkText = t?.source_permalink
+      ? `🔗 <${t.source_permalink}|元メッセージへ>`
+      : "";
+
+    const metaElems = [];
+    if (dueText) metaElems.push({ type: "mrkdwn", text: dueText });
+    if (linkText) metaElems.push({ type: "mrkdwn", text: linkText });
+
+    blocks.push({
+      type: "context",
+      elements: metaElems.length ? metaElems : [{ type: "mrkdwn", text: " " }],
+    });
+
+    // ✅ Homeの完了ボタンは「範囲=自分あて（to_me）」の時だけ
+    if (rangeKey !== "to_me") {
+      // rangeKey: requested_by_me / all など
+      // ★範囲=all のときは「詳細」は右に出してるので、actions自体を省略する（ブロック節約）
+      if (!showDetailOnRight) {
         blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: taskLineForHome(t, viewKey),
-          },
+          type: "actions",
+          elements: [detailBtn],
         });
-
-        // ✅ 小：アイコン + 依頼者 ⇒ アイコン + 対応者（既存のアイコンMapを利用）
-        const requesterId = t?.requester_user_id;
-        const assigneeId = t?.assignee_id;
-
-        const requesterIcon = requesterId
-          ? requesterIconMap.get(requesterId)
-          : null;
-        const assigneeIcon =
-          t?.task_type !== "broadcast" && assigneeId
-            ? assigneeIconMap.get(assigneeId)
-            : null;
-
-        const assigneeText =
-          viewKey === "broadcast"
-            ? assigneeDisplay(t)
-            : assigneeId
-              ? `<@${assigneeId}>`
-              : "-";
-
-        const peopleElements = [];
-        if (requesterIcon)
-          peopleElements.push({
-            type: "image",
-            image_url: requesterIcon,
-            alt_text: "requester",
-          });
-        if (requesterId)
-          peopleElements.push({ type: "mrkdwn", text: `<@${requesterId}>` });
-        peopleElements.push({ type: "mrkdwn", text: "⇒" });
-        if (assigneeIcon)
-          peopleElements.push({
-            type: "image",
-            image_url: assigneeIcon,
-            alt_text: "assignee",
-          });
-        peopleElements.push({ type: "mrkdwn", text: assigneeText });
-
-        blocks.push({ type: "context", elements: peopleElements });
-
-        // ✅ 小：期限 + 元メッセージへリンク
-        const dueText = t?.due_date
-          ? `（${formatDueDateOnly(t.due_date)}）まで`
-          : "";
-        const linkText = t?.source_permalink
-          ? `🔗 <${t.source_permalink}|元メッセージへ>`
-          : "";
-
-        const metaElems = [];
-        if (dueText) metaElems.push({ type: "mrkdwn", text: dueText });
-        if (linkText) metaElems.push({ type: "mrkdwn", text: linkText });
-
+      }
+    } else {
+      // rangeKey === "to_me"
+      if (t.task_type === "broadcast" && viewerCompleted) {
+        // 「完了済み」表示（グレー相当）
         blocks.push({
           type: "context",
-          elements: metaElems.length
-            ? metaElems
-            : [{ type: "mrkdwn", text: " " }],
+          elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
         });
 
-        // ✅ Homeの完了ボタンは「範囲=自分あて（to_me）」の時だけ
-        if (rangeKey !== "to_me") {
+        // 詳細だけ（※showDetailOnRight の場合は下に出さない）
+        if (!showDetailOnRight) {
           blocks.push({
             type: "actions",
-            elements: [
-              {
-                type: "button",
-                text: { type: "plain_text", text: "詳細" },
-                action_id: "open_detail_modal",
-                value: JSON.stringify({ teamId, taskId: t.id }),
-              },
-            ],
+            elements: [detailBtn],
           });
-        } else {
-          // rangeKey === "to_me"
-          if (t.task_type === "broadcast" && viewerCompleted) {
-            // 「完了済み」表示（グレー相当）
-            blocks.push({
-              type: "context",
-              elements: [{ type: "mrkdwn", text: "✅ あなたは完了済み" }],
-            });
-
-            // 詳細だけ
-            blocks.push({
-              type: "actions",
-              elements: [
-                {
-                  type: "button",
-                  text: { type: "plain_text", text: "詳細" },
-                  action_id: "open_detail_modal",
-                  value: JSON.stringify({ teamId, taskId: t.id }),
-                },
-              ],
-            });
-          } else {
-            // 完了 + 詳細（自分あての時だけ）
-            blocks.push({
-              type: "actions",
-              elements: [
-                {
-                  type: "button",
-                  text: {
-                    type: "plain_text",
-                    text:
-                      t.task_type === "broadcast"
-                        ? "自分だけ完了 ✅"
-                        : "完了 ✅",
-                  },
-                  style: "primary",
-                  action_id: "complete_task",
-                  value: JSON.stringify({ teamId, taskId: t.id }),
-                  confirm: {
-                    title: { type: "plain_text", text: "確認" },
-                    text: {
-                      type: "mrkdwn",
-                      text: "このタスクを*完了*にしますか？",
-                    },
-                    confirm: { type: "plain_text", text: "完了にする" },
-                    deny: { type: "plain_text", text: "やめる" },
-                  },
-                },
-                {
-                  type: "button",
-                  text: { type: "plain_text", text: "詳細" },
-                  action_id: "open_detail_modal",
-                  value: JSON.stringify({ teamId, taskId: t.id }),
-                },
-              ],
-            });
-          }
         }
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
-        });
+      } else {
+        // 完了 +（必要なら）詳細（自分あての時だけ）
+        const elems = [
+          {
+            type: "button",
+            text: {
+              type: "plain_text",
+              text: t.task_type === "broadcast" ? "自分だけ完了 ✅" : "完了 ✅",
+            },
+            style: "primary",
+            action_id: "complete_task",
+            value: JSON.stringify({ teamId, taskId: t.id }),
+            confirm: {
+              title: { type: "plain_text", text: "確認" },
+              text: { type: "mrkdwn", text: "このタスクを*完了*にしますか？" },
+              confirm: { type: "plain_text", text: "完了にする" },
+              deny: { type: "plain_text", text: "やめる" },
+            },
+          },
+        ];
 
-        shown++;
-      }
+        // ★範囲=all のときは詳細は右にあるので、下に追加しない
+        if (!showDetailOnRight) elems.push(detailBtn);
 
-      const remaining = Math.max(0, list.length - shown);
-      if (remaining > 0 && canAdd(1)) {
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: `（他 ${remaining} 件）` }],
-        });
+        blocks.push({ type: "actions", elements: elems });
       }
+    }
 
-      if (canAdd(1)) {
-        blocks.push({ type: "divider" });
-      }
-    };
+    // 区切り
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
+    });
+
+    shown++;
+  }
+
+  const remaining = Math.max(0, list.length - shown);
+  if (remaining > 0 && canAdd(1)) {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `（他 ${remaining} 件）` }],
+    });
+  }
+
+  if (canAdd(1)) {
+    blocks.push({ type: "divider" });
+  }
+};
+
 
     // スマホ優先：期限切れ → 今日 → 明日以降
     await pushTaskList("*🚨 期限切れ*", overdue);
@@ -3657,110 +3653,6 @@ app.action("task_row_overflow", async ({ ack, body, action, client }) => {
     });
   } catch (e) {
     console.error("task_row_overflow error:", e?.data || e);
-  }
-});
-
-// Home: タスク作成（メッセージなし）
-app.action("home_create_task", async ({ ack, body, client }) => {
-  await ack();
-
-  try {
-    const teamId = body.team?.id || body.team_id;
-    const userId = body.user?.id;
-    if (!teamId || !userId) return;
-
-    const today = jstDateOnly(new Date());
-    const initDue = slackDateYmd(today);
-
-    await client.views.open({
-      trigger_id: body.trigger_id,
-      view: {
-        type: "modal",
-        callback_id: "task_modal",
-        private_metadata: JSON.stringify({
-          teamId,
-          channelId: "",
-          msgTs: "",
-          requesterUserId: userId,
-          messageText: "",
-          messageTextPretty: "",
-        }),
-        title: { type: "plain_text", text: "タスク作成" },
-        submit: { type: "plain_text", text: "決定" },
-        close: { type: "plain_text", text: "キャンセル" },
-        blocks: [
-          {
-            type: "input",
-            block_id: "desc",
-            label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
-            element: {
-              type: "plain_text_input",
-              action_id: "desc_input",
-              multiline: true,
-              initial_value: "",
-            },
-          },
-
-          // 対応者（個人：複数OK）
-          {
-            type: "input",
-            optional: true,
-            block_id: "assignee_users",
-            label: { type: "plain_text", text: "対応者（個人・複数OK）" },
-            element: {
-              type: "multi_users_select",
-              action_id: "assignee_users_select",
-              placeholder: { type: "plain_text", text: "ユーザーを選択" },
-            },
-          },
-
-          // 対応者（グループ：@ALL-xxx / @mk-all 等）
-          {
-            type: "input",
-            optional: true,
-            block_id: "assignee_groups",
-            label: {
-              type: "plain_text",
-              text: "対応者（グループ：@ALL-xxx / @mk-all など）",
-            },
-            element: {
-              type: "multi_external_select",
-              action_id: "assignee_groups_select",
-              placeholder: {
-                type: "plain_text",
-                text: "ユーザーグループを検索",
-              },
-              min_query_length: 0,
-            },
-          },
-
-          {
-            type: "input",
-            block_id: "due",
-            label: { type: "plain_text", text: "期限" },
-            element: {
-              type: "datepicker",
-              action_id: "due_date",
-              ...(initDue ? { initial_date: initDue } : {}),
-              placeholder: { type: "plain_text", text: "日付を選択" },
-            },
-          },
-          //{ type: "input", block_id: "status", label: { type: "plain_text", text: "ステータス" }, element: statusSelectElement("open") },
-
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。",
-              },
-            ],
-          },
-        ],
-      },
-    });
-  } catch (e) {
-    console.error("home_create_task error:", e?.data || e);
   }
 });
 

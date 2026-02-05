@@ -1944,11 +1944,7 @@ if (st.scopeKey === "done") {
 
       blocks.push({ type: "actions", elements: elems });
 
-      // 区切り（軽量）
-      blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
-      });
+     blocks.push({ type: "divider" });
     }
   }
   } else {
@@ -2198,12 +2194,7 @@ if (st.scopeKey === "done") {
       }
     }
 
-    // 区切り
-    blocks.push({
-      type: "context",
-      elements: [{ type: "mrkdwn", text: "━━━━━━━━━━━━━━━━━━━━━━━━━" }],
-    });
-
+blocks.push({ type: "divider" });
     shown++;
   }
 
@@ -2215,9 +2206,6 @@ if (st.scopeKey === "done") {
     });
   }
 
-  if (canAdd(1)) {
-    blocks.push({ type: "divider" });
-  }
 };
 
 

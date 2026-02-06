@@ -1457,33 +1457,16 @@ async function openDetailModal(
 // key: `${teamId}:${userId}`
 const homeState = new Map();
 
-// View種類
-const HOME_VIEWS = [
-  { key: "personal", label: "個人タスク" },
-  { key: "broadcast", label: "全社/複数タスク" },
-  // ★追加（③）：すべて
-  { key: "all", label: "すべて" },
-];
-
-// 状態（表示範囲）
 const HOME_SCOPES = [
-  { key: "active", label: "未完了" },
-  { key: "done", label: "完了" },
-  { key: "cancelled", label: "取り下げ" },
+  { key: "active", label: "状態: 未完了" },
+  { key: "done", label: "状態: 完了" },
+  { key: "cancelled", label: "状態: 取り下げ" },
 ];
 
-// broadcast: 範囲（Phase8-3）
 const BROADCAST_SCOPES = [
-  { key: "to_me", label: "自分あて" },
-  { key: "requested_by_me", label: "自分が発行" },
-  { key: "all", label: "すべて" },
-];
-
-// personal: 範囲（PhaseX）
-const PERSONAL_SCOPES = [
-  { key: "to_me", label: "自分が対応" },
-  { key: "requested_by_me", label: "自分が発行" },
-  { key: "all", label: "すべて" },
+  { key: "to_me", label: "範囲: 自分あて" },
+  { key: "requested_by_me", label: "範囲: 自分が発行" },
+  { key: "all", label: "範囲: すべて" },
 ];
 
 // 未完了 = done以外
@@ -1501,10 +1484,17 @@ function getHomeState(teamId, userId) {
     deptKey: "all",
     broadcastScopeKey: "to_me",
 
-    // ★追加：Home「もっと見る」展開状態（範囲=すべて の時だけUIで使う）
+    // ★既存：Home「もっと見る」展開状態（範囲=すべて の時だけUIで使う）
     homeMore: {
       overdue: false,
       today: false,
+    },
+
+    // ★追加：Home「畳む（開く/閉じる）」状態（もっと見るとは別）
+    homeFold: {
+      overdue: false,
+      today: false,
+      later: false,
     },
   };
 
@@ -1512,6 +1502,13 @@ function getHomeState(teamId, userId) {
   const homeMore = {
     overdue: !!s?.homeMore?.overdue,
     today: !!s?.homeMore?.today,
+  };
+
+  // 後方互換：昔のstateに homeFold が無い場合に備える
+  const homeFold = {
+    overdue: !!s?.homeFold?.overdue,
+    today: !!s?.homeFold?.today,
+    later: !!s?.homeFold?.later,
   };
 
   // ★表示は常に「すべて」に固定（personal/broadcastの切替を使わない）
@@ -1522,6 +1519,7 @@ function getHomeState(teamId, userId) {
     broadcastScopeKey: s.broadcastScopeKey || "to_me",
     personalScopeKey: s.broadcastScopeKey || s.personalScopeKey || "to_me",
     homeMore,
+    homeFold,
   };
 }
 
@@ -1543,13 +1541,18 @@ function setHomeState(teamId, userId, next) {
     ...(next.homeMore || {}),
   };
 
+  // homeFold もネストなので明示的にmerge
+  merged.homeFold = {
+    ...(prev.homeFold || { overdue: false, today: false, later: false }),
+    ...(next.homeFold || {}),
+  };
+
   if (merged.broadcastScopeKey) {
     merged.personalScopeKey = merged.broadcastScopeKey;
   }
 
   homeState.set(k, merged);
 }
-
 
 function homeScopeSelectElement(scopeKey) {
   const cur = HOME_SCOPES.find((s) => s.key === scopeKey) || HOME_SCOPES[0];
@@ -1585,7 +1588,7 @@ function broadcastScopeSelectElement(scopeKey) {
 }
 
 function deptSelectElement(currentDeptValue, currentDeptText) {
-  const text = currentDeptText || "部署（@グループ）を検索";
+  const text = currentDeptText ? `部署: ${currentDeptText}` : "部署: すべて";
   const value = currentDeptValue || "all";
   const initial =
     value === "all" || value === "__none__"
@@ -1772,15 +1775,23 @@ async function publishHome({ client, teamId, userId }) {
 
   const blocks = [];
 
-  // 範囲（共通）
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: "*範囲*" },
-    accessory: broadcastScopeSelectElement(st.broadcastScopeKey || "to_me"),
-  });
+  // ✅ フィルタは1行（actions）にまとめる：機能はそのまま
+  const rangeKey0 = st.broadcastScopeKey || "to_me";
+  const isAllRange0 = rangeKey0 === "all";
 
-  // 範囲＝すべて のときだけ、部署フィルタを出す
-  if ((st.broadcastScopeKey || "to_me") === "all") {
+  // actions 内の select は placeholder が欲しいので、ここで付ける（既存functionは触らない）
+  const rangeSelect = {
+    ...broadcastScopeSelectElement(rangeKey0),
+    placeholder: { type: "plain_text", text: "範囲" },
+  };
+
+  const stateSelect = {
+    ...homeScopeSelectElement(st.scopeKey),
+    placeholder: { type: "plain_text", text: "状態" },
+  };
+
+  // 範囲=すべて のときだけ部署も同じ行に出す
+  if (isAllRange0) {
     const deptValue = st.deptKey || "all";
     let deptText =
       deptValue === "all"
@@ -1788,27 +1799,29 @@ async function publishHome({ client, teamId, userId }) {
         : deptValue === "__none__"
           ? "未設定"
           : null;
+    if (!isAllRange0) deptText = null; // 保険（ここは来ない）
+
     if (!deptText && deptValue) {
       const idToHandle = await getSubteamIdMap(teamId);
       const h = idToHandle.get(deptValue);
       deptText = h ? `@${h}` : "部署（@グループ）を検索";
     }
 
+    const deptSelect = deptSelectElement(deptValue, deptText);
+
     blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: "*部署*" },
-      accessory: deptSelectElement(deptValue, deptText),
+      type: "actions",
+      elements: [rangeSelect, deptSelect, stateSelect],
+    });
+  } else {
+    blocks.push({
+      type: "actions",
+      elements: [rangeSelect, stateSelect],
     });
   }
 
-  // 状態（未完了/完了）
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: "*状態*" },
-    accessory: homeScopeSelectElement(st.scopeKey),
-  });
-
   blocks.push({ type: "divider" });
+
 
   // データ取得
   let tasks = [];
@@ -1912,10 +1925,10 @@ async function publishHome({ client, teamId, userId }) {
     );
     const okMap = new Map();
 
-    for (const ch of uniqChannels) {
-      const ok = await canUserSeeChannel({ client, teamId, channelId: ch });
-      okMap.set(ch, ok);
-    }
+for (const ch of uniqChannels) {
+  const ok = await canUserSeeChannel({ client, teamId, channelId: ch, userId });
+  okMap.set(ch, ok);
+}
 
     tasks = (tasks || []).filter((t) => {
       const ch = String(t.channel_id || "");
@@ -2073,42 +2086,72 @@ async function publishHome({ client, teamId, userId }) {
       );
     }
 
-    const pushTaskList = async (title, list, totalCount = null) => {
-      // Slack Home view は blocks <= 100 制限がある
-      const MAX_BLOCKS = 100;
-      const SAFETY = 8; // 見出しや末尾の余裕
+    const pushTaskList = async (title, list, totalCount = null, opts = null) => {
+  // Slack Home view は blocks <= 100 制限がある
+  const MAX_BLOCKS = 100;
+  const SAFETY = 8; // 見出しや末尾の余裕
 
-      const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
+  const canAdd = (n) => blocks.length + n <= MAX_BLOCKS - SAFETY;
 
-      const titlePlain = String(title || "")
-        .replace(/\*/g, "")
-        .trim();
+  const titlePlain = String(title || "")
+    .replace(/\*/g, "")
+    .trim();
 
-      blocks.push({
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: `${titlePlain}（${totalCount ?? list.length}件）`,
+  const count = totalCount ?? list.length;
+
+  // ✅ 見出しは「ボタン1個」の行として表示（疑似：見出しクリック）
+  if (opts?.toggleAction) {
+    const label = `${titlePlain}（${count}件） ${opts.toggleLabel || ""}`.trim();
+
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: label },
+          action_id: opts.toggleAction.action_id,
+          value: opts.toggleAction.value,
         },
+      ],
+    });
+  } else {
+    blocks.push({
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: `${titlePlain}（${count}件）`,
+      },
+    });
+  }
+  blocks.push({ type: "divider" });
+
+  // ✅ 畳み状態：一覧を出さない（もっと見るとは別）
+  if (opts?.folded) {
+    if (canAdd(2)) {
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: "（閉じています）" }],
       });
       blocks.push({ type: "divider" });
+    }
+    return;
+  }
 
-      if (!list.length) {
-        if (canAdd(2)) {
-          blocks.push({
-            type: "context",
-            elements: [{ type: "mrkdwn", text: "（なし）" }],
-          });
-          blocks.push({ type: "divider" });
-        }
-        return;
-      }
+  if (!list.length) {
+    if (canAdd(2)) {
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: "（なし）" }],
+      });
+      blocks.push({ type: "divider" });
+    }
+    return;
+  }
 
-      let shown = 0;
+  let shown = 0;
 
-      // ★範囲=すべて のときだけ、詳細を右に出す（下には出さない）
-      const showDetailOnRight = rangeKey === "all";
-
+  // ★範囲=すべて のときだけ、詳細を右に出す（下には出さない）
+  const showDetailOnRight = rangeKey === "all";
       for (const t of list) {
         const viewKey = t.task_type === "broadcast" ? "broadcast" : "personal";
 
@@ -2265,77 +2308,135 @@ blocks.push({ type: "divider" });
           elements: [{ type: "mrkdwn", text: `…他 ${list.length - shown}件` }],
         });
         blocks.push({ type: "divider" });
-      } else {
-        blocks.push({ type: "divider" });
       }
+      // NOTE: ループ内ですでに各タスクの後に divider を入れているため、
+      // ここでの追加 divider は二重線の原因になるので入れない
+
     };
 
     // スマホ優先：期限切れ → 今日 → 明日以降
-    const MORE_LIMIT = 10; // ★範囲=すべて(all) のときだけ「もっと見る」で段階表示
+ // スマホ優先：期限切れ → 今日 → 明日以降
+const MORE_LIMIT = 10; // ★範囲=すべて(all) のときだけ「もっと見る」で段階表示
 
-    const isAllRange = rangeKey === "all";
+const isAllRange = rangeKey === "all";
 
-    const overdueTotal = overdue.length;
-    const todayTotal = todayTasks.length;
+const overdueTotal = overdue.length;
+const todayTotal = todayTasks.length;
 
-    const overdueExpanded = !!st.homeMore?.overdue;
-    const todayExpanded = !!st.homeMore?.today;
+const overdueExpanded = !!st.homeMore?.overdue;
+const todayExpanded = !!st.homeMore?.today;
 
-    const overdueVisible =
-      isAllRange && !overdueExpanded ? overdue.slice(0, MORE_LIMIT) : overdue;
+// ✅ 追加：畳み状態（もっと見るとは別）
+const overdueFolded = !!st.homeFold?.overdue;
+const todayFolded = !!st.homeFold?.today;
+const laterFolded = !!st.homeFold?.later;
 
-    const todayVisible =
-      isAllRange && !todayExpanded
-        ? todayTasks.slice(0, MORE_LIMIT)
-        : todayTasks;
+const overdueVisible =
+  isAllRange && !overdueExpanded ? overdue.slice(0, MORE_LIMIT) : overdue;
 
-    await pushTaskList("*🚨 期限切れ*", overdueVisible, overdueTotal);
+const todayVisible =
+  isAllRange && !todayExpanded
+    ? todayTasks.slice(0, MORE_LIMIT)
+    : todayTasks;
 
-    // ★「もっと見る（期限切れ）」は “今日” の見出しの直前（= 今日の上）に出す
-    if (isAllRange && overdueTotal > MORE_LIMIT) {
-      const hidden = Math.max(0, overdueTotal - overdueVisible.length);
-      blocks.push({
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: {
-              type: "plain_text",
-              text: overdueExpanded
-                ? "閉じる"
-                : `もっと見る（残り${hidden}件）`,
-            },
-            action_id: "home_toggle_more",
-            value: JSON.stringify({ section: "overdue" }),
-          },
-        ],
-      });
-      blocks.push({ type: "divider" });
-    }
+// ✅ 見出し右の「開く/閉じる」ボタン
+const overdueFoldBtn =
+  overdueTotal > 0
+    ? {
+        type: "button",
+        text: { type: "plain_text", text: overdueFolded ? "開く" : "閉じる" },
+        action_id: "home_toggle_fold",
+        value: JSON.stringify({ section: "overdue" }),
+      }
+    : null;
 
-    await pushTaskList("*🟨 今日*", todayVisible, todayTotal);
+const todayFoldBtn =
+  todayTotal > 0
+    ? {
+        type: "button",
+        text: { type: "plain_text", text: todayFolded ? "開く" : "閉じる" },
+        action_id: "home_toggle_fold",
+        value: JSON.stringify({ section: "today" }),
+      }
+    : null;
 
-    // ★「もっと見る（今日）」は “明日以降” の見出しの直前（= 明日以降の上）に出す
-    if (isAllRange && todayTotal > MORE_LIMIT) {
-      const hidden = Math.max(0, todayTotal - todayVisible.length);
-      blocks.push({
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: {
-              type: "plain_text",
-              text: todayExpanded ? "閉じる" : `もっと見る（残り${hidden}件）`,
-            },
-            action_id: "home_toggle_more",
-            value: JSON.stringify({ section: "today" }),
-          },
-        ],
-      });
-      blocks.push({ type: "divider" });
-    }
+const laterFoldBtn =
+  laterTasks.length > 0
+    ? {
+        type: "button",
+        text: { type: "plain_text", text: laterFolded ? "開く" : "閉じる" },
+        action_id: "home_toggle_fold",
+        value: JSON.stringify({ section: "later" }),
+      }
+    : null;
 
-    await pushTaskList("*🟩 明日以降*", laterTasks);
+await pushTaskList("*🚨 期限切れ*", overdueVisible, overdueTotal, {
+  toggleAction: {
+    action_id: "home_toggle_fold",
+    value: JSON.stringify({ section: "overdue" }),
+  },
+  toggleLabel: overdueFolded ? "▽" : "△",
+  folded: overdueFolded,
+});
+
+// ★既存：もっと見る（期限切れ）
+// 畳んでいるときは出さない（押せても意味ない＆混乱するので）
+if (!overdueFolded && isAllRange && overdueTotal > MORE_LIMIT) {
+  const hidden = Math.max(0, overdueTotal - overdueVisible.length);
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: {
+          type: "plain_text",
+          text: overdueExpanded ? "閉じる" : `もっと見る（残り${hidden}件）`,
+        },
+        action_id: "home_toggle_more",
+        value: JSON.stringify({ section: "overdue" }),
+      },
+    ],
+  });
+  blocks.push({ type: "divider" });
+}
+
+await pushTaskList("*🟨 今日*", todayVisible, todayTotal, {
+  toggleAction: {
+    action_id: "home_toggle_fold",
+    value: JSON.stringify({ section: "today" }),
+  },
+  toggleLabel: todayFolded ? "▽" : "△",
+  folded: todayFolded,
+});
+
+// ★既存：もっと見る（今日）
+if (!todayFolded && isAllRange && todayTotal > MORE_LIMIT) {
+  const hidden = Math.max(0, todayTotal - todayVisible.length);
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: {
+          type: "plain_text",
+          text: todayExpanded ? "閉じる" : `もっと見る（残り${hidden}件）`,
+        },
+        action_id: "home_toggle_more",
+        value: JSON.stringify({ section: "today" }),
+      },
+    ],
+  });
+  blocks.push({ type: "divider" });
+}
+
+await pushTaskList("*🟩 明日以降*", laterTasks, null, {
+  toggleAction: {
+    action_id: "home_toggle_fold",
+    value: JSON.stringify({ section: "later" }),
+  },
+  toggleLabel: laterFolded ? "▽" : "△",
+  folded: laterFolded,
+});
   }
 
   await client.views.publish({
@@ -2394,32 +2495,80 @@ async function getUsergroupMembers(teamId, groupId) {
 }
 
 // ================================
-// Channel visibility cache（publicは表示OK / private・DMは表示NG）
+// Channel visibility cache（参加チャンネルのみ表示）
+// - public でも「ユーザーが参加していない」なら表示しない
+// - private / DM は表示しない（既存方針維持）
 // ================================
 const CHANNEL_VIS_CACHE_MS = 10 * 60 * 1000;
 const channelVisCache = new Map(); // `${teamId}:${channelId}` -> { at, ok }
 
-async function canUserSeeChannel({ client, teamId, channelId }) {
+// user -> joined channels cache（API節約）
+const USER_JOINED_CH_CACHE_MS = 10 * 60 * 1000;
+const userJoinedChCache = new Map(); // `${teamId}:${userId}` -> { at, set: Set<string> }
+
+async function listUserJoinedChannelsSet(client, teamId, userId) {
+  const key = `${teamId}:${userId}`;
+  const cached = userJoinedChCache.get(key);
+  if (cached && Date.now() - cached.at < USER_JOINED_CH_CACHE_MS) return cached.set;
+
+  const set = new Set();
+  let cursor;
+  try {
+    do {
+      const res = await client.users.conversations({
+        user: userId,
+        types: "public_channel,private_channel",
+        limit: 200,
+        cursor,
+        exclude_archived: true,
+      });
+      for (const ch of res?.channels || []) {
+        if (ch?.id) set.add(ch.id);
+      }
+      cursor = res?.response_metadata?.next_cursor || null;
+    } while (cursor);
+  } catch (e) {
+    // 失敗時は空（= 表示しない）に倒す
+    console.error("users.conversations error:", e?.data || e);
+  }
+
+  userJoinedChCache.set(key, { at: Date.now(), set });
+  return set;
+}
+
+async function canUserSeeChannel({ client, teamId, channelId, userId }) {
   if (!channelId) return true;
+  if (!userId) return false; // user前提の判定に寄せる
 
   // まずIDプレフィックスで高速判定（API節約）
   const id0 = String(channelId)[0];
-  if (id0 === "C") return true; // public channel
-  if (id0 === "G") return false; // private channel
   if (id0 === "D") return false; // DM
+  if (id0 === "G") return false; // private channel（Homeには出さない方針）
 
-  // 想定外のID（例：共有チャンネル等）は conversations.info で確定
+  // public channel: 参加している場合のみ表示
+  if (id0 === "C") {
+    const joined = await listUserJoinedChannelsSet(client, teamId, userId);
+    return joined.has(channelId);
+  }
+
+  // 想定外のID（例：共有チャンネル等）は conversations.info で public を確認しつつ、参加判定
   const key = `${teamId}:${channelId}`;
   const cached = channelVisCache.get(key);
-  if (cached && Date.now() - cached.at < CHANNEL_VIS_CACHE_MS)
-    return !!cached.ok;
+  if (cached && Date.now() - cached.at < CHANNEL_VIS_CACHE_MS) {
+    if (!cached.ok) return false;
+    const joined = await listUserJoinedChannelsSet(client, teamId, userId);
+    return joined.has(channelId);
+  }
 
   try {
     const info = await client.conversations.info({ channel: channelId });
     const ch = info?.channel;
     const isPublic = !!ch?.is_channel && !ch?.is_private;
     channelVisCache.set(key, { at: Date.now(), ok: isPublic });
-    return isPublic;
+    if (!isPublic) return false;
+
+    const joined = await listUserJoinedChannelsSet(client, teamId, userId);
+    return joined.has(channelId);
   } catch (_) {
     channelVisCache.set(key, { at: Date.now(), ok: false });
     return false;
@@ -3785,6 +3934,32 @@ app.action("home_toggle_more", async ({ ack, body, client }) => {
   }
 });
 
+// Home: 「開く / 閉じる」トグル（畳む機能。もっと見るとは別）
+app.action("home_toggle_fold", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+
+    const payload = safeJsonParse(body.actions?.[0]?.value || "");
+    const section = payload?.section; // "overdue" | "today" | "later"
+    if (!teamId || !userId) return;
+    if (section !== "overdue" && section !== "today" && section !== "later") return;
+
+    const st = getHomeState(teamId, userId);
+    const next = {
+      homeFold: {
+        ...(st.homeFold || { overdue: false, today: false, later: false }),
+        [section]: !(st.homeFold?.[section]),
+      },
+    };
+
+    setHomeState(teamId, userId, next);
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_toggle_fold error:", e?.data || e);
+  }
+});
 
 // Home: フィルタをリセット（Phase8-4）
 app.action("home_reset_filters", async ({ ack, body, client }) => {

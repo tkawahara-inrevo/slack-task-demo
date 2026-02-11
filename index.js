@@ -2443,14 +2443,15 @@ await pushTaskList("*🟩 明日以降*", laterTasks, null, {
   toggleLabel: laterFolded ? "▽" : "△",
   folded: laterFolded,
 });
-
-// ✅ Home下部が見切れる対策：最後に余白ブロックを追加（スマホ/デスクトップ両対応）
-blocks.push({
-  type: "context",
-  elements: [{ type: "plain_text", text: "　" }], // ← 全角スペース（空文字はSlackが嫌がる）
-});
-
   }
+
+  // ✅ 末尾が見切れてスクロールできない対策：
+  // Slack Home は「空に見える block」を潰すことがあるので、
+  // section(mrkdwn) + ゼロ幅スペース + 改行で確実に高さが出る余白を追加する
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: "\u200b\n\u200b\n\u200b\n\u200b\n\u200b" },
+  });
 
   await client.views.publish({
     user_id: userId,

@@ -2476,25 +2476,22 @@ await pushTaskList("*🟩 明日以降*", laterTasks, null, {
   // 対策：
   // - publish 前に blocks を上限内に収める（末尾用の“余白”枠を必ず確保）
   // - 余白は actions を使って高さを確保（スクロール終端の“底上げ”）
+  // ✅ 見切れ対策の“余白”を「見える空ボタン」ではなく、ほぼ見えない context で作る
+  // - actions(button) は空のUI部品が見えてしまい不快になりがち
+  // - context は最小高さを持ちつつ、ゼロ幅スペースなら表示上ほぼ何も出ない
+  // - 足りない環境向けに context を複数入れて高さを確保する
   const FOOTER_BLOCKS = [
-    // ① 省略メッセージ（必要なときだけ出す）
-    //   ※ ここは後で条件付きで push する
-    // ② 下余白（必ず残す）
     {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: " " },
-          action_id: "noop",
-          value: "home_spacer",
-        },
-      ],
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "\u200b" }], // ゼロ幅スペース（見えない）
     },
-    // ③ さらに少し余白（actions だけだと環境によってギリになることがあるので保険）
     {
-      type: "section",
-      text: { type: "mrkdwn", text: "\u200b\n\u200b" }, // ゼロ幅スペース + 改行
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "\u200b" }],
+    },
+    {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "\u200b" }],
     },
   ];
 

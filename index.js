@@ -1288,6 +1288,40 @@ if (!isBroadcast) {
     text: { type: "mrkdwn", text: "*🗨 コメント*" },
   });
 
+   // ✅ コメント日時表示（created_at）
+  // - サーバーのTZに依存するとズレるので、表示は Asia/Tokyo(JST) 固定にする
+  // - Slack上で読みやすいように「YYYY/MM/DD HH:mm」形式にする
+  function formatCommentCreatedAtJst(createdAt) {
+    if (!createdAt) return null;
+
+    const d = createdAt instanceof Date ? createdAt : new Date(createdAt);
+    if (Number.isNaN(d.getTime())) return null;
+
+    try {
+      // ✅ JST固定でフォーマット
+      const parts = new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(d);
+
+      const get = (type) => parts.find((p) => p.type === type)?.value || "";
+      return `${get("year")}/${get("month")}/${get("day")} ${get("hour")}:${get("minute")}`;
+    } catch (_) {
+      // Intl が使えない環境向けの保険（基本はここには来ない想定）
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      return `${y}/${m}/${dd} ${hh}:${mm}`;
+    }
+  }
+
   if (!__comments.length) {
     blocks.push({
       type: "context",
@@ -1296,9 +1330,13 @@ if (!isBroadcast) {
   } else {
     for (const c of __comments) {
       const name = await getUserDisplayName(teamId, c.user_id);
+      const at = formatCommentCreatedAtJst(c.created_at);
+
+      // ✅ 表示：名前 + 日時（あれば）→ 本文
+      const header = at ? `*${name}*  _(${at})_` : `*${name}*`;
       blocks.push({
         type: "section",
-        text: { type: "mrkdwn", text: `*${name}*\n${c.comment}` },
+        text: { type: "mrkdwn", text: `${header}\n${c.comment}` },
       });
     }
   }

@@ -1,15 +1,21 @@
 require("dotenv").config();
-const { App } = require("@slack/bolt");
+const { App, ExpressReceiver } = require("@slack/bolt");
+const express = require("express");
 const { Pool } = require("pg");
 const { randomUUID } = require("crypto");
 const cron = require("node-cron");
 
 // ================================
-// Slack Bolt App
+// Slack Bolt App (+ custom webhook endpoint)
 // ================================
+const receiver = new ExpressReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  // Slack側のRequest URLがデフォルト(/slack/events等)のままなら、ここは指定不要
+});
+
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  receiver,
 });
 
 // ================================
@@ -2437,6 +2443,13 @@ await pushTaskList("*🟩 明日以降*", laterTasks, null, {
   toggleLabel: laterFolded ? "▽" : "△",
   folded: laterFolded,
 });
+
+// ✅ Home下部が見切れる対策：最後に余白ブロックを追加（スマホ/デスクトップ両対応）
+blocks.push({
+  type: "context",
+  elements: [{ type: "plain_text", text: "　" }], // ← 全角スペース（空文字はSlackが嫌がる）
+});
+
   }
 
   await client.views.publish({
@@ -2447,6 +2460,24 @@ await pushTaskList("*🟩 明日以降*", laterTasks, null, {
       blocks,
     },
   });
+}
+
+function extractTsFromPermalink(url) {
+  // permalink例: https://xxx.slack.com/archives/C12345678/p1707350400000123
+  // -> ts: 1707350400.000123
+  const s = String(url || "");
+  const m = s.match(/\/p(\d{10})(\d{6,})/);
+  if (!m) return null;
+  return `${m[1]}.${m[2].padStart(6, "0")}`;
+}
+
+async function getTeamIdViaAuthTest(client) {
+  try {
+    const r = await client.auth.test();
+    return r?.team_id || null;
+  } catch (_) {
+    return null;
+  }
 }
 
 // ================================
@@ -2718,6 +2749,172 @@ app.event("app_home_opened", async ({ event, client, body }) => {
 });
 
 // ================================
+// Custom Step (Workflow Builder): 情シス依頼を自動タスク化
+// callback_id: josys_taskify
+// ================================
+app.function("josys_taskify", async ({ client, inputs, complete, fail, logger }) => {
+  try {
+    let teamId = inputs?.team_id || inputs?.teamId || null; // 任意
+    const requesterUserId = inputs?.requester_user_id || inputs?.requesterUserId || null;
+    const typeLabel = String(inputs?.type_label || inputs?.typeLabel || "").trim();
+    const content = String(inputs?.content || "").trim();
+    const dueRaw = inputs?.due_date || inputs?.dueDate || null;
+    const channelId = inputs?.channel_id || inputs?.channelId || null;
+
+// message_ts が取れない環境向け：メッセージのリンクから復元
+    const messageLink =
+      inputs?.message_link ||
+      inputs?.messageLink ||
+      inputs?.message_url ||
+      inputs?.messageUrl ||
+      inputs?.message_permalink ||
+      inputs?.messagePermalink ||
+      null;
+
+    let msgTs = inputs?.message_ts || inputs?.messageTs || null;
+    if (!msgTs && messageLink) {
+      msgTs = extractTsFromPermalink(messageLink);
+    }
+
+// teamId も inputs に無い環境向け：client から取得
+    if (!teamId) {
+     teamId = await getTeamIdViaAuthTest(client);
+    }
+
+    const corpGroupId = process.env.CORP_SYSTEM_USERGROUP_ID || "";
+    const corpHandle = (process.env.CORP_SYSTEM_HANDLE || "corp-system").replace(/^@/, "");
+
+    // ✅ 必須が欠けたら「タスク化しない」
+    // ただしワークフロー側の設定ミスに気づけるよう fail にする（静かにスキップしたいなら complete に変更も可）
+if (!requesterUserId || !typeLabel || !dueRaw || !channelId || !corpGroupId) {
+await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+return;
+
+}
+
+// message_ts が無い場合は message_link が必須（どっちも無ければタスク化しない）
+if (!msgTs) {
+await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+return;
+
+}
+    // due を YYYY-MM-DD に寄せる（既存ヘルパーを利用）
+    const due = slackDateYmd(dueRaw);
+    if (!due) {
+      await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+      return;
+    }
+
+    // teamId は body から取れないので、最優先で inputs 経由に寄せる
+    // もし入らない環境だったら、ここは後でログ見て調整しよ🫶
+if (!teamId) {
+  logger?.error?.("missing teamId (inputs/auth.test)");
+  await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+return;
+
+}
+
+
+    // 二重作成防止（同一メッセージ起点は1回だけ）
+    const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
+    if (existing?.id) {
+      await complete({ outputs: { task_id: existing.id } });
+      return;
+    }
+
+    // corp-system usergroup を展開して broadcast targets を作る
+    const { users: usersFromGroups } = await expandTargetsFromGroups(teamId, [corpGroupId]);
+    const targetList = Array.from(usersFromGroups || new Set()).filter(Boolean);
+
+    if (!targetList.length) {
+      await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+return;
+
+    }
+
+    // permalink（元投稿リンク）
+    let permalink = "";
+    try {
+      const r = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs });
+      permalink = r?.permalink || "";
+    } catch (_) {}
+
+    // title/desc
+    const descParts = [];
+    descParts.push(`【種別】${typeLabel}`);
+    descParts.push(`【期日】${due}`);
+    if (content) descParts.push(`【依頼内容】\n${content}`);
+    const description = descParts.join("\n");
+
+    const taskId = randomUUID();
+    const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+
+    const created = await dbCreateTask({
+      id: taskId,
+      team_id: teamId,
+      channel_id: channelId,
+      message_ts: msgTs,
+      source_permalink: permalink || null,
+      title: typeLabel, // ✅ タイトルは種別
+      description,
+      requester_user_id: requesterUserId,     // ✅ 依頼主 = workflow 実行者
+      created_by_user_id: requesterUserId,
+      assignee_id: null,                      // broadcast 固定
+      assignee_label: `@${corpHandle}`,
+      status: "in_progress",
+      due_date: due,
+      requester_dept: requesterDept,
+      assignee_dept: null,
+      task_type: "broadcast",
+      broadcast_group_handle: `@${corpHandle}`,
+      broadcast_group_id: corpGroupId,
+      total_count: targetList.length,
+      completed_count: 0,
+      notified_at: null,
+    });
+
+    // broadcast: snapshot targets & counts
+    await dbInsertTaskTargets(teamId, taskId, targetList);
+    const total = await dbCountTargets(teamId, taskId);
+    await dbUpdateBroadcastCounts(teamId, taskId, 0, total);
+    created.total_count = total;
+    created.completed_count = 0;
+
+    // スレッドカード更新（DMは除外）
+    try {
+      if (!String(channelId || "").startsWith("D")) {
+        const blocks = await buildThreadCardBlocks({ teamId, task: created });
+        await upsertThreadCard(client, { teamId, channelId, parentTs: msgTs, blocks });
+      }
+    } catch (e) {
+      console.error("workflow step upsertThreadCard error:", e?.data || e);
+    }
+
+    // 発行通知（依頼主自身は除外）
+    try {
+      const toNotify = targetList.filter((u) => u && u !== requesterUserId);
+      for (const uid of toNotify) {
+        await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+      }
+    } catch (e) {
+      console.error("workflow step notify error:", e?.data || e);
+    }
+
+    // Home更新（依頼主 + 全対象者）
+    try {
+      const toRefresh = Array.from(new Set([requesterUserId, ...targetList].filter(Boolean)));
+      publishHomeForUsers(client, teamId, toRefresh, 200);
+      setTimeout(() => publishHomeForUsers(client, teamId, toRefresh, 200), 200);
+    } catch (_) {}
+
+    await complete({ outputs: { task_id: taskId } });
+  } catch (error) {
+    logger?.error?.(error);
+    await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+  }
+});
+
+// ================================
 // Shortcut: Message -> Task create modal
 // ================================
 app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
@@ -2727,8 +2924,11 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     const teamId = shortcut.team?.id || shortcut.team_id;
     const channelId = shortcut.channel?.id || "";
     const msgTs = shortcut.message?.ts || "";
-    const rawText = shortcut.message?.text || "";
-    const requesterUserId = shortcut.message?.user || "";
+        const rawText = shortcut.message?.text || "";
+
+    // ✅ 依頼主の初期値は「タスク化した人」
+    const actorUserId = shortcut.user?.id || "";
+
 
     const msgBlocks = shortcut.message?.blocks || null;
 
@@ -2752,7 +2952,9 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     let initialGroupOptions = [];
 
     if (hasUserMention || hasGroupMention) {
-      const targets = inferTargetsFromMessage(rawText, requesterUserId, msgBlocks);
+            // ✅ メンションが無いときの fallback も「タスク化した人」にする
+      const targets = inferTargetsFromMessage(rawText, actorUserId, msgBlocks);
+
       initialUserIds = Array.isArray(targets.userIds) ? targets.userIds.filter(Boolean) : [];
       initialGroupIds = Array.isArray(targets.groupIds) ? targets.groupIds.filter(Boolean) : [];
 
@@ -2780,17 +2982,19 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
         type: "modal",
         callback_id: "task_modal",
         // ✅ private_metadata は軽量に（3000文字制限対策）
-        private_metadata: JSON.stringify({
+                private_metadata: JSON.stringify({
           teamId,
           channelId,
           msgTs,
-          requesterUserId,
+          // ✅ 後方互換のため残してOK（submit側はstate優先）
+          requesterUserId: actorUserId,
         }),
+
         title: { type: "plain_text", text: "タスク作成" },
         submit: { type: "plain_text", text: "決定" },
         close: { type: "plain_text", text: "キャンセル" },
         blocks: [
-          {
+                    {
             type: "input",
             block_id: "desc",
             label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
@@ -2799,6 +3003,19 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
               action_id: "desc_input",
               multiline: true,
               initial_value: prettyText || "",
+            },
+          },
+
+          // ✅ 依頼主（選択式）：初期値は「タスク化した人」
+          {
+            type: "input",
+            block_id: "requester",
+            label: { type: "plain_text", text: "依頼主" },
+            element: {
+              type: "users_select",
+              action_id: "requester_user_select",
+              initial_user: actorUserId,
+              placeholder: { type: "plain_text", text: "依頼主を選択" },
             },
           },
 
@@ -3273,29 +3490,44 @@ await client.views.open({
     type: "modal",
     callback_id: "task_modal",
     // ✅ private_metadata は軽量に（3000文字制限対策）
-    private_metadata: JSON.stringify({
-      teamId,
-      channelId,
-      msgTs,
-      requesterUserId,
-    }),
+            private_metadata: JSON.stringify({
+          teamId,
+          channelId,
+          msgTs,
+          // ✅ 後方互換のため残してOK（submit側はstate優先）
+          requesterUserId: actorUserId,
+        }),
+
     title: { type: "plain_text", text: "タスク作成" },
     submit: { type: "plain_text", text: "決定" },
     close: { type: "plain_text", text: "キャンセル" },
     blocks: [
-      {
-        type: "input",
-        block_id: "desc",
-        label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
-        element: {
-          type: "plain_text_input",
-          action_id: "desc_input",
-          multiline: true,
-          // ✅ 本文は input に入ってるのでOK
-          initial_value: prettyText || "",
-        },
-      },
+                {
+            type: "input",
+            block_id: "desc",
+            label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
+            element: {
+              type: "plain_text_input",
+              action_id: "desc_input",
+              multiline: true,
+              initial_value: prettyText || "",
+            },
+          },
 
+          // ✅ 依頼主（選択式）：初期値は「タスク化した人」
+          {
+            type: "input",
+            block_id: "requester",
+            label: { type: "plain_text", text: "依頼主" },
+            element: {
+              type: "users_select",
+              action_id: "requester_user_select",
+              initial_user: actorUserId,
+              placeholder: { type: "plain_text", text: "依頼主を選択" },
+            },
+          },
+
+          // 対応者（個人：複数OK）
           {
             type: "input",
             optional: true,
@@ -3485,8 +3717,13 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     const due = view.state.values.due?.due_date?.selected_date || null;
     //const status = view.state.values.status?.status_select?.selected_option?.value || "open";
     // （B方針）作成時ステータスは in_progress 固定（迷わせない）
-    const status = "in_progress";
-    const requesterUserId = meta.requesterUserId || actorUserId;
+        const status = "in_progress";
+
+    // ✅ 依頼主：ユーザーが選べるようにする（初期値は「タスク化した人」）
+    const requesterUserId =
+      view.state.values.requester?.requester_user_select?.selected_user ||
+      actorUserId;
+
 
     if (!selectedUsers.length && !selectedGroupIds.length) {
       // Phase8-2: 対応者（個人 or グループ）必須。モーダル内エラー表示で送信をブロックする
@@ -4084,28 +4321,32 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
 
       await dbUpsertCompletion(teamId, taskId, userId);
 
-      const total = task.total_count || (await dbCountTargets(teamId, taskId));
+            const total = task.total_count || (await dbCountTargets(teamId, taskId));
       const doneCount = await dbCountCompletions(teamId, taskId);
 
-      // 全員完了（= 依頼者の確認待ちへ）
+      // ✅ 全員完了：確認待ち工程は廃止して、そのまま完了(done)へ
       if (doneCount >= total && total > 0) {
         const fresh = await dbGetTaskById(teamId, taskId);
-        if (fresh && !["waiting", "done", "cancelled"].includes(fresh.status)) {
-          await dbUpdateStatus(teamId, taskId, "waiting");
+        if (fresh && !["done", "cancelled"].includes(fresh.status)) {
+          await dbUpdateStatus(teamId, taskId, "done");
         }
-        // 依頼者へ通知（1回だけ）
+
+        // ✅ 依頼者へ通知（1回だけ）
+        // - notified_at は「全員完了通知の送信済みフラグ」として流用する
         if (fresh && !fresh.notified_at) {
           await dbQuery(
             `UPDATE tasks SET notified_at=now() WHERE team_id=$1 AND id=$2 AND notified_at IS NULL`,
             [teamId, taskId],
           );
-          await postRequesterConfirmDM({
-            teamId,
-            taskId,
-            requesterUserId: fresh.requester_user_id,
-            title: fresh.title,
-          });
-          // ★Home再描画：全員完了→確認待ち（依頼者/対象者にも反映）
+
+          // ✅ タイトル + 詳細ボタンのみの静かな通知に統一
+          await notifyTaskSimpleDM(
+            fresh.requester_user_id,
+            { ...fresh, status: "done" },
+            "🎉 全員が完了したよ",
+          );
+
+          // ✅ Home再描画：依頼者/対象者へ即反映（スマホ遅延対策で2回）
           try {
             const targets = await dbListTargetUserIds(teamId, taskId);
             const toRefresh = Array.from(

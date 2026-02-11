@@ -2445,30 +2445,6 @@ await pushTaskList("*🟩 明日以降*", laterTasks, null, {
 });
   }
 
-  // ✅ 末尾が見切れてスクロールできない対策（折り畳み導入後に発生しやすい）：
-  // Slack Home は末尾が section/context だけだと「スクロール限界」が伸びないことがある。
-  // actions は高さが確保されやすいので、末尾に noop ボタンを置いて“下余白”を作る。
-  // ※ action_id: "noop" は既に実装がある前提（ackだけする）
-  blocks.push({
-    type: "actions",
-    elements: [
-      {
-        type: "button",
-        text: { type: "plain_text", text: " " }, // 空っぽに見えるけど高さを作れる
-        action_id: "noop",
-        value: "home_spacer",
-      },
-    ],
-  });
-
-  await client.views.publish({
-    user_id: userId,
-    view: {
-      type: "home",
-      callback_id: "home",
-      blocks,
-    },
-  });
   // ✅ 末尾が見切れてスクロールできない対策：
   // 原因として多いのが「Slack Home の blocks 上限（100個）に到達して末尾が切られる」こと。
   // 折り畳み導入でブロック数が増えると、最後の余白ブロック自体が捨てられて効かなくなる。

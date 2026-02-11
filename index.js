@@ -2469,6 +2469,69 @@ await pushTaskList("*🟩 明日以降*", laterTasks, null, {
       blocks,
     },
   });
+  // ✅ 末尾が見切れてスクロールできない対策：
+  // 原因として多いのが「Slack Home の blocks 上限（100個）に到達して末尾が切られる」こと。
+  // 折り畳み導入でブロック数が増えると、最後の余白ブロック自体が捨てられて効かなくなる。
+  //
+  // 対策：
+  // - publish 前に blocks を上限内に収める（末尾用の“余白”枠を必ず確保）
+  // - 余白は actions を使って高さを確保（スクロール終端の“底上げ”）
+  const FOOTER_BLOCKS = [
+    // ① 省略メッセージ（必要なときだけ出す）
+    //   ※ ここは後で条件付きで push する
+    // ② 下余白（必ず残す）
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: " " },
+          action_id: "noop",
+          value: "home_spacer",
+        },
+      ],
+    },
+    // ③ さらに少し余白（actions だけだと環境によってギリになることがあるので保険）
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "\u200b\n\u200b" }, // ゼロ幅スペース + 改行
+    },
+  ];
+
+  // Slack blocks 上限は 100。末尾の余白ブロック分を先に確保する
+  const SLACK_BLOCK_LIMIT = 100;
+  const RESERVE = FOOTER_BLOCKS.length;
+
+  // ✅ blocks が多すぎる場合、末尾が切られて「スクロールできない」原因になるので削る
+  if (blocks.length > SLACK_BLOCK_LIMIT - RESERVE) {
+    // 末尾は中途半端に切るとUIが崩れやすいので、
+    // 「安全に収まるところまで」ガツッと切って注意文を入れる
+    const keep = SLACK_BLOCK_LIMIT - RESERVE - 1; // 注意文1個分も確保
+    blocks.splice(keep);
+
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text:
+            "⚠️ 表示件数が多いため一部を省略しました。フィルタ/折り畳みで絞ると下まで見やすくなるよ。",
+        },
+      ],
+    });
+  }
+
+  // ✅ 最後に“必ず残る”余白を付与
+  blocks.push(...FOOTER_BLOCKS);
+
+  await client.views.publish({
+    user_id: userId,
+    view: {
+      type: "home",
+      callback_id: "home",
+      blocks,
+    },
+  });
 
 }
 

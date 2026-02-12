@@ -150,13 +150,41 @@ function generateTitleCandidate(text, maxLen = 22) {
 }
 
 async function dbQuery(text, params) {
-  const client = await pool.connect();
-  try {
-    return await client.query(text, params);
-  } finally {
-    client.release();
+  // ✅ pg が ECONNRESET などの一時的エラーを起こすことがあるので、1回だけリトライする
+  const isTransientPgError = (e) => {
+    const code = e?.code;
+    return (
+      code === "ECONNRESET" ||
+      code === "ETIMEDOUT" ||
+      code === "ECONNREFUSED" ||
+      code === "EPIPE"
+    );
+  };
+
+  let lastErr = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const client = await pool.connect();
+    try {
+      return await client.query(text, params);
+    } catch (e) {
+      lastErr = e;
+
+      // ✅ 一時的エラーだけリトライ、それ以外は即throw
+      if (!isTransientPgError(e) || attempt === 1) {
+        throw e;
+      }
+
+      // ✅ ほんの少し待ってから再試行（コネクション再確立待ち）
+      await new Promise((r) => setTimeout(r, 150));
+    } finally {
+      client.release();
+    }
   }
+
+  throw lastErr;
 }
+
 
 // ================================
 // Slack text prettifier: <!subteam^ID> -> @handle
@@ -1460,7 +1488,6 @@ if (!isBroadcast) {
   };
 }
 
-
 async function openDetailModal(
   client,
   {
@@ -1472,8 +1499,39 @@ async function openDetailModal(
     isFromModal = false,
   },
 ) {
+  // ✅ trigger_id は数秒で期限切れになるので、先に軽いモーダルを即表示する
+  const loadingView = {
+    type: "modal",
+    callback_id: "detail_modal_loading",
+    title: { type: "plain_text", text: "タスク" },
+    close: { type: "plain_text", text: "閉じる" },
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "読み込み中…⏳" },
+      },
+    ],
+  };
+
+  let openedViewId = null;
+
+  try {
+    // ✅ モーダル上のボタンからは views.push、それ以外は views.open
+    if (isFromModal) {
+      const res = await client.views.push({ trigger_id, view: loadingView });
+      openedViewId = res?.view?.id || null;
+    } else {
+      const res = await client.views.open({ trigger_id, view: loadingView });
+      openedViewId = res?.view?.id || null;
+    }
+  } catch (e) {
+    // open/push 自体が失敗したら、ここで終了（trigger_id 切れ等）
+    throw e;
+  }
+
+  // ✅ ここから先は時間がかかってもOK（view_id で更新できるため）
   const task = await dbGetTaskById(teamId, taskId);
-  if (!task) return;
+  if (!task || !openedViewId) return;
 
   const view = await buildDetailModalView({
     teamId,
@@ -1482,14 +1540,13 @@ async function openDetailModal(
     origin,
   });
 
-  // モーダル上のボタンからは views.open ではなく views.push（Slack仕様）
-  if (isFromModal) {
-    await client.views.push({ trigger_id, view });
-    return;
-  }
-
-  await client.views.open({ trigger_id, view });
+  // ✅ loading を本番UIに差し替え
+  await client.views.update({
+    view_id: openedViewId,
+    view,
+  });
 }
+
 
 // watcher helper
 

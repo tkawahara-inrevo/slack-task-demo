@@ -2895,6 +2895,7 @@ app.event("app_home_opened", async ({ event, client, body }) => {
 // ================================
 app.function("josys_taskify", async ({ client, inputs, complete, fail, logger }) => {
   console.log("🔥 josys_taskify CALLED", inputs);
+
   try {
     let teamId = inputs?.team_id || inputs?.teamId || null; // 任意
     const requesterUserId = inputs?.requester_user_id || inputs?.requesterUserId || null;
@@ -2903,7 +2904,7 @@ app.function("josys_taskify", async ({ client, inputs, complete, fail, logger })
     const dueRaw = inputs?.due_date || inputs?.dueDate || null;
     const channelId = inputs?.channel_id || inputs?.channelId || null;
 
-// message_ts が取れない環境向け：メッセージのリンクから復元
+    // message_ts が取れない環境向け：メッセージのリンクから復元
     const messageLink =
       inputs?.message_link ||
       inputs?.messageLink ||
@@ -2918,49 +2919,63 @@ app.function("josys_taskify", async ({ client, inputs, complete, fail, logger })
       msgTs = extractTsFromPermalink(messageLink);
     }
 
-// teamId も inputs に無い環境向け：client から取得
+    // teamId も inputs に無い環境向け：client から取得
     if (!teamId) {
-     teamId = await getTeamIdViaAuthTest(client);
+      teamId = await getTeamIdViaAuthTest(client);
     }
 
     const corpGroupId = process.env.CORP_SYSTEM_USERGROUP_ID || "";
     const corpHandle = (process.env.CORP_SYSTEM_HANDLE || "corp-system").replace(/^@/, "");
 
-    // ✅ 必須が欠けたら「タスク化しない」
-    // ただしワークフロー側の設定ミスに気づけるよう fail にする（静かにスキップしたいなら complete に変更も可）
-if (!requesterUserId || !typeLabel || !dueRaw || !channelId || !corpGroupId) {
-await complete({ outputs: { task_id: null, skipped: "missing_required" } });
-return;
+    logger?.info?.("🧪 debug vars", {
+      teamId,
+      requesterUserId,
+      typeLabel,
+      dueRaw,
+      channelId,
+      msgTs,
+      corpGroupId,
+    });
 
-}
+    // ===== 必須チェック（どれが欠けてるか全部出す）=====
+    const missing = [];
+    if (!requesterUserId) missing.push("requester_user_id");
+    if (!typeLabel) missing.push("type_label");
+    if (!dueRaw) missing.push("due_date");
+    if (!channelId) missing.push("channel_id");
+    if (!corpGroupId) missing.push("CORP_SYSTEM_USERGROUP_ID");
+    if (!msgTs) missing.push("message_ts(or message_link parse)");
+    if (!teamId) missing.push("team_id");
 
-// message_ts が無い場合は message_link が必須（どっちも無ければタスク化しない）
-if (!msgTs) {
-await complete({ outputs: { task_id: null, skipped: "missing_required" } });
-return;
-
-}
-    // due を YYYY-MM-DD に寄せる（既存ヘルパーを利用）
-    const due = slackDateYmd(dueRaw);
-    if (!due) {
-      await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+    if (missing.length) {
+      logger?.warn?.("⛔ skipped: missing required", { missing, inputs });
+      await complete({
+        outputs: {
+          task_id: null,
+          skipped: `missing:${missing.join(",")}`,
+        },
+      });
       return;
     }
 
-    // teamId は body から取れないので、最優先で inputs 経由に寄せる
-    // もし入らない環境だったら、ここは後でログ見て調整しよ🫶
-if (!teamId) {
-  logger?.error?.("missing teamId (inputs/auth.test)");
-  await complete({ outputs: { task_id: null, skipped: "missing_required" } });
-return;
-
-}
-
+    // due を YYYY-MM-DD に寄せる
+    const due = slackDateYmd(dueRaw);
+    if (!due) {
+      logger?.warn?.("⛔ skipped: invalid due", { dueRaw });
+      await complete({
+        outputs: {
+          task_id: null,
+          skipped: "invalid_due",
+        },
+      });
+      return;
+    }
 
     // 二重作成防止（同一メッセージ起点は1回だけ）
     const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
     if (existing?.id) {
-      await complete({ outputs: { task_id: existing.id } });
+      logger?.info?.("ℹ️ already exists", { taskId: existing.id });
+      await complete({ outputs: { task_id: existing.id, skipped: "already_exists" } });
       return;
     }
 
@@ -2969,9 +2984,14 @@ return;
     const targetList = Array.from(usersFromGroups || new Set()).filter(Boolean);
 
     if (!targetList.length) {
-      await complete({ outputs: { task_id: null, skipped: "missing_required" } });
-return;
-
+      logger?.warn?.("⛔ skipped: no targets from group", { corpGroupId });
+      await complete({
+        outputs: {
+          task_id: null,
+          skipped: "no_targets",
+        },
+      });
+      return;
     }
 
     // permalink（元投稿リンク）
@@ -2979,7 +2999,9 @@ return;
     try {
       const r = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs });
       permalink = r?.permalink || "";
-    } catch (_) {}
+    } catch (e) {
+      logger?.warn?.("getPermalink failed", e);
+    }
 
     // title/desc
     const descParts = [];
@@ -2997,11 +3019,11 @@ return;
       channel_id: channelId,
       message_ts: msgTs,
       source_permalink: permalink || null,
-      title: typeLabel, // ✅ タイトルは種別
+      title: typeLabel,
       description,
-      requester_user_id: requesterUserId,     // ✅ 依頼主 = workflow 実行者
+      requester_user_id: requesterUserId,
       created_by_user_id: requesterUserId,
-      assignee_id: null,                      // broadcast 固定
+      assignee_id: null,
       assignee_label: `@${corpHandle}`,
       status: "in_progress",
       due_date: due,
@@ -3029,7 +3051,7 @@ return;
         await upsertThreadCard(client, { teamId, channelId, parentTs: msgTs, blocks });
       }
     } catch (e) {
-      console.error("workflow step upsertThreadCard error:", e?.data || e);
+      logger?.error?.("workflow step upsertThreadCard error", e);
     }
 
     // 発行通知（依頼主自身は除外）
@@ -3039,7 +3061,7 @@ return;
         await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
       }
     } catch (e) {
-      console.error("workflow step notify error:", e?.data || e);
+      logger?.error?.("workflow step notify error", e);
     }
 
     // Home更新（依頼主 + 全対象者）
@@ -3047,12 +3069,22 @@ return;
       const toRefresh = Array.from(new Set([requesterUserId, ...targetList].filter(Boolean)));
       publishHomeForUsers(client, teamId, toRefresh, 200);
       setTimeout(() => publishHomeForUsers(client, teamId, toRefresh, 200), 200);
-    } catch (_) {}
+    } catch (e) {
+      logger?.warn?.("home publish error", e);
+    }
 
+    logger?.info?.("✅ task created", { taskId });
     await complete({ outputs: { task_id: taskId } });
   } catch (error) {
-    logger?.error?.(error);
-    await complete({ outputs: { task_id: null, skipped: "missing_required" } });
+    logger?.error?.("💥 josys_taskify failed", {
+      message: error?.message,
+      stack: error?.stack,
+    });
+
+    // ❗ デバッグ中は fail で Slack 側にもエラーを出す
+    await fail({
+      error: `josys_taskify failed: ${error?.message || "unknown error"}`,
+    });
   }
 });
 

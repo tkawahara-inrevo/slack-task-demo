@@ -2894,6 +2894,7 @@ app.event("app_home_opened", async ({ event, client, body }) => {
 // callback_id: josys_taskify
 // ================================
 app.function("josys_taskify", async ({ client, inputs, complete, fail, logger }) => {
+  console.log("🔥 josys_taskify CALLED", inputs);
   try {
     let teamId = inputs?.team_id || inputs?.teamId || null; // 任意
     const requesterUserId = inputs?.requester_user_id || inputs?.requesterUserId || null;

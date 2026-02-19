@@ -1105,10 +1105,6 @@ async function upsertThreadCard(
 
 // ★要望②：スレッドから完了ボタン削除（詳細からのみ）
 async function buildThreadCardBlocks({ teamId, task }) {
-  const src = task.source_permalink
-    ? `<${task.source_permalink}|元メッセージを開く>`
-    : noMention(`> ${(task.description || "").slice(0, 140)}`);
-
   // スレッド側の「詳細」は閲覧専用（操作は Home から）
   const payload = JSON.stringify({
     teamId,
@@ -1138,13 +1134,6 @@ async function buildThreadCardBlocks({ teamId, task }) {
       type: "section",
       text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` },
     },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*ステータス*：${statusLabel(task.status)}`,
-      },
-    },
   ];
   //if (task.task_type !== "broadcast") {
   //  common.push({ type: "section", text: { type: "mrkdwn", text: `*対応者部署*：${deptLabel(task.assignee_dept)}` } });
@@ -1154,11 +1143,6 @@ async function buildThreadCardBlocks({ teamId, task }) {
     ...common,
     { type: "divider" },
     {
-      type: "section",
-      text: { type: "mrkdwn", text: `*元メッセージ*\n${src}` },
-    },
-    { type: "divider" },
-    {
       type: "actions",
       elements: [
         {
@@ -1166,15 +1150,6 @@ async function buildThreadCardBlocks({ teamId, task }) {
           text: { type: "plain_text", text: "詳細を開く" },
           action_id: "open_detail_modal",
           value: payload,
-        },
-      ],
-    },
-    {
-      type: "context",
-      elements: [
-        {
-          type: "mrkdwn",
-          text: "✅ 操作は「詳細」画面から行います（誤操作防止）",
         },
       ],
     },
@@ -3098,15 +3073,7 @@ app.function("josys_taskify", async ({ client, inputs, complete, fail, logger })
     created.total_count = total;
     created.completed_count = 0;
 
-    // スレッドカード更新（DMは除外）
-    try {
-      if (!String(channelId || "").startsWith("D")) {
-        const blocks = await buildThreadCardBlocks({ teamId, task: created });
-        await upsertThreadCard(client, { teamId, channelId, parentTs: msgTs, blocks });
-      }
-    } catch (e) {
-      logger?.error?.("workflow step upsertThreadCard error", e);
-    }
+    // ✅ Workflow から自動作成されたタスクはスレッドに投稿しない（会話のノイズになるため）
 
     // 発行通知（依頼主自身は除外）
     try {

@@ -923,6 +923,60 @@ async function safeEphemeral(client, channelId, userId, text) {
   } catch (_) {}
 }
 
+async function safeEphemeral(client, channelId, userId, text) {
+  try {
+    await client.chat.postEphemeral({ channel: channelId, user: userId, text });
+  } catch (_) {}
+}
+
+/**
+ * Ensure bot is in channel (public only). Private channels cannot be joined programmatically.
+ * Returns: { ok, isPrivate, joined, reason, error }
+ */
+async function ensureBotInChannel({ client, channelId }) {
+  const id = String(channelId || "");
+  if (!id) return { ok: false, isPrivate: false, joined: false, reason: "no_channel" };
+
+  // DM / Group DM: join concept doesn't apply
+  if (id.startsWith("D")) {
+    return { ok: true, isPrivate: false, joined: false, reason: "dm" };
+  }
+
+  try {
+    const info = await client.conversations.info({ channel: id });
+    const ch = info?.channel || {};
+    const isPrivate = !!ch.is_private;
+    const isMember = !!ch.is_member;
+
+    if (isMember) return { ok: true, isPrivate, joined: false, reason: "already_member" };
+
+    if (isPrivate) {
+      return { ok: false, isPrivate: true, joined: false, reason: "private_not_member" };
+    }
+
+    // public: try to join
+    try {
+      await client.conversations.join({ channel: id });
+      return { ok: true, isPrivate: false, joined: true, reason: "joined" };
+    } catch (e) {
+      return { ok: false, isPrivate: false, joined: false, reason: "join_failed", error: e };
+    }
+  } catch (e) {
+    return { ok: false, isPrivate: false, joined: false, reason: "info_failed", error: e };
+  }
+}
+
+async function postDM(userId, text) {
+  if (!userId) return;
+  try {
+    const dm = await app.client.conversations.open({ users: userId });
+    const channel = dm.channel?.id;
+    if (!channel) return;
+    await app.client.chat.postMessage({ channel, text });
+  } catch (_) {}
+}
+
+
 async function postDM(userId, text) {
   if (!userId) return;
   try {
@@ -3863,6 +3917,58 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     const channelId = meta.channelId || "";
     const parentTs = meta.msgTs || "";
 
+    const isDmChannel = String(channelId || "")[0] === "D";
+
+    // ✅「作成」押した瞬間にチェック：botが未参加なら促す
+    // - public: join を試す（成功したら続行）
+    // - private: 自動参加できないのでDMで手順案内して、モーダルはエラーで止める
+    if (!isDmChannel && channelId) {
+      const joinRes = await ensureBotInChannel({ client, channelId });
+
+      if (!joinRes.ok) {
+        if (joinRes.isPrivate) {
+          await postDM(
+            actorUserId,
+            "そのチャンネルはプライベートだから、ボットを招待しないとタスク作成できません\n" +
+              "チャンネルで `/invite @Task Demo` を実行してから、もう一度「作成」してね",
+          );
+
+          await ack({
+            response_action: "errors",
+            errors: {
+              desc: "このチャンネルにボットが未参加だよ（招待手順をDMに送ったよ）",
+            },
+          });
+          return;
+        }
+
+        // publicだけど joinできない（権限/設定など）
+        await postDM(
+          actorUserId,
+          "このチャンネルに参加できなかったよ…！\n" +
+            "別の方法を試すか、管理者へ連絡してください",
+        );
+
+        await ack({
+          response_action: "errors",
+          errors: {
+            desc: "チャンネル参加に失敗したよ（詳細はDMを見てね）",
+          },
+        });
+        return;
+      }
+
+      // joinできた（=publicで未参加だった）場合は、エフェメラルで軽く案内
+      if (joinRes.joined) {
+        await safeEphemeral(
+          client,
+          channelId,
+          actorUserId,
+          "🤖 このチャンネルに参加したよ！このままタスク作ります◎",
+        );
+      }
+    }
+
     // ✅ 本文は view.state から読む（private_metadata には入れない）
     const description = (view.state.values.desc?.desc_input?.value || "").trim();
 
@@ -3877,7 +3983,6 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
 
     const title = generateTitleCandidate(description);
 
-
     const selectedUsers =
       view.state.values.assignee_users?.assignee_users_select?.selected_users ||
       [];
@@ -3889,33 +3994,50 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       .filter(Boolean);
 
     const due = view.state.values.due?.due_date?.selected_date || null;
-    //const status = view.state.values.status?.status_select?.selected_option?.value || "open";
+
     // （B方針）作成時ステータスは in_progress 固定（迷わせない）
-        const status = "in_progress";
+    const status = "in_progress";
 
     // ✅ 依頼主：ユーザーが選べるようにする（初期値は「タスク化した人」）
     const requesterUserId =
       view.state.values.requester?.requester_user_select?.selected_user ||
       actorUserId;
 
+    // ✅ DM特別ルール：personal固定（=自分あて固定）
+    // - DMで「自分の作業メモ → タスク化」を成立させる
+    // - ここでは "Dxxxx" を DM として扱う（Group DMもDになる運用前提）
+    if (isDmChannel) {
+      const hasOthers =
+        (selectedUsers || []).some((u) => u && u !== actorUserId) ||
+        (selectedGroupIds || []).length > 0;
 
-    if (!selectedUsers.length && !selectedGroupIds.length) {
-      // Phase8-2: 対応者（個人 or グループ）必須。モーダル内エラー表示で送信をブロックする
-
-      await ack({
-        response_action: "errors",
-
-        errors: {
-          assignee_users: "対応者（個人 or グループ）を1つ以上選んでください",
-
-          assignee_groups: "対応者（個人 or グループ）を1つ以上選んでください",
-        },
-      });
-
-      return;
+      if (hasOthers) {
+        await ack({
+          response_action: "errors",
+          errors: {
+            assignee_users:
+              "DMでは「自分あての個人タスク」固定だよ🙏（他ユーザー/グループは選べないよ）",
+            assignee_groups: "DMでは「自分あての個人タスク」固定だよ🙏",
+          },
+        });
+        return;
+      }
+      // ※選択が空でもOK（あとで actorUserId を入れる）
+    } else {
+      // Phase8-2: 対応者（個人 or グループ）必須（DMは例外）
+      if (!selectedUsers.length && !selectedGroupIds.length) {
+        await ack({
+          response_action: "errors",
+          errors: {
+            assignee_users: "対応者（個人 or グループ）を1つ以上選んでください",
+            assignee_groups: "対応者（個人 or グループ）を1つ以上選んでください",
+          },
+        });
+        return;
+      }
     }
 
-    // Phase8-2: バリデーション通過後にack（このハンドラ内でackは1回のみ）
+    // ✅ ここまで通ったらack（このハンドラ内でackは1回のみ）
     await ack();
 
     // Expand group members
@@ -3935,8 +4057,6 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     // - DMで「自分の作業メモ → タスク化」を成立させる
     // - ここでは "Dxxxx" を DM として扱う（Group DMもDになる運用前提）
     // ============================
-    const isDmChannel = String(channelId || "")[0] === "D";
-
     if (isDmChannel) {
       // DMは「自分あて」固定にしたいので、他人/グループが選ばれてたら弾く（事故防止）
       const hasOthers =
@@ -4190,6 +4310,31 @@ app.action("my_tasks_status_select", async ({ ack, body, client }) => {
 
     const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
     const rangeKey = meta.rangeKey || "to_me";
+
+    // 📱スマホ対策：まずローディング表示（ここが体感に効く！）
+    const loadingView = {
+      type: "modal",
+      callback_id: "task_list_modal",
+      title: { type: "plain_text", text: "タスク一覧" },
+      close: { type: "plain_text", text: "閉じる" },
+      private_metadata: body.view?.private_metadata || "{}",
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "読み込み中…⏳" },
+        },
+      ],
+    };
+
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        hash: body.view.hash,
+        view: loadingView,
+      });
+    } catch (_) {}
+
+    // 本描画（DB/整形が重くても、ユーザーは「反応した」って分かる）
     const view = await buildTaskListModalView({
       teamId,
       userId,
@@ -4466,7 +4611,6 @@ app.action("task_row_overflow", async ({ ack, body, action, client }) => {
   }
 });
 
-// complete (detail only) - personal: status done / broadcast: per-user completion + recount
 app.action("complete_task", async ({ ack, body, action, client }) => {
   await ack();
   const p = safeJsonParse(action.value || "{}") || {};
@@ -4474,6 +4618,30 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
   const taskId = p.taskId;
 
   if (!teamId || !taskId) return;
+
+  // 📱スマホ対策：押した瞬間に「反映中…」を出して無反応感を消す
+  if (body.view?.id) {
+    const loadingView = {
+      type: "modal",
+      callback_id: "detail_modal_loading",
+      title: { type: "plain_text", text: "タスク" },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "反映中…⏳" },
+        },
+      ],
+    };
+
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        hash: body.view.hash,
+        view: loadingView,
+      });
+    } catch (_) {}
+  }
 
   try {
     const task = await dbGetTaskById(teamId, taskId);

@@ -28,6 +28,50 @@ const pool = new Pool({
 // ================================
 // Helpers
 // ================================
+// ================================
+// 元メッセージ本文キャッシュ（private_metadata 3000文字制限回避）
+// - モーダル表示時にメモリに保持
+// - submit時に取り出して tasks.description に保存
+// ================================
+const __msgTextCache = new Map();
+
+function __cacheKey(teamId, channelId, ts) {
+  return `${teamId || ""}:${channelId || ""}:${ts || ""}`;
+}
+
+function __cachePut(key, text, ttlMs = 10 * 60 * 1000) {
+  if (!key) return;
+  __msgTextCache.set(key, { text: String(text || ""), exp: Date.now() + ttlMs });
+}
+
+function __cacheGet(key) {
+  const v = __msgTextCache.get(key);
+  if (!v) return "";
+  if (v.exp < Date.now()) {
+    __msgTextCache.delete(key);
+    return "";
+  }
+  return v.text || "";
+}
+
+async function fetchMessageTextByTs(client, channelId, ts) {
+  try {
+    if (!channelId || !ts) return "";
+    const res = await client.conversations.history({
+      channel: channelId,
+      latest: ts,
+      oldest: ts,
+      inclusive: true,
+      limit: 1,
+    });
+    const msg = res?.messages?.[0];
+    return String(msg?.text || "");
+  } catch (e) {
+    console.error("fetchMessageTextByTs error:", e?.data || e);
+    return "";
+  }
+}
+
 function safeJsonParse(str) {
   try {
     return JSON.parse(str);
@@ -140,40 +184,6 @@ function slackDateYmd(due) {
     return `${y}-${mm}-${dd}`;
   }
   return null;
-}
-
-function generateTitleCandidate(text, maxLen = 22) {
-  if (!text) return "（タスク）";
-  let s = String(text);
-
-  s = s.replace(/\r\n/g, "\n");
-  s = s.replace(/https?:\/\/\S+/g, "");
-  s = s.replace(/<@[A-Z0-9]+>/g, "");
-  s = s.replace(/<#[A-Z0-9]+\|[^>]+>/g, "");
-  s = s.replace(/:[a-z0-9_+-]+:/gi, "");
-  s = s.replace(/<!subteam\^[A-Z0-9]+(\|[^>]+)?>/g, ""); // usergroup token
-
-  s = s.replace(/[【】\[\]（）()]/g, " ");
-  s = s.replace(/\s+/g, " ").trim();
-
-  s = s.replace(
-    /^(すみません|恐縮ですが|お疲れ様です|取り急ぎ|ごめん|失礼|お願い|至急|急ぎ)\s*/g,
-    "",
-  );
-
-  const cut = s.split(/[\n。！？!?]/)[0].trim();
-  let title = cut || s;
-  title = title
-    .replace(
-      /(お願いします|ください|してもらえますか|して下さい|お願いします。?)$/g,
-      "",
-    )
-    .trim();
-  title = title.replace(/^@\S+\s*/, "");
-
-  if (!title) title = "（タスク）";
-  if (title.length > maxLen) title = title.slice(0, maxLen) + "…";
-  return title;
 }
 
 async function dbQuery(text, params) {
@@ -1535,11 +1545,11 @@ async function dbListPersonalTasksByStatusesWithScope(
 }
 
 function taskLineForHome(task, viewKey) {
-  const rawDesc = String(task.description || "")
-    .replace(/\r\n/g, "\n")
-    .trim();
+  const rawTitle = String(task.title || "").replace(/\r\n/g, "\n").trim();
+  const rawDesc = String(task.description || "").replace(/\r\n/g, "\n").trim();
 
-  let preview = rawDesc || String(task.title || "（本文なし）");
+  // ✅ Home一覧は基本「タイトル」／空なら本文
+  let preview = rawTitle || rawDesc || "（本文なし）";
 
   // 改行を整理
   preview = preview.replace(/\n{3,}/g, "\n\n");
@@ -1557,9 +1567,10 @@ function taskLineForHome(task, viewKey) {
     preview = preview.slice(0, MAX_PREVIEW_CHARS) + "…";
   }
 
+  // 通知抑止（Home表示用）
   preview = noMention(preview);
 
-  if (!preview) preview = noMention(String(task.title || "（本文なし）"));
+  if (!preview) preview = "（本文なし）";
   return preview;
 }
 
@@ -3033,7 +3044,9 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
         });
       }
     }
-
+    // ✅ 本文は表示しないが保存するのでキャッシュしておく
+    const cacheKey = __cacheKey(teamId, channelId, msgTs);
+    __cachePut(cacheKey, prettyText || "");
     await client.views.open({
       trigger_id: shortcut.trigger_id,
       view: {
@@ -3051,16 +3064,22 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
         title: { type: "plain_text", text: "タスク作成" },
         submit: { type: "plain_text", text: "決定" },
         close: { type: "plain_text", text: "キャンセル" },
+        
         blocks: [
+          // ✅ タイトル（任意）：初期値は空欄
           {
             type: "input",
-            block_id: "desc",
-            label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
+            optional: true,
+            block_id: "title",
+            label: { type: "plain_text", text: "タイトル（任意）" },
             element: {
               type: "plain_text_input",
-              action_id: "desc_input",
-              multiline: true,
-              initial_value: prettyText || "",
+              action_id: "title_input",
+              multiline: false,
+              placeholder: {
+                type: "plain_text",
+                text: "空欄なら本文がタイトルになります",
+              },
             },
           },
 
@@ -3076,7 +3095,6 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
               placeholder: { type: "plain_text", text: "依頼主を選択" },
             },
           },
-
           // 対応者（個人：複数OK）
           {
             type: "input",
@@ -3126,16 +3144,6 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
               placeholder: { type: "plain_text", text: "期限" },
               initial_date: todayJstYmd(),
             },
-          },
-
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。",
-              },
-            ],
           },
         ],
       },
@@ -3445,7 +3453,10 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
 
     let prettyText = await prettifySlackText(rawText, teamId);
     prettyText = await prettifyUserMentions(prettyText, teamId);
-    const title = generateTitleCandidate(prettyText || rawText || "");
+
+    // ✅ タイトル入力欄が無い導線なので「空欄扱い」= 本文をタイトルにする（リプレイス処理なし）
+    const description = String(prettyText || rawText || "").trim();
+    const title = description || "（本文なし）";
 
     const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
     const assigneeDept = await resolveDeptForUser(teamId, assigneeId);
@@ -3455,7 +3466,6 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
     // この導線は「personalタスクを即作成」だけに絞る（リアクション→確定ボタン）
     const taskType = "personal";
     const status = "in_progress"; // 初期は進行中で固定
-    const description = prettyText || rawText || "";
     const due = dueYmd; // "YYYY-MM-DD"
 
     const created = await dbCreateTask({
@@ -3519,6 +3529,10 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
     let prettyText = await prettifySlackText(rawText, teamId);
     prettyText = await prettifyUserMentions(prettyText, teamId);
 
+    // ✅ 本文は表示しないが保存するのでキャッシュしておく
+    const cacheKey = __cacheKey(teamId, channelId, msgTs);
+    __cachePut(cacheKey, prettyText || "");
+
     // task_modal を開く（初期値入り）
     await client.views.open({
       trigger_id: body.trigger_id,
@@ -3538,15 +3552,20 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
         submit: { type: "plain_text", text: "決定" },
         close: { type: "plain_text", text: "キャンセル" },
         blocks: [
+          // ✅ タイトル（任意）：初期値は空欄
           {
             type: "input",
-            block_id: "desc",
-            label: { type: "plain_text", text: "詳細（元メッセージ全文）" },
+            optional: true,
+            block_id: "title",
+            label: { type: "plain_text", text: "タイトル（任意）" },
             element: {
               type: "plain_text_input",
-              action_id: "desc_input",
-              multiline: true,
-              initial_value: prettyText || "",
+              action_id: "title_input",
+              multiline: false,
+              placeholder: {
+                type: "plain_text",
+                text: "空欄なら本文がタイトルになります",
+              },
             },
           },
 
@@ -3562,7 +3581,6 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
               placeholder: { type: "plain_text", text: "依頼主を選択" },
             },
           },
-
           // 対応者（個人：複数OK）
           {
             type: "input",
@@ -3707,7 +3725,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
           await ack({
             response_action: "errors",
             errors: {
-              desc: "このチャンネルにボットが未参加だよ（招待手順をDMに送ったよ）",
+              title: "このチャンネルにボットが未参加だよ（招待手順をDMに送ったよ）",
             },
           });
           return;
@@ -3723,7 +3741,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
         await ack({
           response_action: "errors",
           errors: {
-            desc: "チャンネル参加に失敗したよ（詳細はDMを見てね）",
+            title: "チャンネル参加に失敗したよ（詳細はDMを見てね）",
           },
         });
         return;
@@ -3740,21 +3758,30 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       }
     }
 
-    // ✅ 本文は view.state から読む（private_metadata には入れない）
-    const description = (
-      view.state.values.desc?.desc_input?.value || ""
-    ).trim();
+    // ✅ 本文：モーダルでは表示しないので cacheKey から取得（なければSlackから再取得して整形）
+    const cacheKey = meta.cacheKey || __cacheKey(teamId, channelId, parentTs);
 
-    // ✅ 空はブロック（ユーザーに分かるようにモーダル内エラー）
+    let description = __cacheGet(cacheKey);
+
+    if (!description) {
+      const raw = await fetchMessageTextByTs(client, channelId, parentTs);
+      let pretty = await prettifySlackText(raw, teamId);
+      pretty = await prettifyUserMentions(pretty, teamId);
+      description = String(pretty || raw || "").trim();
+      if (description) __cachePut(cacheKey, description);
+    }
+
     if (!description) {
       await ack({
         response_action: "errors",
-        errors: { desc: "詳細を入力してください" },
+        errors: { title: "元メッセージ取得に失敗したよ（もう一度お試しください）" },
       });
       return;
     }
 
-    const title = generateTitleCandidate(description);
+    // ✅ タイトル（任意）：空欄なら本文がタイトルになる（リプレイス処理なし）
+    const inputTitle = (view.state.values.title?.title_input?.value || "").trim();
+    const title = inputTitle ? inputTitle : description;
 
     const selectedUsers =
       view.state.values.assignee_users?.assignee_users_select?.selected_users ||

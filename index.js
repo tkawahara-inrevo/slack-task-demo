@@ -169,7 +169,7 @@ function generateTitleCandidate(text, maxLen = 22) {
       "",
     )
     .trim();
-  title = title.replace(/^@\S+\s*/, "");
+  title = title.replace(/^(@\S+\s*)+/, "");
 
   if (!title) title = "（タスク）";
   if (title.length > maxLen) title = title.slice(0, maxLen) + "…";
@@ -1535,32 +1535,19 @@ async function dbListPersonalTasksByStatusesWithScope(
 }
 
 function taskLineForHome(task, viewKey) {
-  const rawDesc = String(task.description || "")
-    .replace(/\r\n/g, "\n")
-    .trim();
+  // ✅ Home一覧は「保存済みタイトル」を表示する（本文冒頭のメンション羅列で潰れないように）
+  let title = String(task.title || "").trim();
 
-  let preview = rawDesc || String(task.title || "（本文なし）");
-
-  // 改行を整理
-  preview = preview.replace(/\n{3,}/g, "\n\n");
-
-  // ★ まず「最大5行」に制限
-  const MAX_LINES = 5;
-  const lines = preview.split("\n");
-  if (lines.length > MAX_LINES) {
-    preview = lines.slice(0, MAX_LINES).join("\n") + "\n…";
+  // 念のため：空やプレースホルダならフォールバック
+  if (!title || title === "（タスク）") {
+    title = "（詳細を参照）";
   }
 
-  // ★ 次に「最大文字数」に制限
-  const MAX_PREVIEW_CHARS = 100;
-  if (preview.length > MAX_PREVIEW_CHARS) {
-    preview = preview.slice(0, MAX_PREVIEW_CHARS) + "…";
-  }
+  // 文字数制限（Homeは短く）
+  const MAX_TITLE_CHARS = 40;
+  if (title.length > MAX_TITLE_CHARS) title = title.slice(0, MAX_TITLE_CHARS) + "…";
 
-  preview = noMention(preview);
-
-  if (!preview) preview = noMention(String(task.title || "（本文なし）"));
-  return preview;
+  return noMention(title);
 }
 
 function buildHomeFiltersModalView({ teamId, userId, st, deptText }) {

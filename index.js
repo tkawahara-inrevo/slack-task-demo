@@ -147,29 +147,69 @@ function generateTitleCandidate(text, maxLen = 22) {
   let s = String(text);
 
   s = s.replace(/\r\n/g, "\n");
+
+  // 1) URL / Slackトークン系を先に落とす（行判定を安定させる）
   s = s.replace(/https?:\/\/\S+/g, "");
   s = s.replace(/<@[A-Z0-9]+>/g, "");
   s = s.replace(/<#[A-Z0-9]+\|[^>]+>/g, "");
   s = s.replace(/:[a-z0-9_+-]+:/gi, "");
   s = s.replace(/<!subteam\^[A-Z0-9]+(\|[^>]+)?>/g, ""); // usergroup token
 
-  s = s.replace(/[【】\[\]（）()]/g, " ");
-  s = s.replace(/\s+/g, " ").trim();
+  // 2) 先頭の「メンション羅列行」をスキップしてからタイトル化する
+  const isMentionHeavyLine = (line) => {
+    const raw = String(line || "").trim();
+    if (!raw) return true;
 
+    // 判定用に ＠ を @ に寄せる
+    const t = raw.replace(/＠/g, "@");
+
+    // 先頭が @ で始まる行だけを見る（本文行を誤爆しない）
+    if (!t.startsWith("@")) return false;
+
+    const atCount = (t.match(/@/g) || []).length;
+    const hasFyiOrCc = /\b(fyi|cc)\b/i.test(t);
+
+    // 記号・区切り・空白・@ を除いた「実質文字」が少ないなら羅列扱い
+    const meaningfulLen = t.replace(/[@\s,、・→⇒]/g, "").length;
+
+    // だいたいこのどれかなら「羅列」扱い
+    return atCount >= 2 || hasFyiOrCc || meaningfulLen <= 12;
+  };
+
+  {
+    const lines = s.split("\n");
+    let i = 0;
+
+    // 先頭から最大3行まで、メンション羅列行を落とす
+    while (i < lines.length && i < 3 && isMentionHeavyLine(lines[i])) i++;
+
+    const rest = lines.slice(i).join("\n").trim();
+    if (rest) s = rest;
+  }
+
+  // 3) 記号類の整理
+  s = s.replace(/[【】\[\]（）()]/g, " ");
+
+  // 4) 丁寧文言の先頭落とし（※改行が残っている段階でやる）
   s = s.replace(
     /^(すみません|恐縮ですが|お疲れ様です|取り急ぎ|ごめん|失礼|お願い|至急|急ぎ)\s*/g,
     "",
   );
 
+  // 5) 「最初の文」からタイトルを作る（改行/句読点で切る）
   const cut = s.split(/[\n。！？!?]/)[0].trim();
   let title = cut || s;
+
+  // 6) 末尾の依頼定型を落とす
   title = title
-    .replace(
-      /(お願いします|ください|してもらえますか|して下さい|お願いします。?)$/g,
-      "",
-    )
+    .replace(/(お願いします|ください|してもらえますか|して下さい|お願いします。?)$/g, "")
     .trim();
-  title = title.replace(/^(@\S+\s*)+/, "");
+
+  // 7) 念のため：タイトル先頭に @トークンが残ってたら落とす（複数も対応）
+  title = title.replace(/^([@＠][^\s]+\s*)+/, "").trim();
+
+  // 8) 仕上げ（空白つぶし）
+  title = title.replace(/\s+/g, " ").trim();
 
   if (!title) title = "（タスク）";
   if (title.length > maxLen) title = title.slice(0, maxLen) + "…";

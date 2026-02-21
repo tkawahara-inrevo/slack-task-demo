@@ -734,23 +734,10 @@ function statusLabel(s) {
 }
 
 // broadcast の "対応者ラベル" は "@田中/John @佐藤/Jane" みたいに複数入ることがあるので、
-// 文字列全体を split せず「各人の /～ だけ」を削る（後ろの人が消えないようにする）
 function shortenAssigneeLabel(label) {
   if (!label) return "";
-
   const s = String(label);
-
-  // 例：
-  // "@田中太郎/John Doe @佐藤花子/Jane" -> "@田中太郎 @佐藤花子"
-  // "@田中/John, @佐藤/Jane" -> "@田中, @佐藤"
-  // "@田中/John・@佐藤/Jane" -> "@田中・@佐藤"
-  //
-  // 区切り文字（空白/カンマ/読点/中点など）は保持したまま、
-  // 各トークンの "/～" 部分だけを削る
-  return s.replace(
-    /(@[^\s,、・]+)\/[^\s,、・]+/g,
-    "$1",
-  );
+  return s.replace(/(@[^@\n]+?)\/[^@\n]+/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
 }
 
 function assigneeDisplay(task) {
@@ -2198,12 +2185,12 @@ const statuses = st.scopeKey === "done" ? DONE_STATUSES : ACTIVE_STATUSES;
         }
 
         // broadcast の対応者表示（assignee_label が "@田中/John" みたいな形式でも短縮する）
-        const assigneeText =
-          viewKey === "broadcast"
-            ? toAtShortName(t?.assignee_label || "（複数対象）")
-            : assigneeId
-              ? await getShortAtName(assigneeId)
-              : "-";
+const assigneeText =
+  viewKey === "broadcast"
+    ? assigneeDisplay(t) // ← broadcastはここに統一（shortenAssigneeLabelもここで効く）
+    : assigneeId
+      ? await getShortAtName(assigneeId)
+      : "-";
 
         const requesterText = requesterId ? await getShortAtName(requesterId) : "-";
 

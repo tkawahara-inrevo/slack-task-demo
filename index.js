@@ -736,14 +736,34 @@ function statusLabel(s) {
 // broadcast の "対応者ラベル" は "@田中/John @佐藤/Jane" みたいに複数入ることがあるので、
 function shortenAssigneeLabel(label) {
   if (!label) return "";
+
   const s = String(label);
-  return s.replace(/(@[^@\n]+?)\/[^@\n]+/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+
+  return s
+    .replace(/(@[^@\n]+?)\/[^@\n]+/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+// "@" の数で人数をざっくりカウントする
+function countAssigneesFromLabel(label) {
+  if (!label) return 0;
+  const m = String(label).match(/@/g);
+  return m ? m.length : 0;
 }
 
 function assigneeDisplay(task) {
   if (task?.task_type === "broadcast") {
-    // 表示は通知抑止（発行時通知は別で行う）
     const raw = task.assignee_label || "（複数対象）";
+
+    const count = countAssigneesFromLabel(raw);
+
+    // ✅ 4人以上は要約表示
+    if (count >= 4) {
+      return "⇒ 対象者多数（詳細を参照）";
+    }
+
+    // 1〜3人は名前を短縮表示（/～ をカット）
     return noMention(shortenAssigneeLabel(raw));
   }
   return `<@${task.assignee_id}>`;

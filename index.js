@@ -1779,6 +1779,16 @@ const statuses = st.scopeKey === "done" ? DONE_STATUSES : ACTIVE_STATUSES;
     60,
   );
 
+  // ✅ 方針：依頼者=対応者 の personal タスクは「範囲=すべて」では出さない
+  // - to_me / requested_by_me では今まで通り見える（自分の整理には必要）
+  if (rangeKey === "all") {
+    personalTasks = (personalTasks || []).filter((t) => {
+      const r = t?.requester_user_id;
+      const a = t?.assignee_id;
+      return !(r && a && r === a);
+    });
+  }
+
   // broadcast は範囲で絞る（to_me は JOIN、requested_by_me は requester、all は JOINなし）
   let broadcastTasks =
     rangeKey === "to_me" || rangeKey === "requested_by_me"

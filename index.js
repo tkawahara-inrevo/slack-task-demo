@@ -2800,6 +2800,10 @@ app.event("app_home_opened", async ({ event, client, body }) => {
 // Custom Step (Workflow Builder): 情シス依頼を自動タスク化
 // callback_id: josys_taskify
 // ================================
+// ================================
+// Custom Step (Workflow Builder): 情シス依頼を自動タスク化
+// callback_id: josys_taskify
+// ================================
 app.function(
   "josys_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
@@ -2809,14 +2813,23 @@ app.function(
       let teamId = inputs?.team_id || inputs?.teamId || null; // 任意
       const requesterUserId =
         inputs?.requester_user_id || inputs?.requesterUserId || null;
-      const typeLabel = String(
-        inputs?.type_label || inputs?.typeLabel || "",
-      ).trim();
-      const content = String(inputs?.content || "").trim();
-      const dueRaw = inputs?.due_date || inputs?.dueDate || null;
+
       const channelId = inputs?.channel_id || inputs?.channelId || null;
 
-      // message_ts が取れない環境向け：メッセージのリンクから復元
+      // ✅ 対応者（任意）
+      const assigneeUserIdRaw =
+        inputs?.assignee_user_id || inputs?.assigneeUserId || null;
+      const assigneeUserIdsRaw =
+        inputs?.assignee_user_ids ||
+        inputs?.assigneeUserIds ||
+        inputs?.assignee_user_ids_csv ||
+        inputs?.assigneeUserIdsCsv ||
+        null;
+
+      // ✅ 期限（任意）：未指定なら翌日
+      const dueRaw = inputs?.due_date || inputs?.dueDate || null;
+
+      // message_ts が取れない環境向け：メッセージのリンクから復元（ここ重要）
       const messageLink =
         inputs?.message_link ||
         inputs?.messageLink ||
@@ -2836,30 +2849,62 @@ app.function(
         teamId = await getTeamIdViaAuthTest(client);
       }
 
-      const corpGroupId = process.env.CORP_SYSTEM_USERGROUP_ID || "";
+      // ✅ デフォルト配布先：@corp-soumu を優先（なければ旧 env へ）
+      const corpGroupId =
+        process.env.CORP_SOUMU_USERGROUP_ID ||
+        process.env.CORP_SYSTEM_USERGROUP_ID ||
+        "";
       const corpHandle = (
-        process.env.CORP_SYSTEM_HANDLE || "corp-system"
+        process.env.CORP_SOUMU_HANDLE ||
+        process.env.CORP_SYSTEM_HANDLE ||
+        "corp-soumu"
       ).replace(/^@/, "");
+
+      // assignee ids normalize
+      const normalizeUserIds = (v) => {
+        if (!v) return [];
+        if (Array.isArray(v))
+          return v.map(String).map((s) => s.trim()).filter(Boolean);
+        if (typeof v === "string") {
+          return v
+            .split(/[\s,]+/g)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+        return [];
+      };
+
+      const assigneeIds = Array.from(
+        new Set(
+          [
+            ...normalizeUserIds(assigneeUserIdsRaw),
+            ...(assigneeUserIdRaw ? [String(assigneeUserIdRaw).trim()] : []),
+          ].filter(Boolean),
+        ),
+      );
 
       logger?.info?.("🧪 debug vars", {
         teamId,
         requesterUserId,
-        typeLabel,
         dueRaw,
         channelId,
         msgTs,
         corpGroupId,
+        assigneeIdsCount: assigneeIds.length,
       });
 
-      // ===== 必須チェック（どれが欠けてるか全部出す）=====
+      // ===== 必須チェック =====
       const missing = [];
       if (!requesterUserId) missing.push("requester_user_id");
-      if (!typeLabel) missing.push("type_label");
-      if (!dueRaw) missing.push("due_date");
       if (!channelId) missing.push("channel_id");
-      if (!corpGroupId) missing.push("CORP_SYSTEM_USERGROUP_ID");
-      if (!msgTs) missing.push("message_ts(or message_link parse)");
       if (!teamId) missing.push("team_id");
+
+      // 本文をメッセージ全文にする仕様なので、ts（または link）が必要
+      if (!msgTs) missing.push("message_ts(or message_link parse)");
+
+      // assignee 未指定で broadcast する場合は usergroup が必要
+      if (assigneeIds.length === 0 && !corpGroupId)
+        missing.push("CORP_SOUMU_USERGROUP_ID");
 
       if (missing.length) {
         logger?.warn?.("⛔ skipped: missing required", { missing, inputs });
@@ -2872,15 +2917,17 @@ app.function(
         return;
       }
 
-      // due を YYYY-MM-DD に寄せる
-      const due = slackDateYmd(dueRaw);
+      // due を YYYY-MM-DD に寄せる（未指定なら翌日）
+      const tomorrowYmd = () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return slackDateYmd(d);
+      };
+      const due = dueRaw ? slackDateYmd(dueRaw) : tomorrowYmd();
       if (!due) {
         logger?.warn?.("⛔ skipped: invalid due", { dueRaw });
         await complete({
-          outputs: {
-            task_id: null,
-            skipped: "invalid_due",
-          },
+          outputs: { task_id: null, skipped: "invalid_due" },
         });
         return;
       }
@@ -2895,24 +2942,18 @@ app.function(
         return;
       }
 
-      // corp-system usergroup を展開して broadcast targets を作る
-      const { users: usersFromGroups } = await expandTargetsFromGroups(teamId, [
-        corpGroupId,
-      ]);
-      const targetList = Array.from(usersFromGroups || new Set()).filter(
-        Boolean,
-      );
-
-      if (!targetList.length) {
-        logger?.warn?.("⛔ skipped: no targets from group", { corpGroupId });
-        await complete({
-          outputs: {
-            task_id: null,
-            skipped: "no_targets",
-          },
-        });
-        return;
+      // ✅ メッセージ全文を title/description にする
+      const rawText = await fetchMessageTextByTs(client, channelId, msgTs);
+      let prettyText = "";
+      try {
+        prettyText = await prettifySlackText(rawText, teamId);
+        prettyText = await prettifyUserMentions(prettyText, teamId);
+      } catch (_) {
+        prettyText = String(rawText || "");
       }
+      const messageFullText = String(prettyText || rawText || "").trim();
+      const title = messageFullText || "（本文なし）";
+      const description = messageFullText || "";
 
       // permalink（元投稿リンク）
       let permalink = "";
@@ -2926,15 +2967,81 @@ app.function(
         logger?.warn?.("getPermalink failed", e);
       }
 
-      // title/desc
-      const descParts = [];
-      descParts.push(`【種別】${typeLabel}`);
-      descParts.push(`【期日】${due}`);
-      if (content) descParts.push(`【依頼内容】\n${content}`);
-      const description = descParts.join("\n");
-
       const taskId = randomUUID();
       const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+
+      // ===== ここから personal / broadcast 分岐 =====
+      if (assigneeIds.length === 1) {
+        // personal
+        const only = assigneeIds[0];
+        const assigneeDept = await resolveDeptForUser(teamId, only);
+
+        const created = await dbCreateTask({
+          id: taskId,
+          team_id: teamId,
+          channel_id: channelId,
+          message_ts: msgTs,
+          source_permalink: permalink || null,
+          title,
+          description,
+          requester_user_id: requesterUserId,
+          created_by_user_id: requesterUserId,
+          assignee_id: only,
+          assignee_label: null,
+          status: "in_progress",
+          due_date: due,
+          requester_dept: requesterDept,
+          assignee_dept: assigneeDept,
+          task_type: "personal",
+          broadcast_group_handle: null,
+          broadcast_group_id: null,
+          total_count: null,
+          completed_count: 0,
+          notified_at: null,
+        });
+
+        // 通知（依頼主自身は除外）
+        try {
+          if (only && only !== requesterUserId) {
+            await notifyTaskSimpleDM(only, created, "📝 タスクが届いたよ");
+          }
+        } catch (e) {
+          logger?.error?.("workflow step notify error", e);
+        }
+
+        // Home更新（依頼主 + 対象者）
+        try {
+          publishHomeBurst(client, teamId, [requesterUserId, only], 200);
+        } catch (e) {
+          logger?.warn?.("home publish error", e);
+        }
+
+        logger?.info?.("✅ task created", { taskId });
+        await complete({ outputs: { task_id: taskId } });
+        return;
+      }
+
+      // broadcast（2名以上 or 未指定）
+      let targetList = [];
+      if (assigneeIds.length >= 2) {
+        targetList = assigneeIds;
+      } else {
+        const { users: usersFromGroups } = await expandTargetsFromGroups(teamId, [
+          corpGroupId,
+        ]);
+        targetList = Array.from(usersFromGroups || new Set()).filter(Boolean);
+      }
+
+      if (!targetList.length) {
+        logger?.warn?.("⛔ skipped: no targets", { corpGroupId, assigneeIds });
+        await complete({ outputs: { task_id: null, skipped: "no_targets" } });
+        return;
+      }
+
+      const assigneeLabel =
+        assigneeIds.length >= 2
+          ? targetList.map((u) => `<@${u}>`).join(" ")
+          : `@${corpHandle}`;
 
       const created = await dbCreateTask({
         id: taskId,
@@ -2942,34 +3049,31 @@ app.function(
         channel_id: channelId,
         message_ts: msgTs,
         source_permalink: permalink || null,
-        title: typeLabel,
+        title,
         description,
         requester_user_id: requesterUserId,
         created_by_user_id: requesterUserId,
         assignee_id: null,
-        assignee_label: `@${corpHandle}`,
+        assignee_label: assigneeLabel,
         status: "in_progress",
         due_date: due,
         requester_dept: requesterDept,
         assignee_dept: null,
         task_type: "broadcast",
-        broadcast_group_handle: `@${corpHandle}`,
-        broadcast_group_id: corpGroupId,
+        broadcast_group_handle: assigneeIds.length >= 2 ? null : `@${corpHandle}`,
+        broadcast_group_id: assigneeIds.length >= 2 ? null : corpGroupId,
         total_count: targetList.length,
         completed_count: 0,
         notified_at: null,
       });
 
-      // broadcast: snapshot targets & counts
       await dbInsertTaskTargets(teamId, taskId, targetList);
       const total = await dbCountTargets(teamId, taskId);
       await dbUpdateBroadcastCounts(teamId, taskId, 0, total);
       created.total_count = total;
       created.completed_count = 0;
 
-      // ✅ Workflow から自動作成されたタスクはスレッドに投稿しない（会話のノイズになるため）
-
-      // 発行通知（依頼主自身は除外）
+      // 通知（依頼主自身は除外）
       try {
         const toNotify = targetList.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
@@ -2997,7 +3101,6 @@ app.function(
         stack: error?.stack,
       });
 
-      // ❗ デバッグ中は fail で Slack 側にもエラーを出す
       await fail({
         error: `josys_taskify failed: ${error?.message || "unknown error"}`,
       });

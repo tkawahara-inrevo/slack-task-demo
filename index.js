@@ -5113,6 +5113,168 @@ if (process.env.RUN_NOTIFY_NOW === "true") {
 }
 
 // ================================
+// Daily overdue notify to channel (e.g. @mk)
+// - posts to a fixed channel
+// - mentions a usergroup handle (default: mk)
+// - lists overdue tasks that would show up in Home when filtering by that usergroup
+// ================================
+const MK_OVERDUE_NOTIFY_CHANNEL_ID =
+  process.env.MK_OVERDUE_NOTIFY_CHANNEL_ID || "C087A0B6597";
+const MK_OVERDUE_NOTIFY_USERGROUP_HANDLE =
+  (process.env.MK_OVERDUE_NOTIFY_USERGROUP_HANDLE || "mk")
+    .trim()
+    .replace(/^@/, "");
+
+async function getUsergroupIdByHandle(teamId, handle) {
+  const h = String(handle || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (!h) return null;
+
+  const idToHandle = await getSubteamIdMap(teamId);
+  for (const [id, hh] of idToHandle.entries()) {
+    if (String(hh || "").toLowerCase() === h) return id;
+  }
+  return null;
+}
+
+async function displayTargetsForNotice(teamId, task) {
+  if (!task) return "-";
+
+  // 通知は「@mk だけ」鳴らしたいので、個人メンションは抑止した表示にする
+  if (task.task_type === "personal") {
+    const name = await getUserDisplayName(teamId, task.assignee_id);
+    return noMention(`@${cutAfterSlash(name)}`);
+  }
+
+  // broadcast はラベルに @ が入っているので、通知は抑止表示にする
+  const raw = shortenAssigneeLabel(task.assignee_label || "（複数対象）");
+  return noMention(raw);
+}
+
+async function runMkOverdueNotifyJob() {
+  const today = todayJstYmd();
+  const channelId = MK_OVERDUE_NOTIFY_CHANNEL_ID;
+
+  // tasks テーブルに出てくる team_id を対象に回す（単一WSなら実質1件）
+  const teamsRes = await dbQuery(
+    `SELECT DISTINCT team_id FROM tasks WHERE team_id IS NOT NULL LIMIT 50;`,
+    [],
+  );
+  const teamIds = (teamsRes.rows || [])
+    .map((r) => r.team_id)
+    .filter(Boolean);
+
+  for (const teamId of teamIds) {
+    try {
+      const groupId = await getUsergroupIdByHandle(
+        teamId,
+        MK_OVERDUE_NOTIFY_USERGROUP_HANDLE,
+      );
+      if (!groupId) {
+        console.log(
+          `[mk_overdue_notify] skip: usergroup not found. team=${teamId} handle=@${MK_OVERDUE_NOTIFY_USERGROUP_HANDLE}`,
+        );
+        continue;
+      }
+
+      // bot join if needed
+      await ensureBotInChannel({ client: app.client, channelId });
+
+      const members = await getUsergroupMembers(teamId, groupId);
+      const allowed = Array.from(new Set((members || []).filter(Boolean)));
+      if (!allowed.length) {
+        console.log(
+          `[mk_overdue_notify] skip: empty usergroup. team=${teamId} group=${groupId}`,
+        );
+        continue;
+      }
+
+      // 「@mk フィルタで見える」= 対象者が mk に含まれるタスク
+      // - personal: assignee_id in allowed
+      // - broadcast: task_targets intersects allowed
+      const q = `
+        SELECT DISTINCT t.*
+        FROM tasks t
+        LEFT JOIN task_targets tt
+          ON tt.team_id = t.team_id
+         AND tt.task_id = t.id
+        WHERE t.team_id = $1
+          AND t.status = 'in_progress'
+          AND t.due_date IS NOT NULL
+          AND t.due_date < $2
+          AND (
+            (t.task_type IS NULL OR t.task_type='personal')
+              AND t.assignee_id = ANY($3)
+            OR
+            (t.task_type='broadcast')
+              AND tt.user_id = ANY($3)
+          )
+        ORDER BY t.due_date ASC, t.created_at ASC
+        LIMIT 200;
+      `;
+
+      const tasks = (await dbQuery(q, [teamId, today, allowed])).rows || [];
+      if (!tasks.length) {
+        console.log(`[mk_overdue_notify] no overdue. team=${teamId} today=${today}`);
+        continue;
+      }
+
+      const mention = `<!subteam^${groupId}|@${MK_OVERDUE_NOTIFY_USERGROUP_HANDLE}>`;
+
+      // blocks (Slack 100 limit) / 1投稿に詰めすぎない
+      const MAX_SHOW = 20;
+      const head = tasks.slice(0, MAX_SHOW);
+      const rest = Math.max(0, tasks.length - head.length);
+
+      const lines = [];
+      for (const t of head) {
+        const targets = await displayTargetsForNotice(teamId, t);
+        const due = formatDueDateOnly(t.due_date);
+        const title = noMention(t.title);
+        lines.push(`• *${title}*  /  期限: *${due}*  /  対象者: ${targets}`);
+      }
+      if (rest) lines.push(`…他 ${rest}件`);
+
+      await app.client.chat.postMessage({
+        channel: channelId,
+        text: `${mention} 期限切れタスクが ${tasks.length}件あります`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `${mention} *期限切れタスク*（Homeの @${MK_OVERDUE_NOTIFY_USERGROUP_HANDLE} 相当）\n${lines.join("\n")}`,
+            },
+          },
+        ],
+      });
+
+      console.log(
+        `[mk_overdue_notify] posted. team=${teamId} today=${today} count=${tasks.length}`,
+      );
+    } catch (e) {
+      console.error("runMkOverdueNotifyJob error:", e?.data || e);
+    }
+  }
+}
+
+cron.schedule(
+  "0 11 * * *",
+  () => {
+    runMkOverdueNotifyJob().catch((e) =>
+      console.error("runMkOverdueNotifyJob error:", e?.data || e),
+    );
+  },
+  { timezone: "Asia/Tokyo" },
+);
+
+if (process.env.RUN_MK_OVERDUE_NOTIFY_NOW === "true") {
+  runMkOverdueNotifyJob().catch(console.error);
+}
+
+// ================================
 // Edit Task modal
 // ================================
 app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {

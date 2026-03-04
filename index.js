@@ -5116,7 +5116,8 @@ if (process.env.RUN_NOTIFY_NOW === "true") {
 // Daily overdue notify to channel (e.g. @mk)
 // - posts to a fixed channel
 // - mentions a usergroup handle (default: mk)
-// - lists overdue tasks that would show up in Home when filtering by that usergroup
+// - lists overdue tasks that are strictly "assigned to @mk" (broadcast_group_id = @mk)
+//   plus personal tasks assigned to @mk members
 // ================================
 const MK_OVERDUE_NOTIFY_CHANNEL_ID =
   process.env.MK_OVERDUE_NOTIFY_CHANNEL_ID || "C087A0B6597";
@@ -5158,19 +5159,51 @@ async function displayTargetsForNotice(teamId, task) {
   return noMention(raw);
 }
 
-// タイトルが空なら本文（description）を使う：Homeの仕様に合わせる
-function titleForNotice(task) {
-  const t = String(task?.title || "").trim();
-  if (t) return t;
+// タイトルが空なら本文（description）を使う。ただし「メンションだらけ」を除去して意味が残るようにする
+function pickNoticeText(task) {
+  const title = String(task?.title || "").trim();
+  if (title) return title;
 
-  const d = String(task?.description || "").trim();
-  if (d) return d;
+  const desc = String(task?.description || "").trim();
+  if (!desc) return "（本文なし）";
 
-  return "（本文なし）";
+  // ① Slack token/mention を削る
+  // - <@Uxxx> / <!subteam^Gxxx|@mk> / <!channel> 等
+  let s = desc
+    .replace(/<@[^>]+>/g, " ")
+    .replace(/<!subteam\^[^>]+>/g, " ")
+    .replace(/<!channel>/g, " ")
+    .replace(/<!here>/g, " ")
+    .replace(/<!everyone>/g, " ");
+
+  // ② @xxx / ＠xxx の連打を削る（日本語/英数字）
+  //    ※メンションだけの文を「メンションしか見えない」問題を潰す
+  s = s.replace(/(^|\s)[@＠][^\s　]+/g, " ");
+
+  // ③ URL を削る（リンクだけになって読めないのを避ける）
+  s = s.replace(/https?:\/\/\S+/g, " ");
+
+  // ④ 余分な空白整理
+  s = s.replace(/\s+/g, " ").trim();
+
+  // それでも短すぎたら、元のdescから「最初の1行」だけ拾う（保険）
+  if (s.length < 8) {
+    const first = desc.split("\n").map((x) => x.trim()).filter(Boolean)[0] || "";
+    const cleaned = first
+      .replace(/<@[^>]+>/g, " ")
+      .replace(/<!subteam\^[^>]+>/g, " ")
+      .replace(/(^|\s)[@＠][^\s　]+/g, " ")
+      .replace(/https?:\/\/\S+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleaned || "（本文なし）";
+  }
+
+  return s;
 }
 
 // Slack mrkdwn で読みやすいように軽く整形（長すぎると読めない）
-function shortenOneLine(s, max = 80) {
+function shortenOneLine(s, max = 90) {
   const x = String(s || "").replace(/\r\n/g, "\n").trim();
   const one = x.split("\n").join(" / ");
   if (one.length <= max) return one;
@@ -5196,7 +5229,6 @@ async function runMkOverdueNotifyJob() {
     `SELECT DISTINCT team_id FROM tasks WHERE team_id IS NOT NULL LIMIT 50;`,
     [],
   );
-
   const teamIds = (teamsRes.rows || []).map((r) => r.team_id).filter(Boolean);
 
   for (const teamId of teamIds) {
@@ -5225,37 +5257,37 @@ async function runMkOverdueNotifyJob() {
         continue;
       }
 
-      // 「@mk フィルタで見える」= 対象者が mk に含まれるタスク
-      // - personal: assignee_id in allowed
-      // - broadcast: task_targets intersects allowed
+      // 対象を絞る（重要）：
+      // - personal: assignee が mkメンバー
+      // - broadcast: 「@mk グループに割り当てられた」ものだけ (= broadcast_group_id = groupId)
       //
-      // NOTE: task_targets.task_id は uuid の可能性があるため、JOIN は ::text で揃える（uuid=text 事故防止）
-      const q = `
-        SELECT DISTINCT t.*
-        FROM tasks t
-        LEFT JOIN task_targets tt
-          ON tt.team_id = t.team_id
-         AND tt.task_id::text = t.id
-        WHERE t.team_id = $1
-          AND t.status = 'in_progress'
-          AND t.due_date IS NOT NULL
-          AND t.due_date < $2
-          AND (
-            (
-              (t.task_type IS NULL OR t.task_type = 'personal')
-              AND t.assignee_id = ANY($3)
-            )
-            OR
-            (
-              t.task_type = 'broadcast'
-              AND tt.user_id = ANY($3)
-            )
-          )
-        ORDER BY t.due_date ASC, t.created_at ASC
-        LIMIT 200;
-      `;
+      // ※ 全社グループや他グループのbroadcastに mkメンバーが “含まれてしまう” ケースを除外するため
+const q = `
+  SELECT DISTINCT t.*
+  FROM tasks t
+  LEFT JOIN task_targets tt
+    ON tt.team_id = t.team_id
+   AND tt.task_id::text = t.id
+  WHERE t.team_id = $1
+    AND t.status = 'in_progress'
+    AND t.due_date IS NOT NULL
+    AND t.due_date < $2
+    AND (
+      (
+        (t.task_type IS NULL OR t.task_type = 'personal')
+        AND t.assignee_id = ANY($3)
+      )
+      OR
+      (
+        t.task_type = 'broadcast'
+        AND tt.user_id = ANY($3)
+      )
+    )
+  ORDER BY t.due_date ASC, t.created_at ASC
+  LIMIT 200;
+`;
 
-      const allTasks = (await dbQuery(q, [teamId, today, allowed])).rows || [];
+   const allTasks = (await dbQuery(q, [teamId, today, allowed])).rows || [];
 
       if (!allTasks.length) {
         console.log(
@@ -5266,48 +5298,75 @@ async function runMkOverdueNotifyJob() {
 
       const mention = `<!subteam^${groupId}|@${MK_OVERDUE_NOTIFY_USERGROUP_HANDLE}>`;
 
-      // Slack側の読みやすさとブロック制限対策：最大20件だけ本文に出す
+      // 読みやすさ + ブロック制限対策：最大20件
       const MAX_SHOW = 20;
       const showTasks = allTasks.slice(0, MAX_SHOW);
       const rest = Math.max(0, allTasks.length - showTasks.length);
 
       // 期限日ごとにまとめて見やすくする
-      // キーは "YYYY/MM/DD"（表示用）
       const byDue = groupBy(showTasks, (t) => formatDueDateOnly(t.due_date));
       const dueKeys = Array.from(byDue.keys()).sort((a, b) => a.localeCompare(b));
 
       const blocks = [];
 
-      // ヘッダ
+      // ヘッダ（Home文言は入れない）
       blocks.push({
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `${mention} *期限切れタスク*（Homeの @${MK_OVERDUE_NOTIFY_USERGROUP_HANDLE} 相当）\n` +
+          text:
+            `${mention} *期限切れタスク*\n` +
             `*${allTasks.length}件*あります 🥺⚠️`,
         },
       });
 
       blocks.push({ type: "divider" });
 
-      // 本文（期限日ごと）
       for (const due of dueKeys) {
-        const items = byDue.get(due) || [];
-
-        const lines = [];
-        for (const t of items) {
-          const targets = await displayTargetsForNotice(teamId, t);
-          const title = shortenOneLine(noMention(titleForNotice(t)), 90);
-          lines.push(`• *${title}*  _(${targets})_`);
-        }
-
         blocks.push({
           type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `🔴 *期限: ${due}*\n${lines.join("\n")}`,
-          },
+          text: { type: "mrkdwn", text: `🔴 *期限: ${due}*` },
         });
+
+        const items = byDue.get(due) || [];
+        for (const t of items) {
+          const targets = await displayTargetsForNotice(teamId, t);
+          const title = shortenOneLine(noMention(pickNoticeText(t)), 90);
+
+          const payload = JSON.stringify({
+            teamId,
+            taskId: t.id,
+            origin: "mk_overdue_notify",
+          });
+
+          blocks.push({
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `• *${title}*  _(${targets})_`,
+            },
+            accessory: {
+              type: "button",
+              text: { type: "plain_text", text: "詳細を開く" },
+              action_id: "open_detail_modal",
+              value: payload,
+            },
+          });
+
+          if (t.source_permalink) {
+            blocks.push({
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: `🔗 <${t.source_permalink}|元メッセージへ>`,
+                },
+              ],
+            });
+          }
+        }
+
+        blocks.push({ type: "divider" });
       }
 
       if (rest) {

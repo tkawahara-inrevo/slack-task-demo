@@ -5194,26 +5194,26 @@ async function runMkOverdueNotifyJob() {
       // 「@mk フィルタで見える」= 対象者が mk に含まれるタスク
       // - personal: assignee_id in allowed
       // - broadcast: task_targets intersects allowed
-      const q = `
-        SELECT DISTINCT t.*
-        FROM tasks t
-        LEFT JOIN task_targets tt
-          ON tt.team_id = t.team_id
-         AND tt.task_id = t.id
-        WHERE t.team_id = $1
-          AND t.status = 'in_progress'
-          AND t.due_date IS NOT NULL
-          AND t.due_date < $2
-          AND (
-            (t.task_type IS NULL OR t.task_type='personal')
-              AND t.assignee_id = ANY($3)
-            OR
-            (t.task_type='broadcast')
-              AND tt.user_id = ANY($3)
-          )
-        ORDER BY t.due_date ASC, t.created_at ASC
-        LIMIT 200;
-      `;
+  const q = `
+  SELECT DISTINCT t.*
+  FROM tasks t
+  LEFT JOIN task_targets tt
+    ON tt.team_id = t.team_id
+   AND tt.task_id::text = t.id
+  WHERE t.team_id = $1
+    AND t.status = 'in_progress'
+    AND t.due_date IS NOT NULL
+    AND t.due_date < $2
+    AND (
+      (t.task_type IS NULL OR t.task_type='personal')
+        AND t.assignee_id = ANY($3)
+      OR
+      (t.task_type='broadcast')
+        AND tt.user_id = ANY($3)
+    )
+  ORDER BY t.due_date ASC, t.created_at ASC
+  LIMIT 200;
+`;
 
       const tasks = (await dbQuery(q, [teamId, today, allowed])).rows || [];
       if (!tasks.length) {

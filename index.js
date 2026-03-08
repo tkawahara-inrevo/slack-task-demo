@@ -694,6 +694,66 @@ async function dbListTargetUserIds(teamId, taskId) {
   return (res.rows || []).map((r) => r.user_id).filter(Boolean);
 }
 
+async function dbDeleteTaskTargets(teamId, taskId) {
+  const q = `DELETE FROM task_targets WHERE team_id=$1 AND task_id=$2;`;
+  await dbQuery(q, [teamId, taskId]);
+}
+
+async function dbPruneTaskCompletionsByTargets(teamId, taskId) {
+  const q = `
+    DELETE FROM task_completions tc
+    WHERE tc.team_id = $1
+      AND tc.task_id = $2
+      AND NOT EXISTS (
+        SELECT 1
+        FROM task_targets tt
+        WHERE tt.team_id = tc.team_id
+          AND tt.task_id = tc.task_id
+          AND tt.user_id = tc.user_id
+      );
+  `;
+  await dbQuery(q, [teamId, taskId]);
+}
+
+async function dbReplaceTaskTargets(teamId, taskId, userIds) {
+  await dbDeleteTaskTargets(teamId, taskId);
+  await dbInsertTaskTargets(teamId, taskId, uniqIds(userIds));
+  await dbPruneTaskCompletionsByTargets(teamId, taskId);
+}
+
+async function dbUpdateTaskEditableFields(teamId, taskId, patch) {
+  const q = `
+    UPDATE tasks
+    SET
+      assignee_id = $3,
+      assignee_label = $4,
+      assignee_dept = $5,
+      due_date = $6,
+      description = $7,
+      broadcast_group_handle = $8,
+      broadcast_group_id = $9,
+      total_count = $10,
+      completed_count = $11,
+      updated_at = now()
+    WHERE team_id=$1 AND id=$2
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [
+    teamId,
+    taskId,
+    patch?.assignee_id ?? null,
+    patch?.assignee_label ?? null,
+    patch?.assignee_dept ?? null,
+    patch?.due_date ?? null,
+    patch?.description ?? null,
+    patch?.broadcast_group_handle ?? null,
+    patch?.broadcast_group_id ?? null,
+    patch?.total_count ?? null,
+    patch?.completed_count ?? 0,
+  ]);
+  return res.rows[0] || null;
+}
+
 // ================================
 // DB: Thread Cards
 // ================================
@@ -895,6 +955,299 @@ async function notifyTaskSimpleDM(
   } catch (_) {}
 }
 
+function uniqIds(arr) {
+  return Array.from(new Set((arr || []).filter(Boolean)));
+}
+
+async function postMessageInThread(client, channelId, parentTs, text, blocks = null) {
+  if (!client || !channelId || !parentTs || !text) return;
+  await client.chat.postMessage({
+    channel: channelId,
+    thread_ts: parentTs,
+    text,
+    ...(blocks ? { blocks } : {}),
+  });
+}
+
+async function notifyCreateResultOnSource({
+  client,
+  channelId,
+  parentTs,
+  actorUserId,
+  text,
+}) {
+  if (!text) return;
+
+  // 通常チャンネル起点ならエフェメラル
+  if (channelId && parentTs && !String(channelId).startsWith("D")) {
+    try {
+      await safeEphemeral(client, channelId, actorUserId, text);
+      return;
+    } catch (e) {
+      console.error(
+        "notifyCreateResultOnSource(ephemeral) error:",
+        e?.data || e,
+      );
+    }
+  }
+
+  // DM起点 / standalone は全部アプリDMに寄せる
+  try {
+    await postDM(actorUserId, text);
+  } catch (e) {
+    console.error("notifyCreateResultOnSource(dm) error:", e?.data || e);
+  }
+}
+
+function buildTaskCreateModalBlocks({
+  actorUserId,
+  initialUserIds = [],
+  initialGroupOptions = [],
+  includeContentInput = false,
+  initialContent = "",
+}) {
+  const blocks = [
+    {
+      type: "input",
+      optional: true,
+      block_id: "title",
+      label: { type: "plain_text", text: "タイトル（任意）" },
+      element: {
+        type: "plain_text_input",
+        action_id: "title_input",
+        multiline: false,
+        placeholder: {
+          type: "plain_text",
+          text: "空欄なら本文がタイトルになります",
+        },
+      },
+    },
+    {
+      type: "input",
+      block_id: "requester",
+      label: { type: "plain_text", text: "依頼主" },
+      element: {
+        type: "users_select",
+        action_id: "requester_user_select",
+        initial_user: actorUserId,
+        placeholder: { type: "plain_text", text: "依頼主を選択" },
+      },
+    },
+    {
+      type: "input",
+      optional: true,
+      block_id: "assignee_users",
+      label: { type: "plain_text", text: "対応者（個人・複数OK）" },
+      element: {
+        type: "multi_users_select",
+        action_id: "assignee_users_select",
+        placeholder: { type: "plain_text", text: "ユーザーを選択" },
+        ...(initialUserIds.length ? { initial_users: initialUserIds } : {}),
+      },
+    },
+    {
+      type: "input",
+      optional: true,
+      block_id: "assignee_groups",
+      label: {
+        type: "plain_text",
+        text: "対応者（グループ：@ALL-xxx / @mk-all など）",
+      },
+      element: {
+        type: "multi_external_select",
+        action_id: "assignee_groups_select",
+        placeholder: {
+          type: "plain_text",
+          text: "ユーザーグループを検索",
+        },
+        min_query_length: 0,
+        ...(initialGroupOptions.length
+          ? { initial_options: initialGroupOptions }
+          : {}),
+      },
+    },
+  ];
+
+  if (includeContentInput) {
+    blocks.push({
+      type: "input",
+      block_id: "content",
+      label: { type: "plain_text", text: "タスク内容" },
+      element: {
+        type: "plain_text_input",
+        action_id: "content_text",
+        multiline: true,
+        initial_value: initialContent || "",
+        placeholder: {
+          type: "plain_text",
+          text: "タスク内容を入力",
+        },
+      },
+    });
+  }
+
+  blocks.push({
+    type: "input",
+    block_id: "due",
+    label: { type: "plain_text", text: "期限" },
+    element: {
+      type: "datepicker",
+      action_id: "due_date",
+      placeholder: { type: "plain_text", text: "期限" },
+      initial_date: todayJstYmd(),
+    },
+  });
+
+  if (!includeContentInput) {
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全体/複数タスク」になります。",
+        },
+      ],
+    });
+  }
+
+  return blocks;
+}
+
+async function openTaskCreateModal(
+  client,
+  {
+    trigger_id,
+    teamId,
+    channelId = "",
+    msgTs = "",
+    actorUserId,
+    initialUserIds = [],
+    initialGroupOptions = [],
+    includeContentInput = false,
+    initialContent = "",
+  },
+) {
+  await client.views.open({
+    trigger_id,
+    view: {
+      type: "modal",
+      callback_id: "task_modal",
+      private_metadata: JSON.stringify({
+        teamId,
+        channelId,
+        msgTs,
+        requesterUserId: actorUserId,
+        sourceMode: includeContentInput ? "standalone" : "message",
+      }),
+      title: { type: "plain_text", text: "タスク作成" },
+      submit: { type: "plain_text", text: "決定" },
+      close: { type: "plain_text", text: "キャンセル" },
+      blocks: buildTaskCreateModalBlocks({
+        actorUserId,
+        initialUserIds,
+        initialGroupOptions,
+        includeContentInput,
+        initialContent,
+      }),
+    },
+  });
+}
+
+async function buildBroadcastInitialOptions(teamId, task) {
+  const initialUserIds = uniqIds(await dbListTargetUserIds(teamId, task.id));
+
+  let initialGroupOptions = [];
+  if (task?.broadcast_group_id) {
+    try {
+      const idToHandle = await getSubteamIdMap(teamId);
+      const handle =
+        idToHandle.get(task.broadcast_group_id) || task.broadcast_group_id;
+      initialGroupOptions = [
+        {
+          text: {
+            type: "plain_text",
+            text: `@${String(handle).replace(/^@/, "")}`,
+          },
+          value: task.broadcast_group_id,
+        },
+      ];
+    } catch (_) {}
+  }
+
+  return { initialUserIds, initialGroupOptions };
+}
+
+async function getBroadcastEditSelectionFromView(teamId, task, viewStateValues) {
+  const userBlock = viewStateValues?.assignee_users?.assignee_users_select;
+  const groupBlock = viewStateValues?.assignee_groups?.assignee_groups_select;
+
+  const hasUsersField = userBlock !== undefined;
+  const hasGroupsField = groupBlock !== undefined;
+
+  // どちらも state に無い = 対象者未変更
+  if (!hasUsersField && !hasGroupsField) {
+    const { initialUserIds, initialGroupOptions } =
+      await buildBroadcastInitialOptions(teamId, task);
+
+    const selectedGroupIds = (initialGroupOptions || [])
+      .map((o) => o?.value)
+      .filter(Boolean);
+
+    const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(
+      teamId,
+      selectedGroupIds,
+    );
+
+    const nextTargets = uniqIds([
+      ...initialUserIds,
+      ...Array.from(groupUsers || []),
+    ]);
+
+    return {
+      changed: false,
+      selectedUsers: initialUserIds,
+      selectedGroupIds,
+      groupHandles,
+      nextTargets,
+    };
+  }
+
+  const selectedUsers = userBlock?.selected_users || [];
+  const selectedGroupOptions = groupBlock?.selected_options || [];
+  const selectedGroupIds = selectedGroupOptions
+    .map((o) => o?.value)
+    .filter(Boolean);
+
+  const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(
+    teamId,
+    selectedGroupIds,
+  );
+
+  const nextTargets = uniqIds([
+    ...selectedUsers,
+    ...Array.from(groupUsers || []),
+  ]);
+
+  return {
+    changed: true,
+    selectedUsers,
+    selectedGroupIds,
+    groupHandles,
+    nextTargets,
+  };
+}
+
+async function buildAssigneeLabelRaw(teamId, selectedUsers, groupHandles) {
+  const labelParts = [];
+  for (const gidHandle of groupHandles || []) {
+    labelParts.push(`@${String(gidHandle).replace(/^@/, "")}`);
+  }
+  for (const u of selectedUsers || []) {
+    const name = await getUserDisplayName(teamId, u);
+    labelParts.push(`@${name}`);
+  }
+  return labelParts.join(" ");
+}
 // ================================
 // Thread Card (upsert)
 // ================================
@@ -1773,6 +2126,14 @@ async function publishHome({ client, teamId, userId }) {
       stateOptions0.find((o) => o.value === stateKey0) || stateOptions0[0],
   });
 
+  actionElements.push({
+    type: "button",
+    action_id: "open_home_task_create_modal",
+    text: { type: "plain_text", text: "＋ タスク作成" },
+    style: "primary",
+    value: JSON.stringify({ teamId, userId }),
+  });
+
   blocks.push({ type: "actions", elements: actionElements });
 
   blocks.push({ type: "divider" });
@@ -1877,8 +2238,6 @@ async function publishHome({ client, teamId, userId }) {
   // public は参加していなくても表示する / private は表示しない
   // DM（Dxxxx）は基本表示しないが、「範囲=自分あて(to_me)」かつ personal で自分担当のものだけ表示する
   {
-    const isToMe = rangeKey === "to_me";
-
     const uniqChannels = Array.from(
       new Set((tasks || []).map((t) => t.channel_id).filter(Boolean)),
     );
@@ -1900,11 +2259,10 @@ async function publishHome({ client, teamId, userId }) {
       // チャンネル情報が無いものは落とさない
       if (!ch) return true;
 
-      // ✅ DMは例外許可：to_me の personal で、自分が担当のものだけ通す
+      // ✅ DM起点タスクは Home の範囲絞り込み結果をそのまま通す
+      //    （ここでは追加の可視性制限をかけない）
       if (ch.startsWith("D")) {
-        const isPersonal = t.task_type !== "broadcast";
-        const isMine = t.assignee_id && t.assignee_id === userId;
-        return isToMe && isPersonal && isMine;
+        return true;
       }
 
       // 通常ルール：publicのみOK（private/その他はNG）
@@ -3119,19 +3477,12 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     const channelId = shortcut.channel?.id || "";
     const msgTs = shortcut.message?.ts || "";
     const rawText = shortcut.message?.text || "";
-
-    // ✅ 依頼主の初期値は「タスク化した人」
     const actorUserId = shortcut.user?.id || "";
-
     const msgBlocks = shortcut.message?.blocks || null;
 
     let prettyText = await prettifySlackText(rawText, teamId);
     prettyText = await prettifyUserMentions(prettyText, teamId);
 
-    // ============================
-    // ✅ メンション初期値（ユーザー / ユーザーグループ）
-    // - 「メンションがある時だけ」初期値に入れる（勝手に自分が入らないように）
-    // ============================
     const hasUserMention =
       extractUserIdsFromBlocks(msgBlocks || []).length > 0 ||
       /<@([A-Z0-9]+)(?:\|[^>]+)?>/.test(String(rawText || ""));
@@ -3145,136 +3496,42 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
     let initialGroupOptions = [];
 
     if (hasUserMention || hasGroupMention) {
-      // ✅ メンションが無いときの fallback も「タスク化した人」にする
       const targets = inferTargetsFromMessage(rawText, actorUserId, msgBlocks);
 
       initialUserIds = Array.isArray(targets.userIds)
-        ? targets.userIds.filter(Boolean)
+        ? targets.userIds.filter(Boolean).slice(0, 10)
         : [];
       initialGroupIds = Array.isArray(targets.groupIds)
-        ? targets.groupIds.filter(Boolean)
+        ? targets.groupIds.filter(Boolean).slice(0, 10)
         : [];
 
-      // user_select の初期値が多すぎると邪魔なので一応上限（任意）
-      initialUserIds = initialUserIds.slice(0, 10);
-      initialGroupIds = initialGroupIds.slice(0, 10);
-
-      // groupId -> handle へ（@mk-all みたいな表示用）
       if (initialGroupIds.length) {
         const idToHandle = await getSubteamIdMap(teamId);
         initialGroupOptions = initialGroupIds.map((gid) => {
           const handle = idToHandle.get(gid) || gid;
-          const label = `@${String(handle).replace(/^@/, "")}`;
           return {
-            text: { type: "plain_text", text: label },
+            text: {
+              type: "plain_text",
+              text: `@${String(handle).replace(/^@/, "")}`,
+            },
             value: gid,
           };
         });
       }
     }
-    // ✅ 本文は表示しないが保存するのでキャッシュしておく
+
     const cacheKey = __cacheKey(teamId, channelId, msgTs);
     __cachePut(cacheKey, prettyText || "");
-    await client.views.open({
+
+    await openTaskCreateModal(client, {
       trigger_id: shortcut.trigger_id,
-      view: {
-        type: "modal",
-        callback_id: "task_modal",
-        // ✅ private_metadata は軽量に（3000文字制限対策）
-        private_metadata: JSON.stringify({
-          teamId,
-          channelId,
-          msgTs,
-          // ✅ 後方互換のため残してOK（submit側はstate優先）
-          requesterUserId: actorUserId,
-        }),
-
-        title: { type: "plain_text", text: "タスク作成" },
-        submit: { type: "plain_text", text: "決定" },
-        close: { type: "plain_text", text: "キャンセル" },
-
-        blocks: [
-          // ✅ タイトル（任意）：初期値は空欄
-          {
-            type: "input",
-            optional: true,
-            block_id: "title",
-            label: { type: "plain_text", text: "タイトル（任意）" },
-            element: {
-              type: "plain_text_input",
-              action_id: "title_input",
-              multiline: false,
-              placeholder: {
-                type: "plain_text",
-                text: "空欄なら本文がタイトルになります",
-              },
-            },
-          },
-
-          // ✅ 依頼主（選択式）：初期値は「タスク化した人」
-          {
-            type: "input",
-            block_id: "requester",
-            label: { type: "plain_text", text: "依頼主" },
-            element: {
-              type: "users_select",
-              action_id: "requester_user_select",
-              initial_user: actorUserId,
-              placeholder: { type: "plain_text", text: "依頼主を選択" },
-            },
-          },
-          // 対応者（個人：複数OK）
-          {
-            type: "input",
-            optional: true,
-            block_id: "assignee_users",
-            label: { type: "plain_text", text: "対応者（個人・複数OK）" },
-            element: {
-              type: "multi_users_select",
-              action_id: "assignee_users_select",
-              placeholder: { type: "plain_text", text: "ユーザーを選択" },
-              ...(initialUserIds.length
-                ? { initial_users: initialUserIds }
-                : {}),
-            },
-          },
-
-          // 対応者（グループ：@ALL-xxx / @mk-all 等）
-          {
-            type: "input",
-            optional: true,
-            block_id: "assignee_groups",
-            label: {
-              type: "plain_text",
-              text: "対応者（グループ：@ALL-xxx / @mk-all など）",
-            },
-            element: {
-              type: "multi_external_select",
-              action_id: "assignee_groups_select",
-              placeholder: {
-                type: "plain_text",
-                text: "ユーザーグループを検索",
-              },
-              min_query_length: 0,
-              ...(initialGroupOptions.length
-                ? { initial_options: initialGroupOptions }
-                : {}),
-            },
-          },
-
-          {
-            type: "input",
-            block_id: "due",
-            label: { type: "plain_text", text: "期限" },
-            element: {
-              type: "datepicker",
-              action_id: "due_date",
-              placeholder: { type: "plain_text", text: "期限" },
-              initial_date: todayJstYmd(),
-            },
-          },
-        ],
-      },
+      teamId,
+      channelId,
+      msgTs,
+      actorUserId,
+      initialUserIds,
+      initialGroupOptions,
+      includeContentInput: false,
     });
   } catch (e) {
     console.error("shortcut error:", e?.data || e);
@@ -3650,118 +3907,21 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
 
     if (!teamId || !channelId || !msgTs || !actorUserId) return;
 
-    // 元メッセージ取得
     const rawText = payload.messageText || "";
 
     let prettyText = await prettifySlackText(rawText, teamId);
     prettyText = await prettifyUserMentions(prettyText, teamId);
 
-    // ✅ 本文は表示しないが保存するのでキャッシュしておく
     const cacheKey = __cacheKey(teamId, channelId, msgTs);
     __cachePut(cacheKey, prettyText || "");
 
-    // task_modal を開く（初期値入り）
-    await client.views.open({
+    await openTaskCreateModal(client, {
       trigger_id: body.trigger_id,
-      view: {
-        type: "modal",
-        callback_id: "task_modal",
-        // ✅ private_metadata は軽量に（3000文字制限対策）
-        private_metadata: JSON.stringify({
-          teamId,
-          channelId,
-          msgTs,
-          // ✅ 後方互換のため残してOK（submit側はstate優先）
-          requesterUserId: actorUserId,
-        }),
-
-        title: { type: "plain_text", text: "タスク作成" },
-        submit: { type: "plain_text", text: "決定" },
-        close: { type: "plain_text", text: "キャンセル" },
-        blocks: [
-          // ✅ タイトル（任意）：初期値は空欄
-          {
-            type: "input",
-            optional: true,
-            block_id: "title",
-            label: { type: "plain_text", text: "タイトル（任意）" },
-            element: {
-              type: "plain_text_input",
-              action_id: "title_input",
-              multiline: false,
-              placeholder: {
-                type: "plain_text",
-                text: "空欄なら本文がタイトルになります",
-              },
-            },
-          },
-
-          // ✅ 依頼主（選択式）：初期値は「タスク化した人」
-          {
-            type: "input",
-            block_id: "requester",
-            label: { type: "plain_text", text: "依頼主" },
-            element: {
-              type: "users_select",
-              action_id: "requester_user_select",
-              initial_user: actorUserId,
-              placeholder: { type: "plain_text", text: "依頼主を選択" },
-            },
-          },
-          // 対応者（個人：複数OK）
-          {
-            type: "input",
-            optional: true,
-            block_id: "assignee_users",
-            label: { type: "plain_text", text: "対応者（個人・複数OK）" },
-            element: {
-              type: "multi_users_select",
-              action_id: "assignee_users_select",
-              placeholder: { type: "plain_text", text: "ユーザーを選択" },
-            },
-          },
-          {
-            type: "input",
-            optional: true,
-            block_id: "assignee_groups",
-            label: {
-              type: "plain_text",
-              text: "対応者（グループ：@ALL-xxx / @mk-all など）",
-            },
-            element: {
-              type: "multi_external_select",
-              action_id: "assignee_groups_select",
-              placeholder: {
-                type: "plain_text",
-                text: "ユーザーグループを検索",
-              },
-              min_query_length: 0,
-            },
-          },
-
-          {
-            type: "input",
-            block_id: "due",
-            label: { type: "plain_text", text: "期限" },
-            element: {
-              type: "datepicker",
-              action_id: "due_date",
-              placeholder: { type: "plain_text", text: "期限" },
-              initial_date: todayJstYmd(),
-            },
-          },
-
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全社/複数タスク」になります。",
-              },
-            ],
-          },
-        ],
-      },
+      teamId,
+      channelId,
+      msgTs,
+      actorUserId,
+      includeContentInput: false,
     });
   } catch (e) {
     console.error("reaction_task_open_edit_modal error:", e?.data || e);
@@ -3825,91 +3985,88 @@ async function expandTargetsFromGroups(teamId, groupIds) {
 }
 
 app.view("task_modal", async ({ ack, body, view, client }) => {
+  const meta = safeJsonParse(view.private_metadata || "{}") || {};
+  const actorUserId = body.user.id;
+
+  const teamId = meta.teamId || body.team?.id || body.team_id;
+  const channelId = meta.channelId || "";
+  const parentTs = meta.msgTs || "";
+  const sourceMode = meta.sourceMode || "message";
+
+  const isDmChannel = String(channelId || "")[0] === "D";
+  const isStandalone = sourceMode === "standalone";
+
   try {
-    const meta = safeJsonParse(view.private_metadata || "{}") || {};
-    const actorUserId = body.user.id;
+    if (!teamId || !actorUserId) {
+      await ack();
+      return;
+    }
 
-    const teamId = meta.teamId || body.team?.id || body.team_id;
-    const channelId = meta.channelId || "";
-    const parentTs = meta.msgTs || "";
-
-    const isDmChannel = String(channelId || "")[0] === "D";
-
-    // ✅「作成」押した瞬間にチェック：botが未参加なら促す
-    // - public: join を試す（成功したら続行）
-    // - private: 自動参加できないのでDMで手順案内して、モーダルはエラーで止める
-    if (!isDmChannel && channelId) {
+    // 元メッセージ由来だけ参加確認
+    if (!isStandalone && !isDmChannel && channelId) {
       const joinRes = await ensureBotInChannel({ client, channelId });
 
       if (!joinRes.ok) {
+        let errText = "このチャンネルに参加できなかったよ…！";
         if (joinRes.isPrivate) {
-          await postDM(
-            actorUserId,
-            "そのチャンネルはプライベートだから、ボットを招待しないとタスク作成できません\n" +
-              "チャンネルで `/invite @Task Demo` を実行してから、もう一度「作成」してね",
-          );
-
-          await ack({
-            response_action: "errors",
-            errors: {
-              title:
-                "このチャンネルにボットが未参加だよ（招待手順をDMに送ったよ）",
-            },
-          });
-          return;
+          errText =
+            "このプライベートチャンネルにはボットが未参加だよ。`/invite @Task Demo` のあとでもう一度試してね。";
         }
-
-        // publicだけど joinできない（権限/設定など）
-        await postDM(
-          actorUserId,
-          "このチャンネルに参加できなかったよ…！\n" +
-            "別の方法を試すか、管理者へ連絡してください",
-        );
 
         await ack({
           response_action: "errors",
-          errors: {
-            title: "チャンネル参加に失敗したよ（詳細はDMを見てね）",
-          },
+          errors: { title: errText },
         });
         return;
       }
 
-      // joinできた（=publicで未参加だった）場合は、エフェメラルで軽く案内
       if (joinRes.joined) {
         await safeEphemeral(
           client,
           channelId,
           actorUserId,
-          "🤖 このチャンネルに参加したよ！このままタスク作ります◎",
+          "🤖 このチャンネルに参加したよ！このままタスク作るね◎",
         );
       }
     }
 
-    // ✅ 本文：モーダルでは表示しないので cacheKey から取得（なければSlackから再取得して整形）
-    const cacheKey = meta.cacheKey || __cacheKey(teamId, channelId, parentTs);
+    let description = "";
 
-    let description = __cacheGet(cacheKey);
+    if (isStandalone) {
+      description = (
+        view.state.values.content?.content_text?.value || ""
+      ).trim();
 
-    if (!description) {
-      const raw = await fetchMessageTextByTs(client, channelId, parentTs);
-      let pretty = await prettifySlackText(raw, teamId);
-      pretty = await prettifyUserMentions(pretty, teamId);
-      description = String(pretty || raw || "").trim();
-      if (description) __cachePut(cacheKey, description);
+      if (!description) {
+        await ack({
+          response_action: "errors",
+          errors: { content: "タスク内容を入力してください" },
+        });
+        return;
+      }
+    } else {
+      const cacheKey = meta.cacheKey || __cacheKey(teamId, channelId, parentTs);
+      description = __cacheGet(cacheKey);
+
+      if (!description) {
+        const raw = await fetchMessageTextByTs(client, channelId, parentTs);
+        let pretty = await prettifySlackText(raw, teamId);
+        pretty = await prettifyUserMentions(pretty, teamId);
+        description = String(pretty || raw || "").trim();
+        if (description) __cachePut(cacheKey, description);
+      }
+
+      if (!description) {
+        await ack({
+          response_action: "errors",
+          errors: {
+            title: "元メッセージ取得に失敗したよ（もう一度お試しください）",
+          },
+        });
+        return;
+      }
     }
 
-    if (!description) {
-      await ack({
-        response_action: "errors",
-        errors: {
-          title: "元メッセージ取得に失敗したよ（もう一度お試しください）",
-        },
-      });
-      return;
-    }
-
-    // ✅ タイトル（任意）：空欄なら本文がタイトルになる（リプレイス処理なし）
     const inputTitle = (
       view.state.values.title?.title_input?.value || ""
     ).trim();
@@ -3919,122 +4076,55 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       view.state.values.assignee_users?.assignee_users_select?.selected_users ||
       [];
     const selectedGroupOptions =
-      view.state.values.assignee_groups?.assignee_groups_select
-        ?.selected_options || [];
+      view.state.values.assignee_groups?.assignee_groups_select?.selected_options ||
+      [];
     const selectedGroupIds = selectedGroupOptions
       .map((o) => o?.value)
       .filter(Boolean);
 
+    if (!selectedUsers.length && !selectedGroupIds.length) {
+      await ack({
+        response_action: "errors",
+        errors: {
+          assignee_users: "対応者（個人 or グループ）を1つ以上選んでください",
+          assignee_groups: "対応者（個人 or グループ）を1つ以上選んでください",
+        },
+      });
+      return;
+    }
+
     const due = view.state.values.due?.due_date?.selected_date || null;
-
-    const status = "in_progress";
-
-    // ✅ 依頼主：ユーザーが選べるようにする（初期値は「タスク化した人」）
     const requesterUserId =
       view.state.values.requester?.requester_user_select?.selected_user ||
       actorUserId;
 
-    // ✅ DM特別ルール：personal固定（=自分あて固定）
-    // - DMで「自分の作業メモ → タスク化」を成立させる
-    // - ここでは "Dxxxx" を DM として扱う（Group DMもDになる運用前提）
-    if (isDmChannel) {
-      const hasOthers =
-        (selectedUsers || []).some((u) => u && u !== actorUserId) ||
-        (selectedGroupIds || []).length > 0;
-
-      if (hasOthers) {
-        await ack({
-          response_action: "errors",
-          errors: {
-            assignee_users:
-              "DMでは「自分あての個人タスク」固定だよ🙏（他ユーザー/グループは選べないよ）",
-            assignee_groups: "DMでは「自分あての個人タスク」固定だよ🙏",
-          },
-        });
-        return;
-      }
-      // ※選択が空でもOK（あとで actorUserId を入れる）
-    } else {
-      // Phase8-2: 対応者（個人 or グループ）必須（DMは例外）
-      if (!selectedUsers.length && !selectedGroupIds.length) {
-        await ack({
-          response_action: "errors",
-          errors: {
-            assignee_users: "対応者（個人 or グループ）を1つ以上選んでください",
-            assignee_groups:
-              "対応者（個人 or グループ）を1つ以上選んでください",
-          },
-        });
-        return;
-      }
-    }
-
-    // ✅ ここまで通ったらack（このハンドラ内でackは1回のみ）
     await ack();
 
-    // Expand group members
     const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(
       teamId,
       selectedGroupIds,
     );
 
-    // targets = selectedUsers + groupUsers
-    const targets = new Set();
-    for (const u of selectedUsers) targets.add(u);
-    for (const u of groupUsers) targets.add(u);
-    let targetList = Array.from(targets);
-
-    // ============================
-    // ✅ DM特別ルール：personal固定（=自分あて固定）
-    // - DMで「自分の作業メモ → タスク化」を成立させる
-    // - ここでは "Dxxxx" を DM として扱う（Group DMもDになる運用前提）
-    // ============================
-    if (isDmChannel) {
-      // DMは「自分あて」固定にしたいので、他人/グループが選ばれてたら弾く（事故防止）
-      const hasOthers =
-        (selectedUsers || []).some((u) => u && u !== actorUserId) ||
-        (selectedGroupIds || []).length > 0;
-
-      if (hasOthers) {
-        await ack({
-          response_action: "errors",
-          errors: {
-            assignee_users:
-              "DMでは「自分あての個人タスク」固定だよ🙏（他ユーザー/グループは選べないよ）",
-            assignee_groups: "DMでは「自分あての個人タスク」固定だよ🙏",
-          },
-        });
-        return;
-      }
-
-      // 選択が空でもOKにして、自分を入れる
-      targetList = [actorUserId];
-    }
+    const targetList = uniqIds([
+      ...selectedUsers,
+      ...Array.from(groupUsers || []),
+    ]);
 
     const isPersonal = targetList.length === 1 && selectedGroupIds.length === 0;
     const taskType = isPersonal ? "personal" : "broadcast";
-
-    // label for display (no mention)
-    // - broadcastは「選択された対象（個人/グループ）」だけをラベル化（グループの全員は展開しない）
-    // - メンション通知を避けるため、表示は noMention() を通す
-    const labelParts = [];
-    for (const gidHandle of groupHandles)
-      labelParts.push(`@${String(gidHandle).replace(/^@/, "")}`);
-    for (const u of selectedUsers) {
-      const name = await getUserDisplayName(teamId, u);
-      labelParts.push(`@${name}`);
-    }
-    const assigneeLabelRaw = labelParts.join(" ");
-
-    // dept resolve (A): requester + (personalのみ assignee)
     const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
     const personalAssigneeId = isPersonal ? targetList[0] : null;
     const assigneeDept = isPersonal
       ? await resolveDeptForUser(teamId, personalAssigneeId)
       : null;
+    const assigneeLabelRaw = await buildAssigneeLabelRaw(
+      teamId,
+      selectedUsers,
+      groupHandles,
+    );
 
     let permalink = "";
-    if (channelId && parentTs) {
+    if (!isStandalone && channelId && parentTs) {
       try {
         const r = await client.chat.getPermalink({
           channel: channelId,
@@ -4045,7 +4135,6 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     }
 
     const taskId = randomUUID();
-
     const created = await dbCreateTask({
       id: taskId,
       team_id: teamId,
@@ -4058,21 +4147,18 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       created_by_user_id: actorUserId,
       assignee_id: personalAssigneeId,
       assignee_label: assigneeLabelRaw || null,
-      status,
+      status: "in_progress",
       due_date: due,
       requester_dept: requesterDept,
       assignee_dept: assigneeDept,
       task_type: taskType,
-      broadcast_group_handle: groupHandles.length
-        ? `@${groupHandles[0]}`
-        : null,
+      broadcast_group_handle: groupHandles.length ? `@${groupHandles[0]}` : null,
       broadcast_group_id: selectedGroupIds.length ? selectedGroupIds[0] : null,
       total_count: taskType === "broadcast" ? targetList.length : null,
       completed_count: 0,
       notified_at: null,
     });
 
-    // broadcast: snapshot targets
     if (taskType === "broadcast") {
       await dbInsertTaskTargets(teamId, taskId, targetList);
       const total = await dbCountTargets(teamId, taskId);
@@ -4081,32 +4167,14 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       created.completed_count = 0;
     }
 
-    // ✅ DMでの作成は「作ったよ」エフェメラルだけは必ず出す（作成DMは出さない）
-    try {
-      const isDmChannel = String(channelId || "")[0] === "D";
-      if (isDmChannel) {
-        await safeEphemeral(
-          client,
-          channelId,
-          actorUserId,
-          "📝 DMのメモ、タスクにしたよ！Homeの「自分あて」に出るよ",
-        );
-      }
-    } catch (_) {}
-
-    // ① 発行通知（personal / broadcast）
-    // - 自分が発行して自分が対象の場合は通知しない（うるささ回避）
     try {
       if (taskType === "personal") {
         const to = personalAssigneeId;
         if (to && to !== actorUserId) {
           await notifyTaskSimpleDM(to, created, "📝 タスクが届いたよ");
         }
-      } else if (taskType === "broadcast") {
-        const targets = (targetList || []).filter(
-          (u) => u && u !== actorUserId,
-        );
-        for (const uid of targets) {
+      } else {
+        for (const uid of targetList.filter((u) => u && u !== actorUserId)) {
           await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
         }
       }
@@ -4114,59 +4182,35 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       console.error("create notify error:", e?.data || e);
     }
 
-    // broadcast creation notify: allow mention (only once)
-    if (taskType === "broadcast" && channelId) {
-      try {
-        const mentionParts = [];
-        // usergroups: ensure mention works using subteam token
-        const idToHandle = await getSubteamIdMap(teamId);
-        for (const gid of selectedGroupIds) {
-          const handle = idToHandle.get(gid);
-          if (handle) mentionParts.push(`<!subteam^${gid}|@${handle}>`);
-        }
-        // users: normal mention
-        for (const u of selectedUsers) mentionParts.push(`<@${u}>`);
-      } catch (e) {
-        if (e?.data?.error === "not_in_channel") {
-          await safeEphemeral(
-            client,
-            channelId,
-            actorUserId,
-            "このチャンネルにボットが参加してないよ…！ `/invite @アプリ名` してから試してね✨",
-          );
-        } else {
-          console.error("broadcast notify error:", e?.data || e);
-        }
-      }
-    }
-
-    // thread card
-    if (created?.channel_id && created?.message_ts) {
+    if (created?.channel_id && created?.message_ts && !created.channel_id.startsWith("D")) {
       try {
         const blocks = await buildThreadCardBlocks({ teamId, task: created });
-        if (!created.channel_id?.startsWith("D")) {
-          await upsertThreadCard(client, {
-            teamId,
-            channelId,
-            parentTs,
-            blocks,
-          });
-        }
+        await upsertThreadCard(client, {
+          teamId,
+          channelId: created.channel_id,
+          parentTs: created.message_ts,
+          blocks,
+        });
       } catch (e) {
-        if (e?.data?.error === "not_in_channel") {
-          await safeEphemeral(
-            client,
-            channelId,
-            actorUserId,
-            "このチャンネルにボットが参加してないよ…！ `/invite @アプリ名` してから試してね✨",
-          );
-        } else {
-          console.error("thread card error:", e?.data || e);
-        }
+        console.error("thread card error:", e?.data || e);
       }
     }
+try {
+  await notifyCreateResultOnSource({
+    client,
+    channelId,
+    parentTs,
+    actorUserId,
+    text: isStandalone
+      ? "📝 タスクを作成したよ！作成者にはこのDM、対応者にはタスク通知を送ったよ。"
+      : isDmChannel
+        ? "📝 このDMメッセージからタスクを作成したよ！"
+        : "📝 タスクを作成したよ！",
+  });
+} catch (e) {
+  console.error("create result notify failed:", e?.data || e);
+}
 
-    // Home refresh（スマホ反映対策：関係者＋対象者へ再描画）
     publishHomeForUsers(client, teamId, [
       actorUserId,
       requesterUserId,
@@ -4174,8 +4218,105 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     ]);
   } catch (e) {
     console.error("view submit error:", e?.data || e);
+try {
+  await notifyCreateResultOnSource({
+    client,
+    channelId,
+    parentTs,
+    actorUserId,
+    text: `⚠️ タスク作成に失敗したよ: ${e?.message || "unknown error"}`,
+  });
+} catch (notifyErr) {
+  console.error("create result notify failed:", notifyErr?.data || notifyErr);
+}
   }
 });
+
+async function runOverdueThreadReminderJob() {
+  const today = todayJstYmd();
+
+  const q = `
+    SELECT *
+    FROM tasks
+    WHERE due_date < $1
+      AND status NOT IN ('done','cancelled')
+      AND channel_id IS NOT NULL
+      AND message_ts IS NOT NULL
+    ORDER BY due_date ASC, created_at ASC
+    LIMIT 500;
+  `;
+  const tasks = (await dbQuery(q, [today])).rows || [];
+
+  for (const t of tasks) {
+    try {
+      let notifyUserIds = [];
+
+      if (t.task_type === "broadcast") {
+        const targets = await dbListTargetUserIds(t.team_id, t.id);
+        const completionsRes = await dbQuery(
+          `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
+          [t.team_id, t.id],
+        );
+        const doneSet = new Set(
+          (completionsRes.rows || []).map((r) => r.user_id).filter(Boolean),
+        );
+        notifyUserIds = targets.filter((u) => u && !doneSet.has(u));
+      } else {
+        notifyUserIds = t.assignee_id ? [t.assignee_id] : [];
+      }
+
+      notifyUserIds = uniqIds(notifyUserIds);
+      if (!notifyUserIds.length) continue;
+
+      const titleText = noMention(t.title || "（無題）");
+      const dueText = formatDueDateOnly(t.due_date);
+
+      // ✅ DM起点タスクはスレッド返信せず、対応者へアプリDM
+      if (String(t.channel_id || "").startsWith("D")) {
+        for (const uid of notifyUserIds) {
+          try {
+            await notifyTaskSimpleDM(uid, t, `⏰ 期限切れだよ（期限: ${dueText}）`);
+          } catch (dmErr) {
+            console.error(
+              "runOverdueThreadReminderJob dm fallback error:",
+              dmErr?.data || dmErr,
+            );
+          }
+        }
+        continue;
+      }
+
+      const mentionText = notifyUserIds.map((u) => `<@${u}>`).join(" ");
+
+      await postMessageInThread(
+        app.client,
+        t.channel_id,
+        t.message_ts,
+        `⏰ 期限切れリマインド\n${mentionText}\n*${titleText}*\n期限: ${dueText}`,
+      );
+    } catch (e) {
+      console.error("runOverdueThreadReminderJob error:", e?.data || e);
+    }
+  }
+
+  console.log(
+    `[overdue_thread_reminder] done. today=${today} count=${tasks.length}`,
+  );
+}
+
+cron.schedule(
+  "40 20 * * *",
+  () => {
+    runOverdueThreadReminderJob().catch((e) =>
+      console.error("runOverdueThreadReminderJob error:", e?.data || e),
+    );
+  },
+  { timezone: "Asia/Tokyo" },
+);
+
+if (process.env.RUN_OVERDUE_THREAD_REMINDER_NOW === "true") {
+  runOverdueThreadReminderJob().catch(console.error);
+}
 
 // ================================
 // Actions
@@ -5418,8 +5559,6 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
 
   if (!teamId || !taskId || !viewerUserId) return;
 
-  // ✅ trigger_id はすぐ期限切れになる（特にモバイル）
-  // 先に軽いモーダルを即 push → view_id で update する
   const loadingView = {
     type: "modal",
     callback_id: "edit_task_modal_loading",
@@ -5448,24 +5587,55 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
     if (!task || !openedViewId) return;
 
     const isBroadcast = task.task_type === "broadcast";
-
-    // ✅ broadcast は「だれでも」編集OK / personal は依頼者or対応者
     const canEditTask = isBroadcast
       ? true
       : viewerUserId === task.requester_user_id ||
         viewerUserId === task.assignee_id;
 
-    if (!canEditTask) {
-      // 方針どおりサイレント return（通知しない）
-      return;
-    }
+    if (!canEditTask) return;
 
     const initDue = slackDateYmd(task.due_date);
-
     const blocks = [];
 
-    // personal のみ：対応者を変更できる（broadcastは対象者集合の整合性があるため変更しない）
-    if (!isBroadcast) {
+    if (isBroadcast) {
+      const { initialUserIds, initialGroupOptions } =
+        await buildBroadcastInitialOptions(teamId, task);
+
+      blocks.push({
+        type: "input",
+        optional: true,
+        block_id: "assignee_users",
+        label: { type: "plain_text", text: "対応者（個人・複数OK）" },
+        element: {
+          type: "multi_users_select",
+          action_id: "assignee_users_select",
+          placeholder: { type: "plain_text", text: "ユーザーを選択" },
+          ...(initialUserIds.length ? { initial_users: initialUserIds } : {}),
+        },
+      });
+
+      blocks.push({
+        type: "input",
+        optional: true,
+        block_id: "assignee_groups",
+        label: {
+          type: "plain_text",
+          text: "対応者（グループ：@ALL-xxx / @mk-all など）",
+        },
+        element: {
+          type: "multi_external_select",
+          action_id: "assignee_groups_select",
+          placeholder: {
+            type: "plain_text",
+            text: "ユーザーグループを検索",
+          },
+          min_query_length: 0,
+          ...(initialGroupOptions.length
+            ? { initial_options: initialGroupOptions }
+            : {}),
+        },
+      });
+    } else {
       blocks.push({
         type: "input",
         block_id: "assignee",
@@ -5528,8 +5698,6 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
   const taskId = meta.taskId;
   const actorUserId = getUserIdFromBody(body);
 
-  const nextAssignee =
-    view.state.values.assignee?.assignee_user?.selected_user || null;
   const nextDue = view.state.values.due?.due_date?.selected_date || null;
   const nextContent = (
     view.state.values.content?.content_text?.value || ""
@@ -5543,7 +5711,6 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     return;
   }
 
-  // ① まず軽い画面へ差し替え（hash_conflict回避）
   await ack({
     response_action: "update",
     view: {
@@ -5562,8 +5729,6 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     if (!before) return;
 
     const isBroadcast = before.task_type === "broadcast";
-
-    // ✅ 修正ポイント：broadcast は「だれでも」保存OK
     const canEditTask = isBroadcast
       ? true
       : actorUserId === before.requester_user_id ||
@@ -5571,34 +5736,136 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
 
     if (!canEditTask) return;
 
-    // personal だけ対応者変更を許可（broadcastは対象者集合の整合性があるため変更しない）
-    let patchAssigneeId = null;
-    let patchAssigneeDept = null;
-    if (!isBroadcast) {
-      if (!nextAssignee) {
-        // users_select なので通常は入るが、万一の保険
+    let updated = null;
+    let usersToRefresh = [before.requester_user_id, actorUserId];
+    let usersToNotify = [];
+
+       if (isBroadcast) {
+      const beforeTargets = uniqIds(await dbListTargetUserIds(teamId, taskId));
+
+      const selection = await getBroadcastEditSelectionFromView(
+        teamId,
+        before,
+        view.state.values,
+      );
+
+      const {
+        changed,
+        selectedUsers,
+        selectedGroupIds,
+        groupHandles,
+        nextTargets,
+      } = selection;
+
+      if (!nextTargets.length) {
+        try {
+          await client.views.update({
+            view_id: body.view.id,
+            view: {
+              type: "modal",
+              callback_id: "edit_task_modal_error",
+              title: { type: "plain_text", text: "保存できませんでした" },
+              close: { type: "plain_text", text: "閉じる" },
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: "対応者（個人 or グループ）を1つ以上選んでください。",
+                  },
+                },
+              ],
+            },
+          });
+        } catch (_) {}
         return;
       }
-      patchAssigneeId = nextAssignee;
+
+      if (changed) {
+        await dbReplaceTaskTargets(teamId, taskId, nextTargets);
+      }
+
+      const completedCount = changed
+        ? await dbCountCompletions(teamId, taskId)
+        : before.completed_count ?? 0;
+
+      const assigneeLabelRaw = await buildAssigneeLabelRaw(
+        teamId,
+        selectedUsers,
+        groupHandles,
+      );
+
+      updated = await dbUpdateTaskEditableFields(teamId, taskId, {
+        assignee_id: null,
+        assignee_label: assigneeLabelRaw || null,
+        assignee_dept: null,
+        due_date: nextDue,
+        description: nextContent,
+        broadcast_group_handle: groupHandles.length
+          ? `@${groupHandles[0]}`
+          : null,
+        broadcast_group_id: selectedGroupIds.length
+          ? selectedGroupIds[0]
+          : null,
+        total_count: nextTargets.length,
+        completed_count: completedCount,
+      });
+
+      usersToNotify = changed
+        ? nextTargets.filter((u) => !beforeTargets.includes(u))
+        : [];
+
+      usersToRefresh = uniqIds([
+        ...usersToRefresh,
+        ...beforeTargets,
+        ...nextTargets,
+      ]);
+    } else {
+      const nextAssignee =
+        view.state.values.assignee?.assignee_user?.selected_user || null;
+      if (!nextAssignee) return;
+
+      let patchAssigneeDept = null;
       try {
         patchAssigneeDept = await resolveDeptForUser(teamId, nextAssignee);
       } catch (_) {}
+
+      updated = await dbUpdateTaskEditableFields(teamId, taskId, {
+        assignee_id: nextAssignee,
+        assignee_label: null,
+        assignee_dept: patchAssigneeDept,
+        due_date: nextDue,
+        description: nextContent,
+        broadcast_group_handle: null,
+        broadcast_group_id: null,
+        total_count: null,
+        completed_count: 0,
+      });
+
+      if (nextAssignee && nextAssignee !== before.assignee_id) {
+        usersToNotify = [nextAssignee];
+      }
+
+      usersToRefresh = uniqIds([
+        ...usersToRefresh,
+        before.assignee_id,
+        nextAssignee,
+      ]);
     }
 
-    const updated = await dbUpdateTaskContent(teamId, taskId, {
-      assignee_id: patchAssigneeId,
-      assignee_dept: patchAssigneeDept,
-      due_date: nextDue,
-      description: nextContent,
-    });
     if (!updated) return;
 
-    // スレッドカード更新 + 変更通知（証跡）
-    if (updated.channel_id && updated.message_ts) {
-      const cardBlocks = await buildThreadCardBlocks({ teamId, task: updated });
-      if (!updated.channel_id || !updated.message_ts) return;
+    try {
+      for (const uid of usersToNotify.filter((u) => u && u !== actorUserId)) {
+        await notifyTaskSimpleDM(uid, updated, "👋 あなたが対応者に追加されたよ");
+      }
+    } catch (e) {
+      console.error("assignee notify error:", e?.data || e);
+    }
 
+    if (updated.channel_id && updated.message_ts && !updated.channel_id.startsWith("D")) {
       try {
+        const cardBlocks = await buildThreadCardBlocks({ teamId, task: updated });
         await upsertThreadCard(client, {
           teamId,
           channelId: updated.channel_id,
@@ -5611,17 +5878,10 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
       }
     }
 
-    // Home を更新（対象者/依頼者に広く）
     try {
-      const users = [
-        updated.requester_user_id,
-        updated.assignee_id,
-        actorUserId,
-      ].filter(Boolean);
-      await publishHomeForUsers(client, teamId, users, 250);
+      await publishHomeForUsers(client, teamId, usersToRefresh, 250);
     } catch (_) {}
 
-    // ② 現在のモーダルは「保存しました✅」最小UI
     try {
       await client.views.update({
         view_id: body.view.id,
@@ -5642,7 +5902,6 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
   } catch (e) {
     console.error("edit_task_modal submit error:", e?.data || e);
 
-    // 失敗画面（最小UI）
     try {
       await client.views.update({
         view_id: body.view.id,
@@ -6284,6 +6543,28 @@ app.action("home_task_overflow", async ({ ack, body, client, action }) => {
     }
   } catch (e) {
     console.error("home_task_overflow error:", e?.data || e);
+  }
+});
+
+app.action("open_home_task_create_modal", async ({ ack, body, client }) => {
+  await ack();
+
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const actorUserId = getUserIdFromBody(body);
+    if (!teamId || !actorUserId) return;
+
+    await openTaskCreateModal(client, {
+      trigger_id: body.trigger_id,
+      teamId,
+      channelId: "",
+      msgTs: "",
+      actorUserId,
+      includeContentInput: true,
+      initialContent: "",
+    });
+  } catch (e) {
+    console.error("open_home_task_create_modal error:", e?.data || e);
   }
 });
 

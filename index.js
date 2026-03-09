@@ -4304,17 +4304,17 @@ async function runOverdueThreadReminderJob() {
   );
 }
 
-if (process.env.ENABLE_OVERDUE_REMINDER === "true") {
-  cron.schedule(
-    "0 10 * * *",
-    () => {
-      runOverdueThreadReminderJob().catch((e) =>
-        console.error("runOverdueThreadReminderJob error:", e?.data || e),
-      );
-    },
-    { timezone: "Asia/Tokyo" },
-  );
-}
+//if (process.env.ENABLE_OVERDUE_REMINDER === "true") {
+//  cron.schedule(
+//    "0 10 * * *",
+//    () => {
+//      runOverdueThreadReminderJob().catch((e) =>
+//        console.error("runOverdueThreadReminderJob error:", e?.data || e),
+//      );
+//    },
+//    { timezone: "Asia/Tokyo" },
+//  );
+//}
 
 // ================================
 // Actions

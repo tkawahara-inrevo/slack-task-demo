@@ -959,15 +959,15 @@ function uniqIds(arr) {
   return Array.from(new Set((arr || []).filter(Boolean)));
 }
 
-async function postMessageInThread(client, channelId, parentTs, text, blocks = null) {
-  if (!client || !channelId || !parentTs || !text) return;
-  await client.chat.postMessage({
-    channel: channelId,
-    thread_ts: parentTs,
-    text,
-    ...(blocks ? { blocks } : {}),
-  });
-}
+// async function postMessageInThread(client, channelId, parentTs, text, blocks = null) {
+//   if (!client || !channelId || !parentTs || !text) return;
+//   await client.chat.postMessage({
+//     channel: channelId,
+//     thread_ts: parentTs,
+//     text,
+//     ...(blocks ? { blocks } : {}),
+//   });
+// }
 
 async function notifyCreateResultOnSource({
   client,
@@ -4232,77 +4232,77 @@ try {
   }
 });
 
-async function runOverdueThreadReminderJob() {
-  const today = todayJstYmd();
+// async function runOverdueThreadReminderJob() {
+//   const today = todayJstYmd();
 
-  const q = `
-    SELECT *
-    FROM tasks
-    WHERE due_date < $1
-      AND status NOT IN ('done','cancelled')
-      AND channel_id IS NOT NULL
-      AND message_ts IS NOT NULL
-    ORDER BY due_date ASC, created_at ASC
-    LIMIT 500;
-  `;
-  const tasks = (await dbQuery(q, [today])).rows || [];
+//   const q = `
+//     SELECT *
+//     FROM tasks
+//     WHERE due_date < $1
+//       AND status NOT IN ('done','cancelled')
+//       AND channel_id IS NOT NULL
+//       AND message_ts IS NOT NULL
+//     ORDER BY due_date ASC, created_at ASC
+//     LIMIT 500;
+//   `;
+//   const tasks = (await dbQuery(q, [today])).rows || [];
 
-  for (const t of tasks) {
-    try {
-      let notifyUserIds = [];
+//   for (const t of tasks) {
+//     try {
+//       let notifyUserIds = [];
 
-      if (t.task_type === "broadcast") {
-        const targets = await dbListTargetUserIds(t.team_id, t.id);
-        const completionsRes = await dbQuery(
-          `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
-          [t.team_id, t.id],
-        );
-        const doneSet = new Set(
-          (completionsRes.rows || []).map((r) => r.user_id).filter(Boolean),
-        );
-        notifyUserIds = targets.filter((u) => u && !doneSet.has(u));
-      } else {
-        notifyUserIds = t.assignee_id ? [t.assignee_id] : [];
-      }
+//       if (t.task_type === "broadcast") {
+//         const targets = await dbListTargetUserIds(t.team_id, t.id);
+//         const completionsRes = await dbQuery(
+//           `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
+//           [t.team_id, t.id],
+//         );
+//         const doneSet = new Set(
+//           (completionsRes.rows || []).map((r) => r.user_id).filter(Boolean),
+//         );
+//         notifyUserIds = targets.filter((u) => u && !doneSet.has(u));
+//       } else {
+//         notifyUserIds = t.assignee_id ? [t.assignee_id] : [];
+//       }
 
-      notifyUserIds = uniqIds(notifyUserIds);
-      if (!notifyUserIds.length) continue;
+//       notifyUserIds = uniqIds(notifyUserIds);
+//       if (!notifyUserIds.length) continue;
 
-      const titleText = noMention(t.title || "（無題）");
-      const dueText = formatDueDateOnly(t.due_date);
+//       const titleText = noMention(t.title || "（無題）");
+//       const dueText = formatDueDateOnly(t.due_date);
 
-      // ✅ DM起点タスクはスレッド返信せず、対応者へアプリDM
-      if (String(t.channel_id || "").startsWith("D")) {
-        for (const uid of notifyUserIds) {
-          try {
-            await notifyTaskSimpleDM(uid, t, `⏰ 期限切れだよ（期限: ${dueText}）`);
-          } catch (dmErr) {
-            console.error(
-              "runOverdueThreadReminderJob dm fallback error:",
-              dmErr?.data || dmErr,
-            );
-          }
-        }
-        continue;
-      }
+//       // ✅ DM起点タスクはスレッド返信せず、対応者へアプリDM
+//       if (String(t.channel_id || "").startsWith("D")) {
+//         for (const uid of notifyUserIds) {
+//           try {
+//             await notifyTaskSimpleDM(uid, t, `⏰ 期限切れだよ（期限: ${dueText}）`);
+//           } catch (dmErr) {
+//             console.error(
+//               "runOverdueThreadReminderJob dm fallback error:",
+//               dmErr?.data || dmErr,
+//             );
+//           }
+//         }
+//         continue;
+//       }
 
-      const mentionText = notifyUserIds.map((u) => `<@${u}>`).join(" ");
+//       const mentionText = notifyUserIds.map((u) => `<@${u}>`).join(" ");
 
-      await postMessageInThread(
-        app.client,
-        t.channel_id,
-        t.message_ts,
-        `⏰ 期限切れリマインド\n${mentionText}\n*${titleText}*\n期限: ${dueText}`,
-      );
-    } catch (e) {
-      console.error("runOverdueThreadReminderJob error:", e?.data || e);
-    }
-  }
+//       await postMessageInThread(
+//         app.client,
+//         t.channel_id,
+//         t.message_ts,
+//         `⏰ 期限切れリマインド\n${mentionText}\n*${titleText}*\n期限: ${dueText}`,
+//       );
+//     } catch (e) {
+//       console.error("runOverdueThreadReminderJob error:", e?.data || e);
+//     }
+//   }
 
-  console.log(
-    `[overdue_thread_reminder] done. today=${today} count=${tasks.length}`,
-  );
-}
+//   console.log(
+//     `[overdue_thread_reminder] done. today=${today} count=${tasks.length}`,
+//   );
+// }
 
 //if (process.env.ENABLE_OVERDUE_REMINDER === "true") {
 //  cron.schedule(

@@ -3534,14 +3534,15 @@ app.function(
 
     try {
       let teamId = inputs?.team_id || inputs?.teamId || null;
-      const requesterUserId =
+
+      let requesterUserId =
         inputs?.requester_user_id ||
         inputs?.requesterUserId ||
         inputs?.user_id ||
         inputs?.userId ||
         null;
 
-      const channelId = inputs?.channel_id || inputs?.channelId || null;
+      let channelId = inputs?.channel_id || inputs?.channelId || null;
 
       const messageLink =
         inputs?.message_link ||
@@ -3557,6 +3558,10 @@ app.function(
         msgTs = extractTsFromPermalink(messageLink);
       }
 
+      if (!looksLikeSlackChannelId(channelId) && messageLink) {
+        channelId = extractChannelIdFromPermalink(messageLink);
+      }
+
       if (!teamId) {
         teamId = await getTeamIdViaAuthTest(client);
       }
@@ -3568,10 +3573,18 @@ app.function(
       ]);
 
       const missing = [];
-      if (!requesterUserId) missing.push("requester_user_id");
-      if (!channelId) missing.push("channel_id");
-      if (!teamId) missing.push("team_id");
-      if (!msgTs) missing.push("message_ts(or message_link parse)");
+      if (!requesterUserId || !looksLikeSlackUserId(requesterUserId)) {
+        missing.push("requester_user_id(valid Slack user ID)");
+      }
+      if (!channelId || !looksLikeSlackChannelId(channelId)) {
+        missing.push("channel_id(valid Slack channel ID or message_link)");
+      }
+      if (!teamId || !looksLikeSlackTeamId(teamId)) {
+        missing.push("team_id(valid Slack team ID)");
+      }
+      if (!msgTs) {
+        missing.push("message_ts(or message_link parse)");
+      }
       if (assigneeIds.length !== 3) {
         missing.push("BC_CONTRACT_ASSIGNEE_USER_ID_1/2/3");
       }
@@ -3596,26 +3609,42 @@ app.function(
         return;
       }
 
-      const rawText = await fetchMessageTextByTs(client, channelId, msgTs);
+      let rawText = "";
+      try {
+        rawText = await fetchMessageTextByTs(client, channelId, msgTs);
+      } catch (e) {
+        logger?.warn?.("fetchMessageTextByTs failed; fallback to blank", {
+          channelId,
+          msgTs,
+          error: e?.message,
+        });
+        rawText = "";
+      }
+
       const description = String(rawText || "");
       const title = "契約書送付確認";
 
       let permalink = "";
       try {
-        const r = await client.chat.getPermalink({
-          channel: channelId,
-          message_ts: msgTs,
-        });
-        permalink = r?.permalink || "";
+        if (channelId && msgTs) {
+          const r = await client.chat.getPermalink({
+            channel: channelId,
+            message_ts: msgTs,
+          });
+          permalink = r?.permalink || "";
+        }
       } catch (e) {
         logger?.warn?.("getPermalink failed", e);
+        permalink = String(messageLink || "");
       }
 
       const postedYmd = jstYmdFromSlackTs(msgTs) || todayJstYmd();
       const due = nextJpBusinessDayFromYmd(postedYmd);
       if (!due) {
         logger?.warn?.("⛔ skipped: invalid due", { postedYmd });
-        await complete({ outputs: { task_id: null, skipped: "invalid_due" } });
+        await complete({
+          outputs: { task_id: null, skipped: "invalid_due" },
+        });
         return;
       }
 
@@ -3628,7 +3657,7 @@ app.function(
         team_id: teamId,
         channel_id: channelId,
         message_ts: msgTs,
-        source_permalink: permalink || null,
+        source_permalink: permalink || messageLink || null,
         title,
         description,
         requester_user_id: requesterUserId,
@@ -3672,7 +3701,12 @@ app.function(
       }
 
       logger?.info?.("✅ task created", { taskId, due, postedYmd });
-      await complete({ outputs: { task_id: taskId, due_date: due } });
+      await complete({
+        outputs: {
+          task_id: taskId,
+          due_date: due,
+        },
+      });
     } catch (error) {
       logger?.error?.("💥 bc_contract_send_check_taskify failed", {
         message: error?.message,

@@ -2939,6 +2939,24 @@ function extractTsFromPermalink(url) {
   return `${m[1]}.${m[2].padStart(6, "0")}`;
 }
 
+function extractChannelIdFromPermalink(link) {
+  const s = String(link || "");
+  const m = s.match(/\/archives\/([A-Z0-9]+)\//i);
+  return m ? m[1] : null;
+}
+
+function looksLikeSlackChannelId(v) {
+  return /^[CGD][A-Z0-9]+$/.test(String(v || ""));
+}
+
+function looksLikeSlackUserId(v) {
+  return /^[UW][A-Z0-9]+$/.test(String(v || ""));
+}
+
+function looksLikeSlackTeamId(v) {
+  return /^T[A-Z0-9]+$/.test(String(v || ""));
+}
+
 async function getTeamIdViaAuthTest(client) {
   try {
     const r = await client.auth.test();

@@ -3665,34 +3665,33 @@ app.function(
         });
         return;
       }
+const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+const taskId = randomUUID();
+const assigneeLabel = await buildAssigneeLabelRaw(teamId, assigneeIds, []);
 
-      const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
-      const taskId = randomUUID();
-      const assigneeLabel = assigneeIds.map((u) => `<@${u}>`).join(" ");
-
-      const created = await dbCreateTask({
-        id: taskId,
-        team_id: teamId,
-        channel_id: channelId,
-        message_ts: msgTs,
-        source_permalink: permalink || messageLink || null,
-        title,
-        description,
-        requester_user_id: requesterUserId,
-        created_by_user_id: requesterUserId,
-        assignee_id: null,
-        assignee_label: assigneeLabel,
-        status: "in_progress",
-        due_date: due,
-        requester_dept: requesterDept,
-        assignee_dept: null,
-        task_type: "broadcast",
-        broadcast_group_handle: null,
-        broadcast_group_id: null,
-        total_count: assigneeIds.length,
-        completed_count: 0,
-        notified_at: null,
-      });
+const created = await dbCreateTask({
+  id: taskId,
+  team_id: teamId,
+  channel_id: channelId,
+  message_ts: msgTs,
+  source_permalink: permalink || messageLink || null,
+  title,
+  description,
+  requester_user_id: requesterUserId,
+  created_by_user_id: requesterUserId,
+  assignee_id: null,
+  assignee_label: assigneeLabel,
+  status: "in_progress",
+  due_date: due,
+  requester_dept: requesterDept,
+  assignee_dept: null,
+  task_type: "broadcast",
+  broadcast_group_handle: null,
+  broadcast_group_id: null,
+  total_count: assigneeIds.length,
+  completed_count: 0,
+  notified_at: null,
+});
 
       await dbInsertTaskTargets(teamId, taskId, assigneeIds);
       const total = await dbCountTargets(teamId, taskId);

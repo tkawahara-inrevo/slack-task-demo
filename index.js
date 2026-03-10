@@ -3158,10 +3158,6 @@ app.event("app_home_opened", async ({ event, client, body }) => {
 // Custom Step (Workflow Builder): 情シス依頼を自動タスク化
 // callback_id: josys_taskify
 // ================================
-// ================================
-// Custom Step (Workflow Builder): 情シス依頼を自動タスク化
-// callback_id: josys_taskify
-// ================================
 app.function(
   "josys_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
@@ -3461,6 +3457,189 @@ app.function(
 
       await fail({
         error: `josys_taskify failed: ${error?.message || "unknown error"}`,
+      });
+    }
+  },
+);
+
+// ================================
+// Custom Step (Workflow Builder): 契約書送付確認を自動タスク化
+// callback_id: bc_contract_send_check_taskify
+// ================================
+app.function(
+  "bc_contract_send_check_taskify",
+  async ({ client, inputs, complete, fail, logger }) => {
+    try {
+      let teamId = inputs?.team_id || inputs?.teamId || null;
+      const requesterUserId =
+        inputs?.requester_user_id || inputs?.requesterUserId || null;
+      const channelId = inputs?.channel_id || inputs?.channelId || null;
+
+      const messageLink =
+        inputs?.message_link ||
+        inputs?.messageLink ||
+        inputs?.message_url ||
+        inputs?.messageUrl ||
+        inputs?.message_permalink ||
+        inputs?.messagePermalink ||
+        null;
+
+      let msgTs = inputs?.message_ts || inputs?.messageTs || null;
+      if (!msgTs && messageLink) {
+        msgTs = extractTsFromPermalink(messageLink);
+      }
+
+      if (!teamId) {
+        teamId = await getTeamIdViaAuthTest(client);
+      }
+
+      const fixedAssigneeIds = parseCsvUserIds(
+        process.env.BC_CONTRACT_SEND_CHECK_ASSIGNEE_IDS,
+      );
+
+      const missing = [];
+      if (!teamId) missing.push("team_id");
+      if (!requesterUserId) missing.push("requester_user_id");
+      if (!channelId) missing.push("channel_id");
+      if (!msgTs) missing.push("message_ts(or message_link)");
+      if (fixedAssigneeIds.length !== 3) {
+        missing.push("BC_CONTRACT_SEND_CHECK_ASSIGNEE_IDS(exactly 3 users)");
+      }
+
+      if (missing.length) {
+        logger?.warn?.("⛔ bc_contract_send_check_taskify skipped", {
+          missing,
+          inputs,
+        });
+        await complete({
+          outputs: {
+            task_id: null,
+            skipped: `missing:${missing.join(",")}`,
+          },
+        });
+        return;
+      }
+
+      const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
+      if (existing?.id) {
+        logger?.info?.("ℹ️ already exists", { taskId: existing.id });
+        await complete({
+          outputs: { task_id: existing.id, skipped: "already_exists" },
+        });
+        return;
+      }
+
+      const rawText = await fetchMessageTextByTs(client, channelId, msgTs);
+      let prettyText = "";
+      try {
+        prettyText = await prettifySlackText(rawText, teamId);
+        prettyText = await prettifyUserMentions(prettyText, teamId);
+      } catch (_) {
+        prettyText = String(rawText || "");
+      }
+
+      const messageFullText = String(prettyText || rawText || "").trim();
+      const title = "契約書送付確認";
+      const description = messageFullText || "";
+
+      let permalink = "";
+      try {
+        const r = await client.chat.getPermalink({
+          channel: channelId,
+          message_ts: msgTs,
+        });
+        permalink = r?.permalink || "";
+      } catch (e) {
+        logger?.warn?.("getPermalink failed", e);
+      }
+
+      const requestYmd = jstYmdFromSlackTs(msgTs);
+      const due = nextBusinessDayYmd(requestYmd);
+
+      if (!due) {
+        logger?.warn?.("⛔ invalid due", { requestYmd });
+        await complete({
+          outputs: { task_id: null, skipped: "invalid_due" },
+        });
+        return;
+      }
+
+      const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+      const taskId = randomUUID();
+      const targetList = Array.from(new Set(fixedAssigneeIds)).filter(Boolean);
+
+      const assigneeLabel = targetList.map((u) => `<@${u}>`).join(" ");
+
+      const created = await dbCreateTask({
+        id: taskId,
+        team_id: teamId,
+        channel_id: channelId,
+        message_ts: msgTs,
+        source_permalink: permalink || null,
+        title,
+        description,
+        requester_user_id: requesterUserId,
+        created_by_user_id: requesterUserId,
+        assignee_id: null,
+        assignee_label: assigneeLabel,
+        status: "in_progress",
+        due_date: due,
+        requester_dept: requesterDept,
+        assignee_dept: null,
+        task_type: "broadcast",
+        broadcast_group_handle: null,
+        broadcast_group_id: null,
+        total_count: targetList.length,
+        completed_count: 0,
+        notified_at: null,
+      });
+
+      await dbInsertTaskTargets(teamId, taskId, targetList);
+      const total = await dbCountTargets(teamId, taskId);
+      await dbUpdateBroadcastCounts(teamId, taskId, 0, total);
+      created.total_count = total;
+      created.completed_count = 0;
+
+      try {
+        const toNotify = targetList.filter((u) => u && u !== requesterUserId);
+        for (const uid of toNotify) {
+          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+        }
+      } catch (e) {
+        logger?.error?.("workflow step notify error", e);
+      }
+
+      try {
+        const toRefresh = Array.from(
+          new Set([requesterUserId, ...targetList].filter(Boolean)),
+        );
+        publishHomeBurst(client, teamId, toRefresh, 200);
+      } catch (e) {
+        logger?.warn?.("home publish error", e);
+      }
+
+      logger?.info?.("✅ bc_contract_send_check task created", {
+        taskId,
+        due,
+        targetCount: targetList.length,
+      });
+
+      await complete({
+        outputs: {
+          task_id: taskId,
+          due_date: due,
+        },
+      });
+    } catch (error) {
+      logger?.error?.("💥 bc_contract_send_check_taskify failed", {
+        message: error?.message,
+        stack: error?.stack,
+      });
+
+      await fail({
+        error: `bc_contract_send_check_taskify failed: ${
+          error?.message || "unknown error"
+        }`,
       });
     }
   },
@@ -5158,6 +5337,71 @@ function todayJstYmd() {
   const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
   const d = String(jst.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+function jstYmdFromSlackTs(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n)) return todayJstYmd();
+  const ms = Math.floor(n * 1000);
+  const jst = new Date(ms + 9 * 60 * 60 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(jst.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseCsvUserIds(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) {
+    return Array.from(new Set(v.map(String).map((s) => s.trim()).filter(Boolean)));
+  }
+  return Array.from(
+    new Set(
+      String(v)
+        .split(/[\s,]+/g)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getJpHolidaySetFromEnv() {
+  const raw = process.env.JP_HOLIDAYS_CSV || "";
+  return new Set(
+    String(raw)
+      .split(/[\s,]+/g)
+      .map((s) => s.trim())
+      .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s)),
+  );
+}
+
+function addDaysToYmd(ymd, days) {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCDate(d.getUTCDate() + days);
+  const y = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${mm}-${dd}`;
+}
+
+function isBusinessDayYmd(ymd, holidaySet = getJpHolidaySetFromEnv()) {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const dow = d.getUTCDay(); // 0:Sun ... 6:Sat
+  if (dow === 0 || dow === 6) return false;
+  if (holidaySet.has(ymd)) return false;
+  return true;
+}
+
+function nextBusinessDayYmd(baseYmd, holidaySet = getJpHolidaySetFromEnv()) {
+  let cur = addDaysToYmd(baseYmd, 1);
+  while (cur && !isBusinessDayYmd(cur, holidaySet)) {
+    cur = addDaysToYmd(cur, 1);
+  }
+  return cur;
 }
 
 async function notifyUserDM(userId, task, roleLabel) {

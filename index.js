@@ -5679,7 +5679,7 @@ const q = `
     ON tt.team_id = t.team_id
    AND tt.task_id::text = t.id
   WHERE t.team_id = $1
-    AND t.status = 'in_progress'
+    AND t.status NOT IN ('done', 'cancelled')
     AND t.due_date IS NOT NULL
     AND t.due_date < $2
     AND (
@@ -5691,6 +5691,12 @@ const q = `
       (
         t.task_type = 'broadcast'
         AND tt.user_id = ANY($3)
+        AND NOT EXISTS (
+          SELECT 1 FROM task_completions tc
+          WHERE tc.team_id = t.team_id
+            AND tc.task_id::text = t.id
+            AND tc.user_id = tt.user_id
+        )
       )
     )
   ORDER BY t.due_date ASC, t.created_at ASC

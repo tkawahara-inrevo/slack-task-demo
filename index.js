@@ -62,6 +62,7 @@ const {
   dbReplaceTaskTargets,
   dbUpdateBroadcastCounts,
   dbUpdateStatus,
+  dbUpdateTaskContent,
   dbUpdateTaskEditableFields,
   dbUpsertCompletion,
   dbUpsertTeamSettings,

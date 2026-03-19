@@ -38,11 +38,6 @@ function extractUserIdsFromBlocks(blocks) {
   };
   walk(blocks);
   return out;
-  return {
-    extractUserGroupIdsFromBlocks,
-    extractUserIdsFromBlocks,
-    inferTargetsFromMessage,
-  };
 }
 
 // ★追加：blocks から usergroup_id を拾う（rich_text の usergroup）
@@ -400,6 +395,12 @@ app.action("reaction_task_open_edit_modal", async ({ ack, body, client }) => {
     console.error("reaction_task_open_edit_modal error:", e?.data || e);
   }
 });
+
+  return {
+    extractUserGroupIdsFromBlocks,
+    extractUserIdsFromBlocks,
+    inferTargetsFromMessage,
+  };
 }
 
 module.exports = {

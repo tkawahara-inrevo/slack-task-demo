@@ -839,16 +839,19 @@ async function upsertThreadCard(
   // parentTs は「カードの一意キー」（= 1メッセージ1回の判定に使う）
   const existing = await dbGetThreadCard(teamId, channelId, parentTs);
   if (existing?.card_ts) {
-    await client.chat.update({
-      channel: channelId,
-      ts: existing.card_ts,
-      text: "タスク表示（更新）",
-      blocks,
-    });
-    return existing.card_ts;
+    try {
+      await client.chat.update({
+        channel: channelId,
+        ts: existing.card_ts,
+        text: "?????????",
+        blocks,
+      });
+      return existing.card_ts;
+    } catch (e) {
+      if (e?.data?.error !== "not_found") throw e;
+    }
   }
 
-  // threadTs は「投稿先のスレッド親」（未指定なら parentTs と同じ）
   const postThreadTs = threadTs || parentTs;
 
   const res = await client.chat.postMessage({

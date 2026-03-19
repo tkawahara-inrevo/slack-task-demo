@@ -128,6 +128,44 @@ async function buildBroadcastInitialOptions(teamId, task) {
   return { initialUserIds, initialGroupOptions };
 }
 
+async function getBroadcastEditSelectionFromView(teamId, task, values) {
+  const selectedUsers =
+    values?.assignee_users?.assignee_users_select?.selected_users || [];
+  const selectedGroupOptions =
+    values?.assignee_groups?.assignee_groups_select?.selected_options || [];
+  const selectedGroupIds = selectedGroupOptions
+    .map((option) => option?.value)
+    .filter(Boolean);
+
+  const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(
+    teamId,
+    selectedGroupIds,
+  );
+
+  const nextTargets = uniqIds([
+    ...selectedUsers,
+    ...Array.from(groupUsers || []),
+  ]);
+
+  const prevGroupIds = task?.broadcast_group_id ? [task.broadcast_group_id] : [];
+  const prevTargets = uniqIds(await dbListTargetUserIds(teamId, task.id));
+  const changed =
+    JSON.stringify([...selectedUsers].sort()) !==
+      JSON.stringify([...(task?.assignee_id ? [task.assignee_id] : [])].sort()) ||
+    JSON.stringify([...selectedGroupIds].sort()) !==
+      JSON.stringify([...prevGroupIds].sort()) ||
+    JSON.stringify([...nextTargets].sort()) !==
+      JSON.stringify([...prevTargets].sort());
+
+  return {
+    changed,
+    selectedUsers,
+    selectedGroupIds,
+    groupHandles,
+    nextTargets,
+  };
+}
+
 app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
   await ack();
   try {

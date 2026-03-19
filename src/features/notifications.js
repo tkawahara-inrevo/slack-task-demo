@@ -12,6 +12,7 @@ function registerNotificationJobs(deps) {
     getUsergroupMembers,
     groupBy,
     isOverdueChannelNotificationEnabled = async () => true,
+    isJpBusinessDayYmd = () => true,
     noMention,
     normalizeHandle,
     pickNoticeText,
@@ -158,6 +159,11 @@ async function displayTargetsForNotice(teamId, task) {
 async function runMkOverdueNotifyJob() {
   const today = todayJstYmd(); // YYYY-MM-DD (JST)
   const channelId = MK_OVERDUE_NOTIFY_CHANNEL_ID;
+
+  if (!isJpBusinessDayYmd(today)) {
+    console.log(`[mk_overdue_notify] skip: non-business-day. today=${today}`);
+    return;
+  }
 
   // tasks テーブルに出てくる team_id を対象に回す（単一WSなら実質1件）
   const teamsRes = await dbQuery(
@@ -346,9 +352,6 @@ cron.schedule(
   { timezone: "Asia/Tokyo" },
 );
 
-if (process.env.RUN_MK_OVERDUE_NOTIFY_NOW === "true") {
-  runMkOverdueNotifyJob().catch(console.error);
-}
 }
 
 module.exports = {

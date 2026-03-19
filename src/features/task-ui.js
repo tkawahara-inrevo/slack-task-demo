@@ -102,6 +102,32 @@ async function buildListDetailView({
   });
 }
 
+async function buildBroadcastInitialOptions(teamId, task) {
+  if (!teamId || !task?.id) {
+    return { initialUserIds: [], initialGroupOptions: [] };
+  }
+
+  const initialUserIds = [];
+  const initialGroupOptions = [];
+
+  if (task.broadcast_group_id) {
+    const idToHandle = await getSubteamIdMap(teamId);
+    const handle = idToHandle.get(task.broadcast_group_id) || task.broadcast_group_id;
+    initialGroupOptions.push({
+      text: {
+        type: "plain_text",
+        text: `@${String(handle).replace(/^@/, "")}`,
+      },
+      value: task.broadcast_group_id,
+    });
+  } else {
+    const targetIds = await dbListTargetUserIds(teamId, task.id);
+    initialUserIds.push(...(targetIds || []));
+  }
+
+  return { initialUserIds, initialGroupOptions };
+}
+
 app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
   await ack();
   try {

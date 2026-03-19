@@ -1,20 +1,30 @@
 function registerTaskUiFeature(deps) {
   const {
     app,
+    __cacheGet,
+    __cacheKey,
+    __cachePut,
     buildDetailModalView,
+    buildAssigneeLabelRaw,
     buildTaskListModalView,
     buildThreadCardBlocks,
     dbCountCompletions,
     dbCountTargets,
     dbCreateTask,
     dbGetTaskById,
+    dbInsertTaskTargets,
+    dbIsUserTarget,
     dbInsertTaskComment,
     dbListTargetUserIds,
+    dbQuery,
     dbReplaceTaskTargets,
     dbUpdateBroadcastCounts,
+    dbUpdateTaskContent,
     dbUpdateStatus,
     dbUpdateTaskEditableFields,
     dbUpsertCompletion,
+    ensureBotInChannel,
+    fetchMessageTextByTs,
     formatDueDateOnly,
     getSubteamIdMap,
     getTeamIdFromBody,
@@ -26,15 +36,71 @@ function registerTaskUiFeature(deps) {
     parseActionMeta,
     prettifySlackText,
     prettifyUserMentions,
+    publishHomeBurst = publishHomeForUsers,
     publishHomeForUsers,
     randomUUID,
     resolveDeptForUser,
+    safeEphemeral,
     safeJsonParse,
     slackDateYmd,
     statusLabel,
     uniqIds,
     upsertThreadCard,
   } = deps;
+
+async function notifyCreateResultOnSource({
+  client,
+  channelId,
+  parentTs,
+  actorUserId,
+  text,
+}) {
+  if (!text) return;
+
+  if (channelId && parentTs && !String(channelId).startsWith("D")) {
+    try {
+      await safeEphemeral(client, channelId, actorUserId, text);
+      return;
+    } catch (_) {}
+  }
+
+  if (actorUserId) {
+    try {
+      const dm = await app.client.conversations.open({ users: actorUserId });
+      const dmChannel = dm.channel?.id;
+      if (!dmChannel) return;
+      await app.client.chat.postMessage({
+        channel: dmChannel,
+        text,
+      });
+    } catch (_) {}
+  }
+}
+
+async function postDM(userId, text) {
+  if (!userId || !text) return;
+  try {
+    const dm = await app.client.conversations.open({ users: userId });
+    const channel = dm.channel?.id;
+    if (!channel) return;
+    await app.client.chat.postMessage({ channel, text });
+  } catch (_) {}
+}
+
+async function buildListDetailView({
+  teamId,
+  task,
+  viewerUserId,
+  returnState,
+}) {
+  return buildDetailModalView({
+    teamId,
+    task,
+    viewerUserId,
+    origin: "list_modal",
+    returnState,
+  });
+}
 
 app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
   await ack();
@@ -466,6 +532,19 @@ app.action("task_row_overflow", async ({ ack, body, action, client }) => {
     if (origin === "list_modal" && body.view?.id) {
       const task = await dbGetTaskById(teamId, taskId);
       if (!task) return;
+      const meta2 = safeJsonParse(body.view?.private_metadata || "{}") || {};
+      const returnState = meta2.returnState || {
+        viewType: "assigned",
+        userId: body.user.id,
+        status: "in_progress",
+        deptKey: "all",
+      };
+      const nextView = await buildListDetailView({
+        teamId,
+        task,
+        returnState,
+        viewerUserId: body.user.id,
+      });
 
       await client.views.update({
         view_id: body.view.id,

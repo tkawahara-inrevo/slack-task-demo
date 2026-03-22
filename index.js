@@ -41,6 +41,7 @@ const {
 } = require("./src/utils/common");
 const {
   dbEnsureSettingsSchema,
+  dbGetNotificationThread,
   dbCountCompletions,
   dbCountTargets,
   dbCreateTask,
@@ -66,6 +67,7 @@ const {
   dbUpdateTaskContent,
   dbUpdateTaskEditableFields,
   dbUpsertCompletion,
+  dbUpsertNotificationThread,
   dbUpsertTeamSettings,
   dbUpsertThreadCard,
   dbUpsertUserDept,
@@ -133,9 +135,11 @@ resolveHomeDefaultsForHome = resolveHomeDefaults;
 registerNotificationJobs({
   app,
   canUserReceiveDm: isUserDmEnabled,
+  dbGetNotificationThread,
   cron,
   cutAfterSlash,
   dbQuery,
+  dbUpsertNotificationThread,
   ensureBotInChannel,
   formatDueDateOnly,
   getSubteamIdMap,

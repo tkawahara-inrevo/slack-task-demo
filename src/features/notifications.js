@@ -4,7 +4,9 @@ function registerNotificationJobs(deps) {
     cron,
     cutAfterSlash,
     canUserReceiveDm = async () => true,
+    dbGetNotificationThread,
     dbQuery,
+    dbUpsertNotificationThread,
     ensureBotInChannel,
     formatDueDateOnly,
     getSubteamIdMap,
@@ -127,6 +129,7 @@ const MK_OVERDUE_NOTIFY_USERGROUP_HANDLE =
   (process.env.MK_OVERDUE_NOTIFY_USERGROUP_HANDLE || "mk")
     .trim()
     .replace(/^@/, "");
+const MK_OVERDUE_THREAD_KIND = "mk_overdue_notify";
 
 
 async function getUsergroupIdByHandle(teamId, handle) {
@@ -155,6 +158,59 @@ async function displayTargetsForNotice(teamId, task) {
 }
 
 // タイトルが空なら本文（description）を使う。ただし「メンションだらけ」を除去して意味が残るようにする
+
+async function ensureOverdueNotifyThreadRoot(teamId, channelId) {
+  const existing = await dbGetNotificationThread(
+    teamId,
+    channelId,
+    MK_OVERDUE_THREAD_KIND,
+  );
+
+  if (existing?.parent_ts) {
+    try {
+      const res = await app.client.conversations.history({
+        channel: channelId,
+        latest: existing.parent_ts,
+        oldest: existing.parent_ts,
+        inclusive: true,
+        limit: 1,
+      });
+      const msg = res?.messages?.[0];
+      if (msg?.ts === existing.parent_ts) return existing.parent_ts;
+    } catch (_) {}
+  }
+
+  const posted = await app.client.chat.postMessage({
+    channel: channelId,
+    text: "【タスク期限切れ通知スレッド】",
+    blocks: [
+      {
+        type: "header",
+        text: { type: "plain_text", text: "タスク期限切れ通知スレッド" },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: "毎日の期限切れ通知はこのスレッドに投稿されます。",
+          },
+        ],
+      },
+    ],
+  });
+
+  const parentTs = posted?.ts || null;
+  if (parentTs) {
+    await dbUpsertNotificationThread(
+      teamId,
+      channelId,
+      MK_OVERDUE_THREAD_KIND,
+      parentTs,
+    );
+  }
+  return parentTs;
+}
 
 async function runMkOverdueNotifyJob() {
   const today = todayJstYmd(); // YYYY-MM-DD (JST)
@@ -208,29 +264,41 @@ async function runMkOverdueNotifyJob() {
       //
       // ※ 全社グループや他グループのbroadcastに mkメンバーが “含まれてしまう” ケースを除外するため
 const q = `
-  SELECT DISTINCT t.*
+  SELECT t.*
   FROM tasks t
-  LEFT JOIN task_targets tt
-    ON tt.team_id = t.team_id
-   AND tt.task_id::text = t.id
   WHERE t.team_id = $1
-    AND t.status NOT IN ('done', 'cancelled')
     AND t.due_date IS NOT NULL
     AND t.due_date < $2
     AND (
       (
         (t.task_type IS NULL OR t.task_type = 'personal')
+        AND t.status NOT IN ('done', 'cancelled')
         AND t.assignee_id = ANY($3)
       )
       OR
       (
         t.task_type = 'broadcast'
-        AND tt.user_id = ANY($3)
-        AND NOT EXISTS (
-          SELECT 1 FROM task_completions tc
-          WHERE tc.team_id = t.team_id
-            AND tc.task_id::text = t.id
-            AND tc.user_id = tt.user_id
+        AND t.status NOT IN ('done', 'cancelled')
+        AND EXISTS (
+          SELECT 1
+          FROM task_targets tt_mk
+          WHERE tt_mk.team_id = t.team_id
+            AND tt_mk.task_id::text = t.id
+            AND tt_mk.user_id = ANY($3)
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM task_targets tt_open
+          WHERE tt_open.team_id = t.team_id
+            AND tt_open.task_id::text = t.id
+            AND tt_open.user_id = ANY($3)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM task_completions tc
+              WHERE tc.team_id = t.team_id
+                AND tc.task_id::text = t.id
+                AND tc.user_id = tt_open.user_id
+            )
         )
       )
     )
@@ -238,7 +306,7 @@ const q = `
   LIMIT 200;
 `;
 
-   const allTasks = (await dbQuery(q, [teamId, today, allowed])).rows || [];
+      const allTasks = (await dbQuery(q, [teamId, today, allowed])).rows || [];
 
       if (!allTasks.length) {
         console.log(
@@ -248,6 +316,7 @@ const q = `
       }
 
       const mention = `<!subteam^${groupId}|@${MK_OVERDUE_NOTIFY_USERGROUP_HANDLE}>`;
+      const parentTs = await ensureOverdueNotifyThreadRoot(teamId, channelId);
 
       // 読みやすさ + ブロック制限対策：最大20件
       const MAX_SHOW = 20;
@@ -329,6 +398,7 @@ const q = `
 
       await app.client.chat.postMessage({
         channel: channelId,
+        ...(parentTs ? { thread_ts: parentTs } : {}),
         text: `${mention} 期限切れタスクが ${allTasks.length}件あります`,
         blocks,
       });

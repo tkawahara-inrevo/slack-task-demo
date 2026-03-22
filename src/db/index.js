@@ -81,6 +81,17 @@ async function dbEnsureSettingsSchema() {
       PRIMARY KEY (team_id, user_id)
     );
   `);
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS notification_threads (
+      team_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      parent_ts TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (team_id, channel_id, kind)
+    );
+  `);
 }
 
 function normalizeSettingsObject(value) {
@@ -165,6 +176,31 @@ async function dbUpsertUserSettings(teamId, userId, settings) {
     ...row,
     settings: normalizeSettingsObject(row.settings),
   };
+}
+
+async function dbGetNotificationThread(teamId, channelId, kind) {
+  const q = `
+    SELECT team_id, channel_id, kind, parent_ts, updated_at
+    FROM notification_threads
+    WHERE team_id=$1 AND channel_id=$2 AND kind=$3
+    LIMIT 1;
+  `;
+  const res = await dbQuery(q, [teamId, channelId, kind]);
+  return res.rows[0] || null;
+}
+
+async function dbUpsertNotificationThread(teamId, channelId, kind, parentTs) {
+  const q = `
+    INSERT INTO notification_threads (team_id, channel_id, kind, parent_ts, updated_at)
+    VALUES ($1, $2, $3, $4, now())
+    ON CONFLICT (team_id, channel_id, kind)
+    DO UPDATE SET
+      parent_ts = EXCLUDED.parent_ts,
+      updated_at = now()
+    RETURNING team_id, channel_id, kind, parent_ts, updated_at;
+  `;
+  const res = await dbQuery(q, [teamId, channelId, kind, parentTs]);
+  return res.rows[0] || null;
 }
 
 async function dbCreateTask(task) {
@@ -614,6 +650,7 @@ module.exports = {
   dbCreateTask,
   dbDeleteTaskTargets,
   dbGetTaskById,
+  dbGetNotificationThread,
   dbGetTaskBySource,
   dbGetThreadCard,
   dbGetTeamSettings,
@@ -636,6 +673,7 @@ module.exports = {
   dbUpdateTaskContent,
   dbUpdateTaskEditableFields,
   dbUpsertCompletion,
+  dbUpsertNotificationThread,
   dbUpsertTeamSettings,
   dbUpsertThreadCard,
   dbUpsertUserDept,

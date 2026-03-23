@@ -174,6 +174,10 @@ async function buildCommentMentionCatalog(teamId, task) {
   const userAliasToId = new Map();
   const groupAliasToId = new Map();
   const hintHandles = [];
+  const userOptions = [];
+  const groupOptions = [];
+  const userOptionIds = new Set();
+  const groupOptionIds = new Set();
 
   const addHint = (handle) => {
     const normalized = normalizeHandle(handle);
@@ -196,6 +200,30 @@ async function buildCommentMentionCatalog(teamId, task) {
     addHint(normalized);
   };
 
+  const addUserOption = (userId, label) => {
+    if (!userId || userOptionIds.has(userId)) return;
+    userOptionIds.add(userId);
+    userOptions.push({
+      text: {
+        type: "plain_text",
+        text: String(label || userId).slice(0, 75),
+      },
+      value: userId,
+    });
+  };
+
+  const addGroupOption = (groupId, handle) => {
+    if (!groupId || groupOptionIds.has(groupId)) return;
+    groupOptionIds.add(groupId);
+    groupOptions.push({
+      text: {
+        type: "plain_text",
+        text: `@${String(handle || groupId).replace(/^@/, "")}`.slice(0, 75),
+      },
+      value: groupId,
+    });
+  };
+
   const userIds = new Set();
   if (task?.requester_user_id) userIds.add(task.requester_user_id);
   if (task?.assignee_id) userIds.add(task.assignee_id);
@@ -214,6 +242,7 @@ async function buildCommentMentionCatalog(teamId, task) {
       const shortName = cutAfterSlash(displayName);
       addUserAlias(displayName, userId);
       addUserAlias(shortName, userId);
+      addUserOption(userId, shortName || displayName || userId);
     } catch (_) {}
   }
 
@@ -222,14 +251,15 @@ async function buildCommentMentionCatalog(teamId, task) {
     const idToHandle = await getSubteamIdMap(teamId);
     const groupHandle = idToHandle.get(groupId) || groupId;
     addGroupAlias(groupHandle, groupId);
+    addGroupOption(groupId, groupHandle);
   }
 
   return {
     userAliasToId,
     groupAliasToId,
-    hintText: hintHandles.length
-      ? "本文中で " + hintHandles.join(" ") + " を使えます"
-      : "",
+    userOptions,
+    groupOptions,
+    hintText: hintHandles.length ? "本文では @名前 や @グループ も使えます" : "",
   };
 }
 
@@ -1634,8 +1664,8 @@ app.action("open_comment_modal", async ({ ack, body, action, client }) => {
       callback_id: "comment_modal",
       private_metadata: JSON.stringify(meta),
       title: { type: "plain_text", text: "コメント" },
-      submit: { type: "plain_text", text: "謚慕ｨｿ" },
-      close: { type: "plain_text", text: "繧ｭ繝｣繝ｳ繧ｻ繝ｫ" },
+      submit: { type: "plain_text", text: "投稿" },
+      close: { type: "plain_text", text: "キャンセル" },
       blocks: [
         ...(mentionCatalog.hintText
           ? [
@@ -1652,20 +1682,37 @@ app.action("open_comment_modal", async ({ ack, body, action, client }) => {
           : []),
         {
           type: "input",
-          block_id: "mention",
+          block_id: "mention_users",
           optional: true,
-          label: { type: "plain_text", text: "メンション（任意）" },
+          label: { type: "plain_text", text: "メンション先ユーザー（任意）" },
           element: {
-            type: "multi_users_select",
+            type: "multi_static_select",
             action_id: "users",
-            placeholder: { type: "plain_text", text: "ユーザーを選択" },
+            placeholder: { type: "plain_text", text: "候補ユーザーを選択" },
+            options: mentionCatalog.userOptions,
           },
         },
+        ...(mentionCatalog.groupOptions?.length
+          ? [
+              {
+                type: "input",
+                block_id: "mention_groups",
+                optional: true,
+                label: { type: "plain_text", text: "メンション先グループ（任意）" },
+                element: {
+                  type: "multi_static_select",
+                  action_id: "groups",
+                  placeholder: { type: "plain_text", text: "候補グループを選択" },
+                  options: mentionCatalog.groupOptions,
+                },
+              },
+            ]
+          : []),
 
         {
           type: "input",
           block_id: "comment",
-          label: { type: "plain_text", text: "繧ｳ繝｡繝ｳ繝亥・螳ｹ" },
+          label: { type: "plain_text", text: "コメント内容" },
           element: {
             type: "plain_text_input",
             action_id: "body",
@@ -1686,7 +1733,7 @@ app.action("open_comment_modal", async ({ ack, body, action, client }) => {
                     {
                       text: {
                         type: "plain_text",
-                        text: "譛ｪ螳御ｺ・・・縺ｿ縺ｫ騾夂衍",
+                        text: "未完了者のみに通知",
                       },
                       value: "incomplete_only",
                     },
@@ -1704,11 +1751,18 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
   const meta = safeJsonParse(view.private_metadata || "{}") || {};
 
   const base = view.state.values.comment?.body?.value?.trim() || "";
-  const mentionUserIds = view.state.values.mention?.users?.selected_users || [];
   const task = await dbGetTaskById(meta.teamId, meta.taskId);
   const mentionCatalog = task
     ? await buildCommentMentionCatalog(meta.teamId, task)
     : null;
+  const mentionUserIds =
+    view.state.values.mention_users?.users?.selected_options
+      ?.map((option) => option?.value)
+      .filter(Boolean) || [];
+  const mentionGroupIds =
+    view.state.values.mention_groups?.groups?.selected_options
+      ?.map((option) => option?.value)
+      .filter(Boolean) || [];
   const resolvedComment = replaceCommentPseudoMentions(base, mentionCatalog);
   const notifyIncompleteOnly = Boolean(
     view.state.values.notify_scope?.notify_scope_check?.selected_options?.some(
@@ -1716,14 +1770,16 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
     ),
   );
 
-  // <@U1> <@U2> ???????????????
-  const mentionPrefix = mentionUserIds.map((u) => `<@${u}>`).join(" ");
+  const explicitGroupMentions = mentionGroupIds.map(
+    (groupId) => `<!subteam^${groupId}>`,
+  );
+  const mentionPrefix = [...mentionUserIds.map((u) => `<@${u}>`), ...explicitGroupMentions].join(" ");
   const comment = `${mentionPrefix}${mentionPrefix ? " " : ""}${resolvedComment.text}`.trim();
 
   if (!comment) {
     await ack({
       response_action: "errors",
-      errors: { comment: "繧ｳ繝｡繝ｳ繝医ｒ蜈･蜉帙＠縺ｦ縺上□縺輔＞" },
+      errors: { comment: "コメントを入力してください" },
     });
     return;
   }
@@ -1737,7 +1793,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
       title: { type: "plain_text", text: "コメント" },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
-        { type: "section", text: { type: "mrkdwn", text: "沈 菫晏ｭ倅ｸｭ窶ｦ" } },
+        { type: "section", text: { type: "mrkdwn", text: "投稿しています..." } },
       ],
     },
   });
@@ -1760,6 +1816,14 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
       // 繝｡繝ｳ繧ｷ繝ｧ繝ｳ蜈茨ｼ郁､・焚・・
       for (const uid of mentionUserIds || []) {
         if (uid && uid !== actor) recipients.add(uid);
+      }
+      for (const gid of mentionGroupIds || []) {
+        try {
+          const groupUsers = await getUsergroupMembers(task.team_id, gid);
+          for (const uid of groupUsers || []) {
+            if (uid && uid !== actor) recipients.add(uid);
+          }
+        } catch (_) {}
       }
       for (const uid of resolvedComment.mentionedUserIds || []) {
         if (uid && uid !== actor) recipients.add(uid);
@@ -1826,14 +1890,14 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
           const channel = dm.channel?.id;
           if (!channel) continue;
 
-          const blocks = [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: "町 *繧ｿ繧ｹ繧ｯ縺ｫ繧ｳ繝｡繝ｳ繝医′縺ゅｊ縺ｾ縺励◆*",
-              },
-            },
+      const blocks = [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "*タスクにコメントがありました*",
+          },
+        },
             {
               type: "section",
               text: { type: "mrkdwn", text: `*${noMention(title)}*` },
@@ -1929,7 +1993,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
           blocks: [
             {
               type: "section",
-              text: { type: "mrkdwn", text: "･ｺ 菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆窶ｦ" },
+              text: { type: "mrkdwn", text: "投稿に失敗しました。もう一度お試しください。" },
             },
           ],
         },

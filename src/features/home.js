@@ -541,6 +541,39 @@ async function publishHome({ client, teamId, userId }) {
   }
 
   // 表示：未完了はステータス別に分ける（完了/取り下げはまとめ）
+  if (rangeKey === "to_me") {
+    const hiddenAssignedTasks = [];
+    for (const task of [...personalTasks, ...broadcastTasks]) {
+      if (!task) continue;
+
+      const key = `${task.task_type || "personal"}:${task.id}`;
+      const alreadyVisible = (tasks || []).some(
+        (visibleTask) =>
+          `${visibleTask.task_type || "personal"}:${visibleTask.id}` === key,
+      );
+      if (alreadyVisible) continue;
+
+      if (task.task_type === "broadcast") {
+        const isAssigned = await isBroadcastAssignedToUser(task, teamId, userId);
+        if (!isAssigned) continue;
+
+        const hasCompleted = await dbHasUserCompleted(teamId, task.id, userId);
+        if (hasCompleted) continue;
+
+        hiddenAssignedTasks.push(task);
+        continue;
+      }
+
+      if (String(task.assignee_id || "") === String(userId)) {
+        hiddenAssignedTasks.push(task);
+      }
+    }
+
+    if (hiddenAssignedTasks.length) {
+      tasks = [...tasks, ...hiddenAssignedTasks].sort(cmp);
+    }
+  }
+
   if (st.scopeKey === "done") {
     // ★完了は直近N時間だけ表示（ここはあなたが2週間=336時間に変更する想定でOK）
     const DONE_VISIBLE_HOURS = 168; // ←あなたの方針でここを336にしてね

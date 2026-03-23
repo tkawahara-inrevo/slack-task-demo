@@ -33,7 +33,7 @@ async function notifyUserDM(userId, task, roleLabel) {
 
   // 期限表示：JST基準で「今日」を優先。DB/pgの型差（Date/文字列）にも耐える。
   const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
-  const hasLink = !!task?.source_permalink;
+  const hasLink = !!(task?.source_permalink && task?.message_ts);
 
   await app.client.chat.postMessage({
     channel,
@@ -373,13 +373,24 @@ const q = `
             },
           });
 
-          if (t.source_permalink) {
+          if (t.source_permalink && t.message_ts) {
             blocks.push({
               type: "context",
               elements: [
                 {
                   type: "mrkdwn",
                   text: `🔗 <${t.source_permalink}|元メッセージへ>`,
+                },
+              ],
+            });
+          } else if (!t.message_ts) {
+            blocks.push({
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text:
+                    "Home \u306e\u30bf\u30b9\u30af\u4f5c\u6210\u304b\u3089\u4f5c\u6210\u3055\u308c\u305f\u30bf\u30b9\u30af\u3067\u3059\u3002",
                 },
               ],
             });

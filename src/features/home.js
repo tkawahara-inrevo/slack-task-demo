@@ -969,13 +969,19 @@ async function publishHome({ client, teamId, userId }) {
         const dueText = t?.due_date
           ? `（${formatDueDateOnly(t.due_date)}）まで`
           : "";
-        const linkText = t?.source_permalink
+        const sourceHintText = !t?.message_ts
+          ? "Home \u304b\u3089\u4f5c\u6210"
+          : "";
+        const hasSourceMessage = !!(t?.source_permalink && t?.message_ts);
+        const linkText = hasSourceMessage
           ? `🔗 <${t.source_permalink}|元メッセージへ>`
           : "";
 
         const metaElems = [];
         if (dueText) metaElems.push({ type: "mrkdwn", text: dueText });
         if (linkText) metaElems.push({ type: "mrkdwn", text: linkText });
+        if (sourceHintText)
+          metaElems.push({ type: "mrkdwn", text: sourceHintText });
 
         blocks.push({
           type: "context",

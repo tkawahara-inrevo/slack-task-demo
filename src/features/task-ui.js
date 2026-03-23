@@ -1912,13 +1912,24 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
           ];
 
           // 蜈・Γ繝・そ繝ｼ繧ｸ繝ｪ繝ｳ繧ｯ・医≠繧後・・・
-          if (task.source_permalink) {
+          if (task.source_permalink && task.message_ts) {
             blocks.push({
               type: "section",
               text: {
                 type: "mrkdwn",
                 text: "<" + task.source_permalink + "|元メッセージへ>",
               },
+            });
+          } else if (!task.message_ts) {
+            blocks.push({
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text:
+                    "\u3053\u306e\u30bf\u30b9\u30af\u306f Home \u306e\u30bf\u30b9\u30af\u4f5c\u6210\u304b\u3089\u4f5c\u6210\u3055\u308c\u307e\u3057\u305f\u3002",
+                },
+              ],
             });
           }
 

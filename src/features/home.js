@@ -458,7 +458,9 @@ async function publishHome({ client, teamId, userId }) {
 
     for (const task of fallbackBroadcastTasks || []) {
       if (existingIds.has(String(task.id))) continue;
-      if (await isBroadcastAssignedToUser(task, teamId, userId)) {
+      const isAssigned = await isBroadcastAssignedToUser(task, teamId, userId);
+      const alreadyCompleted = await dbHasUserCompleted(teamId, task.id, userId);
+      if (isAssigned && !alreadyCompleted) {
         broadcastTasks.push(task);
         existingIds.add(String(task.id));
       }

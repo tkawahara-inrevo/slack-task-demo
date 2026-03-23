@@ -955,6 +955,19 @@ async function buildDetailModalView({
   }
 
   const isBroadcast = task.task_type === "broadcast";
+  const broadcastAssigneeFallback = async () => {
+    if (!isBroadcast || !viewerUserId) return false;
+    if (String(task.assignee_label || "").includes(`<@${viewerUserId}>`)) {
+      return true;
+    }
+    if (task.broadcast_group_id) {
+      try {
+        const members = await getUsergroupMembers(teamId, task.broadcast_group_id);
+        return (members || []).includes(viewerUserId);
+      } catch (_) {}
+    }
+    return false;
+  };
 
   // 操作可否は「権限（依頼者/対応者/対象者）」だけで決める
   // personal 完了権限（依頼者 or 対応者）
@@ -1150,7 +1163,9 @@ async function buildDetailModalView({
 
   // ===== broadcast 操作（誤操作防止版）=====
   if (isBroadcast) {
-    const isTarget = await dbIsUserTarget(teamId, task.id, viewerUserId);
+    const isTarget =
+      (await dbIsUserTarget(teamId, task.id, viewerUserId)) ||
+      (await broadcastAssigneeFallback());
     const already = await dbHasUserCompleted(teamId, task.id, viewerUserId);
 
     // ① 完了/未完了一覧（誰でも閲覧可）
@@ -1293,6 +1308,40 @@ async function getTeamIdViaAuthTest(client) {
   } catch (_) {
     return null;
   }
+}
+
+function addJpBusinessDaysYmd(baseYmd, businessDays) {
+  const total = Math.max(0, Number(businessDays || 0));
+  let cur = baseYmd;
+  for (let i = 0; i < total; i++) {
+    cur = nextJpBusinessDayFromYmd(cur);
+    if (!cur) return null;
+  }
+  return cur;
+}
+
+async function getTaskBySourceAndBroadcastKey(
+  teamId,
+  channelId,
+  messageTs,
+  title,
+  broadcastGroupId,
+) {
+  const res = await dbQuery(
+    `
+      SELECT *
+      FROM tasks
+      WHERE team_id=$1
+        AND channel_id=$2
+        AND message_ts=$3
+        AND COALESCE(title, '')=$4
+        AND COALESCE(broadcast_group_id, '')=$5
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `,
+    [teamId, channelId, messageTs, String(title || ""), String(broadcastGroupId || "")],
+  );
+  return res.rows[0] || null;
 }
 
 // ================================
@@ -1935,6 +1984,274 @@ const created = await dbCreateTask({
 
       await fail({
         error: `bc_contract_send_check_taskify failed: ${error?.message || "unknown error"}`,
+      });
+    }
+  },
+);
+
+// ================================
+// Custom Step (Workflow Builder): 受注報告から総務/経理タスクを作成
+// callback_id: cb8d79backoffice_group_taskify
+// ================================
+app.function(
+  "cb8d79backoffice_group_taskify",
+  async ({ client, inputs, complete, fail, logger }) => {
+    try {
+      logger?.info?.("cb8d79backoffice_group_taskify called", {
+        hasInputs: !!inputs,
+        inputKeys: Object.keys(inputs || {}),
+      });
+
+      let teamId = inputs?.team_id || inputs?.teamId || null;
+      let requesterUserId =
+        inputs?.requester_user_id ||
+        inputs?.requesterUserId ||
+        inputs?.user_id ||
+        inputs?.userId ||
+        null;
+      let channelId = inputs?.channel_id || inputs?.channelId || null;
+      const messageLink =
+        inputs?.message_link ||
+        inputs?.messageLink ||
+        inputs?.message_url ||
+        inputs?.messageUrl ||
+        inputs?.message_permalink ||
+        inputs?.messagePermalink ||
+        null;
+      let msgTs = inputs?.message_ts || inputs?.messageTs || null;
+      const title =
+        String(inputs?.task_title || inputs?.title || "").trim() || "バックオフィスタスク";
+      const descriptionInput = String(
+        inputs?.task_description || inputs?.description || "",
+      ).trim();
+      const assigneeGroupId =
+        String(
+          inputs?.assignee_group_id ||
+            inputs?.assigneeGroupId ||
+            inputs?.usergroup_id ||
+            inputs?.usergroupId ||
+            "",
+        ).trim() || null;
+      let assigneeGroupHandle =
+        String(
+          inputs?.assignee_group_handle ||
+            inputs?.assigneeGroupHandle ||
+            inputs?.usergroup_handle ||
+            inputs?.usergroupHandle ||
+            "",
+        ).trim() || null;
+      const dueBusinessDays = Number(
+        inputs?.due_business_days || inputs?.dueBusinessDays || 3,
+      );
+
+      if (!msgTs && messageLink) {
+        msgTs = extractTsFromPermalink(messageLink);
+      }
+      if (!looksLikeSlackChannelId(channelId) && messageLink) {
+        channelId = extractChannelIdFromPermalink(messageLink);
+      }
+      if (!teamId) {
+        teamId = await getTeamIdViaAuthTest(client);
+      }
+
+      const missing = [];
+      if (!requesterUserId || !looksLikeSlackUserId(requesterUserId)) {
+        missing.push("requester_user_id");
+      }
+      if (!teamId || !looksLikeSlackTeamId(teamId)) {
+        missing.push("team_id");
+      }
+      if (!channelId || !looksLikeSlackChannelId(channelId)) {
+        missing.push("channel_id");
+      }
+      if (!msgTs) {
+        missing.push("message_ts or message_link");
+      }
+      if (!assigneeGroupId) {
+        missing.push("assignee_group_id");
+      }
+      if (missing.length) {
+        logger?.warn?.("cb8d79backoffice_group_taskify missing required", {
+          missing,
+          requesterUserId,
+          channelId,
+          hasMessageLink: !!messageLink,
+          hasMessageTs: !!msgTs,
+          assigneeGroupId,
+        });
+        await complete({
+          outputs: {
+            task_id: null,
+            skipped: `missing:${missing.join(",")}`,
+          },
+        });
+        return;
+      }
+
+      if (!assigneeGroupHandle) {
+        try {
+          const idToHandle = await getSubteamIdMap(teamId);
+          assigneeGroupHandle = idToHandle.get(assigneeGroupId) || assigneeGroupId;
+        } catch (_) {
+          assigneeGroupHandle = assigneeGroupId;
+        }
+      }
+      assigneeGroupHandle = String(assigneeGroupHandle || assigneeGroupId).replace(
+        /^@/,
+        "",
+      );
+
+      const existing = await getTaskBySourceAndBroadcastKey(
+        teamId,
+        channelId,
+        msgTs,
+        title,
+        assigneeGroupId,
+      );
+      if (existing?.id) {
+        logger?.info?.("cb8d79backoffice_group_taskify already exists", {
+          existingTaskId: existing.id,
+          teamId,
+          channelId,
+          msgTs,
+          title,
+          assigneeGroupId,
+        });
+        await complete({
+          outputs: {
+            task_id: existing.id,
+            due_date: existing.due_date || null,
+            skipped: "already_exists",
+          },
+        });
+        return;
+      }
+
+      let rawText = "";
+      try {
+        rawText = await fetchMessageTextByTs(client, channelId, msgTs);
+      } catch (_) {}
+
+      const description = descriptionInput || String(rawText || "");
+
+      let permalink = String(messageLink || "");
+      try {
+        if (channelId && msgTs) {
+          const r = await client.chat.getPermalink({
+            channel: channelId,
+            message_ts: msgTs,
+          });
+          permalink = r?.permalink || permalink;
+        }
+      } catch (e) {
+        logger?.warn?.("getPermalink failed", e);
+      }
+
+      const postedYmd = jstYmdFromSlackTs(msgTs) || todayJstYmd();
+      const due = addJpBusinessDaysYmd(postedYmd, dueBusinessDays);
+      if (!due) {
+        logger?.warn?.("cb8d79backoffice_group_taskify invalid due", {
+          postedYmd,
+          dueBusinessDays,
+        });
+        await complete({
+          outputs: { task_id: null, skipped: "invalid_due" },
+        });
+        return;
+      }
+
+      const targetList = uniqIds(await getUsergroupMembers(teamId, assigneeGroupId));
+      if (!targetList.length) {
+        logger?.warn?.("cb8d79backoffice_group_taskify no targets", {
+          teamId,
+          assigneeGroupId,
+          assigneeGroupHandle,
+        });
+        await complete({
+          outputs: { task_id: null, skipped: "no_targets" },
+        });
+        return;
+      }
+
+      const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+      const taskId = randomUUID();
+      const assigneeLabel = await buildAssigneeLabelRaw(teamId, [], [
+        assigneeGroupHandle,
+      ]);
+
+      const created = await dbCreateTask({
+        id: taskId,
+        team_id: teamId,
+        channel_id: channelId,
+        message_ts: msgTs,
+        source_permalink: permalink || null,
+        title,
+        description,
+        requester_user_id: requesterUserId,
+        created_by_user_id: requesterUserId,
+        assignee_id: null,
+        assignee_label: assigneeLabel,
+        status: "in_progress",
+        due_date: due,
+        requester_dept: requesterDept,
+        assignee_dept: null,
+        task_type: "broadcast",
+        broadcast_group_handle: `@${assigneeGroupHandle}`,
+        broadcast_group_id: assigneeGroupId,
+        total_count: targetList.length,
+        completed_count: 0,
+        notified_at: null,
+      });
+
+      await dbInsertTaskTargets(teamId, taskId, targetList);
+      const total = await dbCountTargets(teamId, taskId);
+      await dbUpdateBroadcastCounts(teamId, taskId, 0, total);
+      created.total_count = total;
+      created.completed_count = 0;
+
+      try {
+        const toNotify = targetList.filter((u) => u && u !== requesterUserId);
+        for (const uid of toNotify) {
+          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+        }
+      } catch (e) {
+        logger?.error?.("workflow step notify error", e);
+      }
+
+      try {
+        const toRefresh = Array.from(
+          new Set([requesterUserId, ...targetList].filter(Boolean)),
+        );
+        publishHomeBurst(client, teamId, toRefresh, 200);
+      } catch (e) {
+        logger?.warn?.("home publish error", e);
+      }
+
+      await complete({
+        outputs: {
+          task_id: taskId,
+          due_date: due,
+        },
+      });
+      logger?.info?.("cb8d79backoffice_group_taskify created", {
+        taskId,
+        teamId,
+        channelId,
+        msgTs,
+        title,
+        assigneeGroupId,
+        assigneeGroupHandle,
+        targetCount: targetList.length,
+        due,
+      });
+    } catch (error) {
+      logger?.error?.("cb8d79backoffice_group_taskify failed", {
+        message: error?.message,
+        stack: error?.stack,
+      });
+
+      await fail({
+        error: `cb8d79backoffice_group_taskify failed: ${error?.message || "unknown error"}`,
       });
     }
   },

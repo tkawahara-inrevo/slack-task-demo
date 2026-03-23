@@ -31,6 +31,23 @@ function registerHomeFeature(deps) {
     todayJstYmd,
   } = deps;
 
+  async function isBroadcastAssignedToUser(task, teamId, userId) {
+    if (!task || task.task_type !== "broadcast" || !userId) return false;
+
+    if (String(task.assignee_label || "").includes(`<@${userId}>`)) {
+      return true;
+    }
+
+    if (task.broadcast_group_id) {
+      try {
+        const members = await getUsergroupMembers(teamId, task.broadcast_group_id);
+        if ((members || []).includes(userId)) return true;
+      } catch (_) {}
+    }
+
+    return false;
+  }
+
 async function publishHomeForUsers(client, teamId, userIds, intervalMs = 200) {
   const uniq = Array.from(new Set((userIds || []).filter(Boolean)));
   for (let i = 0; i < uniq.length; i++) {
@@ -429,6 +446,24 @@ async function publishHome({ client, teamId, userId }) {
           60,
         )
       : await dbListBroadcastTasksByStatuses(teamId, statuses, "all", 60);
+
+  if (rangeKey === "to_me") {
+    const fallbackBroadcastTasks = await dbListBroadcastTasksByStatuses(
+      teamId,
+      statuses,
+      "all",
+      120,
+    );
+    const existingIds = new Set((broadcastTasks || []).map((t) => String(t.id)));
+
+    for (const task of fallbackBroadcastTasks || []) {
+      if (existingIds.has(String(task.id))) continue;
+      if (await isBroadcastAssignedToUser(task, teamId, userId)) {
+        broadcastTasks.push(task);
+        existingIds.add(String(task.id));
+      }
+    }
+  }
 
   // ★範囲=すべて かつ 部署指定 のときだけ「@mkに関わる全て」に絞る（JS側）
   if (rangeKey === "all" && deptKey && deptKey !== "all") {

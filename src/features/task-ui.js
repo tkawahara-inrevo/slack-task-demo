@@ -1,4 +1,4 @@
-function registerTaskUiFeature(deps) {
+﻿function registerTaskUiFeature(deps) {
   const {
     app,
     __cacheGet,
@@ -26,12 +26,16 @@ function registerTaskUiFeature(deps) {
     ensureBotInChannel,
     fetchMessageTextByTs,
     formatDueDateOnly,
+    cutAfterSlash,
     getSubteamIdMap,
     getTeamIdFromBody,
+    getUserDisplayName,
     getUserIdFromBody,
+    getUsergroupMembers,
     canUserReceiveDm = async () => true,
     noMention,
     notifyTaskSimpleDM,
+    normalizeHandle,
     openDetailModal,
     parseActionMeta,
     prettifySlackText,
@@ -166,6 +170,128 @@ async function getBroadcastEditSelectionFromView(teamId, task, values) {
   };
 }
 
+async function buildCommentMentionCatalog(teamId, task) {
+  const userAliasToId = new Map();
+  const groupAliasToId = new Map();
+  const hintHandles = [];
+
+  const addHint = (handle) => {
+    const normalized = normalizeHandle(handle);
+    if (!normalized) return;
+    const at = `@${normalized}`;
+    if (!hintHandles.includes(at)) hintHandles.push(at);
+  };
+
+  const addUserAlias = (alias, userId) => {
+    const normalized = normalizeHandle(alias);
+    if (!normalized || !userId) return;
+    if (!userAliasToId.has(normalized)) userAliasToId.set(normalized, userId);
+    addHint(normalized);
+  };
+
+  const addGroupAlias = (alias, groupId) => {
+    const normalized = normalizeHandle(alias);
+    if (!normalized || !groupId) return;
+    if (!groupAliasToId.has(normalized)) groupAliasToId.set(normalized, groupId);
+    addHint(normalized);
+  };
+
+  const userIds = new Set();
+  if (task?.requester_user_id) userIds.add(task.requester_user_id);
+  if (task?.assignee_id) userIds.add(task.assignee_id);
+
+  if (task?.task_type === "broadcast" && task?.id) {
+    for (const uid of await dbListTargetUserIds(teamId, task.id)) {
+      if (uid) userIds.add(uid);
+    }
+  }
+
+  for (const userId of userIds) {
+    addUserAlias(userId, userId);
+
+    try {
+      const displayName = await getUserDisplayName(teamId, userId);
+      const shortName = cutAfterSlash(displayName);
+      addUserAlias(displayName, userId);
+      addUserAlias(shortName, userId);
+    } catch (_) {}
+  }
+
+  if (task?.broadcast_group_id) {
+    const groupId = task.broadcast_group_id;
+    const idToHandle = await getSubteamIdMap(teamId);
+    const groupHandle = idToHandle.get(groupId) || groupId;
+    addGroupAlias(groupHandle, groupId);
+  }
+
+  return {
+    userAliasToId,
+    groupAliasToId,
+    hintText: hintHandles.length
+      ? "本文中で " + hintHandles.join(" ") + " を使えます"
+      : "",
+  };
+}
+
+function replaceCommentPseudoMentions(text, catalog) {
+  const source = String(text || "");
+  if (!source) {
+    return { text: "", mentionedUserIds: [], mentionedGroupIds: [] };
+  }
+
+  const mentionedUserIds = new Set();
+  const mentionedGroupIds = new Set();
+
+  const resolvedText = source.replace(
+    /(^|[\s(])@([A-Za-z0-9._\-\/]+)/g,
+    (match, prefix, handle) => {
+      const normalized = normalizeHandle(handle);
+      if (!normalized) return match;
+
+      const groupId = catalog?.groupAliasToId?.get(normalized);
+      if (groupId) {
+        mentionedGroupIds.add(groupId);
+        return prefix + "<!subteam^" + groupId + "|@" + normalized + ">";
+      }
+
+      const userId = catalog?.userAliasToId?.get(normalized);
+      if (userId) {
+        mentionedUserIds.add(userId);
+        return prefix + "<@" + userId + ">";
+      }
+
+      return match;
+    },
+  );
+
+  return {
+    text: resolvedText,
+    mentionedUserIds: Array.from(mentionedUserIds),
+    mentionedGroupIds: Array.from(mentionedGroupIds),
+  };
+}
+
+async function listIncompleteTaskTargetUserIds(teamId, taskId) {
+  if (!teamId || !taskId) return [];
+
+  const targetsRes = await dbQuery(
+    `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2`,
+    [teamId, taskId],
+  );
+  const completionsRes = await dbQuery(
+    `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
+    [teamId, taskId],
+  );
+
+  const doneSet = new Set(
+    (completionsRes.rows || []).map((row) => row.user_id).filter(Boolean),
+  );
+
+  return (targetsRes.rows || [])
+    .map((row) => row.user_id)
+    .filter((userId) => userId && !doneSet.has(userId));
+}
+
 app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
   await ack();
   try {
@@ -174,7 +300,7 @@ app.shortcut("open_my_tasks", async ({ shortcut, ack, client, body }) => {
     const userId = shortcut?.user?.id || body?.user?.id || null;
     if (!teamId || !userId) return;
 
-    // 初期値：to_me / active
+    // 蛻晄悄蛟､・嗾o_me / active
     const view = await buildTaskListModalView({
       teamId,
       userId,
@@ -237,15 +363,15 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       return;
     }
 
-    // 元メッセージ由来だけ参加確認
+    // 蜈・Γ繝・そ繝ｼ繧ｸ逕ｱ譚･縺縺大盾蜉遒ｺ隱・
     if (!isStandalone && !isDmChannel && channelId) {
       const joinRes = await ensureBotInChannel({ client, channelId });
 
       if (!joinRes.ok) {
-        let errText = "このチャンネルに参加できなかったよ…！";
+        let errText = "このチャンネルに参加できませんでした。";
         if (joinRes.isPrivate) {
           errText =
-            "このプライベートチャンネルにはボットが未参加だよ。`/invite @Task Demo` のあとでもう一度試してね。";
+            "このプライベートチャンネルには bot が未参加です。`/invite @Task Demo` をお試しください。";
         }
 
         await ack({
@@ -260,7 +386,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
           client,
           channelId,
           actorUserId,
-          "🤖 このチャンネルに参加したよ！このままタスク作るね◎",
+          "このチャンネルに参加しました。このままタスクを作成できます。",
         );
       }
     }
@@ -275,7 +401,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       if (!description) {
         await ack({
           response_action: "errors",
-          errors: { content: "タスク内容を入力してください" },
+          errors: { content: "繧ｿ繧ｹ繧ｯ蜀・ｮｹ繧貞・蜉帙＠縺ｦ縺上□縺輔＞" },
         });
         return;
       }
@@ -295,7 +421,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
         await ack({
           response_action: "errors",
           errors: {
-            title: "元メッセージ取得に失敗したよ（もう一度お試しください）",
+            title: "メッセージ取得に失敗しました。もう一度お試しください。",
           },
         });
         return;
@@ -321,8 +447,8 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       await ack({
         response_action: "errors",
         errors: {
-          assignee_users: "対応者（個人 or グループ）を1つ以上選んでください",
-          assignee_groups: "対応者（個人 or グループ）を1つ以上選んでください",
+          assignee_users: "蟇ｾ蠢懆・ｼ亥倶ｺｺ or 繧ｰ繝ｫ繝ｼ繝暦ｼ峨ｒ1縺､莉･荳企∈繧薙〒縺上□縺輔＞",
+          assignee_groups: "蟇ｾ蠢懆・ｼ亥倶ｺｺ or 繧ｰ繝ｫ繝ｼ繝暦ｼ峨ｒ1縺､莉･荳企∈繧薙〒縺上□縺輔＞",
         },
       });
       return;
@@ -406,11 +532,11 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       if (taskType === "personal") {
         const to = personalAssigneeId;
         if (to && to !== actorUserId) {
-          await notifyTaskSimpleDM(to, created, "📝 タスクが届いたよ");
+          await notifyTaskSimpleDM(to, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
         }
       } else {
         for (const uid of targetList.filter((u) => u && u !== actorUserId)) {
-          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
         }
       }
     } catch (e) {
@@ -437,10 +563,10 @@ try {
     parentTs,
     actorUserId,
     text: isStandalone
-      ? "📝 タスクを作成したよ！作成者にはこのDM、対応者にはタスク通知を送ったよ。"
+      ? "タスクを作成しました。結果は DM に送ります。"
       : isDmChannel
-        ? "📝 このDMメッセージからタスクを作成したよ！"
-        : "📝 タスクを作成したよ！",
+        ? "DM からタスクを作成しました。"
+        : "タスクを作成しました。",
   });
 } catch (e) {
   console.error("create result notify failed:", e?.data || e);
@@ -459,7 +585,7 @@ try {
     channelId,
     parentTs,
     actorUserId,
-    text: `⚠️ タスク作成に失敗したよ: ${e?.message || "unknown error"}`,
+    text: `笞・・繧ｿ繧ｹ繧ｯ菴懈・縺ｫ螟ｱ謨励＠縺溘ｈ: ${e?.message || "unknown error"}`,
   });
 } catch (notifyErr) {
   console.error("create result notify failed:", notifyErr?.data || notifyErr);
@@ -503,14 +629,14 @@ try {
 //       notifyUserIds = uniqIds(notifyUserIds);
 //       if (!notifyUserIds.length) continue;
 
-//       const titleText = noMention(t.title || "（無題）");
+//       const titleText = noMention(t.title || "・育┌鬘鯉ｼ・);
 //       const dueText = formatDueDateOnly(t.due_date);
 
-//       // ✅ DM起点タスクはスレッド返信せず、対応者へアプリDM
+//       // 笨・DM襍ｷ轤ｹ繧ｿ繧ｹ繧ｯ縺ｯ繧ｹ繝ｬ繝・ラ霑比ｿ｡縺帙★縲∝ｯｾ蠢懆・∈繧｢繝励ΜDM
 //       if (String(t.channel_id || "").startsWith("D")) {
 //         for (const uid of notifyUserIds) {
 //           try {
-//             await notifyTaskSimpleDM(uid, t, `⏰ 期限切れだよ（期限: ${dueText}）`);
+//             await notifyTaskSimpleDM(uid, t, `竢ｰ 譛滄剞蛻・ｌ縺繧茨ｼ域悄髯・ ${dueText}・荏);
 //           } catch (dmErr) {
 //             console.error(
 //               "runOverdueThreadReminderJob dm fallback error:",
@@ -527,7 +653,7 @@ try {
 //         app.client,
 //         t.channel_id,
 //         t.message_ts,
-//         `⏰ 期限切れリマインド\n${mentionText}\n*${titleText}*\n期限: ${dueText}`,
+//         `竢ｰ 譛滄剞蛻・ｌ繝ｪ繝槭う繝ｳ繝噂n${mentionText}\n*${titleText}*\n譛滄剞: ${dueText}`,
 //       );
 //     } catch (e) {
 //       console.error("runOverdueThreadReminderJob error:", e?.data || e);
@@ -592,7 +718,7 @@ app.action("task_row_overflow", async ({ ack, body, action, client }) => {
     const origin = p.origin || "home";
     if (!teamId || !taskId) return;
 
-    // 一覧モーダル内なら、同一モーダルを詳細表示へ更新（既存 open_detail_in_list と同等）
+    // 荳隕ｧ繝｢繝ｼ繝繝ｫ蜀・↑繧峨∝酔荳繝｢繝ｼ繝繝ｫ繧定ｩｳ邏ｰ陦ｨ遉ｺ縺ｸ譖ｴ譁ｰ・域里蟄・open_detail_in_list 縺ｨ蜷檎ｭ会ｼ・
     if (origin === "list_modal" && body.view?.id) {
       const task = await dbGetTaskById(teamId, taskId);
       if (!task) return;
@@ -618,7 +744,7 @@ app.action("task_row_overflow", async ({ ack, body, action, client }) => {
       return;
     }
 
-    // Home/その他は通常の詳細モーダルを開く
+    // Home/縺昴・莉悶・騾壼ｸｸ縺ｮ隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧帝幕縺・
     await openDetailModal(client, {
       trigger_id: body.trigger_id,
       teamId,
@@ -663,7 +789,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
           await notifyTaskSimpleDM(
             fresh.requester_user_id,
             { ...fresh, status: "done" },
-            "🎉 全員が完了したよ",
+            "脂 蜈ｨ蜩｡縺悟ｮ御ｺ・＠縺溘ｈ",
           );
 
           try {
@@ -695,8 +821,8 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
           }
         }
       }
-      // ✅ Home view には views.update しない（固まり/反映中対策）
-      // ✅ detail_modal のときだけ更新する
+      // 笨・Home view 縺ｫ縺ｯ views.update 縺励↑縺・ｼ亥崋縺ｾ繧・蜿肴丐荳ｭ蟇ｾ遲厄ｼ・
+      // 笨・detail_modal 縺ｮ縺ｨ縺阪□縺第峩譁ｰ縺吶ｋ
       if (body?.view?.id && body.view.callback_id === "detail_modal") {
         const refreshed = await dbGetTaskById(teamId, taskId);
         if (refreshed) {
@@ -728,7 +854,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
         ),
       );
       for (const uid of toNotify) {
-        await notifyTaskSimpleDM(uid, updated, "✅ 完了になったよ");
+        await notifyTaskSimpleDM(uid, updated, "笨・螳御ｺ・↓縺ｪ縺｣縺溘ｈ");
       }
     } catch (_) {}
 
@@ -736,13 +862,13 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
       const doneBlocks = [
         {
           type: "header",
-          text: { type: "plain_text", text: "✅ 完了しました" },
+          text: { type: "plain_text", text: "笨・螳御ｺ・＠縺ｾ縺励◆" },
         },
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `*${noMention(updated.title)}*\nタスクを完了にしました✨`,
+            text: `*${noMention(updated.title)}*\n繧ｿ繧ｹ繧ｯ繧貞ｮ御ｺ・↓縺励∪縺励◆笨ｨ`,
           },
         },
       ];
@@ -796,7 +922,7 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
   const { teamId, taskId } = parseActionMeta(body, action);
   if (!teamId || !taskId) return;
 
-  // 既存の「反映中…」表示があるならここは残したままでOK
+  // 譌｢蟄倥・縲悟渚譏荳ｭ窶ｦ縲崎｡ｨ遉ｺ縺後≠繧九↑繧峨％縺薙・谿九＠縺溘∪縺ｾ縺ｧOK
 
   await handleCompleteTask({ client, body, teamId, taskId });
 });
@@ -812,36 +938,36 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
     const task = await dbGetTaskById(teamId, taskId);
     if (!task) return;
 
-    // ★⑤（変更）：broadcast は誰でも完了にできる（運用優先）
+    // 笘・側・亥､画峩・会ｼ喘roadcast 縺ｯ隱ｰ縺ｧ繧ょｮ御ｺ・↓縺ｧ縺阪ｋ・磯°逕ｨ蜆ｪ蜈茨ｼ・
     if (task.task_type !== "broadcast") return;
 
-    // すでに完了/取り下げなら何もしない
+    // 縺吶〒縺ｫ螳御ｺ・蜿悶ｊ荳九￡縺ｪ繧我ｽ輔ｂ縺励↑縺・
     if (task.status === "done" || task.status === "cancelled") {
       await safeEphemeral(
         client,
         task.channel_id || body.user.id,
         body.user.id,
-        "もう完了（または取り下げ）になってるよ！",
+        "このタスクはすでに完了または取消済みです。",
       );
       return;
     }
 
-    // waitingでなくても強制的にdoneへ
+    // waiting縺ｧ縺ｪ縺上※繧ょｼｷ蛻ｶ逧・↓done縺ｸ
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
 
-    // ★通知：完了（broadcast）は「依頼者だけ」
+    // 笘・夂衍・壼ｮ御ｺ・ｼ・roadcast・峨・縲御ｾ晞ｼ閠・□縺代・
     try {
       if (updated.requester_user_id) {
         await notifyTaskSimpleDM(
           updated.requester_user_id,
           updated,
-          "✅ 完了になったよ",
+          "笨・螳御ｺ・↓縺ｪ縺｣縺溘ｈ",
         );
       }
     } catch (_) {}
 
-    // ★Home再描画：依頼者/対象者にも反映
+    // 笘・ome蜀肴緒逕ｻ・壻ｾ晞ｼ閠・蟇ｾ雎｡閠・↓繧ょ渚譏
     try {
       const targets = await dbListTargetUserIds(teamId, taskId);
       const toRefresh = Array.from(
@@ -865,7 +991,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
       }
     }
 
-    // modal refresh（一覧モーダル廃止：常に detail_modal を更新）
+    // modal refresh・井ｸ隕ｧ繝｢繝ｼ繝繝ｫ蟒・ｭ｢・壼ｸｸ縺ｫ detail_modal 繧呈峩譁ｰ・・
     if (body.view?.id) {
       const refreshed = await dbGetTaskById(teamId, taskId);
       if (refreshed) {
@@ -891,13 +1017,13 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
         await client.chat.update({
           channel: body.channel.id,
           ts: body.message.ts,
-          text: "✅ 確認完了しました",
+          text: "笨・遒ｺ隱榊ｮ御ｺ・＠縺ｾ縺励◆",
           blocks: [
             {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `✅ *確認完了しました*\n「*${noMention(updated.title)}*」を完了にしました。`,
+                text: "進捗を更新しました。\n・" + noMention(updated.title) + " の状態を変更しました。",
               },
             },
           ],
@@ -922,10 +1048,10 @@ app.action("status_select", async ({ ack, body, action, client }) => {
     const task = await dbGetTaskById(teamId, taskId);
     if (!task) return;
 
-    // ✅ broadcast は手動変更しない（権限/導線的にも出さない前提なので黙ってreturn）
+    // 笨・broadcast 縺ｯ謇句虚螟画峩縺励↑縺・ｼ域ｨｩ髯・蟆守ｷ夂噪縺ｫ繧ょ・縺輔↑縺・燕謠舌↑縺ｮ縺ｧ鮟吶▲縺ｦreturn・・
     if (task.task_type === "broadcast") return;
 
-    // ✅ personal：依頼者 or 対応者のみ（権限なしは黙ってreturn）
+    // 笨・personal・壻ｾ晞ｼ閠・or 蟇ｾ蠢懆・・縺ｿ・域ｨｩ髯舌↑縺励・鮟吶▲縺ｦreturn・・
     const actor = body.user.id;
     if (actor !== task.requester_user_id && actor !== task.assignee_id) return;
 
@@ -963,7 +1089,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
       }),
     });
 
-    // スレッドカード：表示更新
+    // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝会ｼ夊｡ｨ遉ｺ譖ｴ譁ｰ
     if (updated.channel_id && updated.message_ts) {
       const blocks = await buildThreadCardBlocks({ teamId, task: updated });
       if (!updated.channel_id?.startsWith("D")) {
@@ -975,7 +1101,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
         });
       }
     }
-    // ★通知：完了（personalのみ）
+    // 笘・夂衍・壼ｮ御ｺ・ｼ・ersonal縺ｮ縺ｿ・・
     try {
       if (nextStatus === "done") {
         const toNotify = Array.from(
@@ -986,7 +1112,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
         for (const uid of toNotify) {
           await postDM(
             uid,
-            `✅ 完了になったよ\n・タイトル：${noMention(updated.title)}\n・期限：${formatDueDateOnly(updated.due_date)}\n・ステータス：${statusLabel(updated.status)}`,
+            "進捗を更新しました\n・タイトル: " + noMention(updated.title) + "\n・期限: " + formatDueDateOnly(updated.due_date) + "\n・ステータス: " + statusLabel(updated.status),
           );
         }
       }
@@ -1010,11 +1136,11 @@ app.action("status_select", async ({ ack, body, action, client }) => {
   }
 });
 
-// progress modal: MVP placeholder (実装は後で拡張しやすいように入口だけ)
+// progress modal: MVP placeholder (螳溯｣・・蠕後〒諡｡蠑ｵ縺励ｄ縺吶＞繧医≧縺ｫ蜈･蜿｣縺縺・
 app.action("open_progress_modal", async ({ ack, body, action, client }) => {
   await ack();
 
-  // value から取れないケースがあるので、modal meta も参照する（堅牢化）
+  // value 縺九ｉ蜿悶ｌ縺ｪ縺・こ繝ｼ繧ｹ縺後≠繧九・縺ｧ縲［odal meta 繧ょ盾辣ｧ縺吶ｋ・亥・欧蛹厄ｼ・
   const p = safeJsonParse(action?.value || "{}") || {};
   const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
   const teamId = p.teamId || meta.teamId || body.team?.id || body.team_id;
@@ -1026,7 +1152,7 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
     if (!task) return;
     if (task.task_type !== "broadcast") return;
 
-    // 仕様変更：誰でも閲覧可（依頼者・対応者・対象者・ウォッチャー・その他）
+    // 莉墓ｧ伜､画峩・夊ｪｰ縺ｧ繧る夢隕ｧ蜿ｯ・井ｾ晞ｼ閠・・蟇ｾ蠢懆・・蟇ｾ雎｡閠・・繧ｦ繧ｩ繝・メ繝｣繝ｼ繝ｻ縺昴・莉厄ｼ・
     // targets / completions
     const targetsRes = await dbQuery(
       `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
@@ -1052,10 +1178,10 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
       const MAX = 50;
       const head = arr
         .slice(0, MAX)
-        .map((u) => `• <@${u}>`)
+        .map((u) => `窶｢ <@${u}>`)
         .join("\n");
-      const more = arr.length > MAX ? `\n…ほか ${arr.length - MAX} 名` : "";
-      return `${head}${more}`;
+      const more = arr.length > MAX ? "\n...ほか " + (arr.length - MAX) + " 人" : "";
+      return head + more;
     };
 
     const meta2 = { teamId, taskId, origin: "progress" };
@@ -1064,32 +1190,32 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
       type: "modal",
       callback_id: "progress_modal",
       private_metadata: JSON.stringify(meta2),
-      title: { type: "plain_text", text: "完了状況" },
+      title: { type: "plain_text", text: "進捗一覧" },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
         {
           type: "header",
-          text: { type: "plain_text", text: "📊 完了/未完了一覧" },
+          text: { type: "plain_text", text: "完了 / 未完了" },
         },
         { type: "divider" },
 
         {
           type: "section",
-          text: { type: "mrkdwn", text: `✅ *完了済み（${done.length}）*` },
+          text: { type: "mrkdwn", text: "*完了* " + done.length + "件" },
         },
         {
           type: "section",
-          text: { type: "mrkdwn", text: listText(done, "（まだいません）") },
+          text: { type: "mrkdwn", text: listText(done, "まだありません") },
         },
         { type: "divider" },
 
         {
           type: "section",
-          text: { type: "mrkdwn", text: `⏳ *未完了（${todo.length}）*` },
+          text: { type: "mrkdwn", text: "*未完了* " + todo.length + "件" },
         },
         {
           type: "section",
-          text: { type: "mrkdwn", text: listText(todo, "（全員完了！🎉）") },
+          text: { type: "mrkdwn", text: listText(todo, "まだありません") },
         },
       ],
     };
@@ -1121,9 +1247,9 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
     type: "modal",
     callback_id: "edit_task_modal_loading",
     title: { type: "plain_text", text: "タスク編集" },
-    close: { type: "plain_text", text: "キャンセル" },
+    close: { type: "plain_text", text: "繧ｭ繝｣繝ｳ繧ｻ繝ｫ" },
     blocks: [
-      { type: "section", text: { type: "mrkdwn", text: "読み込み中…⏳" } },
+      { type: "section", text: { type: "mrkdwn", text: "読み込み中..." } },
     ],
   };
 
@@ -1163,7 +1289,7 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
         type: "input",
         optional: true,
         block_id: "assignee_users",
-        label: { type: "plain_text", text: "対応者（個人・複数OK）" },
+        label: { type: "plain_text", text: "担当者（複数可）" },
         element: {
           type: "multi_users_select",
           action_id: "assignee_users_select",
@@ -1178,14 +1304,14 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
         block_id: "assignee_groups",
         label: {
           type: "plain_text",
-          text: "対応者（グループ：@ALL-xxx / @mk-all など）",
+          text: "担当グループ（例: @mk）",
         },
         element: {
           type: "multi_external_select",
           action_id: "assignee_groups_select",
           placeholder: {
             type: "plain_text",
-            text: "ユーザーグループを検索",
+            text: "繝ｦ繝ｼ繧ｶ繝ｼ繧ｰ繝ｫ繝ｼ繝励ｒ讀懃ｴ｢",
           },
           min_query_length: 0,
           ...(initialGroupOptions.length
@@ -1197,7 +1323,7 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
       blocks.push({
         type: "input",
         block_id: "assignee",
-        label: { type: "plain_text", text: "対応者" },
+        label: { type: "plain_text", text: "担当者" },
         element: {
           type: "users_select",
           action_id: "assignee_user",
@@ -1210,7 +1336,7 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
       type: "input",
       block_id: "due",
       optional: true,
-      label: { type: "plain_text", text: "期限" },
+      label: { type: "plain_text", text: "譛滄剞" },
       element: {
         type: "datepicker",
         action_id: "due_date",
@@ -1222,7 +1348,7 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
     blocks.push({
       type: "input",
       block_id: "content",
-      label: { type: "plain_text", text: "タスク内容" },
+      label: { type: "plain_text", text: "繧ｿ繧ｹ繧ｯ蜀・ｮｹ" },
       element: {
         type: "plain_text_input",
         action_id: "content_text",
@@ -1237,7 +1363,7 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
       private_metadata: JSON.stringify({ teamId, taskId }),
       title: { type: "plain_text", text: "タスク編集" },
       submit: { type: "plain_text", text: "保存" },
-      close: { type: "plain_text", text: "キャンセル" },
+      close: { type: "plain_text", text: "繧ｭ繝｣繝ｳ繧ｻ繝ｫ" },
       blocks,
     };
 
@@ -1264,7 +1390,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
   if (!nextContent) {
     await ack({
       response_action: "errors",
-      errors: { content: "タスク内容を入力してください" },
+      errors: { content: "繧ｿ繧ｹ繧ｯ蜀・ｮｹ繧貞・蜉帙＠縺ｦ縺上□縺輔＞" },
     });
     return;
   }
@@ -1274,10 +1400,10 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     view: {
       type: "modal",
       callback_id: "edit_task_modal_saving",
-      title: { type: "plain_text", text: "保存中." },
+      title: { type: "plain_text", text: "菫晏ｭ倅ｸｭ." },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
-        { type: "section", text: { type: "mrkdwn", text: "更新しています。" } },
+        { type: "section", text: { type: "mrkdwn", text: "保存しています..." } },
       ],
     },
   });
@@ -1322,14 +1448,14 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
             view: {
               type: "modal",
               callback_id: "edit_task_modal_error",
-              title: { type: "plain_text", text: "保存できませんでした" },
+              title: { type: "plain_text", text: "菫晏ｭ倥〒縺阪∪縺帙ｓ縺ｧ縺励◆" },
               close: { type: "plain_text", text: "閉じる" },
               blocks: [
                 {
                   type: "section",
                   text: {
                     type: "mrkdwn",
-                    text: "対応者（個人 or グループ）を1つ以上選んでください。",
+                    text: "担当者またはグループを1つ以上選択してください。",
                   },
                 },
               ],
@@ -1415,7 +1541,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
 
     try {
       for (const uid of usersToNotify.filter((u) => u && u !== actorUserId)) {
-        await notifyTaskSimpleDM(uid, updated, "👋 あなたが対応者に追加されたよ");
+        await notifyTaskSimpleDM(uid, updated, "窓 縺ゅ↑縺溘′蟇ｾ蠢懆・↓霑ｽ蜉縺輔ｌ縺溘ｈ");
       }
     } catch (e) {
       console.error("assignee notify error:", e?.data || e);
@@ -1446,7 +1572,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
         view: {
           type: "modal",
           callback_id: "edit_task_modal_done",
-          title: { type: "plain_text", text: "保存しました✅" },
+          title: { type: "plain_text", text: "保存しました" },
           close: { type: "plain_text", text: "閉じる" },
           blocks: [
             {
@@ -1466,7 +1592,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
         view: {
           type: "modal",
           callback_id: "edit_task_modal_error",
-          title: { type: "plain_text", text: "保存できませんでした" },
+          title: { type: "plain_text", text: "菫晏ｭ倥〒縺阪∪縺帙ｓ縺ｧ縺励◆" },
           close: { type: "plain_text", text: "閉じる" },
           blocks: [
             {
@@ -1491,12 +1617,16 @@ app.action("open_comment_modal", async ({ ack, body, action, client }) => {
   await ack();
 
   const meta = safeJsonParse(action.value || "{}") || {};
+  const task = await dbGetTaskById(meta.teamId, meta.taskId);
+  const mentionCatalog = task
+    ? await buildCommentMentionCatalog(meta.teamId, task)
+    : { hintText: "" };
 
-  // 親（詳細モーダル）を更新するために保持（閉じた時に古いモーダルへ戻らないようにする）
+  // 隕ｪ・郁ｩｳ邏ｰ繝｢繝ｼ繝繝ｫ・峨ｒ譖ｴ譁ｰ縺吶ｋ縺溘ａ縺ｫ菫晄戟・磯哩縺倥◆譎ゅ↓蜿､縺・Δ繝ｼ繝繝ｫ縺ｸ謌ｻ繧峨↑縺・ｈ縺・↓縺吶ｋ・・
   meta.parent_view_id = body.view?.id || null;
   meta.parent_view_type = body.view?.type || null;
 
-  // 詳細モーダル上からは push が正解（モーダル二重 open は不可）
+  // 隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ荳翫°繧峨・ push 縺梧ｭ｣隗｣・医Δ繝ｼ繝繝ｫ莠碁㍾ open 縺ｯ荳榊庄・・
   await client.views.push({
     trigger_id: body.trigger_id,
     view: {
@@ -1504,31 +1634,67 @@ app.action("open_comment_modal", async ({ ack, body, action, client }) => {
       callback_id: "comment_modal",
       private_metadata: JSON.stringify(meta),
       title: { type: "plain_text", text: "コメント" },
-      submit: { type: "plain_text", text: "投稿" },
-      close: { type: "plain_text", text: "キャンセル" },
+      submit: { type: "plain_text", text: "謚慕ｨｿ" },
+      close: { type: "plain_text", text: "繧ｭ繝｣繝ｳ繧ｻ繝ｫ" },
       blocks: [
+        ...(mentionCatalog.hintText
+          ? [
+              {
+                type: "context",
+                elements: [
+                  {
+                    type: "mrkdwn",
+                    text: mentionCatalog.hintText,
+                  },
+                ],
+              },
+            ]
+          : []),
         {
           type: "input",
           block_id: "mention",
           optional: true,
-          label: { type: "plain_text", text: "メンション（任意・複数可）" },
+          label: { type: "plain_text", text: "メンション（任意）" },
           element: {
             type: "multi_users_select",
             action_id: "users",
-            placeholder: { type: "plain_text", text: "メンションする人を選択" },
+            placeholder: { type: "plain_text", text: "ユーザーを選択" },
           },
         },
 
         {
           type: "input",
           block_id: "comment",
-          label: { type: "plain_text", text: "コメント内容" },
+          label: { type: "plain_text", text: "繧ｳ繝｡繝ｳ繝亥・螳ｹ" },
           element: {
             type: "plain_text_input",
             action_id: "body",
             multiline: true,
           },
         },
+        ...(task?.task_type === "broadcast"
+          ? [
+              {
+                type: "input",
+                block_id: "notify_scope",
+                optional: true,
+                label: { type: "plain_text", text: "通知先" },
+                element: {
+                  type: "checkboxes",
+                  action_id: "notify_scope_check",
+                  options: [
+                    {
+                      text: {
+                        type: "plain_text",
+                        text: "譛ｪ螳御ｺ・・・縺ｿ縺ｫ騾夂衍",
+                      },
+                      value: "incomplete_only",
+                    },
+                  ],
+                },
+              },
+            ]
+          : []),
       ],
     },
   });
@@ -1539,20 +1705,30 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
 
   const base = view.state.values.comment?.body?.value?.trim() || "";
   const mentionUserIds = view.state.values.mention?.users?.selected_users || [];
+  const task = await dbGetTaskById(meta.teamId, meta.taskId);
+  const mentionCatalog = task
+    ? await buildCommentMentionCatalog(meta.teamId, task)
+    : null;
+  const resolvedComment = replaceCommentPseudoMentions(base, mentionCatalog);
+  const notifyIncompleteOnly = Boolean(
+    view.state.values.notify_scope?.notify_scope_check?.selected_options?.some(
+      (option) => option?.value === "incomplete_only",
+    ),
+  );
 
-  // <@U1> <@U2> 形式で先頭に付与
+  // <@U1> <@U2> ???????????????
   const mentionPrefix = mentionUserIds.map((u) => `<@${u}>`).join(" ");
-  const comment = `${mentionPrefix}${mentionPrefix ? " " : ""}${base}`;
+  const comment = `${mentionPrefix}${mentionPrefix ? " " : ""}${resolvedComment.text}`.trim();
 
   if (!comment) {
     await ack({
       response_action: "errors",
-      errors: { comment: "コメントを入力してください" },
+      errors: { comment: "繧ｳ繝｡繝ｳ繝医ｒ蜈･蜉帙＠縺ｦ縺上□縺輔＞" },
     });
     return;
   }
 
-  // ① まず3秒以内に軽い画面へ差し替え（確実にUIを落とさない）
+  // 竭 縺ｾ縺・遘剃ｻ･蜀・↓霆ｽ縺・判髱｢縺ｸ蟾ｮ縺玲崛縺茨ｼ育｢ｺ螳溘↓UI繧定誠縺ｨ縺輔↑縺・ｼ・
   await ack({
     response_action: "update",
     view: {
@@ -1561,48 +1737,80 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
       title: { type: "plain_text", text: "コメント" },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
-        { type: "section", text: { type: "mrkdwn", text: "💾 保存中…" } },
+        { type: "section", text: { type: "mrkdwn", text: "沈 菫晏ｭ倅ｸｭ窶ｦ" } },
       ],
     },
   });
 
   try {
-    // ② 重い処理は ack 後にやる
+    // 竭｡ 驥阪＞蜃ｦ逅・・ ack 蠕後↓繧・ｋ
     await dbInsertTaskComment(meta.teamId, meta.taskId, body.user.id, comment);
 
-    const task = await dbGetTaskById(meta.teamId, meta.taskId);
     if (!task) return;
 
-    // ②-b コメント通知（bot DM）
-    // - メンションがあればメンション先へ
-    // - メンションが無ければ personal は (依頼者/対応者) へ（自分は除外）
-    // - broadcast は依頼者へ（自分は除外）
+    // 竭｡-b 繧ｳ繝｡繝ｳ繝磯夂衍・・ot DM・・
+    // - 繝｡繝ｳ繧ｷ繝ｧ繝ｳ縺後≠繧後・繝｡繝ｳ繧ｷ繝ｧ繝ｳ蜈医∈
+    // - 繝｡繝ｳ繧ｷ繝ｧ繝ｳ縺檎┌縺代ｌ縺ｰ personal 縺ｯ (萓晞ｼ閠・蟇ｾ蠢懆・ 縺ｸ・郁・蛻・・髯､螟厄ｼ・
+    // - broadcast 縺ｯ萓晞ｼ閠・∈・郁・蛻・・髯､螟厄ｼ・
     try {
       const actor = body.user.id;
 
       const recipients = new Set();
 
-      // メンション先（複数）
+      // 繝｡繝ｳ繧ｷ繝ｧ繝ｳ蜈茨ｼ郁､・焚・・
       for (const uid of mentionUserIds || []) {
         if (uid && uid !== actor) recipients.add(uid);
       }
+      for (const uid of resolvedComment.mentionedUserIds || []) {
+        if (uid && uid !== actor) recipients.add(uid);
+      }
+      for (const gid of resolvedComment.mentionedGroupIds || []) {
+        try {
+          const groupUsers = await getUsergroupMembers(task.team_id, gid);
+          for (const uid of groupUsers || []) {
+            if (uid && uid !== actor) recipients.add(uid);
+          }
+        } catch (_) {}
 
-      // メンションが無い場合のフォールバック
+      }
+      if (task.task_type === "broadcast" && notifyIncompleteOnly) {
+        const incompleteSet = new Set(
+          (await listIncompleteTaskTargetUserIds(task.team_id, task.id)).filter(
+            (uid) => uid && uid !== actor,
+          ),
+        );
+
+        if (recipients.size === 0) {
+          for (const uid of incompleteSet) recipients.add(uid);
+        } else {
+          for (const uid of Array.from(recipients)) {
+            if (!incompleteSet.has(uid)) recipients.delete(uid);
+          }
+        }
+      }
+
+      // 繝｡繝ｳ繧ｷ繝ｧ繝ｳ縺檎┌縺・ｴ蜷医・繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ
       if (recipients.size === 0) {
         const requester = task.requester_user_id;
         const assignee = task.assignee_id;
 
-        if (requester && requester !== actor) recipients.add(requester);
+        if (
+          !(task.task_type === "broadcast" && notifyIncompleteOnly) &&
+          requester &&
+          requester !== actor
+        ) {
+          recipients.add(requester);
+        }
 
         if (task.task_type !== "broadcast" && assignee && assignee !== actor) {
           recipients.add(assignee);
         }
       }
 
-      // DM本文：どのタスクか分かるように blocks +「詳細を開く」ボタンを付ける
-      const title = task.title || "（タスク）";
+      // DM譛ｬ譁・ｼ壹←縺ｮ繧ｿ繧ｹ繧ｯ縺句・縺九ｋ繧医≧縺ｫ blocks +縲瑚ｩｳ邏ｰ繧帝幕縺上阪・繧ｿ繝ｳ繧剃ｻ倥￠繧・
+      const title = task.title || "タスク";
       const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
-      // ★追加：コメント内の <@UXXXX> を @表示名 に変換
+      // 笘・ｿｽ蜉・壹さ繝｡繝ｳ繝亥・縺ｮ <@UXXXX> 繧・@陦ｨ遉ｺ蜷・縺ｫ螟画鋤
       const prettyComment = await prettifyUserMentions(
         comment || "",
         task.team_id,
@@ -1623,7 +1831,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: "💬 *タスクにコメントがありました*",
+                text: "町 *繧ｿ繧ｹ繧ｯ縺ｫ繧ｳ繝｡繝ｳ繝医′縺ゅｊ縺ｾ縺励◆*",
               },
             },
             {
@@ -1634,23 +1842,23 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `*コメント*\n>${noMention(String(prettyComment).slice(0, 800))}`,
+                text: `*繧ｳ繝｡繝ｳ繝・\n>${noMention(String(prettyComment).slice(0, 800))}`,
               },
             },
           ];
 
-          // 元メッセージリンク（あれば）
+          // 蜈・Γ繝・そ繝ｼ繧ｸ繝ｪ繝ｳ繧ｯ・医≠繧後・・・
           if (task.source_permalink) {
             blocks.push({
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `🔗 <${task.source_permalink}|元メッセージへ>`,
+                text: `迫 <${task.source_permalink}|蜈・Γ繝・そ繝ｼ繧ｸ縺ｸ>`,
               },
             });
           }
 
-          // 詳細を開くボタン
+          // 隧ｳ邏ｰ繧帝幕縺上・繧ｿ繝ｳ
           blocks.push({
             type: "actions",
             elements: [
@@ -1665,7 +1873,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
 
           await app.client.chat.postMessage({
             channel,
-            text: `💬 コメント: ${noMention(title)}`,
+            text: `町 繧ｳ繝｡繝ｳ繝・ ${noMention(title)}`,
             blocks,
           });
         } catch (_) {}
@@ -1674,8 +1882,8 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
       console.error("comment DM notify error:", e?.data || e);
     }
 
-    // ③ 親（詳細モーダル）を更新して、コメントモーダルは「投稿完了」表示にする
-    // こうすると、閉じた時に古い詳細モーダルが出てくる問題を防げる
+    // 竭｢ 隕ｪ・郁ｩｳ邏ｰ繝｢繝ｼ繝繝ｫ・峨ｒ譖ｴ譁ｰ縺励※縲√さ繝｡繝ｳ繝医Δ繝ｼ繝繝ｫ縺ｯ縲梧兜遞ｿ螳御ｺ・崎｡ｨ遉ｺ縺ｫ縺吶ｋ
+    // 縺薙≧縺吶ｋ縺ｨ縲・哩縺倥◆譎ゅ↓蜿､縺・ｩｳ邏ｰ繝｢繝ｼ繝繝ｫ縺悟・縺ｦ縺上ｋ蝠城｡後ｒ髦ｲ縺偵ｋ
     if (meta.parent_view_id && meta.parent_view_type === "modal") {
       await client.views.update({
         view_id: meta.parent_view_id,
@@ -1688,7 +1896,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
       });
     }
 
-    // コメントモーダル側は完了メッセージ（自動で詳細に戻さない）
+    // 繧ｳ繝｡繝ｳ繝医Δ繝ｼ繝繝ｫ蛛ｴ縺ｯ螳御ｺ・Γ繝・そ繝ｼ繧ｸ・郁・蜍輔〒隧ｳ邏ｰ縺ｫ謌ｻ縺輔↑縺・ｼ・
     await client.views.update({
       view_id: view.id,
       view: {
@@ -1701,7 +1909,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "✅ 投稿しました！「閉じる」で詳細画面に戻れます。",
+              text: "投稿しました。必要なら詳細画面から続けて確認できます。",
             },
           },
         ],
@@ -1709,7 +1917,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
     });
   } catch (e) {
     console.error("comment_modal post-save error:", e?.data || e);
-    // 失敗表示だけ更新（任意）
+    // 螟ｱ謨苓｡ｨ遉ｺ縺縺第峩譁ｰ・井ｻｻ諢擾ｼ・
     try {
       await client.views.update({
         view_id: view.id,
@@ -1721,7 +1929,7 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
           blocks: [
             {
               type: "section",
-              text: { type: "mrkdwn", text: "🥺 保存に失敗しました…" },
+              text: { type: "mrkdwn", text: "･ｺ 菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆窶ｦ" },
             },
           ],
         },
@@ -1747,8 +1955,8 @@ app.action("open_edit_due_modal", async ({ ack, body, action, client }) => {
     const task = await dbGetTaskById(teamId, taskId);
     if (!task) return;
 
-    // ✅ 仕様：broadcast は「だれでも」期限変更OK
-    // personal は依頼者/対応者のみ（必要なら personal も true にしてOK）
+    // 笨・莉墓ｧ假ｼ喘roadcast 縺ｯ縲後□繧後〒繧ゅ肴悄髯仙､画峩OK
+    // personal 縺ｯ萓晞ｼ閠・蟇ｾ蠢懆・・縺ｿ・亥ｿ・ｦ√↑繧・personal 繧・true 縺ｫ縺励※OK・・
     const isBroadcast = task.task_type === "broadcast";
     const canChangeDue = isBroadcast
       ? true
@@ -1759,7 +1967,7 @@ app.action("open_edit_due_modal", async ({ ack, body, action, client }) => {
 
     const initDue = slackDateYmd(task.due_date);
 
-    // ★親（詳細モーダル）の view_id を保持しておく（後で再描画する）
+    // 笘・ｦｪ・郁ｩｳ邏ｰ繝｢繝ｼ繝繝ｫ・峨・ view_id 繧剃ｿ晄戟縺励※縺翫￥・亥ｾ後〒蜀肴緒逕ｻ縺吶ｋ・・
     const parentViewId = body.view?.id || null;
 
     const blocks = [
@@ -1767,14 +1975,14 @@ app.action("open_edit_due_modal", async ({ ack, body, action, client }) => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*${noMention(task.title || "（タスク）")}*`,
+          text: "*" + noMention(task.title || "タスク") + "*",
         },
       },
       {
         type: "input",
         block_id: "due",
         optional: true,
-        label: { type: "plain_text", text: "期限" },
+        label: { type: "plain_text", text: "譛滄剞" },
         element: {
           type: "datepicker",
           action_id: "due_date",
@@ -1787,7 +1995,7 @@ app.action("open_edit_due_modal", async ({ ack, body, action, client }) => {
         elements: [
           {
             type: "mrkdwn",
-            text: "※ 期限だけ変更します（本文は変更しません）",
+            text: "期限を空にすると未設定になります。",
           },
         ],
       },
@@ -1802,13 +2010,13 @@ app.action("open_edit_due_modal", async ({ ack, body, action, client }) => {
         origin,
         parentViewId,
       }),
-      title: { type: "plain_text", text: "期限変更" },
+      title: { type: "plain_text", text: "譛滄剞螟画峩" },
       submit: { type: "plain_text", text: "保存" },
       close: { type: "plain_text", text: "閉じる" },
       blocks,
     };
 
-    // 詳細モーダル上のボタンからなので push が自然（trigger_id必須）
+    // 隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ荳翫・繝懊ち繝ｳ縺九ｉ縺ｪ縺ｮ縺ｧ push 縺瑚・辟ｶ・・rigger_id蠢・茨ｼ・
     await client.views.push({ trigger_id: body.trigger_id, view });
   } catch (e) {
     console.error("open_edit_due_modal error:", e?.data || e);
@@ -1824,16 +2032,16 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
 
   const nextDue = view.state.values.due?.due_date?.selected_date || null;
 
-  // ① まず軽い画面へ差し替え（hash_conflict回避）
+  // 竭 縺ｾ縺夊ｻｽ縺・判髱｢縺ｸ蟾ｮ縺玲崛縺茨ｼ・ash_conflict蝗樣∩・・
   await ack({
     response_action: "update",
     view: {
       type: "modal",
       callback_id: "edit_due_modal_saving",
-      title: { type: "plain_text", text: "保存中." },
+      title: { type: "plain_text", text: "菫晏ｭ倅ｸｭ." },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
-        { type: "section", text: { type: "mrkdwn", text: "更新しています。" } },
+        { type: "section", text: { type: "mrkdwn", text: "保存しています..." } },
       ],
     },
   });
@@ -1844,7 +2052,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
 
     const isBroadcast = before.task_type === "broadcast";
 
-    // ✅ 仕様：broadcast は「だれでも」期限変更OK
+    // 笨・莉墓ｧ假ｼ喘roadcast 縺ｯ縲後□繧後〒繧ゅ肴悄髯仙､画峩OK
     const canChangeDue = isBroadcast
       ? true
       : actorUserId === before.requester_user_id ||
@@ -1852,7 +2060,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
 
     if (!canChangeDue) return;
 
-    // ✅ due_date だけ更新（本文は触らない）
+    // 笨・due_date 縺縺第峩譁ｰ・域悽譁・・隗ｦ繧峨↑縺・ｼ・
     const updated = await dbUpdateTaskContent(teamId, taskId, {
       due_date: nextDue,
       description: null,
@@ -1861,7 +2069,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
     });
     if (!updated) return;
 
-    // スレッドカード更新（証跡）
+    // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝画峩譁ｰ・郁ｨｼ霍｡・・
     if (updated.channel_id && updated.message_ts) {
       try {
         const cardBlocks = await buildThreadCardBlocks({
@@ -1880,7 +2088,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
       }
     }
 
-    // Home 再描画（広めに）
+    // Home 蜀肴緒逕ｻ・亥ｺ・ａ縺ｫ・・
     try {
       const users = [
         updated.requester_user_id,
@@ -1890,11 +2098,11 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
       await publishHomeForUsers(client, teamId, users, 250);
     } catch (_) {}
 
-    // ===== ★ここが本題：背面の詳細モーダルを最新で再描画 =====
-    // Slack が提供する previous_view_id が取れるならそれが最優先
+    // ===== 笘・％縺薙′譛ｬ鬘鯉ｼ夊レ髱｢縺ｮ隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧呈怙譁ｰ縺ｧ蜀肴緒逕ｻ =====
+    // Slack 縺梧署萓帙☆繧・previous_view_id 縺悟叙繧後ｋ縺ｪ繧峨◎繧後′譛蜆ｪ蜈・
     const prevViewId = body.view?.previous_view_id || null;
 
-    // 念のため open 側で持たせた parentViewId もフォールバックに使う
+    // 蠢ｵ縺ｮ縺溘ａ open 蛛ｴ縺ｧ謖√◆縺帙◆ parentViewId 繧ゅヵ繧ｩ繝ｼ繝ｫ繝舌ャ繧ｯ縺ｫ菴ｿ縺・
     const parentViewId = meta.parentViewId || null;
 
     const targetDetailViewId = prevViewId || parentViewId;
@@ -1916,23 +2124,23 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
         console.error("refresh detail modal error:", e?.data || e);
       }
     }
-    // ===== ★ここまで =====
+    // ===== 笘・％縺薙∪縺ｧ =====
 
-    // ② 現在のモーダルは「保存しました✅」最小UI
+    // 竭｡ 迴ｾ蝨ｨ縺ｮ繝｢繝ｼ繝繝ｫ縺ｯ縲御ｿ晏ｭ倥＠縺ｾ縺励◆笨・肴怙蟆酋I
     try {
       await client.views.update({
         view_id: body.view.id,
         view: {
           type: "modal",
           callback_id: "edit_due_modal_done",
-          title: { type: "plain_text", text: "保存しました✅" },
+          title: { type: "plain_text", text: "保存しました" },
           close: { type: "plain_text", text: "閉じる" },
           blocks: [
             {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `期限を更新しました 🗓️\n*${formatDueDateOnly(nextDue)}*`,
+                text: "期限を更新しました\n*" + formatDueDateOnly(nextDue) + "*",
               },
             },
           ],
@@ -1942,14 +2150,14 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
   } catch (e) {
     console.error("edit_due_modal error:", e?.data || e);
 
-    // 失敗画面（最小UI）
+    // 螟ｱ謨礼判髱｢・域怙蟆酋I・・
     try {
       await client.views.update({
         view_id: body.view.id,
         view: {
           type: "modal",
           callback_id: "edit_due_modal_error",
-          title: { type: "plain_text", text: "保存できませんでした" },
+          title: { type: "plain_text", text: "菫晏ｭ倥〒縺阪∪縺帙ｓ縺ｧ縺励◆" },
           close: { type: "plain_text", text: "閉じる" },
           blocks: [
             {
@@ -1977,18 +2185,18 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
     const task = await dbGetTaskById(teamId, taskId);
     if (!task) return;
 
-    // ✅ 権限なしは黙ってreturn（UIでも出さない前提）
+    // 笨・讓ｩ髯舌↑縺励・鮟吶▲縺ｦreturn・・I縺ｧ繧ょ・縺輔↑縺・燕謠撰ｼ・
     const ok =
       task.task_type === "broadcast"
         ? task.requester_user_id === actor
         : task.requester_user_id === actor || task.assignee_id === actor;
     if (!ok) return;
 
-    // 未完了へ戻す（open でもいいけど、UI的には in_progress が自然）
+    // 譛ｪ螳御ｺ・∈謌ｻ縺呻ｼ・pen 縺ｧ繧ゅ＞縺・￠縺ｩ縲ゞI逧・↓縺ｯ in_progress 縺瑚・辟ｶ・・
     const updated = await dbUpdateStatus(teamId, taskId, "in_progress");
     if (!updated) return;
 
-    // 詳細モーダルを再描画（今開いてるモーダル）
+    // 隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧貞・謠冗判・井ｻ企幕縺・※繧九Δ繝ｼ繝繝ｫ・・
     if (body.view?.id) {
       await client.views.update({
         view_id: body.view.id,
@@ -2002,7 +2210,7 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
       });
     }
 
-    // スレッドカード：表示更新
+    // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝会ｼ夊｡ｨ遉ｺ譖ｴ譁ｰ
     if (updated.channel_id && updated.message_ts) {
       const blocks = await buildThreadCardBlocks({ teamId, task: updated });
       if (!updated.channel_id?.startsWith("D")) {
@@ -2015,7 +2223,7 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
       }
     }
 
-    // Home 再描画（関係者）
+    // Home 蜀肴緒逕ｻ・磯未菫り・ｼ・
     try {
       const relatedIds = Array.from(
         new Set(

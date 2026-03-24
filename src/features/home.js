@@ -460,7 +460,12 @@ async function publishHome({ client, teamId, userId }) {
       if (existingIds.has(String(task.id))) continue;
       const isAssigned = await isBroadcastAssignedToUser(task, teamId, userId);
       const alreadyCompleted = await dbHasUserCompleted(teamId, task.id, userId);
-      if (isAssigned && !alreadyCompleted) {
+      const shouldInclude =
+        isAssigned &&
+        (st.scopeKey === "done"
+          ? task.status === "done" || alreadyCompleted
+          : !alreadyCompleted);
+      if (shouldInclude) {
         broadcastTasks.push(task);
         existingIds.add(String(task.id));
       }
@@ -558,7 +563,11 @@ async function publishHome({ client, teamId, userId }) {
         if (!isAssigned) continue;
 
         const hasCompleted = await dbHasUserCompleted(teamId, task.id, userId);
-        if (hasCompleted) continue;
+        if (st.scopeKey === "done") {
+          if (task.status !== "done" && !hasCompleted) continue;
+        } else if (hasCompleted) {
+          continue;
+        }
 
         hiddenAssignedTasks.push(task);
         continue;

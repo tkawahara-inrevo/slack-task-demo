@@ -417,12 +417,13 @@ async function publishHome({ client, teamId, userId }) {
   // personal は範囲で絞る（to_me / requested_by_me / all）
   const personalScope =
     rangeKey === "to_me" || rangeKey === "requested_by_me" ? rangeKey : "all";
+  const listFetchLimit = rangeKey === "requested_by_me" ? 200 : 60;
   let personalTasks = await dbListPersonalTasksByStatusesWithScope(
     teamId,
     statuses,
     personalScope,
     userId,
-    60,
+    listFetchLimit,
   );
 
   // ✅ 方針：依頼者=対応者 の personal タスクは「範囲=すべて」では出さない
@@ -443,16 +444,21 @@ async function publishHome({ client, teamId, userId }) {
           statuses,
           rangeKey,
           userId,
-          60,
+          listFetchLimit,
         )
-      : await dbListBroadcastTasksByStatuses(teamId, statuses, "all", 60);
+      : await dbListBroadcastTasksByStatuses(
+          teamId,
+          statuses,
+          "all",
+          listFetchLimit,
+        );
 
   if (rangeKey === "to_me") {
     const fallbackBroadcastTasks = await dbListBroadcastTasksByStatuses(
       teamId,
       statuses,
       "all",
-      120,
+      Math.max(120, listFetchLimit * 2),
     );
     const existingIds = new Set((broadcastTasks || []).map((t) => String(t.id)));
 
@@ -511,6 +517,16 @@ async function publishHome({ client, teamId, userId }) {
   // public は参加していなくても表示する / private は表示しない
   // DM（Dxxxx）は基本表示しないが、「範囲=自分あて(to_me)」かつ personal で自分担当のものだけ表示する
   {
+    const requesterVisibleIds = new Set();
+    if (rangeKey === "requested_by_me") {
+      for (const task of tasks || []) {
+        if (!task) continue;
+        if (String(task.requester_user_id || "") === String(userId)) {
+          requesterVisibleIds.add(String(task.id));
+        }
+      }
+    }
+
     const uniqChannels = Array.from(
       new Set((tasks || []).map((t) => t.channel_id).filter(Boolean)),
     );
@@ -537,6 +553,13 @@ async function publishHome({ client, teamId, userId }) {
       // ✅ DM起点タスクは Home の範囲絞り込み結果をそのまま通す
       //    （ここでは追加の可視性制限をかけない）
       if (ch.startsWith("D")) {
+        return true;
+      }
+
+      if (
+        rangeKey === "requested_by_me" &&
+        requesterVisibleIds.has(String(t.id))
+      ) {
         return true;
       }
 
@@ -1199,6 +1222,22 @@ async function publishHome({ client, teamId, userId }) {
         },
       ],
     });
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "open_task_list_modal",
+          text: { type: "plain_text", text: "一覧を開く" },
+          value: JSON.stringify({
+            teamId,
+            userId,
+            rangeKey,
+            scopeKey: st.scopeKey || "active",
+          }),
+        },
+      ],
+    });
   }
 
   // ✅ 最後に“必ず残る”余白を付与
@@ -1447,8 +1486,8 @@ app.action("open_task_list_modal", async ({ ack, body, client }) => {
     const view = await buildTaskListModalView({
       teamId,
       userId,
-      rangeKey: "to_me",
-      scopeKey: "active",
+      rangeKey: payload.rangeKey || "to_me",
+      scopeKey: payload.scopeKey || "active",
     });
     await client.views.open({ trigger_id, view });
   } catch (e) {

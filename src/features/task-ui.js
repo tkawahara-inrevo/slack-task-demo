@@ -1593,7 +1593,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     }
 
     try {
-      await publishHomeForUsers(client, teamId, usersToRefresh, 250);
+      publishHomeBurst(client, teamId, usersToRefresh, 250);
     } catch (_) {}
 
     try {
@@ -2170,7 +2170,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
         updated.assignee_id,
         actorUserId,
       ].filter(Boolean);
-      await publishHomeForUsers(client, teamId, users, 250);
+      publishHomeBurst(client, teamId, users, 250);
     } catch (_) {}
 
     // ===== 笘・％縺薙′譛ｬ鬘鯉ｼ夊レ髱｢縺ｮ隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧呈怙譁ｰ縺ｧ蜀肴緒逕ｻ =====

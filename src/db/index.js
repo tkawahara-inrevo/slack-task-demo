@@ -423,15 +423,16 @@ async function dbUpdateTaskEditableFields(teamId, taskId, patch) {
   const q = `
     UPDATE tasks
     SET
-      assignee_id = $3,
-      assignee_label = $4,
-      assignee_dept = $5,
-      due_date = $6,
-      description = $7,
-      broadcast_group_handle = $8,
-      broadcast_group_id = $9,
-      total_count = $10,
-      completed_count = $11,
+      task_type = COALESCE($3, task_type),
+      assignee_id = $4,
+      assignee_label = $5,
+      assignee_dept = $6,
+      due_date = $7,
+      description = $8,
+      broadcast_group_handle = $9,
+      broadcast_group_id = $10,
+      total_count = $11,
+      completed_count = $12,
       updated_at = now()
     WHERE team_id=$1 AND id=$2
     RETURNING *;
@@ -439,6 +440,7 @@ async function dbUpdateTaskEditableFields(teamId, taskId, patch) {
   const res = await dbQuery(q, [
     teamId,
     taskId,
+    patch?.task_type ?? null,
     patch?.assignee_id ?? null,
     patch?.assignee_label ?? null,
     patch?.assignee_dept ?? null,

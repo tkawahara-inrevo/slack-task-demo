@@ -1389,57 +1389,47 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
 
     const initDue = slackDateYmd(task.due_date);
     const blocks = [];
+    const { initialUserIds, initialGroupOptions } = isBroadcast
+      ? await buildBroadcastInitialOptions(teamId, task)
+      : {
+          initialUserIds: task.assignee_id ? [task.assignee_id] : [],
+          initialGroupOptions: [],
+        };
 
-    if (isBroadcast) {
-      const { initialUserIds, initialGroupOptions } =
-        await buildBroadcastInitialOptions(teamId, task);
+    blocks.push({
+      type: "input",
+      optional: true,
+      block_id: "assignee_users",
+      label: { type: "plain_text", text: "担当者（複数可）" },
+      element: {
+        type: "multi_users_select",
+        action_id: "assignee_users_select",
+        placeholder: { type: "plain_text", text: "ユーザーを選択" },
+        ...(initialUserIds.length ? { initial_users: initialUserIds } : {}),
+      },
+    });
 
-      blocks.push({
-        type: "input",
-        optional: true,
-        block_id: "assignee_users",
-        label: { type: "plain_text", text: "担当者（複数可）" },
-        element: {
-          type: "multi_users_select",
-          action_id: "assignee_users_select",
-          placeholder: { type: "plain_text", text: "ユーザーを選択" },
-          ...(initialUserIds.length ? { initial_users: initialUserIds } : {}),
-        },
-      });
-
-      blocks.push({
-        type: "input",
-        optional: true,
-        block_id: "assignee_groups",
-        label: {
+    blocks.push({
+      type: "input",
+      optional: true,
+      block_id: "assignee_groups",
+      label: {
+        type: "plain_text",
+        text: "担当グループ（例: @mk）",
+      },
+      element: {
+        type: "multi_external_select",
+        action_id: "assignee_groups_select",
+        placeholder: {
           type: "plain_text",
-          text: "担当グループ（例: @mk）",
+          text: "グループを検索",
         },
-        element: {
-          type: "multi_external_select",
-          action_id: "assignee_groups_select",
-          placeholder: {
-            type: "plain_text",
-            text: "グループを検索",
-          },
-          min_query_length: 0,
-          ...(initialGroupOptions.length
-            ? { initial_options: initialGroupOptions }
-            : {}),
-        },
-      });
-    } else {
-      blocks.push({
-        type: "input",
-        block_id: "assignee",
-        label: { type: "plain_text", text: "担当者" },
-        element: {
-          type: "users_select",
-          action_id: "assignee_user",
-          initial_user: task.assignee_id,
-        },
-      });
-    }
+        min_query_length: 0,
+        ...(initialGroupOptions.length
+          ? { initial_options: initialGroupOptions }
+          : {}),
+      },
+    });
 
     blocks.push({
       type: "input",
@@ -1533,54 +1523,63 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     let usersToRefresh = [before.requester_user_id, actorUserId];
     let usersToNotify = [];
 
-       if (isBroadcast) {
-      const beforeTargets = uniqIds(await dbListTargetUserIds(teamId, taskId));
+    const beforeTargets =
+      before.task_type === "broadcast"
+        ? uniqIds(await dbListTargetUserIds(teamId, taskId))
+        : uniqIds([before.assignee_id].filter(Boolean));
 
-      const selection = await getBroadcastEditSelectionFromView(
-        teamId,
-        before,
-        view.state.values,
-      );
+    const selection = await getBroadcastEditSelectionFromView(
+      teamId,
+      before,
+      view.state.values,
+    );
 
-      const {
-        changed,
-        selectedUsers,
-        selectedGroupIds,
-        groupHandles,
-        nextTargets,
-      } = selection;
+    const {
+      changed,
+      selectedUsers,
+      selectedGroupIds,
+      groupHandles,
+      nextTargets,
+    } = selection;
 
-      if (!nextTargets.length) {
-        try {
-          await client.views.update({
-            view_id: body.view.id,
-            view: {
-              type: "modal",
-              callback_id: "edit_task_modal_error",
-              title: { type: "plain_text", text: "編集できませんでした" },
-              close: { type: "plain_text", text: "閉じる" },
-              blocks: [
-                {
-                  type: "section",
-                  text: {
-                    type: "mrkdwn",
-                    text: "担当者またはグループを1つ以上選択してください。",
-                  },
+    if (!nextTargets.length) {
+      try {
+        await client.views.update({
+          view_id: body.view.id,
+          view: {
+            type: "modal",
+            callback_id: "edit_task_modal_error",
+            title: { type: "plain_text", text: "編集できませんでした" },
+            close: { type: "plain_text", text: "閉じる" },
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "担当者またはグループを1つ以上選択してください。",
                 },
-              ],
-            },
-          });
-        } catch (_) {}
-        return;
-      }
+              },
+            ],
+          },
+        });
+      } catch (_) {}
+      return;
+    }
 
-      if (changed) {
+    const nextTaskType =
+      nextTargets.length === 1 && selectedGroupIds.length === 0
+        ? "personal"
+        : "broadcast";
+
+    if (nextTaskType === "broadcast") {
+      if (changed || before.task_type !== "broadcast") {
         await dbReplaceTaskTargets(teamId, taskId, nextTargets);
       }
 
-      const completedCount = changed
-        ? await dbCountCompletions(teamId, taskId)
-        : before.completed_count ?? 0;
+      const completedCount =
+        changed || before.task_type !== "broadcast"
+          ? await dbCountCompletions(teamId, taskId)
+          : before.completed_count ?? 0;
 
       const assigneeLabelRaw = await buildAssigneeLabelRaw(
         teamId,
@@ -1589,6 +1588,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
       );
 
       updated = await dbUpdateTaskEditableFields(teamId, taskId, {
+        task_type: "broadcast",
         assignee_id: null,
         assignee_label: assigneeLabelRaw || null,
         assignee_dept: null,
@@ -1603,27 +1603,19 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
         total_count: nextTargets.length,
         completed_count: completedCount,
       });
-
-      usersToNotify = changed
-        ? nextTargets.filter((u) => !beforeTargets.includes(u))
-        : [];
-
-      usersToRefresh = uniqIds([
-        ...usersToRefresh,
-        ...beforeTargets,
-        ...nextTargets,
-      ]);
     } else {
-      const nextAssignee =
-        view.state.values.assignee?.assignee_user?.selected_user || null;
-      if (!nextAssignee) return;
-
+      const nextAssignee = nextTargets[0];
       let patchAssigneeDept = null;
       try {
         patchAssigneeDept = await resolveDeptForUser(teamId, nextAssignee);
       } catch (_) {}
 
+      if (before.task_type === "broadcast") {
+        await dbReplaceTaskTargets(teamId, taskId, []);
+      }
+
       updated = await dbUpdateTaskEditableFields(teamId, taskId, {
+        task_type: "personal",
         assignee_id: nextAssignee,
         assignee_label: null,
         assignee_dept: patchAssigneeDept,
@@ -1634,17 +1626,14 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
         total_count: null,
         completed_count: 0,
       });
-
-      if (nextAssignee && nextAssignee !== before.assignee_id) {
-        usersToNotify = [nextAssignee];
-      }
-
-      usersToRefresh = uniqIds([
-        ...usersToRefresh,
-        before.assignee_id,
-        nextAssignee,
-      ]);
     }
+
+    usersToNotify = nextTargets.filter((u) => !beforeTargets.includes(u));
+    usersToRefresh = uniqIds([
+      ...usersToRefresh,
+      ...beforeTargets,
+      ...nextTargets,
+    ]);
 
     if (!updated) return;
 

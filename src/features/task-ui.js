@@ -393,6 +393,14 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       return;
     }
 
+    console.info("task_modal submit start", {
+      teamId,
+      actorUserId,
+      sourceMode,
+      channelId,
+      parentTs,
+    });
+
     // 蜈・Γ繝・そ繝ｼ繧ｸ逕ｱ譚･縺縺大盾蜉遒ｺ隱・
     if (!isStandalone && !isDmChannel && channelId) {
       const joinRes = await ensureBotInChannel({ client, channelId });
@@ -489,7 +497,21 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       view.state.values.requester?.requester_user_select?.selected_user ||
       actorUserId;
 
-    await ack();
+    await ack({
+      response_action: "update",
+      view: {
+        type: "modal",
+        callback_id: "task_modal_saving",
+        title: { type: "plain_text", text: "タスク作成" },
+        close: { type: "plain_text", text: "閉じる" },
+        blocks: [
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: "タスクを作成しています..." },
+          },
+        ],
+      },
+    });
 
     const { users: groupUsers, groupHandles } = await expandTargetsFromGroups(
       teamId,
@@ -500,6 +522,16 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       ...selectedUsers,
       ...Array.from(groupUsers || []),
     ]);
+
+    console.info("task_modal resolved targets", {
+      teamId,
+      actorUserId,
+      selectedUsersCount: selectedUsers.length,
+      selectedGroupIdsCount: selectedGroupIds.length,
+      targetCount: targetList.length,
+      requesterUserId,
+      due,
+    });
 
     const isPersonal = targetList.length === 1 && selectedGroupIds.length === 0;
     const taskType = isPersonal ? "personal" : "broadcast";
@@ -607,8 +639,43 @@ try {
       requesterUserId,
       ...targetList,
     ]);
+
+    console.info("task_modal submit success", {
+      teamId,
+      actorUserId,
+      taskId,
+      taskType,
+      targetCount: targetList.length,
+    });
+
+    await client.views.update({
+      view_id: view.id,
+      view: {
+        type: "modal",
+        callback_id: "task_modal_done",
+        title: { type: "plain_text", text: "タスク作成" },
+        close: { type: "plain_text", text: "閉じる" },
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "タスクを作成しました。必要なら Home や詳細画面で続けて確認できます。",
+            },
+          },
+        ],
+      },
+    });
   } catch (e) {
     console.error("view submit error:", e?.data || e);
+    console.error("task_modal submit failed", {
+      teamId,
+      actorUserId,
+      sourceMode,
+      channelId,
+      parentTs,
+      error: e?.message || String(e),
+    });
 try {
   await notifyCreateResultOnSource({
     client,
@@ -620,6 +687,26 @@ try {
 } catch (notifyErr) {
   console.error("create result notify failed:", notifyErr?.data || notifyErr);
 }
+    try {
+      await client.views.update({
+        view_id: view.id,
+        view: {
+          type: "modal",
+          callback_id: "task_modal_error",
+          title: { type: "plain_text", text: "タスク作成" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `タスク作成に失敗しました。\n${e?.message || "unknown error"}`,
+              },
+            },
+          ],
+        },
+      });
+    } catch (_) {}
   }
 });
 
@@ -1795,6 +1882,34 @@ app.view("comment_modal", async ({ ack, body, view, client }) => {
     await dbInsertTaskComment(meta.teamId, meta.taskId, body.user.id, comment);
 
     if (!task) return;
+
+    try {
+      if (
+        task.channel_id &&
+        task.message_ts &&
+        !String(task.channel_id).startsWith("D")
+      ) {
+        await app.client.chat.postMessage({
+          channel: task.channel_id,
+          thread_ts: task.message_ts,
+          text: comment,
+          mrkdwn: true,
+          unfurl_links: false,
+          unfurl_media: false,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*<@${body.user.id}> がコメントしました*\n${comment}`,
+              },
+            },
+          ],
+        });
+      }
+    } catch (e) {
+      console.error("comment thread post error:", e?.data || e);
+    }
 
     // 竭｡-b 繧ｳ繝｡繝ｳ繝磯夂衍・・ot DM・・
     // - 繝｡繝ｳ繧ｷ繝ｧ繝ｳ縺後≠繧後・繝｡繝ｳ繧ｷ繝ｧ繝ｳ蜈医∈

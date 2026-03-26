@@ -493,6 +493,28 @@ function registerSettingsFeature(deps) {
     };
   }
 
+  async function openUserSettingsModal({ client, triggerId, teamId, userId }) {
+    if (!client || !triggerId || !teamId || !userId) return;
+    const settings = await getUserSettings(teamId, userId);
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildUserSettingsModalView(teamId, userId, settings),
+    });
+  }
+
+  async function openTeamSettingsModal({ client, triggerId, teamId, userId }) {
+    if (!client || !triggerId || !teamId || !userId) return false;
+    const allowed = await canManageTeamSettings(client, userId);
+    if (!allowed) return false;
+
+    const settings = await getTeamSettings(teamId);
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildTeamSettingsModalView(teamId, userId, settings),
+    });
+    return true;
+  }
+
   app.command(USER_SETTINGS_COMMAND, async ({ ack, body, client }) => {
     await ack();
 
@@ -654,11 +676,14 @@ function registerSettingsFeature(deps) {
   });
 
   return {
+    canManageTeamSettings,
     getTeamSettings,
     getUserSettings,
     isOverdueChannelNotificationEnabled,
     isReactionTaskifyEnabled,
     isUserDmEnabled,
+    openTeamSettingsModal,
+    openUserSettingsModal,
     resolveHomeDefaults,
   };
 }

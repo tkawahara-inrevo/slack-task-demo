@@ -1,7 +1,8 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const { randomUUID } = require("crypto");
 const cron = require("node-cron");
 const { app } = require("./src/slack/app");
+const { registerAdminFeature } = require("./src/features/admin");
 const { registerHomeFeature } = require("./src/features/home");
 const { registerSettingsFeature } = require("./src/features/settings");
 const { registerNotificationJobs } = require("./src/features/notifications");
@@ -125,12 +126,31 @@ const settingsFeature = registerSettingsFeature({
   setHomeState,
 });
 const {
+  canManageTeamSettings,
+  getTeamSettings,
   isOverdueChannelNotificationEnabled,
   isReactionTaskifyEnabled,
   isUserDmEnabled,
+  openTeamSettingsModal,
   resolveHomeDefaults,
 } = settingsFeature;
 resolveHomeDefaultsForHome = resolveHomeDefaults;
+
+registerAdminFeature({
+  app,
+  canManageTeamSettings,
+  dbHasUserCompleted,
+  dbQuery,
+  formatDueDateOnly,
+  getTeamIdFromBody,
+  getTeamSettings,
+  getUserDisplayName,
+  getUserIdFromBody,
+  openDetailModal: (...args) => openDetailModal(...args),
+  openTeamSettingsModal,
+  safeJsonParse,
+  statusLabel,
+});
 
 registerNotificationJobs({
   app,
@@ -252,12 +272,12 @@ async function publishHomeBurst(client, teamId, userIds, intervalMs = 200) {
 const BACKOFFICE_TASK_THREAD_CHANNEL =
   process.env.BACKOFFICE_TASK_THREAD_CHANNEL || "C0AP0PEL5ME";
 
-// Home再描画を少しずつ投げる（スマホの反映遅延対策）
+// Home蜀肴緒逕ｻ繧貞ｰ代＠縺壹▽謚輔￡繧具ｼ医せ繝槭・縺ｮ蜿肴丐驕・ｻｶ蟇ｾ遲厄ｼ・
 
 
 
 // ================================
-// <!subteam^ID> を @handle に直すための処理＆キャッシュ
+// <!subteam^ID> 繧・@handle 縺ｫ逶ｴ縺吶◆繧√・蜃ｦ逅・ｼ・く繝｣繝・す繝･
 // ================================
 const subteamCache = new Map(); // teamId -> { at, idToHandle: Map }
 const SUBTEAM_CACHE_MS = 60 * 60 * 1000;
@@ -308,7 +328,7 @@ async function prettifySlackText(text, teamId) {
 }
 
 // ================================
-// メンション回避用の変換処理
+// 繝｡繝ｳ繧ｷ繝ｧ繝ｳ蝗樣∩逕ｨ縺ｮ螟画鋤蜃ｦ逅・
 // ================================
 async function prettifyUserMentions(text, teamId) {
   if (!text) return "";
@@ -450,7 +470,7 @@ async function fetchDeptGroups(teamId) {
       .filter((g) => g?.id && g?.handle)
       .map((g) => ({ id: g.id, handle: String(g.handle).replace(/^@/, "") }));
 
-  // 部署代表を決める（A）：DEPT_ALL_HANDLES があればそれだけ、なければ "*-all" を全部
+  // 驛ｨ鄂ｲ莉｣陦ｨ繧呈ｱｺ繧√ｋ・・・会ｼ咼EPT_ALL_HANDLES 縺後≠繧後・縺昴ｌ縺縺代√↑縺代ｌ縺ｰ "*-all" 繧貞・驛ｨ
   const deptHandles = (
     DEPT_ALL_HANDLES.length
       ? DEPT_ALL_HANDLES
@@ -479,7 +499,7 @@ async function fetchDeptGroups(teamId) {
     }
   }
 
-  // 優先順位（複数所属のときの決定）
+  // 蜆ｪ蜈磯・ｽ搾ｼ郁､・焚謇螻槭・縺ｨ縺阪・豎ｺ螳夲ｼ・
   const deptKeys = Array.from(membersByDeptKey.keys());
   let orderedKeys = deptKeys.slice().sort((a, b) => a.localeCompare(b));
   if (DEPT_PRIORITY.length) {
@@ -490,7 +510,7 @@ async function fetchDeptGroups(teamId) {
       if (!orderedKeys.includes(k)) orderedKeys.push(k);
   }
 
-  // insertion order を priority 順に整える
+  // insertion order 繧・priority 鬆・↓謨ｴ縺医ｋ
   const rebuilt = new Map();
   for (const k of orderedKeys) rebuilt.set(k, membersByDeptKey.get(k));
   const finalMembers = new Map();
@@ -563,7 +583,7 @@ async function safeEphemeral(client, channelId, userId, text) {
 }
 
 /**
- * ボットを参加させるための関数
+ * 繝懊ャ繝医ｒ蜿ょ刈縺輔○繧九◆繧√・髢｢謨ｰ
  */
 async function ensureBotInChannel({ client, channelId }) {
   const id = String(channelId || "");
@@ -689,13 +709,6 @@ function buildTaskCreateModalBlocks({
 }) {
   const blocks = [
     {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*ステータス*：${statusLabel(task.status)}`,
-      },
-    },
-    {
       type: "input",
       optional: true,
       block_id: "title",
@@ -713,19 +726,19 @@ function buildTaskCreateModalBlocks({
     {
       type: "input",
       block_id: "requester",
-      label: { type: "plain_text", text: "依頼主" },
+      label: { type: "plain_text", text: "依頼者" },
       element: {
         type: "users_select",
         action_id: "requester_user_select",
         initial_user: actorUserId,
-        placeholder: { type: "plain_text", text: "依頼主を選択" },
+        placeholder: { type: "plain_text", text: "依頼者を選択" },
       },
     },
     {
       type: "input",
       optional: true,
       block_id: "assignee_users",
-      label: { type: "plain_text", text: "対応者（個人・複数OK）" },
+      label: { type: "plain_text", text: "担当者（複数可）（任意）" },
       element: {
         type: "multi_users_select",
         action_id: "assignee_users_select",
@@ -739,14 +752,14 @@ function buildTaskCreateModalBlocks({
       block_id: "assignee_groups",
       label: {
         type: "plain_text",
-        text: "対応者（グループ：@ALL-xxx / @mk-all など）",
+        text: "担当グループ（例: @mk）（任意）",
       },
       element: {
         type: "multi_external_select",
         action_id: "assignee_groups_select",
         placeholder: {
           type: "plain_text",
-          text: "ユーザーグループを検索",
+          text: "グループを検索",
         },
         min_query_length: 0,
         ...(initialGroupOptions.length
@@ -792,7 +805,7 @@ function buildTaskCreateModalBlocks({
       elements: [
         {
           type: "mrkdwn",
-          text: "💡 対象が1人なら「個人タスク」、2人以上またはグループ指定なら「全体/複数タスク」になります。",
+          text: "メッセージ起点の作成では、元メッセージ本文がタスク内容になります。",
         },
       ],
     });
@@ -828,7 +841,7 @@ async function openTaskCreateModal(
         sourceMode: includeContentInput ? "standalone" : "message",
       }),
       title: { type: "plain_text", text: "タスク作成" },
-      submit: { type: "plain_text", text: "決定" },
+      submit: { type: "plain_text", text: "作成" },
       close: { type: "plain_text", text: "キャンセル" },
       blocks: buildTaskCreateModalBlocks({
         actorUserId,
@@ -861,7 +874,7 @@ async function upsertThreadCard(
   client,
   { teamId, channelId, parentTs, threadTs = null, blocks },
 ) {
-  // parentTs は「カードの一意キー」（= 1メッセージ1回の判定に使う）
+  // parentTs 縺ｯ縲後き繝ｼ繝峨・荳諢上く繝ｼ縲搾ｼ・ 1繝｡繝・そ繝ｼ繧ｸ1蝗槭・蛻､螳壹↓菴ｿ縺・ｼ・
   const existing = await dbGetThreadCard(teamId, channelId, parentTs);
   if (existing?.card_ts) {
     try {
@@ -882,7 +895,7 @@ async function upsertThreadCard(
   const res = await client.chat.postMessage({
     channel: channelId,
     thread_ts: postThreadTs,
-    text: "タスク表示",
+    text: "繧ｿ繧ｹ繧ｯ陦ｨ遉ｺ",
     blocks,
   });
 
@@ -891,9 +904,9 @@ async function upsertThreadCard(
   return cardTs;
 }
 
-// ★要望②：スレッドから完了ボタン削除（詳細からのみ）
+// 笘・ｦ∵悍竭｡・壹せ繝ｬ繝・ラ縺九ｉ螳御ｺ・・繧ｿ繝ｳ蜑企勁・郁ｩｳ邏ｰ縺九ｉ縺ｮ縺ｿ・・
 async function buildThreadCardBlocks({ teamId, task }) {
-  // スレッド側の「詳細」は閲覧専用（操作は Home から）
+  // 繧ｹ繝ｬ繝・ラ蛛ｴ縺ｮ縲瑚ｩｳ邏ｰ縲阪・髢ｲ隕ｧ蟆ら畑・域桃菴懊・ Home 縺九ｉ・・
   const payload = JSON.stringify({
     teamId,
     taskId: task.id,
@@ -901,7 +914,7 @@ async function buildThreadCardBlocks({ teamId, task }) {
   });
 
   const common = [
-    { type: "header", text: { type: "plain_text", text: "⏱ タスク" } },
+    { type: "header", text: { type: "plain_text", text: "竢ｱ 繧ｿ繧ｹ繧ｯ" } },
     {
       type: "section",
       text: { type: "mrkdwn", text: `*${noMention(task.title)}*` },
@@ -909,18 +922,18 @@ async function buildThreadCardBlocks({ teamId, task }) {
     { type: "divider" },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` },
+      text: { type: "mrkdwn", text: `*萓晞ｼ閠・・・@${task.requester_user_id}>` },
     },
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*期限*：${formatDueDateOnly(task.due_date)}`,
+        text: `*譛滄剞*・・{formatDueDateOnly(task.due_date)}`,
       },
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` },
+      text: { type: "mrkdwn", text: `*蟇ｾ蠢懆・・・{assigneeDisplay(task)}` },
     },
   ];
   return [
@@ -941,7 +954,7 @@ async function buildThreadCardBlocks({ teamId, task }) {
 }
 
 // ================================
-// 詳細モーダル
+// 隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ
 // ================================
 async function buildDetailModalView({
   teamId,
@@ -950,23 +963,23 @@ async function buildDetailModalView({
   origin = "home",
 }) {
   // ----------------------------
-  // Slack mrkdwn text は 3000文字制限
-  // ここ（詳細モーダルの「タスク内容」）で超えがちなので安全に切る
+  // Slack mrkdwn text 縺ｯ 3000譁・ｭ怜宛髯・
+  // 縺薙％・郁ｩｳ邏ｰ繝｢繝ｼ繝繝ｫ縺ｮ縲後ち繧ｹ繧ｯ蜀・ｮｹ縲搾ｼ峨〒雜・∴縺後■縺ｪ縺ｮ縺ｧ螳牙・縺ｫ蛻・ｋ
   // ----------------------------
   const raw = String(task.description || "").replace(/\r\n/g, "\n");
 
-  // まず「最大行数」
+  // 縺ｾ縺壹梧怙螟ｧ陦梧焚縲・
   const MAX_LINES = 10;
   let srcLinesRaw =
     raw.split("\n").slice(0, MAX_LINES).join("\n") || "（本文なし）";
 
-  // メンション抑止 + コードフェンス混入対策（``` があると表示崩れやすい）
-  let srcLines = noMention(srcLinesRaw).replace(/```/g, "´´´");
+  // 繝｡繝ｳ繧ｷ繝ｧ繝ｳ謚第ｭ｢ + 繧ｳ繝ｼ繝峨ヵ繧ｧ繝ｳ繧ｹ豺ｷ蜈･蟇ｾ遲厄ｼ・`` 縺後≠繧九→陦ｨ遉ｺ蟠ｩ繧後ｄ縺吶＞・・
+  let srcLines = noMention(srcLinesRaw).replace(/```/g, "ﾂｴﾂｴﾂｴ");
 
-  // 次に「最大文字数」：見出しや ``` の分を引いて余裕を持たせる
+  // 谺｡縺ｫ縲梧怙螟ｧ譁・ｭ玲焚縲搾ｼ夊ｦ句・縺励ｄ ``` 縺ｮ蛻・ｒ蠑輔＞縺ｦ菴呵｣輔ｒ謖√◆縺帙ｋ
   const MAX_DETAIL_CHARS = 2600;
   if (srcLines.length > MAX_DETAIL_CHARS) {
-    srcLines = srcLines.slice(0, MAX_DETAIL_CHARS) + "\n…";
+    srcLines = srcLines.slice(0, MAX_DETAIL_CHARS) + "\n窶ｦ";
   }
 
   const isBroadcast = task.task_type === "broadcast";
@@ -984,16 +997,24 @@ async function buildDetailModalView({
     return false;
   };
 
-  // 操作可否は「権限（依頼者/対応者/対象者）」だけで決める
-  // personal 完了権限（依頼者 or 対応者）
+  // 謫堺ｽ懷庄蜷ｦ縺ｯ縲梧ｨｩ髯撰ｼ井ｾ晞ｼ閠・蟇ｾ蠢懆・蟇ｾ雎｡閠・ｼ峨阪□縺代〒豎ｺ繧√ｋ
+  // personal 螳御ｺ・ｨｩ髯撰ｼ井ｾ晞ｼ閠・or 蟇ｾ蠢懆・ｼ・
   const canCompletePersonal =
     !isBroadcast &&
     (viewerUserId === task.requester_user_id ||
       viewerUserId === task.assignee_id);
 
+
   const meta = { teamId, taskId: task.id, origin };
 
   const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*ステータス*：${statusLabel(task.status)}`,
+      },
+    },
     {
       type: "section",
       text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` },
@@ -1012,7 +1033,7 @@ async function buildDetailModalView({
     { type: "divider" },
   ];
 
-  // personal：完了 / 未完了に戻す（権限者のみ）
+  // personal・壼ｮ御ｺ・/ 譛ｪ螳御ｺ・↓謌ｻ縺呻ｼ域ｨｩ髯占・・縺ｿ・・
   if (!isBroadcast) {
     if (canCompletePersonal && task.status !== "cancelled") {
       if (task.status === "done") {
@@ -1021,17 +1042,17 @@ async function buildDetailModalView({
           elements: [
             {
               type: "button",
-              text: { type: "plain_text", text: "未完了に戻す ↩️" },
+              text: { type: "plain_text", text: "未完了に戻す ?" },
               action_id: "reopen_task",
               value: JSON.stringify({ teamId, taskId: task.id }),
               confirm: {
                 title: { type: "plain_text", text: "確認" },
                 text: {
                   type: "mrkdwn",
-                  text: "このタスクを*未完了*に戻します。",
+                  text: "このタスクを未完了に戻します。",
                 },
                 confirm: { type: "plain_text", text: "戻す" },
-                deny: { type: "plain_text", text: "やめる" },
+                deny: { type: "plain_text", text: "キャンセル" },
               },
             },
           ],
@@ -1043,7 +1064,7 @@ async function buildDetailModalView({
           elements: [
             {
               type: "button",
-              text: { type: "plain_text", text: "完了 ✅" },
+              text: { type: "plain_text", text: "完了" },
               style: "primary",
               action_id: "complete_task",
               value: JSON.stringify({ teamId, taskId: task.id }),
@@ -1056,7 +1077,7 @@ async function buildDetailModalView({
   }
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: `*タスク内容*\n\`\`\`\n${srcLines}\n\`\`\`` },
+    text: { type: "mrkdwn", text: `*繧ｿ繧ｹ繧ｯ蜀・ｮｹ*\n\`\`\`\n${srcLines}\n\`\`\`` },
   });
 
   const hasSourceMessage = !!(task?.source_permalink && task?.message_ts);
@@ -1082,7 +1103,7 @@ async function buildDetailModalView({
   }
 
   blocks.push({ type: "divider" });
-  // 期日・内容を編集（broadcast は誰でも / personal は依頼者or対応者）
+  // 譛滓律繝ｻ蜀・ｮｹ繧堤ｷｨ髮・ｼ・roadcast 縺ｯ隱ｰ縺ｧ繧・/ personal 縺ｯ萓晞ｼ閠・r蟇ｾ蠢懆・ｼ・
   {
     const canEdit =
       task.status !== "cancelled" &&
@@ -1105,7 +1126,7 @@ async function buildDetailModalView({
     }
   }
 
-  // ===== コメント表示 =====
+  // ===== 繧ｳ繝｡繝ｳ繝郁｡ｨ遉ｺ =====
   let __comments = [];
   try {
     __comments = await dbListTaskComments(teamId, task.id, 10);
@@ -1116,12 +1137,12 @@ async function buildDetailModalView({
   blocks.push({ type: "divider" });
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: "*🗨 コメント*" },
+    text: { type: "mrkdwn", text: "*📝 コメント*" },
   });
 
-  // ✅ コメント日時表示（created_at）
-  // - サーバーのTZに依存するとズレるので、表示は Asia/Tokyo(JST) 固定にする
-  // - Slack上で読みやすいように「YYYY/MM/DD HH:mm」形式にする
+  // 笨・繧ｳ繝｡繝ｳ繝域律譎り｡ｨ遉ｺ・・reated_at・・
+  // - 繧ｵ繝ｼ繝舌・縺ｮTZ縺ｫ萓晏ｭ倥☆繧九→繧ｺ繝ｬ繧九・縺ｧ縲∬｡ｨ遉ｺ縺ｯ Asia/Tokyo(JST) 蝗ｺ螳壹↓縺吶ｋ
+  // - Slack荳翫〒隱ｭ縺ｿ繧・☆縺・ｈ縺・↓縲刑YYY/MM/DD HH:mm縲榊ｽ｢蠑上↓縺吶ｋ
   function formatCommentCreatedAtJst(createdAt) {
     if (!createdAt) return null;
 
@@ -1129,7 +1150,7 @@ async function buildDetailModalView({
     if (Number.isNaN(d.getTime())) return null;
 
     try {
-      // ✅ JST固定でフォーマット
+      // 笨・JST蝗ｺ螳壹〒繝輔か繝ｼ繝槭ャ繝・
       const parts = new Intl.DateTimeFormat("ja-JP", {
         timeZone: "Asia/Tokyo",
         year: "numeric",
@@ -1143,7 +1164,7 @@ async function buildDetailModalView({
       const get = (type) => parts.find((p) => p.type === type)?.value || "";
       return `${get("year")}/${get("month")}/${get("day")} ${get("hour")}:${get("minute")}`;
     } catch (_) {
-      // Intl が使えない環境向けの保険（基本はここには来ない想定）
+      // Intl 縺御ｽｿ縺医↑縺・腸蠅・髄縺代・菫晞匱・亥渕譛ｬ縺ｯ縺薙％縺ｫ縺ｯ譚･縺ｪ縺・Φ螳夲ｼ・
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, "0");
       const dd = String(d.getDate()).padStart(2, "0");
@@ -1156,14 +1177,14 @@ async function buildDetailModalView({
   if (!__comments.length) {
     blocks.push({
       type: "context",
-      elements: [{ type: "mrkdwn", text: "（コメントなし）" }],
+      elements: [{ type: "mrkdwn", text: "コメントはまだありません。" }],
     });
   } else {
     for (const c of __comments) {
       const name = await getUserDisplayName(teamId, c.user_id);
       const at = formatCommentCreatedAtJst(c.created_at);
 
-      // ✅ 表示：名前 + 日時（あれば）→ 本文
+      // 笨・陦ｨ遉ｺ・壼錐蜑・+ 譌･譎ゑｼ医≠繧後・・俄・ 譛ｬ譁・
       const header = at ? `*${name}*  _(${at})_` : `*${name}*`;
       blocks.push({
         type: "section",
@@ -1172,43 +1193,43 @@ async function buildDetailModalView({
     }
   }
 
-  // コメントを書く
+  // 繧ｳ繝｡繝ｳ繝医ｒ譖ｸ縺・
   blocks.push({
     type: "actions",
     elements: [
       {
         type: "button",
         action_id: "open_comment_modal",
-        text: { type: "plain_text", text: "コメントを書く" },
+        text: { type: "plain_text", text: "コメントを追加" },
         value: JSON.stringify({ teamId, taskId: task.id }),
       },
     ],
   });
 
   blocks.push({ type: "divider" });
-  // ===== コメント表示ここまで =====
+  // ===== 繧ｳ繝｡繝ｳ繝郁｡ｨ遉ｺ縺薙％縺ｾ縺ｧ =====
 
-  // ===== broadcast 操作（誤操作防止版）=====
+  // ===== broadcast 謫堺ｽ懶ｼ郁ｪ､謫堺ｽ憺亟豁｢迚茨ｼ・====
   if (isBroadcast) {
     const isTarget =
       (await dbIsUserTarget(teamId, task.id, viewerUserId)) ||
       (await broadcastAssigneeFallback());
     const already = await dbHasUserCompleted(teamId, task.id, viewerUserId);
 
-    // ① 完了/未完了一覧（誰でも閲覧可）
+    // 竭 螳御ｺ・譛ｪ螳御ｺ・ｸ隕ｧ・郁ｪｰ縺ｧ繧る夢隕ｧ蜿ｯ・・
     blocks.push({
       type: "actions",
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "完了/未完了一覧" },
+          text: { type: "plain_text", text: "未完了者を確認" },
           action_id: "open_progress_modal",
           value: JSON.stringify({ teamId, taskId: task.id }),
         },
       ],
     });
 
-    // ② 自分だけ完了（対象者だけ）
+    // 竭｡ 閾ｪ蛻・□縺大ｮ御ｺ・ｼ亥ｯｾ雎｡閠・□縺托ｼ・
     if (
       isTarget &&
       !already &&
@@ -1220,7 +1241,7 @@ async function buildDetailModalView({
         elements: [
           {
             type: "button",
-            text: { type: "plain_text", text: "自分だけ完了 ✅" },
+            text: { type: "plain_text", text: "自分を完了" },
             style: "primary",
             action_id: "complete_task",
             value: JSON.stringify({ teamId, taskId: task.id }),
@@ -1228,12 +1249,12 @@ async function buildDetailModalView({
         ],
       });
     }
-    // ③ 全体を完了（強制） ※取り下げ導線は削除
+    // 竭｢ 蜈ｨ菴薙ｒ螳御ｺ・ｼ亥ｼｷ蛻ｶ・・窶ｻ蜿悶ｊ荳九￡蟆守ｷ壹・蜑企勁
     if (task.status !== "done" && task.status !== "cancelled") {
       const elems = [
         {
           type: "button",
-          text: { type: "plain_text", text: "全体を完了（強制）⚠️" },
+          text: { type: "plain_text", text: "全員を完了にする" },
           style: "primary",
           action_id: "confirm_broadcast_done",
           value: JSON.stringify({ teamId, taskId: task.id }),
@@ -1241,7 +1262,7 @@ async function buildDetailModalView({
             title: { type: "plain_text", text: "確認" },
             text: {
               type: "mrkdwn",
-              text: "⚠️ 未完了の人がいても、このタスクを*完了*にします。",
+              text: "まだ未完了の人がいても、このタスクを完了にします。",
             },
             confirm: { type: "plain_text", text: "完了にする" },
             deny: { type: "plain_text", text: "やめる" },
@@ -1252,7 +1273,7 @@ async function buildDetailModalView({
       blocks.push({ type: "actions", elements: elems });
     }
   }
-  // ===== broadcast 操作ここまで =====
+  // ===== broadcast 謫堺ｽ懊％縺薙∪縺ｧ =====
 
   return {
     type: "modal",
@@ -1275,7 +1296,7 @@ async function openDetailModal(
     isFromModal = false,
   },
 ) {
-  // ✅ trigger_id は数秒で期限切れになるので、先に軽いモーダルを即表示する
+  // 笨・trigger_id 縺ｯ謨ｰ遘偵〒譛滄剞蛻・ｌ縺ｫ縺ｪ繧九・縺ｧ縲∝・縺ｫ霆ｽ縺・Δ繝ｼ繝繝ｫ繧貞叉陦ｨ遉ｺ縺吶ｋ
   const loadingView = {
     type: "modal",
     callback_id: "detail_modal_loading",
@@ -1284,7 +1305,7 @@ async function openDetailModal(
     blocks: [
       {
         type: "section",
-        text: { type: "mrkdwn", text: "読み込み中…⏳" },
+        text: { type: "mrkdwn", text: "隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ窶ｦ竢ｳ" },
       },
     ],
   };
@@ -1292,7 +1313,7 @@ async function openDetailModal(
   let openedViewId = null;
 
   try {
-    // ✅ モーダル上のボタンからは views.push、それ以外は views.open
+    // 笨・繝｢繝ｼ繝繝ｫ荳翫・繝懊ち繝ｳ縺九ｉ縺ｯ views.push縲√◎繧御ｻ･螟悶・ views.open
     if (isFromModal) {
       const res = await client.views.push({ trigger_id, view: loadingView });
       openedViewId = res?.view?.id || null;
@@ -1301,11 +1322,11 @@ async function openDetailModal(
       openedViewId = res?.view?.id || null;
     }
   } catch (e) {
-    // open/push 自体が失敗したら、ここで終了（trigger_id 切れ等）
+    // open/push 閾ｪ菴薙′螟ｱ謨励＠縺溘ｉ縲√％縺薙〒邨ゆｺ・ｼ・rigger_id 蛻・ｌ遲会ｼ・
     throw e;
   }
 
-  // ✅ ここから先は時間がかかってもOK（view_id で更新できるため）
+  // 笨・縺薙％縺九ｉ蜈医・譎る俣縺後°縺九▲縺ｦ繧０K・・iew_id 縺ｧ譖ｴ譁ｰ縺ｧ縺阪ｋ縺溘ａ・・
   const task = await dbGetTaskById(teamId, taskId);
   if (!task || !openedViewId) return;
 
@@ -1316,7 +1337,7 @@ async function openDetailModal(
     origin,
   });
 
-  // ✅ loading を本番UIに差し替え
+  // 笨・loading 繧呈悽逡ｪUI縺ｫ蟾ｮ縺玲崛縺・
   await client.views.update({
     view_id: openedViewId,
     view,
@@ -1326,7 +1347,7 @@ async function openDetailModal(
 // ================================
 // Home: filters
 // ================================
-// Homeの状態を保持（ユーザーごと）
+// Home縺ｮ迥ｶ諷九ｒ菫晄戟・医Θ繝ｼ繧ｶ繝ｼ縺斐→・・
 
 async function getTeamIdViaAuthTest(client) {
   try {
@@ -1388,7 +1409,7 @@ async function searchUsergroups(query) {
     ? groups
     : groups.filter((g) => g.handle.toLowerCase().includes(q));
 
-  // 上限はSlack推奨に合わせて適当に絞る
+  // 荳企剞縺ｯSlack謗ｨ螂ｨ縺ｫ蜷医ｏ縺帙※驕ｩ蠖薙↓邨槭ｋ
   return filtered.slice(0, 100);
 }
 
@@ -1430,14 +1451,14 @@ async function getUsergroupMembers(teamId, groupId) {
 }
 
 // ================================
-// Channel visibility cache（参加チャンネルのみ表示）
-// - public でも「ユーザーが参加していない」なら表示しない
-// - private / DM は表示しない（既存方針維持）
+// Channel visibility cache・亥盾蜉繝√Ε繝ｳ繝阪Ν縺ｮ縺ｿ陦ｨ遉ｺ・・
+// - public 縺ｧ繧ゅ後Θ繝ｼ繧ｶ繝ｼ縺悟盾蜉縺励※縺・↑縺・阪↑繧芽｡ｨ遉ｺ縺励↑縺・
+// - private / DM 縺ｯ陦ｨ遉ｺ縺励↑縺・ｼ域里蟄俶婿驥晉ｶｭ謖・ｼ・
 // ================================
 const CHANNEL_VIS_CACHE_MS = 10 * 60 * 1000;
 const channelVisCache = new Map(); // `${teamId}:${channelId}` -> { at, ok }
 
-// user -> joined channels cache（API節約）
+// user -> joined channels cache・・PI遽邏・ｼ・
 const USER_JOINED_CH_CACHE_MS = 10 * 60 * 1000;
 const userJoinedChCache = new Map(); // `${teamId}:${userId}` -> { at, set: Set<string> }
 
@@ -1464,7 +1485,7 @@ async function listUserJoinedChannelsSet(client, teamId, userId) {
       cursor = res?.response_metadata?.next_cursor || null;
     } while (cursor);
   } catch (e) {
-    // 失敗時は空（= 表示しない）に倒す
+    // 螟ｱ謨玲凾縺ｯ遨ｺ・・ 陦ｨ遉ｺ縺励↑縺・ｼ峨↓蛟偵☆
     console.error("users.conversations error:", e?.data || e);
   }
 
@@ -1474,20 +1495,20 @@ async function listUserJoinedChannelsSet(client, teamId, userId) {
 
 async function canUserSeeChannel({ client, teamId, channelId, userId }) {
   if (!channelId) return true;
-  if (!userId) return false; // user前提の判定に寄せる
+  if (!userId) return false; // user蜑肴署縺ｮ蛻､螳壹↓蟇・○繧・
 
-  // まずIDプレフィックスで高速判定（API節約）
+  // 縺ｾ縺唔D繝励Ξ繝輔ぅ繝・け繧ｹ縺ｧ鬮倬溷愛螳夲ｼ・PI遽邏・ｼ・
   const id0 = String(channelId)[0];
   if (id0 === "D") return false; // DM
-  if (id0 === "G") return false; // private channel（Homeには出さない方針）
+  if (id0 === "G") return false; // private channel・・ome縺ｫ縺ｯ蜃ｺ縺輔↑縺・婿驥晢ｼ・
 
-  // public channel: 参加している場合のみ表示
+  // public channel: 蜿ょ刈縺励※縺・ｋ蝣ｴ蜷医・縺ｿ陦ｨ遉ｺ
   if (id0 === "C") {
     const joined = await listUserJoinedChannelsSet(client, teamId, userId);
     return joined.has(channelId);
   }
 
-  // 想定外のID（例：共有チャンネル等）は conversations.info で public を確認しつつ、参加判定
+  // 諠ｳ螳壼､悶・ID・井ｾ具ｼ壼・譛峨メ繝｣繝ｳ繝阪Ν遲会ｼ峨・ conversations.info 縺ｧ public 繧堤｢ｺ隱阪＠縺､縺､縲∝盾蜉蛻､螳・
   const key = `${teamId}:${channelId}`;
   const cached = channelVisCache.get(key);
   if (cached && Date.now() - cached.at < CHANNEL_VIS_CACHE_MS) {
@@ -1513,22 +1534,22 @@ async function canUserSeeChannel({ client, teamId, channelId, userId }) {
 
 
 // ================================
-// Custom Step (Workflow Builder): 情シス依頼を自動タスク化
+// Custom Step (Workflow Builder): 諠・す繧ｹ萓晞ｼ繧定・蜍輔ち繧ｹ繧ｯ蛹・
 // callback_id: josys_taskify
 // ================================
 app.function(
   "josys_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
-    console.log("🔥 josys_taskify CALLED", inputs);
+    console.log("櫨 josys_taskify CALLED", inputs);
 
     try {
-      let teamId = inputs?.team_id || inputs?.teamId || null; // 任意
+      let teamId = inputs?.team_id || inputs?.teamId || null; // 莉ｻ諢・
       const requesterUserId =
         inputs?.requester_user_id || inputs?.requesterUserId || null;
 
       const channelId = inputs?.channel_id || inputs?.channelId || null;
 
-      // ✅ 対応者（任意）
+      // 笨・蟇ｾ蠢懆・ｼ井ｻｻ諢擾ｼ・
       const assigneeUserIdRaw =
         inputs?.assignee_user_id || inputs?.assigneeUserId || null;
       const assigneeUserIdsRaw =
@@ -1538,10 +1559,10 @@ app.function(
         inputs?.assigneeUserIdsCsv ||
         null;
 
-      // ✅ 期限（任意）：未指定なら翌日
+      // 笨・譛滄剞・井ｻｻ諢擾ｼ会ｼ壽悴謖・ｮ壹↑繧臥ｿ梧律
       const dueRaw = inputs?.due_date || inputs?.dueDate || null;
 
-      // message_ts が取れない環境向け：メッセージのリンクから復元（ここ重要）
+      // message_ts 縺悟叙繧後↑縺・腸蠅・髄縺托ｼ壹Γ繝・そ繝ｼ繧ｸ縺ｮ繝ｪ繝ｳ繧ｯ縺九ｉ蠕ｩ蜈・ｼ医％縺馴㍾隕・ｼ・
       const messageLink =
         inputs?.message_link ||
         inputs?.messageLink ||
@@ -1556,12 +1577,12 @@ app.function(
         msgTs = extractTsFromPermalink(messageLink);
       }
 
-      // teamId も inputs に無い環境向け：client から取得
+      // teamId 繧・inputs 縺ｫ辟｡縺・腸蠅・髄縺托ｼ喞lient 縺九ｉ蜿門ｾ・
       if (!teamId) {
         teamId = await getTeamIdViaAuthTest(client);
       }
 
-      // ✅ デフォルト配布先：@corp-soumu を優先（なければ旧 env へ）
+      // 笨・繝・ヵ繧ｩ繝ｫ繝磯・蟶・・・咫corp-soumu 繧貞━蜈茨ｼ医↑縺代ｌ縺ｰ譌ｧ env 縺ｸ・・
       const corpGroupId =
         process.env.CORP_SOUMU_USERGROUP_ID ||
         process.env.CORP_SYSTEM_USERGROUP_ID ||
@@ -1595,7 +1616,7 @@ app.function(
         ),
       );
 
-      logger?.info?.("🧪 debug vars", {
+      logger?.info?.("ｧｪ debug vars", {
         teamId,
         requesterUserId,
         dueRaw,
@@ -1605,21 +1626,21 @@ app.function(
         assigneeIdsCount: assigneeIds.length,
       });
 
-      // ===== 必須チェック =====
+      // ===== 蠢・医メ繧ｧ繝・け =====
       const missing = [];
       if (!requesterUserId) missing.push("requester_user_id");
       if (!channelId) missing.push("channel_id");
       if (!teamId) missing.push("team_id");
 
-      // 本文をメッセージ全文にする仕様なので、ts（または link）が必要
+      // 譛ｬ譁・ｒ繝｡繝・そ繝ｼ繧ｸ蜈ｨ譁・↓縺吶ｋ莉墓ｧ倥↑縺ｮ縺ｧ縲》s・医∪縺溘・ link・峨′蠢・ｦ・
       if (!msgTs) missing.push("message_ts(or message_link parse)");
 
-      // assignee 未指定で broadcast する場合は usergroup が必要
+      // assignee 譛ｪ謖・ｮ壹〒 broadcast 縺吶ｋ蝣ｴ蜷医・ usergroup 縺悟ｿ・ｦ・
       if (assigneeIds.length === 0 && !corpGroupId)
         missing.push("CORP_SOUMU_USERGROUP_ID");
 
       if (missing.length) {
-        logger?.warn?.("⛔ skipped: missing required", { missing, inputs });
+        logger?.warn?.("笵・skipped: missing required", { missing, inputs });
         await complete({
           outputs: {
             task_id: null,
@@ -1629,7 +1650,7 @@ app.function(
         return;
       }
 
-      // due を YYYY-MM-DD に寄せる（未指定なら翌日）
+      // due 繧・YYYY-MM-DD 縺ｫ蟇・○繧具ｼ域悴謖・ｮ壹↑繧臥ｿ梧律・・
       const tomorrowYmd = () => {
         const d = new Date();
         d.setDate(d.getDate() + 1);
@@ -1637,24 +1658,24 @@ app.function(
       };
       const due = dueRaw ? slackDateYmd(dueRaw) : tomorrowYmd();
       if (!due) {
-        logger?.warn?.("⛔ skipped: invalid due", { dueRaw });
+        logger?.warn?.("笵・skipped: invalid due", { dueRaw });
         await complete({
           outputs: { task_id: null, skipped: "invalid_due" },
         });
         return;
       }
 
-      // 二重作成防止（同一メッセージ起点は1回だけ）
+      // 莠碁㍾菴懈・髦ｲ豁｢・亥酔荳繝｡繝・そ繝ｼ繧ｸ襍ｷ轤ｹ縺ｯ1蝗槭□縺托ｼ・
       const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
       if (existing?.id) {
-        logger?.info?.("ℹ️ already exists", { taskId: existing.id });
+        logger?.info?.("邃ｹ・・already exists", { taskId: existing.id });
         await complete({
           outputs: { task_id: existing.id, skipped: "already_exists" },
         });
         return;
       }
 
-      // ✅ メッセージ全文を title/description にする
+      // 笨・繝｡繝・そ繝ｼ繧ｸ蜈ｨ譁・ｒ title/description 縺ｫ縺吶ｋ
       const rawText = await fetchMessageTextByTs(client, channelId, msgTs);
       let prettyText = "";
       try {
@@ -1667,7 +1688,7 @@ app.function(
       const title = messageFullText || "（本文なし）";
       const description = messageFullText || "";
 
-      // permalink（元投稿リンク）
+      // permalink・亥・謚慕ｨｿ繝ｪ繝ｳ繧ｯ・・
       let permalink = "";
       try {
         const r = await client.chat.getPermalink({
@@ -1682,7 +1703,7 @@ app.function(
       const taskId = randomUUID();
       const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
 
-      // ===== ここから personal / broadcast 分岐 =====
+      // ===== 縺薙％縺九ｉ personal / broadcast 蛻・ｲ・=====
       if (assigneeIds.length === 1) {
         // personal
         const only = assigneeIds[0];
@@ -1712,28 +1733,28 @@ app.function(
           notified_at: null,
         });
 
-        // 通知（依頼主自身は除外）
+        // 騾夂衍・井ｾ晞ｼ荳ｻ閾ｪ霄ｫ縺ｯ髯､螟厄ｼ・
         try {
           if (only && only !== requesterUserId) {
-            await notifyTaskSimpleDM(only, created, "📝 タスクが届いたよ");
+            await notifyTaskSimpleDM(only, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
           }
         } catch (e) {
           logger?.error?.("workflow step notify error", e);
         }
 
-        // Home更新（依頼主 + 対象者）
+        // Home譖ｴ譁ｰ・井ｾ晞ｼ荳ｻ + 蟇ｾ雎｡閠・ｼ・
         try {
           publishHomeBurst(client, teamId, [requesterUserId, only], 200);
         } catch (e) {
           logger?.warn?.("home publish error", e);
         }
 
-        logger?.info?.("✅ task created", { taskId });
+        logger?.info?.("笨・task created", { taskId });
         await complete({ outputs: { task_id: taskId } });
         return;
       }
 
-      // broadcast（2名以上 or 未指定）
+      // broadcast・・蜷堺ｻ･荳・or 譛ｪ謖・ｮ夲ｼ・
       let targetList = [];
       if (assigneeIds.length >= 2) {
         targetList = assigneeIds;
@@ -1745,7 +1766,7 @@ app.function(
       }
 
       if (!targetList.length) {
-        logger?.warn?.("⛔ skipped: no targets", { corpGroupId, assigneeIds });
+        logger?.warn?.("笵・skipped: no targets", { corpGroupId, assigneeIds });
         await complete({ outputs: { task_id: null, skipped: "no_targets" } });
         return;
       }
@@ -1785,17 +1806,17 @@ app.function(
       created.total_count = total;
       created.completed_count = 0;
 
-      // 通知（依頼主自身は除外）
+      // 騾夂衍・井ｾ晞ｼ荳ｻ閾ｪ霄ｫ縺ｯ髯､螟厄ｼ・
       try {
         const toNotify = targetList.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
-          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
         }
       } catch (e) {
         logger?.error?.("workflow step notify error", e);
       }
 
-      // Home更新（依頼主 + 全対象者）
+      // Home譖ｴ譁ｰ・井ｾ晞ｼ荳ｻ + 蜈ｨ蟇ｾ雎｡閠・ｼ・
       try {
         const toRefresh = Array.from(
           new Set([requesterUserId, ...targetList].filter(Boolean)),
@@ -1805,10 +1826,10 @@ app.function(
         logger?.warn?.("home publish error", e);
       }
 
-      logger?.info?.("✅ task created", { taskId });
+      logger?.info?.("笨・task created", { taskId });
       await complete({ outputs: { task_id: taskId } });
     } catch (error) {
-      logger?.error?.("💥 josys_taskify failed", {
+      logger?.error?.("徴 josys_taskify failed", {
         message: error?.message,
         stack: error?.stack,
       });
@@ -1821,13 +1842,13 @@ app.function(
 );
 
 // ================================
-// Custom Step (Workflow Builder): 契約書送付確認を自動タスク化
+// Custom Step (Workflow Builder): 螂醍ｴ・嶌騾∽ｻ倡｢ｺ隱阪ｒ閾ｪ蜍輔ち繧ｹ繧ｯ蛹・
 // callback_id: bc_contract_send_check_taskify
 // ================================
 app.function(
   "bc_contract_send_check_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
-    console.log("🔥 bc_contract_send_check_taskify CALLED", inputs);
+    console.log("櫨 bc_contract_send_check_taskify CALLED", inputs);
 
     try {
       let teamId = inputs?.team_id || inputs?.teamId || null;
@@ -1887,7 +1908,7 @@ app.function(
       }
 
       if (missing.length) {
-        logger?.warn?.("⛔ skipped: missing required", { missing, inputs });
+        logger?.warn?.("笵・skipped: missing required", { missing, inputs });
         await complete({
           outputs: {
             task_id: null,
@@ -1899,7 +1920,7 @@ app.function(
 
       const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
       if (existing?.id) {
-        logger?.info?.("ℹ️ already exists", { taskId: existing.id });
+        logger?.info?.("邃ｹ・・already exists", { taskId: existing.id });
         await complete({
           outputs: { task_id: existing.id, skipped: "already_exists" },
         });
@@ -1919,7 +1940,7 @@ app.function(
       }
 
       const description = String(rawText || "");
-      const title = "契約書送付確認";
+      const title = "BC 契約送付チェック";
 
       let permalink = "";
       try {
@@ -1938,7 +1959,7 @@ app.function(
       const postedYmd = jstYmdFromSlackTs(msgTs) || todayJstYmd();
       const due = nextJpBusinessDayFromYmd(postedYmd);
       if (!due) {
-        logger?.warn?.("⛔ skipped: invalid due", { postedYmd });
+        logger?.warn?.("笵・skipped: invalid due", { postedYmd });
         await complete({
           outputs: { task_id: null, skipped: "invalid_due" },
         });
@@ -1981,7 +2002,7 @@ const created = await dbCreateTask({
       try {
         const toNotify = assigneeIds.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
-          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
         }
       } catch (e) {
         logger?.error?.("workflow step notify error", e);
@@ -1996,7 +2017,7 @@ const created = await dbCreateTask({
         logger?.warn?.("home publish error", e);
       }
 
-      logger?.info?.("✅ task created", { taskId, due, postedYmd });
+      logger?.info?.("笨・task created", { taskId, due, postedYmd });
       await complete({
         outputs: {
           task_id: taskId,
@@ -2004,7 +2025,7 @@ const created = await dbCreateTask({
         },
       });
     } catch (error) {
-      logger?.error?.("💥 bc_contract_send_check_taskify failed", {
+      logger?.error?.("徴 bc_contract_send_check_taskify failed", {
         message: error?.message,
         stack: error?.stack,
       });
@@ -2017,7 +2038,7 @@ const created = await dbCreateTask({
 );
 
 // ================================
-// Custom Step (Workflow Builder): 受注報告から総務/経理タスクを作成
+// Custom Step (Workflow Builder): 蜿玲ｳｨ蝣ｱ蜻翫°繧臥ｷ丞漁/邨檎炊繧ｿ繧ｹ繧ｯ繧剃ｽ懈・
 // callback_id: cb8d79backoffice_group_taskify
 // ================================
 app.function(
@@ -2047,7 +2068,7 @@ app.function(
         null;
       let msgTs = inputs?.message_ts || inputs?.messageTs || null;
       const title =
-        String(inputs?.task_title || inputs?.title || "").trim() || "バックオフィスタスク";
+        String(inputs?.task_title || inputs?.title || "").trim() || "繝舌ャ繧ｯ繧ｪ繝輔ぅ繧ｹ繧ｿ繧ｹ繧ｯ";
       const descriptionInput = String(
         inputs?.task_description || inputs?.description || "",
       ).trim();
@@ -2212,7 +2233,7 @@ app.function(
           });
           const root = await client.chat.postMessage({
             channel: BACKOFFICE_TASK_THREAD_CHANNEL,
-            text: `タスク管理: ${title}`,
+            text: `繧ｿ繧ｹ繧ｯ邂｡逅・ ${title}`,
             blocks: [
               {
                 type: "section",
@@ -2228,7 +2249,7 @@ app.function(
                       elements: [
                         {
                           type: "mrkdwn",
-                          text: `<${permalink}|元メッセージへ>`,
+                          text: `<${permalink}|蜈・Γ繝・そ繝ｼ繧ｸ縺ｸ>`,
                         },
                       ],
                     },
@@ -2283,7 +2304,7 @@ app.function(
       try {
         const toNotify = targetList.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
-          await notifyTaskSimpleDM(uid, created, "📝 タスクが届いたよ");
+          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
         }
       } catch (e) {
         logger?.error?.("workflow step notify error", e);
@@ -2407,5 +2428,5 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await dbEnsureSettingsSchema();
   await app.start(port);
-  console.log(`⚡️ Slack app is running on port ${port}`);
+  console.log(`笞｡・・Slack app is running on port ${port}`);
 })();

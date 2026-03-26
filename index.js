@@ -895,7 +895,7 @@ async function upsertThreadCard(
   const res = await client.chat.postMessage({
     channel: channelId,
     thread_ts: postThreadTs,
-    text: "繧ｿ繧ｹ繧ｯ陦ｨ遉ｺ",
+    text: "タスク表示",
     blocks,
   });
 
@@ -904,9 +904,7 @@ async function upsertThreadCard(
   return cardTs;
 }
 
-// 笘・ｦ∵悍竭｡・壹せ繝ｬ繝・ラ縺九ｉ螳御ｺ・・繧ｿ繝ｳ蜑企勁・郁ｩｳ邏ｰ縺九ｉ縺ｮ縺ｿ・・
 async function buildThreadCardBlocks({ teamId, task }) {
-  // 繧ｹ繝ｬ繝・ラ蛛ｴ縺ｮ縲瑚ｩｳ邏ｰ縲阪・髢ｲ隕ｧ蟆ら畑・域桃菴懊・ Home 縺九ｉ・・
   const payload = JSON.stringify({
     teamId,
     taskId: task.id,
@@ -914,7 +912,7 @@ async function buildThreadCardBlocks({ teamId, task }) {
   });
 
   const common = [
-    { type: "header", text: { type: "plain_text", text: "竢ｱ 繧ｿ繧ｹ繧ｯ" } },
+    { type: "header", text: { type: "plain_text", text: "⏱ タスク" } },
     {
       type: "section",
       text: { type: "mrkdwn", text: `*${noMention(task.title)}*` },
@@ -922,18 +920,18 @@ async function buildThreadCardBlocks({ teamId, task }) {
     { type: "divider" },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*萓晞ｼ閠・・・@${task.requester_user_id}>` },
+      text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` },
     },
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*譛滄剞*・・{formatDueDateOnly(task.due_date)}`,
+        text: `*期限*：${formatDueDateOnly(task.due_date)}`,
       },
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*蟇ｾ蠢懆・・・{assigneeDisplay(task)}` },
+      text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` },
     },
   ];
   return [
@@ -953,33 +951,23 @@ async function buildThreadCardBlocks({ teamId, task }) {
   ];
 }
 
-// ================================
-// 隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ
-// ================================
 async function buildDetailModalView({
   teamId,
   task,
   viewerUserId,
   origin = "home",
 }) {
-  // ----------------------------
-  // Slack mrkdwn text 縺ｯ 3000譁・ｭ怜宛髯・
-  // 縺薙％・郁ｩｳ邏ｰ繝｢繝ｼ繝繝ｫ縺ｮ縲後ち繧ｹ繧ｯ蜀・ｮｹ縲搾ｼ峨〒雜・∴縺後■縺ｪ縺ｮ縺ｧ螳牙・縺ｫ蛻・ｋ
-  // ----------------------------
   const raw = String(task.description || "").replace(/\r\n/g, "\n");
 
-  // 縺ｾ縺壹梧怙螟ｧ陦梧焚縲・
   const MAX_LINES = 10;
   let srcLinesRaw =
     raw.split("\n").slice(0, MAX_LINES).join("\n") || "（本文なし）";
 
-  // 繝｡繝ｳ繧ｷ繝ｧ繝ｳ謚第ｭ｢ + 繧ｳ繝ｼ繝峨ヵ繧ｧ繝ｳ繧ｹ豺ｷ蜈･蟇ｾ遲厄ｼ・`` 縺後≠繧九→陦ｨ遉ｺ蟠ｩ繧後ｄ縺吶＞・・
-  let srcLines = noMention(srcLinesRaw).replace(/```/g, "ﾂｴﾂｴﾂｴ");
+  let srcLines = noMention(srcLinesRaw).replace(/```/g, "'''");
 
-  // 谺｡縺ｫ縲梧怙螟ｧ譁・ｭ玲焚縲搾ｼ夊ｦ句・縺励ｄ ``` 縺ｮ蛻・ｒ蠑輔＞縺ｦ菴呵｣輔ｒ謖√◆縺帙ｋ
   const MAX_DETAIL_CHARS = 2600;
   if (srcLines.length > MAX_DETAIL_CHARS) {
-    srcLines = srcLines.slice(0, MAX_DETAIL_CHARS) + "\n窶ｦ";
+    srcLines = srcLines.slice(0, MAX_DETAIL_CHARS) + "\n...";
   }
 
   const isBroadcast = task.task_type === "broadcast";
@@ -997,13 +985,10 @@ async function buildDetailModalView({
     return false;
   };
 
-  // 謫堺ｽ懷庄蜷ｦ縺ｯ縲梧ｨｩ髯撰ｼ井ｾ晞ｼ閠・蟇ｾ蠢懆・蟇ｾ雎｡閠・ｼ峨阪□縺代〒豎ｺ繧√ｋ
-  // personal 螳御ｺ・ｨｩ髯撰ｼ井ｾ晞ｼ閠・or 蟇ｾ蠢懆・ｼ・
   const canCompletePersonal =
     !isBroadcast &&
     (viewerUserId === task.requester_user_id ||
       viewerUserId === task.assignee_id);
-
 
   const meta = { teamId, taskId: task.id, origin };
 
@@ -1033,7 +1018,6 @@ async function buildDetailModalView({
     { type: "divider" },
   ];
 
-  // personal・壼ｮ御ｺ・/ 譛ｪ螳御ｺ・↓謌ｻ縺呻ｼ域ｨｩ髯占・・縺ｿ・・
   if (!isBroadcast) {
     if (canCompletePersonal && task.status !== "cancelled") {
       if (task.status === "done") {
@@ -1042,7 +1026,7 @@ async function buildDetailModalView({
           elements: [
             {
               type: "button",
-              text: { type: "plain_text", text: "未完了に戻す ?" },
+              text: { type: "plain_text", text: "未完了に戻す" },
               action_id: "reopen_task",
               value: JSON.stringify({ teamId, taskId: task.id }),
               confirm: {
@@ -1077,7 +1061,7 @@ async function buildDetailModalView({
   }
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: `*繧ｿ繧ｹ繧ｯ蜀・ｮｹ*\n\`\`\`\n${srcLines}\n\`\`\`` },
+    text: { type: "mrkdwn", text: `*タスク内容*\n\`\`\`\n${srcLines}\n\`\`\`` },
   });
 
   const hasSourceMessage = !!(task?.source_permalink && task?.message_ts);
@@ -1103,7 +1087,6 @@ async function buildDetailModalView({
   }
 
   blocks.push({ type: "divider" });
-  // 譛滓律繝ｻ蜀・ｮｹ繧堤ｷｨ髮・ｼ・roadcast 縺ｯ隱ｰ縺ｧ繧・/ personal 縺ｯ萓晞ｼ閠・r蟇ｾ蠢懆・ｼ・
   {
     const canEdit =
       task.status !== "cancelled" &&
@@ -1126,7 +1109,6 @@ async function buildDetailModalView({
     }
   }
 
-  // ===== 繧ｳ繝｡繝ｳ繝郁｡ｨ遉ｺ =====
   let __comments = [];
   try {
     __comments = await dbListTaskComments(teamId, task.id, 10);
@@ -1140,9 +1122,6 @@ async function buildDetailModalView({
     text: { type: "mrkdwn", text: "*📝 コメント*" },
   });
 
-  // 笨・繧ｳ繝｡繝ｳ繝域律譎り｡ｨ遉ｺ・・reated_at・・
-  // - 繧ｵ繝ｼ繝舌・縺ｮTZ縺ｫ萓晏ｭ倥☆繧九→繧ｺ繝ｬ繧九・縺ｧ縲∬｡ｨ遉ｺ縺ｯ Asia/Tokyo(JST) 蝗ｺ螳壹↓縺吶ｋ
-  // - Slack荳翫〒隱ｭ縺ｿ繧・☆縺・ｈ縺・↓縲刑YYY/MM/DD HH:mm縲榊ｽ｢蠑上↓縺吶ｋ
   function formatCommentCreatedAtJst(createdAt) {
     if (!createdAt) return null;
 
@@ -1150,7 +1129,6 @@ async function buildDetailModalView({
     if (Number.isNaN(d.getTime())) return null;
 
     try {
-      // 笨・JST蝗ｺ螳壹〒繝輔か繝ｼ繝槭ャ繝・
       const parts = new Intl.DateTimeFormat("ja-JP", {
         timeZone: "Asia/Tokyo",
         year: "numeric",
@@ -1164,7 +1142,6 @@ async function buildDetailModalView({
       const get = (type) => parts.find((p) => p.type === type)?.value || "";
       return `${get("year")}/${get("month")}/${get("day")} ${get("hour")}:${get("minute")}`;
     } catch (_) {
-      // Intl 縺御ｽｿ縺医↑縺・腸蠅・髄縺代・菫晞匱・亥渕譛ｬ縺ｯ縺薙％縺ｫ縺ｯ譚･縺ｪ縺・Φ螳夲ｼ・
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, "0");
       const dd = String(d.getDate()).padStart(2, "0");
@@ -1184,7 +1161,6 @@ async function buildDetailModalView({
       const name = await getUserDisplayName(teamId, c.user_id);
       const at = formatCommentCreatedAtJst(c.created_at);
 
-      // 笨・陦ｨ遉ｺ・壼錐蜑・+ 譌･譎ゑｼ医≠繧後・・俄・ 譛ｬ譁・
       const header = at ? `*${name}*  _(${at})_` : `*${name}*`;
       blocks.push({
         type: "section",
@@ -1193,7 +1169,6 @@ async function buildDetailModalView({
     }
   }
 
-  // 繧ｳ繝｡繝ｳ繝医ｒ譖ｸ縺・
   blocks.push({
     type: "actions",
     elements: [
@@ -1207,16 +1182,12 @@ async function buildDetailModalView({
   });
 
   blocks.push({ type: "divider" });
-  // ===== 繧ｳ繝｡繝ｳ繝郁｡ｨ遉ｺ縺薙％縺ｾ縺ｧ =====
-
-  // ===== broadcast 謫堺ｽ懶ｼ郁ｪ､謫堺ｽ憺亟豁｢迚茨ｼ・====
   if (isBroadcast) {
     const isTarget =
       (await dbIsUserTarget(teamId, task.id, viewerUserId)) ||
       (await broadcastAssigneeFallback());
     const already = await dbHasUserCompleted(teamId, task.id, viewerUserId);
 
-    // 竭 螳御ｺ・譛ｪ螳御ｺ・ｸ隕ｧ・郁ｪｰ縺ｧ繧る夢隕ｧ蜿ｯ・・
     blocks.push({
       type: "actions",
       elements: [
@@ -1229,7 +1200,6 @@ async function buildDetailModalView({
       ],
     });
 
-    // 竭｡ 閾ｪ蛻・□縺大ｮ御ｺ・ｼ亥ｯｾ雎｡閠・□縺托ｼ・
     if (
       isTarget &&
       !already &&
@@ -1249,7 +1219,6 @@ async function buildDetailModalView({
         ],
       });
     }
-    // 竭｢ 蜈ｨ菴薙ｒ螳御ｺ・ｼ亥ｼｷ蛻ｶ・・窶ｻ蜿悶ｊ荳九￡蟆守ｷ壹・蜑企勁
     if (task.status !== "done" && task.status !== "cancelled") {
       const elems = [
         {
@@ -1273,8 +1242,6 @@ async function buildDetailModalView({
       blocks.push({ type: "actions", elements: elems });
     }
   }
-  // ===== broadcast 謫堺ｽ懊％縺薙∪縺ｧ =====
-
   return {
     type: "modal",
     callback_id: "detail_modal",
@@ -1296,7 +1263,6 @@ async function openDetailModal(
     isFromModal = false,
   },
 ) {
-  // 笨・trigger_id 縺ｯ謨ｰ遘偵〒譛滄剞蛻・ｌ縺ｫ縺ｪ繧九・縺ｧ縲∝・縺ｫ霆ｽ縺・Δ繝ｼ繝繝ｫ繧貞叉陦ｨ遉ｺ縺吶ｋ
   const loadingView = {
     type: "modal",
     callback_id: "detail_modal_loading",
@@ -1305,7 +1271,7 @@ async function openDetailModal(
     blocks: [
       {
         type: "section",
-        text: { type: "mrkdwn", text: "隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ窶ｦ竢ｳ" },
+        text: { type: "mrkdwn", text: "読み込み中..." },
       },
     ],
   };
@@ -1533,23 +1499,18 @@ async function canUserSeeChannel({ client, teamId, channelId, userId }) {
 }
 
 
-// ================================
-// Custom Step (Workflow Builder): 諠・す繧ｹ萓晞ｼ繧定・蜍輔ち繧ｹ繧ｯ蛹・
-// callback_id: josys_taskify
-// ================================
 app.function(
   "josys_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
-    console.log("櫨 josys_taskify CALLED", inputs);
+    console.log("josys_taskify CALLED", inputs);
 
     try {
-      let teamId = inputs?.team_id || inputs?.teamId || null; // 莉ｻ諢・
+      let teamId = inputs?.team_id || inputs?.teamId || null;
       const requesterUserId =
         inputs?.requester_user_id || inputs?.requesterUserId || null;
 
       const channelId = inputs?.channel_id || inputs?.channelId || null;
 
-      // 笨・蟇ｾ蠢懆・ｼ井ｻｻ諢擾ｼ・
       const assigneeUserIdRaw =
         inputs?.assignee_user_id || inputs?.assigneeUserId || null;
       const assigneeUserIdsRaw =
@@ -1559,10 +1520,8 @@ app.function(
         inputs?.assigneeUserIdsCsv ||
         null;
 
-      // 笨・譛滄剞・井ｻｻ諢擾ｼ会ｼ壽悴謖・ｮ壹↑繧臥ｿ梧律
       const dueRaw = inputs?.due_date || inputs?.dueDate || null;
 
-      // message_ts 縺悟叙繧後↑縺・腸蠅・髄縺托ｼ壹Γ繝・そ繝ｼ繧ｸ縺ｮ繝ｪ繝ｳ繧ｯ縺九ｉ蠕ｩ蜈・ｼ医％縺馴㍾隕・ｼ・
       const messageLink =
         inputs?.message_link ||
         inputs?.messageLink ||
@@ -1577,12 +1536,10 @@ app.function(
         msgTs = extractTsFromPermalink(messageLink);
       }
 
-      // teamId 繧・inputs 縺ｫ辟｡縺・腸蠅・髄縺托ｼ喞lient 縺九ｉ蜿門ｾ・
       if (!teamId) {
         teamId = await getTeamIdViaAuthTest(client);
       }
 
-      // 笨・繝・ヵ繧ｩ繝ｫ繝磯・蟶・・・咫corp-soumu 繧貞━蜈茨ｼ医↑縺代ｌ縺ｰ譌ｧ env 縺ｸ・・
       const corpGroupId =
         process.env.CORP_SOUMU_USERGROUP_ID ||
         process.env.CORP_SYSTEM_USERGROUP_ID ||
@@ -1616,7 +1573,7 @@ app.function(
         ),
       );
 
-      logger?.info?.("ｧｪ debug vars", {
+      logger?.info?.("debug vars", {
         teamId,
         requesterUserId,
         dueRaw,
@@ -1626,21 +1583,18 @@ app.function(
         assigneeIdsCount: assigneeIds.length,
       });
 
-      // ===== 蠢・医メ繧ｧ繝・け =====
       const missing = [];
       if (!requesterUserId) missing.push("requester_user_id");
       if (!channelId) missing.push("channel_id");
       if (!teamId) missing.push("team_id");
 
-      // 譛ｬ譁・ｒ繝｡繝・そ繝ｼ繧ｸ蜈ｨ譁・↓縺吶ｋ莉墓ｧ倥↑縺ｮ縺ｧ縲》s・医∪縺溘・ link・峨′蠢・ｦ・
       if (!msgTs) missing.push("message_ts(or message_link parse)");
 
-      // assignee 譛ｪ謖・ｮ壹〒 broadcast 縺吶ｋ蝣ｴ蜷医・ usergroup 縺悟ｿ・ｦ・
       if (assigneeIds.length === 0 && !corpGroupId)
         missing.push("CORP_SOUMU_USERGROUP_ID");
 
       if (missing.length) {
-        logger?.warn?.("笵・skipped: missing required", { missing, inputs });
+        logger?.warn?.("skipped: missing required", { missing, inputs });
         await complete({
           outputs: {
             task_id: null,
@@ -1650,7 +1604,6 @@ app.function(
         return;
       }
 
-      // due 繧・YYYY-MM-DD 縺ｫ蟇・○繧具ｼ域悴謖・ｮ壹↑繧臥ｿ梧律・・
       const tomorrowYmd = () => {
         const d = new Date();
         d.setDate(d.getDate() + 1);
@@ -1658,24 +1611,22 @@ app.function(
       };
       const due = dueRaw ? slackDateYmd(dueRaw) : tomorrowYmd();
       if (!due) {
-        logger?.warn?.("笵・skipped: invalid due", { dueRaw });
+        logger?.warn?.("skipped: invalid due", { dueRaw });
         await complete({
           outputs: { task_id: null, skipped: "invalid_due" },
         });
         return;
       }
 
-      // 莠碁㍾菴懈・髦ｲ豁｢・亥酔荳繝｡繝・そ繝ｼ繧ｸ襍ｷ轤ｹ縺ｯ1蝗槭□縺托ｼ・
       const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
       if (existing?.id) {
-        logger?.info?.("邃ｹ・・already exists", { taskId: existing.id });
+        logger?.info?.("already exists", { taskId: existing.id });
         await complete({
           outputs: { task_id: existing.id, skipped: "already_exists" },
         });
         return;
       }
 
-      // 笨・繝｡繝・そ繝ｼ繧ｸ蜈ｨ譁・ｒ title/description 縺ｫ縺吶ｋ
       const rawText = await fetchMessageTextByTs(client, channelId, msgTs);
       let prettyText = "";
       try {
@@ -1688,7 +1639,6 @@ app.function(
       const title = messageFullText || "（本文なし）";
       const description = messageFullText || "";
 
-      // permalink・亥・謚慕ｨｿ繝ｪ繝ｳ繧ｯ・・
       let permalink = "";
       try {
         const r = await client.chat.getPermalink({
@@ -1703,9 +1653,7 @@ app.function(
       const taskId = randomUUID();
       const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
 
-      // ===== 縺薙％縺九ｉ personal / broadcast 蛻・ｲ・=====
       if (assigneeIds.length === 1) {
-        // personal
         const only = assigneeIds[0];
         const assigneeDept = await resolveDeptForUser(teamId, only);
 
@@ -1733,28 +1681,25 @@ app.function(
           notified_at: null,
         });
 
-        // 騾夂衍・井ｾ晞ｼ荳ｻ閾ｪ霄ｫ縺ｯ髯､螟厄ｼ・
         try {
           if (only && only !== requesterUserId) {
-            await notifyTaskSimpleDM(only, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
+            await notifyTaskSimpleDM(only, created, "タスクが届いたよ");
           }
         } catch (e) {
           logger?.error?.("workflow step notify error", e);
         }
 
-        // Home譖ｴ譁ｰ・井ｾ晞ｼ荳ｻ + 蟇ｾ雎｡閠・ｼ・
         try {
           publishHomeBurst(client, teamId, [requesterUserId, only], 200);
         } catch (e) {
           logger?.warn?.("home publish error", e);
         }
 
-        logger?.info?.("笨・task created", { taskId });
+        logger?.info?.("task created", { taskId });
         await complete({ outputs: { task_id: taskId } });
         return;
       }
 
-      // broadcast・・蜷堺ｻ･荳・or 譛ｪ謖・ｮ夲ｼ・
       let targetList = [];
       if (assigneeIds.length >= 2) {
         targetList = assigneeIds;
@@ -1766,7 +1711,7 @@ app.function(
       }
 
       if (!targetList.length) {
-        logger?.warn?.("笵・skipped: no targets", { corpGroupId, assigneeIds });
+        logger?.warn?.("skipped: no targets", { corpGroupId, assigneeIds });
         await complete({ outputs: { task_id: null, skipped: "no_targets" } });
         return;
       }
@@ -1806,17 +1751,15 @@ app.function(
       created.total_count = total;
       created.completed_count = 0;
 
-      // 騾夂衍・井ｾ晞ｼ荳ｻ閾ｪ霄ｫ縺ｯ髯､螟厄ｼ・
       try {
         const toNotify = targetList.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
-          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
+          await notifyTaskSimpleDM(uid, created, "タスクが届いたよ");
         }
       } catch (e) {
         logger?.error?.("workflow step notify error", e);
       }
 
-      // Home譖ｴ譁ｰ・井ｾ晞ｼ荳ｻ + 蜈ｨ蟇ｾ雎｡閠・ｼ・
       try {
         const toRefresh = Array.from(
           new Set([requesterUserId, ...targetList].filter(Boolean)),
@@ -1826,10 +1769,10 @@ app.function(
         logger?.warn?.("home publish error", e);
       }
 
-      logger?.info?.("笨・task created", { taskId });
+      logger?.info?.("task created", { taskId });
       await complete({ outputs: { task_id: taskId } });
     } catch (error) {
-      logger?.error?.("徴 josys_taskify failed", {
+      logger?.error?.("josys_taskify failed", {
         message: error?.message,
         stack: error?.stack,
       });
@@ -1841,14 +1784,10 @@ app.function(
   },
 );
 
-// ================================
-// Custom Step (Workflow Builder): 螂醍ｴ・嶌騾∽ｻ倡｢ｺ隱阪ｒ閾ｪ蜍輔ち繧ｹ繧ｯ蛹・
-// callback_id: bc_contract_send_check_taskify
-// ================================
 app.function(
   "bc_contract_send_check_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
-    console.log("櫨 bc_contract_send_check_taskify CALLED", inputs);
+    console.log("bc_contract_send_check_taskify CALLED", inputs);
 
     try {
       let teamId = inputs?.team_id || inputs?.teamId || null;
@@ -1908,7 +1847,7 @@ app.function(
       }
 
       if (missing.length) {
-        logger?.warn?.("笵・skipped: missing required", { missing, inputs });
+        logger?.warn?.("skipped: missing required", { missing, inputs });
         await complete({
           outputs: {
             task_id: null,
@@ -1920,7 +1859,7 @@ app.function(
 
       const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
       if (existing?.id) {
-        logger?.info?.("邃ｹ・・already exists", { taskId: existing.id });
+        logger?.info?.("already exists", { taskId: existing.id });
         await complete({
           outputs: { task_id: existing.id, skipped: "already_exists" },
         });
@@ -1959,7 +1898,7 @@ app.function(
       const postedYmd = jstYmdFromSlackTs(msgTs) || todayJstYmd();
       const due = nextJpBusinessDayFromYmd(postedYmd);
       if (!due) {
-        logger?.warn?.("笵・skipped: invalid due", { postedYmd });
+        logger?.warn?.("skipped: invalid due", { postedYmd });
         await complete({
           outputs: { task_id: null, skipped: "invalid_due" },
         });
@@ -2002,7 +1941,7 @@ const created = await dbCreateTask({
       try {
         const toNotify = assigneeIds.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
-          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
+          await notifyTaskSimpleDM(uid, created, "タスクが届いたよ");
         }
       } catch (e) {
         logger?.error?.("workflow step notify error", e);
@@ -2017,7 +1956,7 @@ const created = await dbCreateTask({
         logger?.warn?.("home publish error", e);
       }
 
-      logger?.info?.("笨・task created", { taskId, due, postedYmd });
+      logger?.info?.("task created", { taskId, due, postedYmd });
       await complete({
         outputs: {
           task_id: taskId,
@@ -2025,7 +1964,7 @@ const created = await dbCreateTask({
         },
       });
     } catch (error) {
-      logger?.error?.("徴 bc_contract_send_check_taskify failed", {
+      logger?.error?.("bc_contract_send_check_taskify failed", {
         message: error?.message,
         stack: error?.stack,
       });
@@ -2037,10 +1976,6 @@ const created = await dbCreateTask({
   },
 );
 
-// ================================
-// Custom Step (Workflow Builder): 蜿玲ｳｨ蝣ｱ蜻翫°繧臥ｷ丞漁/邨檎炊繧ｿ繧ｹ繧ｯ繧剃ｽ懈・
-// callback_id: cb8d79backoffice_group_taskify
-// ================================
 app.function(
   "cb8d79backoffice_group_taskify",
   async ({ client, inputs, complete, fail, logger }) => {
@@ -2068,7 +2003,7 @@ app.function(
         null;
       let msgTs = inputs?.message_ts || inputs?.messageTs || null;
       const title =
-        String(inputs?.task_title || inputs?.title || "").trim() || "繝舌ャ繧ｯ繧ｪ繝輔ぅ繧ｹ繧ｿ繧ｹ繧ｯ";
+        String(inputs?.task_title || inputs?.title || "").trim() || "バックオフィスタスク";
       const descriptionInput = String(
         inputs?.task_description || inputs?.description || "",
       ).trim();
@@ -2233,7 +2168,7 @@ app.function(
           });
           const root = await client.chat.postMessage({
             channel: BACKOFFICE_TASK_THREAD_CHANNEL,
-            text: `繧ｿ繧ｹ繧ｯ邂｡逅・ ${title}`,
+            text: `タスク管理: ${title}`,
             blocks: [
               {
                 type: "section",
@@ -2249,7 +2184,7 @@ app.function(
                       elements: [
                         {
                           type: "mrkdwn",
-                          text: `<${permalink}|蜈・Γ繝・そ繝ｼ繧ｸ縺ｸ>`,
+                          text: `<${permalink}|元メッセージへ>`,
                         },
                       ],
                     },
@@ -2304,7 +2239,7 @@ app.function(
       try {
         const toNotify = targetList.filter((u) => u && u !== requesterUserId);
         for (const uid of toNotify) {
-          await notifyTaskSimpleDM(uid, created, "統 繧ｿ繧ｹ繧ｯ縺悟ｱ翫＞縺溘ｈ");
+          await notifyTaskSimpleDM(uid, created, "タスクが届いたよ");
         }
       } catch (e) {
         logger?.error?.("workflow step notify error", e);
@@ -2428,5 +2363,5 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await dbEnsureSettingsSchema();
   await app.start(port);
-  console.log(`笞｡・・Slack app is running on port ${port}`);
+  console.log(`Slack app is running on port ${port}`);
 })();

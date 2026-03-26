@@ -18,6 +18,7 @@ function registerReactionFeature(deps) {
     safeEphemeral,
     safeJsonParse,
     slackDateYmd,
+    publishHomeBurst = () => {},
     upsertThreadCard,
   } = deps;
 
@@ -267,6 +268,14 @@ app.event("reaction_added", async ({ event, client, body }) => {
         blocks,
       });
     }
+    try {
+      publishHomeBurst(
+        client,
+        teamId,
+        [requesterUserId, actorUserId, assigneeId].filter(Boolean),
+        200,
+      );
+    } catch (_) {}
   } catch (e) {
     if (e?.data?.error !== "not_in_channel")
       console.error("reaction_added error:", e?.data || e);

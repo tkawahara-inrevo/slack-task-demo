@@ -174,6 +174,7 @@ const {
   openTaskCreateModal: (...args) => openTaskCreateModal(...args),
   prettifySlackText: (...args) => prettifySlackText(...args),
   prettifyUserMentions: (...args) => prettifyUserMentions(...args),
+  publishHomeBurst,
   randomUUID,
   resolveDeptForUser: (...args) => resolveDeptForUser(...args),
   safeEphemeral: (...args) => safeEphemeral(...args),
@@ -242,7 +243,14 @@ async function publishHomeBurst(client, teamId, userIds, intervalMs = 200) {
     () => publishHomeForUsers(client, teamId, userIds, intervalMs),
     intervalMs,
   );
+  setTimeout(
+    () => publishHomeForUsers(client, teamId, userIds, intervalMs),
+    intervalMs * 2,
+  );
 }
+
+const BACKOFFICE_TASK_THREAD_CHANNEL =
+  process.env.BACKOFFICE_TASK_THREAD_CHANNEL || "C0AP0PEL5ME";
 
 // Home再描画を少しずつ投げる（スマホの反映遅延対策）
 
@@ -680,6 +688,13 @@ function buildTaskCreateModalBlocks({
   initialContent = "",
 }) {
   const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*ステータス*：${statusLabel(task.status)}`,
+      },
+    },
     {
       type: "input",
       optional: true,
@@ -2186,6 +2201,50 @@ app.function(
       }
 
       const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+      let taskChannelId = channelId;
+      let taskMessageTs = msgTs;
+
+      if (looksLikeSlackChannelId(BACKOFFICE_TASK_THREAD_CHANNEL)) {
+        try {
+          await ensureBotInChannel({
+            client,
+            channelId: BACKOFFICE_TASK_THREAD_CHANNEL,
+          });
+          const root = await client.chat.postMessage({
+            channel: BACKOFFICE_TASK_THREAD_CHANNEL,
+            text: `タスク管理: ${title}`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: `*${noMention(title)}*`,
+                },
+              },
+              ...(permalink
+                ? [
+                    {
+                      type: "context",
+                      elements: [
+                        {
+                          type: "mrkdwn",
+                          text: `<${permalink}|元メッセージへ>`,
+                        },
+                      ],
+                    },
+                  ]
+                : []),
+            ],
+          });
+          if (root?.ts) {
+            taskChannelId = BACKOFFICE_TASK_THREAD_CHANNEL;
+            taskMessageTs = root.ts;
+          }
+        } catch (e) {
+          logger?.warn?.("backoffice thread root post failed", e);
+        }
+      }
+
       const taskId = randomUUID();
       const assigneeLabel = await buildAssigneeLabelRaw(teamId, [], [
         assigneeGroupHandle,
@@ -2194,8 +2253,8 @@ app.function(
       const created = await dbCreateTask({
         id: taskId,
         team_id: teamId,
-        channel_id: channelId,
-        message_ts: msgTs,
+        channel_id: taskChannelId,
+        message_ts: taskMessageTs,
         source_permalink: permalink || null,
         title,
         description,

@@ -602,7 +602,7 @@ try {
   console.error("create result notify failed:", e?.data || e);
 }
 
-    publishHomeForUsers(client, teamId, [
+    publishHomeBurst(client, teamId, [
       actorUserId,
       requesterUserId,
       ...targetList,
@@ -869,7 +869,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
         }
       }
 
-      publishHomeForUsers(client, teamId, [userId, task.requester_user_id]);
+      publishHomeBurst(client, teamId, [userId, task.requester_user_id], 200);
       return;
     }
 
@@ -935,11 +935,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
           ),
         ),
       );
-      publishHomeForUsers(client, teamId, relatedIds, 200);
-      setTimeout(
-        () => publishHomeForUsers(client, teamId, relatedIds, 200),
-        200,
-      );
+      publishHomeBurst(client, teamId, relatedIds, 200);
     } catch (_) {}
   } catch (e) {
     console.error("complete_task error:", e?.data || e);
@@ -1106,18 +1102,17 @@ app.action("status_select", async ({ ack, body, action, client }) => {
           viewerUserId: body.user.id,
         }),
       });
-      return;
+    } else {
+      await client.views.update({
+        view_id: body.view.id,
+        hash: body.view.hash,
+        view: await buildDetailModalView({
+          teamId,
+          task: updated,
+          viewerUserId: body.user.id,
+        }),
+      });
     }
-
-    await client.views.update({
-      view_id: body.view.id,
-      hash: body.view.hash,
-      view: await buildDetailModalView({
-        teamId,
-        task: updated,
-        viewerUserId: body.user.id,
-      }),
-    });
 
     // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝会ｼ夊｡ｨ遉ｺ譖ｴ譁ｰ
     if (updated.channel_id && updated.message_ts) {
@@ -1156,10 +1151,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
           ),
         ),
       );
-      publishHomeForUsers(client, teamId, relatedIds, 200);
-      setTimeout(() => {
-        publishHomeForUsers(client, teamId, relatedIds, 200);
-      }, 200);
+      publishHomeBurst(client, teamId, relatedIds, 200);
     } catch (_) {}
   } catch (e) {
     console.error("status_select error:", e?.data || e);
@@ -2307,11 +2299,7 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
           ),
         ),
       );
-      publishHomeForUsers(client, teamId, relatedIds, 200);
-      setTimeout(
-        () => publishHomeForUsers(client, teamId, relatedIds, 200),
-        200,
-      );
+      publishHomeBurst(client, teamId, relatedIds, 200);
     } catch (_) {}
   } catch (e) {
     console.error("reopen_task error:", e?.data || e);

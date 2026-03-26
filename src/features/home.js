@@ -50,7 +50,12 @@ function registerHomeFeature(deps) {
 
 async function publishHomeForUsers(client, teamId, userIds, intervalMs = 200) {
   const uniq = Array.from(new Set((userIds || []).filter(Boolean)));
-  for (let i = 0; i < uniq.length; i++) {
+  // 1人目は即座に await で確実に反映
+  if (uniq.length > 0) {
+    await publishHome({ client, teamId, userId: uniq[0] }).catch(() => {});
+  }
+  // 2人目以降は間隔を空けて
+  for (let i = 1; i < uniq.length; i++) {
     const u = uniq[i];
     setTimeout(() => {
       publishHome({ client, teamId, userId: u }).catch(() => {});
@@ -462,18 +467,32 @@ async function publishHome({ client, teamId, userId }) {
     );
     const existingIds = new Set((broadcastTasks || []).map((t) => String(t.id)));
 
-    for (const task of fallbackBroadcastTasks || []) {
-      if (existingIds.has(String(task.id))) continue;
-      const isAssigned = await isBroadcastAssignedToUser(task, teamId, userId);
-      const alreadyCompleted = await dbHasUserCompleted(teamId, task.id, userId);
-      const shouldInclude =
-        isAssigned &&
-        (st.scopeKey === "done"
-          ? task.status === "done" || alreadyCompleted
-          : !alreadyCompleted);
-      if (shouldInclude) {
-        broadcastTasks.push(task);
-        existingIds.add(String(task.id));
+    const candidates = (fallbackBroadcastTasks || []).filter(
+      (t) => !existingIds.has(String(t.id)),
+    );
+    if (candidates.length > 0) {
+      const checks = await Promise.all(
+        candidates.map((task) =>
+          Promise.all([
+            isBroadcastAssignedToUser(task, teamId, userId),
+            dbHasUserCompleted(teamId, task.id, userId),
+          ]).then(([isAssigned, alreadyCompleted]) => ({
+            task,
+            isAssigned,
+            alreadyCompleted,
+          })),
+        ),
+      );
+      for (const { task, isAssigned, alreadyCompleted } of checks) {
+        const shouldInclude =
+          isAssigned &&
+          (st.scopeKey === "done"
+            ? task.status === "done" || alreadyCompleted
+            : !alreadyCompleted);
+        if (shouldInclude) {
+          broadcastTasks.push(task);
+          existingIds.add(String(task.id));
+        }
       }
     }
   }
@@ -571,31 +590,40 @@ async function publishHome({ client, teamId, userId }) {
   // 表示：未完了はステータス別に分ける（完了/取り下げはまとめ）
   if (rangeKey === "to_me") {
     const hiddenAssignedTasks = [];
-    for (const task of [...personalTasks, ...broadcastTasks]) {
-      if (!task) continue;
-
+    const visibleKeys = new Set(
+      (tasks || []).map((t) => `${t.task_type || "personal"}:${t.id}`),
+    );
+    const allCandidates = [...personalTasks, ...broadcastTasks].filter((task) => {
+      if (!task) return false;
       const key = `${task.task_type || "personal"}:${task.id}`;
-      const alreadyVisible = (tasks || []).some(
-        (visibleTask) =>
-          `${visibleTask.task_type || "personal"}:${visibleTask.id}` === key,
+      return !visibleKeys.has(key);
+    });
+
+    // broadcastタスクの割り当て・完了チェックを並列実行
+    const broadcastCandidates = allCandidates.filter((t) => t.task_type === "broadcast");
+    const personalCandidates = allCandidates.filter((t) => t.task_type !== "broadcast");
+
+    if (broadcastCandidates.length > 0) {
+      const bcChecks = await Promise.all(
+        broadcastCandidates.map((task) =>
+          Promise.all([
+            isBroadcastAssignedToUser(task, teamId, userId),
+            dbHasUserCompleted(teamId, task.id, userId),
+          ]).then(([isAssigned, hasCompleted]) => ({ task, isAssigned, hasCompleted })),
+        ),
       );
-      if (alreadyVisible) continue;
-
-      if (task.task_type === "broadcast") {
-        const isAssigned = await isBroadcastAssignedToUser(task, teamId, userId);
+      for (const { task, isAssigned, hasCompleted } of bcChecks) {
         if (!isAssigned) continue;
-
-        const hasCompleted = await dbHasUserCompleted(teamId, task.id, userId);
         if (st.scopeKey === "done") {
           if (task.status !== "done" && !hasCompleted) continue;
         } else if (hasCompleted) {
           continue;
         }
-
         hiddenAssignedTasks.push(task);
-        continue;
       }
+    }
 
+    for (const task of personalCandidates) {
       if (String(task.assignee_id || "") === String(userId)) {
         hiddenAssignedTasks.push(task);
       }

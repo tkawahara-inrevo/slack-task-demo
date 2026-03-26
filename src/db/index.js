@@ -4,6 +4,9 @@ const { uniqIds } = require("../utils/common");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: parseInt(process.env.DB_POOL_SIZE, 10) || 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 3000,
   ssl: process.env.PGSSL === "true" ? { rejectUnauthorized: false } : undefined,
 });
 
@@ -63,35 +66,35 @@ async function dbUpsertUserDept(teamId, userId, dept_key, dept_handle) {
 }
 
 async function dbEnsureSettingsSchema() {
-  await dbQuery(`
-    CREATE TABLE IF NOT EXISTS team_settings (
-      team_id TEXT PRIMARY KEY,
-      settings JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_by_user_id TEXT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-  `);
-
-  await dbQuery(`
-    CREATE TABLE IF NOT EXISTS user_settings (
-      team_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      settings JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (team_id, user_id)
-    );
-  `);
-
-  await dbQuery(`
-    CREATE TABLE IF NOT EXISTS notification_threads (
-      team_id TEXT NOT NULL,
-      channel_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      parent_ts TEXT NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (team_id, channel_id, kind)
-    );
-  `);
+  await Promise.all([
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS team_settings (
+        team_id TEXT PRIMARY KEY,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_by_user_id TEXT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS user_settings (
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (team_id, user_id)
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS notification_threads (
+        team_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        parent_ts TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (team_id, channel_id, kind)
+      );
+    `),
+  ]);
 }
 
 function normalizeSettingsObject(value) {

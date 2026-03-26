@@ -225,54 +225,72 @@ app.event("reaction_added", async ({ event, client, body }) => {
     // スレッド親（そのスレッドに出す）
     const threadRootTs = mm?.thread_ts || mm?.ts || msgTs;
 
-    // プレビュー用（確認カード表示用）：<@U...> を人間向けに置換してから出す
-    let previewText = rawText;
+    const effectiveRequester = requesterUserId || actorUserId;
 
-    try {
-      // usergroup等も（もし入ってたら）整形
-      previewText = await prettifySlackText(previewText, teamId);
+    // permalink取得・テキスト整形・dept解決を並列実行
+    const [permalinkResult, prettyTextResult, requesterDept, assigneeDept] =
+      await Promise.all([
+        client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
+          .then(r => r?.permalink || "").catch(() => ""),
+        (async () => {
+          try {
+            let t = await prettifySlackText(rawText, teamId);
+            t = await prettifyUserMentions(t, teamId);
+            return t;
+          } catch (_) { return rawText; }
+        })(),
+        resolveDeptForUser(teamId, effectiveRequester),
+        resolveDeptForUser(teamId, assigneeId),
+      ]);
 
-      // <@Uxxx> -> @DisplayName（※この段階では通知はまだ飛ばない）
-      previewText = await prettifyUserMentions(previewText, teamId);
-    } catch (_) {}
+    const permalink = permalinkResult;
+    const prettyText = prettyTextResult;
+    const description = String(prettyText || rawText || "").trim();
+    const title = description || "（本文なし）";
 
-    // payload（create は即作成、edit はモーダル）
-    const payloadBase = {
-      teamId,
-      channelId,
-      msgTs,
-      requesterUserId: requesterUserId || actorUserId,
-      assigneeId,
-      dueYmd,
-      messageText: rawText,
-    };
+    const taskId = randomUUID();
 
-    const payloadCreate = JSON.stringify({ ...payloadBase, mode: "create" });
-    const payloadEdit = JSON.stringify({ ...payloadBase, mode: "edit" });
-
-    const blocks = buildReactionPromptBlocks({
-      previewText,
-      assigneeId,
-      dueYmd,
-      payloadCreate,
-      payloadEdit,
+    const created = await dbCreateTask({
+      id: taskId,
+      team_id: teamId,
+      channel_id: channelId,
+      message_ts: msgTs,
+      source_permalink: permalink || null,
+      title,
+      description,
+      requester_user_id: effectiveRequester,
+      created_by_user_id: actorUserId,
+      assignee_id: assigneeId,
+      assignee_label: null,
+      status: "in_progress",
+      due_date: dueYmd,
+      requester_dept: requesterDept,
+      assignee_dept: assigneeDept,
+      task_type: "personal",
+      broadcast_group_handle: null,
+      broadcast_group_id: null,
+      total_count: null,
+      completed_count: 0,
+      notified_at: null,
     });
 
-    // ★キーは msgTs（= 1メッセージ1回）、投稿先は threadRootTs
+    // タスク化完了カードをスレッドに表示（「詳細を開く」ボタン付き）
+    const doneBlocks = await buildThreadCardBlocks({ teamId, task: created });
+
     if (!String(channelId || "").startsWith("D")) {
       await upsertThreadCard(client, {
         teamId,
         channelId,
         parentTs: msgTs,
         threadTs: threadRootTs,
-        blocks,
+        blocks: doneBlocks,
       });
     }
     try {
-      publishHomeBurst(
+      await publishHomeBurst(
         client,
         teamId,
-        [requesterUserId, actorUserId, assigneeId].filter(Boolean),
+        [effectiveRequester, actorUserId, assigneeId].filter(Boolean),
         200,
       );
     } catch (_) {}
@@ -303,25 +321,24 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
     const existing = await dbGetTaskBySource(teamId, channelId, msgTs);
     if (existing?.id) return;
 
-    // permalink
-    let permalink = "";
-    try {
-      const r = await client.chat.getPermalink({
-        channel: channelId,
-        message_ts: msgTs,
-      });
-      permalink = r?.permalink || "";
-    } catch (_) {}
+    // permalink取得・テキスト整形・dept解決を並列実行
+    const [permalinkResult, prettyTextResult, requesterDept, assigneeDept] =
+      await Promise.all([
+        client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
+          .then(r => r?.permalink || "").catch(() => ""),
+        (async () => {
+          let t = await prettifySlackText(rawText, teamId);
+          t = await prettifyUserMentions(t, teamId);
+          return t;
+        })(),
+        resolveDeptForUser(teamId, requesterUserId),
+        resolveDeptForUser(teamId, assigneeId),
+      ]);
 
-    let prettyText = await prettifySlackText(rawText, teamId);
-    prettyText = await prettifyUserMentions(prettyText, teamId);
-
-    // ✅ タイトル入力欄が無い導線なので「空欄扱い」= 本文をタイトルにする（リプレイス処理なし）
+    const permalink = permalinkResult;
+    const prettyText = prettyTextResult;
     const description = String(prettyText || rawText || "").trim();
     const title = description || "（本文なし）";
-
-    const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
-    const assigneeDept = await resolveDeptForUser(teamId, assigneeId);
 
     const taskId = randomUUID();
 

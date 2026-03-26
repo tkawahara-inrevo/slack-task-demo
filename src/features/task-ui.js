@@ -234,24 +234,23 @@ async function buildCommentMentionCatalog(teamId, task) {
     }
   }
 
-  for (const userId of userIds) {
-    addUserAlias(userId, userId);
-
-    try {
-      const displayName = await getUserDisplayName(teamId, userId);
-      const shortName = cutAfterSlash(displayName);
-      addUserAlias(displayName, userId);
-      addUserAlias(shortName, userId);
-      addUserOption(userId, shortName || displayName || userId);
-    } catch (_) {}
-  }
-
-  if (task?.broadcast_group_id) {
-    const groupId = task.broadcast_group_id;
-    const idToHandle = await getSubteamIdMap(teamId);
-    const groupHandle = idToHandle.get(groupId) || groupId;
-    addGroupAlias(groupHandle, groupId);
-    addGroupOption(groupId, groupHandle);
+  // ユーザー名取得とグループ取得を並列実行
+  const [, idToHandle] = await Promise.all([
+    Promise.all(Array.from(userIds).map(async (userId) => {
+      addUserAlias(userId, userId);
+      try {
+        const displayName = await getUserDisplayName(teamId, userId);
+        const shortName = cutAfterSlash(displayName);
+        addUserAlias(displayName, userId);
+        addUserAlias(shortName, userId);
+        addUserOption(userId, shortName || displayName || userId);
+      } catch (_) {}
+    })),
+    getSubteamIdMap(teamId),
+  ]);
+  for (const [groupId, handle] of idToHandle.entries()) {
+    addGroupAlias(handle, groupId);
+    addGroupOption(groupId, handle);
   }
 
   return {
@@ -259,7 +258,7 @@ async function buildCommentMentionCatalog(teamId, task) {
     groupAliasToId,
     userOptions,
     groupOptions,
-    hintText: hintHandles.length ? "本文では @名前 や @グループ も使えます" : "",
+    hintText: "",
   };
 }
 
@@ -304,14 +303,16 @@ function replaceCommentPseudoMentions(text, catalog) {
 async function listIncompleteTaskTargetUserIds(teamId, taskId) {
   if (!teamId || !taskId) return [];
 
-  const targetsRes = await dbQuery(
-    `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2`,
-    [teamId, taskId],
-  );
-  const completionsRes = await dbQuery(
-    `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
-    [teamId, taskId],
-  );
+  const [targetsRes, completionsRes] = await Promise.all([
+    dbQuery(
+      `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2`,
+      [teamId, taskId],
+    ),
+    dbQuery(
+      `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
+      [teamId, taskId],
+    ),
+  ]);
 
   const doneSet = new Set(
     (completionsRes.rows || []).map((row) => row.user_id).filter(Boolean),
@@ -535,16 +536,12 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
 
     const isPersonal = targetList.length === 1 && selectedGroupIds.length === 0;
     const taskType = isPersonal ? "personal" : "broadcast";
-    const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
     const personalAssigneeId = isPersonal ? targetList[0] : null;
-    const assigneeDept = isPersonal
-      ? await resolveDeptForUser(teamId, personalAssigneeId)
-      : null;
-    const assigneeLabelRaw = await buildAssigneeLabelRaw(
-      teamId,
-      selectedUsers,
-      groupHandles,
-    );
+    const [requesterDept, assigneeDept, assigneeLabelRaw] = await Promise.all([
+      resolveDeptForUser(teamId, requesterUserId),
+      isPersonal ? resolveDeptForUser(teamId, personalAssigneeId) : null,
+      buildAssigneeLabelRaw(teamId, selectedUsers, groupHandles),
+    ]);
 
     let permalink = "";
     if (!isStandalone && channelId && parentTs) {
@@ -634,7 +631,7 @@ try {
   console.error("create result notify failed:", e?.data || e);
 }
 
-    publishHomeBurst(client, teamId, [
+    await publishHomeBurst(client, teamId, [
       actorUserId,
       requesterUserId,
       ...targetList,
@@ -916,7 +913,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
                 [fresh.requester_user_id, ...(targets || [])].filter(Boolean),
               ),
             );
-            publishHomeBurst(client, teamId, toRefresh, 200);
+            await publishHomeBurst(client, teamId, toRefresh, 200);
           } catch (_) {}
         }
       }
@@ -956,7 +953,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
         }
       }
 
-      publishHomeBurst(client, teamId, [userId, task.requester_user_id], 200);
+      await publishHomeBurst(client, teamId, [userId, task.requester_user_id], 200);
       return;
     }
 
@@ -1022,7 +1019,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
           ),
         ),
       );
-      publishHomeBurst(client, teamId, relatedIds, 200);
+      await publishHomeBurst(client, teamId, relatedIds, 200);
     } catch (_) {}
   } catch (e) {
     console.error("complete_task error:", e?.data || e);
@@ -1088,7 +1085,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
           [updated.requester_user_id, ...(targets || [])].filter(Boolean),
         ),
       );
-      publishHomeBurst(client, teamId, toRefresh, 200);
+      await publishHomeBurst(client, teamId, toRefresh, 200);
     } catch (_) {}
 
     // thread card update
@@ -1121,7 +1118,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
       }
     }
     try {
-      publishHomeBurst(client, teamId, [body.user.id], 200);
+      await publishHomeBurst(client, teamId, [body.user.id], 200);
     } catch (_) {}
 
     // best effort: update original DM message if action came from DM
@@ -1238,7 +1235,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
           ),
         ),
       );
-      publishHomeBurst(client, teamId, relatedIds, 200);
+      await publishHomeBurst(client, teamId, relatedIds, 200);
     } catch (_) {}
   } catch (e) {
     console.error("status_select error:", e?.data || e);
@@ -1263,14 +1260,16 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
 
     // 莉墓ｧ伜､画峩・夊ｪｰ縺ｧ繧る夢隕ｧ蜿ｯ・井ｾ晞ｼ閠・・蟇ｾ蠢懆・・蟇ｾ雎｡閠・・繧ｦ繧ｩ繝・メ繝｣繝ｼ繝ｻ縺昴・莉厄ｼ・
     // targets / completions
-    const targetsRes = await dbQuery(
-      `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
-      [teamId, taskId],
-    );
-    const completionsRes = await dbQuery(
-      `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
-      [teamId, taskId],
-    );
+    const [targetsRes, completionsRes] = await Promise.all([
+      dbQuery(
+        `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+        [teamId, taskId],
+      ),
+      dbQuery(
+        `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+        [teamId, taskId],
+      ),
+    ]);
 
     const targets = (targetsRes.rows || [])
       .map((r) => r.user_id)
@@ -1282,7 +1281,7 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
     const done = targets.filter((u) => doneSet.has(u));
     const todo = targets.filter((u) => !doneSet.has(u));
 
-    const listText = (arr, emptyText) => {
+    const doneListText = (arr, emptyText) => {
       if (!arr.length) return emptyText;
       const MAX = 50;
       const head = arr
@@ -1294,6 +1293,35 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
     };
 
     const meta2 = { teamId, taskId, origin: "progress" };
+
+    // 未完了者: 各ユーザーに「外す」ボタンを付ける
+    const todoBlocks = [];
+    const MAX_TODO_DISPLAY = 50;
+    for (let i = 0; i < Math.min(todo.length, MAX_TODO_DISPLAY); i++) {
+      const u = todo[i];
+      todoBlocks.push({
+        type: "section",
+        text: { type: "mrkdwn", text: `<@${u}>` },
+        accessory: {
+          type: "button",
+          text: { type: "plain_text", text: "対象から外す" },
+          action_id: "remove_target_user",
+          value: JSON.stringify({ teamId, taskId, userId: u }),
+          confirm: {
+            title: { type: "plain_text", text: "確認" },
+            text: { type: "mrkdwn", text: `<@${u}> をこのタスクの対象から外しますか？` },
+            confirm: { type: "plain_text", text: "外す" },
+            deny: { type: "plain_text", text: "キャンセル" },
+          },
+        },
+      });
+    }
+    if (todo.length > MAX_TODO_DISPLAY) {
+      todoBlocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `...ほか ${todo.length - MAX_TODO_DISPLAY} 人` }],
+      });
+    }
 
     const view = {
       type: "modal",
@@ -1314,7 +1342,7 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
         },
         {
           type: "section",
-          text: { type: "mrkdwn", text: listText(done, "まだありません") },
+          text: { type: "mrkdwn", text: doneListText(done, "まだありません") },
         },
         { type: "divider" },
 
@@ -1322,10 +1350,9 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
           type: "section",
           text: { type: "mrkdwn", text: "*未完了* " + todo.length + "件" },
         },
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: listText(todo, "まだありません") },
-        },
+        ...(todoBlocks.length
+          ? todoBlocks
+          : [{ type: "section", text: { type: "mrkdwn", text: "まだありません" } }]),
       ],
     };
 
@@ -1336,6 +1363,128 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
     }
   } catch (e) {
     console.error("open_progress_modal error:", e?.data || e);
+  }
+});
+
+// ================================
+// Remove target user from broadcast task
+// ================================
+app.action("remove_target_user", async ({ ack, body, action, client }) => {
+  await ack();
+
+  try {
+    const p = safeJsonParse(action?.value || "{}") || {};
+    const { teamId, taskId, userId: targetUserId } = p;
+    if (!teamId || !taskId || !targetUserId) return;
+
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task || task.task_type !== "broadcast") return;
+
+    // 対象者から削除
+    await dbQuery(
+      `DELETE FROM task_targets WHERE team_id=$1 AND task_id=$2 AND user_id=$3`,
+      [teamId, taskId, targetUserId],
+    );
+
+    // total_count を更新
+    const countRes = await dbQuery(
+      `SELECT COUNT(*) as cnt FROM task_targets WHERE team_id=$1 AND task_id=$2`,
+      [teamId, taskId],
+    );
+    const newTotal = parseInt(countRes.rows[0]?.cnt || "0", 10);
+    await dbQuery(
+      `UPDATE tasks SET total_count=$3, updated_at=now() WHERE team_id=$1 AND id=$2`,
+      [teamId, taskId, newTotal],
+    );
+
+    // 全員完了チェック（削除後に全員完了になるケース）
+    const doneCount = await dbCountCompletions(teamId, taskId);
+    if (newTotal > 0 && doneCount >= newTotal && !["done", "cancelled"].includes(task.status)) {
+      await dbUpdateStatus(teamId, taskId, "done");
+    }
+
+    // 進捗一覧モーダルを更新（再構築）
+    const [targetsRes2, completionsRes2] = await Promise.all([
+      dbQuery(
+        `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+        [teamId, taskId],
+      ),
+      dbQuery(
+        `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+        [teamId, taskId],
+      ),
+    ]);
+
+    const targets2 = (targetsRes2.rows || []).map((r) => r.user_id).filter(Boolean);
+    const doneSet2 = new Set((completionsRes2.rows || []).map((r) => r.user_id).filter(Boolean));
+    const done2 = targets2.filter((u) => doneSet2.has(u));
+    const todo2 = targets2.filter((u) => !doneSet2.has(u));
+
+    const doneListText2 = (arr, emptyText) => {
+      if (!arr.length) return emptyText;
+      const MAX = 50;
+      const head = arr.slice(0, MAX).map((u) => `・ <@${u}>`).join("\n");
+      const more = arr.length > MAX ? "\n...ほか " + (arr.length - MAX) + " 人" : "";
+      return head + more;
+    };
+
+    const todoBlocks2 = [];
+    const MAX_TODO = 50;
+    for (let i = 0; i < Math.min(todo2.length, MAX_TODO); i++) {
+      const u = todo2[i];
+      todoBlocks2.push({
+        type: "section",
+        text: { type: "mrkdwn", text: `<@${u}>` },
+        accessory: {
+          type: "button",
+          text: { type: "plain_text", text: "対象から外す" },
+          action_id: "remove_target_user",
+          value: JSON.stringify({ teamId, taskId, userId: u }),
+          confirm: {
+            title: { type: "plain_text", text: "確認" },
+            text: { type: "mrkdwn", text: `<@${u}> をこのタスクの対象から外しますか？` },
+            confirm: { type: "plain_text", text: "外す" },
+            deny: { type: "plain_text", text: "キャンセル" },
+          },
+        },
+      });
+    }
+    if (todo2.length > MAX_TODO) {
+      todoBlocks2.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `...ほか ${todo2.length - MAX_TODO} 人` }],
+      });
+    }
+
+    const updatedView = {
+      type: "modal",
+      callback_id: "progress_modal",
+      private_metadata: JSON.stringify({ teamId, taskId, origin: "progress" }),
+      title: { type: "plain_text", text: "進捗一覧" },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [
+        { type: "header", text: { type: "plain_text", text: "完了 / 未完了" } },
+        { type: "divider" },
+        { type: "section", text: { type: "mrkdwn", text: "*完了* " + done2.length + "件" } },
+        { type: "section", text: { type: "mrkdwn", text: doneListText2(done2, "まだありません") } },
+        { type: "divider" },
+        { type: "section", text: { type: "mrkdwn", text: "*未完了* " + todo2.length + "件" } },
+        ...(todoBlocks2.length
+          ? todoBlocks2
+          : [{ type: "section", text: { type: "mrkdwn", text: "まだありません" } }]),
+      ],
+    };
+
+    await client.views.update({
+      view_id: body.view.id,
+      hash: body.view.hash,
+      view: updatedView,
+    });
+
+    // ホームタブ更新
+    await publishHomeBurst(client, teamId, [body.user.id, task.requester_user_id].filter(Boolean), 200);
+  } catch (e) {
+    console.error("remove_target_user error:", e?.data || e);
   }
 });
 
@@ -1661,7 +1810,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     }
 
     try {
-      publishHomeBurst(client, teamId, usersToRefresh, 250);
+      await publishHomeBurst(client, teamId, usersToRefresh, 250);
     } catch (_) {}
 
     try {
@@ -2266,10 +2415,10 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
         updated.assignee_id,
         actorUserId,
       ].filter(Boolean);
-      publishHomeBurst(client, teamId, users, 250);
+      await publishHomeBurst(client, teamId, users, 250);
     } catch (_) {}
 
-    // ===== 笘・％縺薙′譛ｬ鬘鯉ｼ夊レ髱｢縺ｮ隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧呈怙譁ｰ縺ｧ蜀肴緒逕ｻ =====
+    // =====笘・％縺薙′譛ｬ鬘鯉ｼ夊レ髱｢縺ｮ隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧呈怙譁ｰ縺ｧ蜀肴緒逕ｻ =====
     // Slack 縺梧署萓帙☆繧・previous_view_id 縺悟叙繧後ｋ縺ｪ繧峨◎繧後′譛蜆ｪ蜈・
     const prevViewId = body.view?.previous_view_id || null;
 
@@ -2403,7 +2552,7 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
           ),
         ),
       );
-      publishHomeBurst(client, teamId, relatedIds, 200);
+      await publishHomeBurst(client, teamId, relatedIds, 200);
     } catch (_) {}
   } catch (e) {
     console.error("reopen_task error:", e?.data || e);

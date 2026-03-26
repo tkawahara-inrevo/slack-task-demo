@@ -85,17 +85,26 @@ async function runDueNotifyJob() {
   `;
   const tasks = (await dbQuery(q, [today])).rows;
 
-  for (const t of tasks) {
-    try {
-      await notifyUserDM(t.requester_user_id, t, "依頼者");
-      await notifyUserDM(t.assignee_id, t, "対応者");
-      await dbQuery(
-        `UPDATE tasks SET notified_at = now() WHERE team_id=$1 AND id=$2`,
-        [t.team_id, t.id],
-      );
-    } catch (e) {
-      console.error("notify error:", e?.data || e);
-    }
+  // レート制限を考慮して5件ずつバッチ並列処理
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+    const batch = tasks.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map(async (t) => {
+        try {
+          await Promise.all([
+            notifyUserDM(t.requester_user_id, t, "依頼者"),
+            notifyUserDM(t.assignee_id, t, "対応者"),
+          ]);
+          await dbQuery(
+            `UPDATE tasks SET notified_at = now() WHERE team_id=$1 AND id=$2`,
+            [t.team_id, t.id],
+          );
+        } catch (e) {
+          console.error("notify error:", e?.data || e);
+        }
+      }),
+    );
   }
 
   console.log(`[notify] done. today=${today} count=${tasks.length}`);

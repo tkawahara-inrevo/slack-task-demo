@@ -258,14 +258,15 @@ const { expandTargetsFromGroups } = registerTaskUiFeature({
 
 
 async function publishHomeBurst(client, teamId, userIds, intervalMs = 200) {
-  publishHomeForUsers(client, teamId, userIds, intervalMs);
+  // 1回目は await で確実に反映してからリトライ
+  await publishHomeForUsers(client, teamId, userIds, intervalMs);
   setTimeout(
     () => publishHomeForUsers(client, teamId, userIds, intervalMs),
-    intervalMs,
+    1500,
   );
   setTimeout(
     () => publishHomeForUsers(client, teamId, userIds, intervalMs),
-    intervalMs * 2,
+    4000,
   );
 }
 
@@ -1651,11 +1652,13 @@ app.function(
       }
 
       const taskId = randomUUID();
-      const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
 
       if (assigneeIds.length === 1) {
         const only = assigneeIds[0];
-        const assigneeDept = await resolveDeptForUser(teamId, only);
+        const [requesterDept, assigneeDept] = await Promise.all([
+          resolveDeptForUser(teamId, requesterUserId),
+          resolveDeptForUser(teamId, only),
+        ]);
 
         const created = await dbCreateTask({
           id: taskId,
@@ -1690,7 +1693,7 @@ app.function(
         }
 
         try {
-          publishHomeBurst(client, teamId, [requesterUserId, only], 200);
+          await publishHomeBurst(client, teamId, [requesterUserId, only], 200);
         } catch (e) {
           logger?.warn?.("home publish error", e);
         }
@@ -1716,6 +1719,7 @@ app.function(
         return;
       }
 
+      const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
       const assigneeLabel =
         assigneeIds.length >= 2
           ? targetList.map((u) => `<@${u}>`).join(" ")
@@ -1764,7 +1768,7 @@ app.function(
         const toRefresh = Array.from(
           new Set([requesterUserId, ...targetList].filter(Boolean)),
         );
-        publishHomeBurst(client, teamId, toRefresh, 200);
+        await publishHomeBurst(client, teamId, toRefresh, 200);
       } catch (e) {
         logger?.warn?.("home publish error", e);
       }
@@ -1904,9 +1908,11 @@ app.function(
         });
         return;
       }
-const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
 const taskId = randomUUID();
-const assigneeLabel = await buildAssigneeLabelRaw(teamId, assigneeIds, []);
+const [requesterDept, assigneeLabel] = await Promise.all([
+  resolveDeptForUser(teamId, requesterUserId),
+  buildAssigneeLabelRaw(teamId, assigneeIds, []),
+]);
 
 const created = await dbCreateTask({
   id: taskId,
@@ -1951,7 +1957,7 @@ const created = await dbCreateTask({
         const toRefresh = Array.from(
           new Set([requesterUserId, ...assigneeIds].filter(Boolean)),
         );
-        publishHomeBurst(client, teamId, toRefresh, 200);
+        await publishHomeBurst(client, teamId, toRefresh, 200);
       } catch (e) {
         logger?.warn?.("home publish error", e);
       }
@@ -2249,7 +2255,7 @@ app.function(
         const toRefresh = Array.from(
           new Set([requesterUserId, ...targetList].filter(Boolean)),
         );
-        publishHomeBurst(client, teamId, toRefresh, 200);
+        await publishHomeBurst(client, teamId, toRefresh, 200);
       } catch (e) {
         logger?.warn?.("home publish error", e);
       }

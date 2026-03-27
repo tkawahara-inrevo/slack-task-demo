@@ -4,6 +4,7 @@ function registerNotificationJobs(deps) {
     cron,
     cutAfterSlash,
     canUserReceiveDm = async () => true,
+    getUserDueSchedule = async () => "morning_only",
     dbGetNotificationThread,
     dbQuery,
     dbUpsertNotificationThread,
@@ -115,6 +116,62 @@ cron.schedule(
   () => {
     runDueNotifyJob().catch((e) =>
       console.error("runDueNotifyJob error:", e?.data || e),
+    );
+  },
+  { timezone: "Asia/Tokyo" },
+);
+
+// ================================
+// 16:00 午後リマインド（設定ユーザーのみ）
+// ================================
+async function runAfternoonDueNotifyJob() {
+  const today = todayJstYmd();
+
+  // 今日が期限でまだ未完了のタスク（朝に通知済みかどうかは問わない）
+  const q = `
+    SELECT *
+    FROM tasks
+    WHERE due_date = $1
+      AND status NOT IN ('done','cancelled')
+      AND (task_type IS NULL OR task_type='personal')
+    ORDER BY created_at ASC
+    LIMIT 500;
+  `;
+  const tasks = (await dbQuery(q, [today])).rows;
+
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+    const batch = tasks.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map(async (t) => {
+        try {
+          // 各ユーザーの午後通知設定をチェック
+          const users = [
+            { id: t.requester_user_id, role: "依頼者" },
+            { id: t.assignee_id, role: "対応者" },
+          ];
+          for (const u of users) {
+            if (!u.id) continue;
+            const schedule = await getUserDueSchedule(t.team_id, u.id);
+            if (schedule === "morning_and_afternoon") {
+              await notifyUserDM(u.id, t, `${u.role}・午後リマインド`);
+            }
+          }
+        } catch (e) {
+          console.error("afternoon notify error:", e?.data || e);
+        }
+      }),
+    );
+  }
+
+  console.log(`[afternoon-notify] done. today=${today} count=${tasks.length}`);
+}
+
+cron.schedule(
+  "0 16 * * *",
+  () => {
+    runAfternoonDueNotifyJob().catch((e) =>
+      console.error("runAfternoonDueNotifyJob error:", e?.data || e),
     );
   },
   { timezone: "Asia/Tokyo" },

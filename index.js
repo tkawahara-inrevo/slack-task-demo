@@ -173,6 +173,7 @@ const {
   isOverdueChannelNotificationEnabled,
   isReactionTaskifyEnabled,
   isUserDmEnabled,
+  getUserDueSchedule,
   openTeamSettingsModal,
   openUserSettingsModal,
   resolveHomeDefaults,
@@ -219,6 +220,7 @@ registerNotificationJobs({
   shortenAssigneeLabel,
   shortenOneLine,
   todayJstYmd,
+  getUserDueSchedule,
 });
 
 const {

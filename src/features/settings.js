@@ -35,6 +35,7 @@ function registerSettingsFeature(deps) {
     homeRange: "inherit",
     homeState: "inherit",
     dueDmNotificationsEnabled: "inherit",
+    dueNotificationSchedule: "morning_only", // "morning_only" = 朝9時のみ, "morning_and_afternoon" = 朝9時＋16時
     completionDmNotificationsEnabled: "inherit",
     commentDmNotificationsEnabled: "inherit",
     homeProjectFilter: "",  // プロジェクトIDでホームタブをフィルター（空=フィルターなし）
@@ -118,8 +119,13 @@ function registerSettingsFeature(deps) {
       ),
       dueDmNotificationsEnabled: pickChoice(
         src.dueDmNotificationsEnabled,
-        ["inherit", "true", "false"],
-        DEFAULT_USER_SETTINGS.dueDmNotificationsEnabled,
+        ["inherit", "true"],
+        src.dueDmNotificationsEnabled === "false" ? "inherit" : DEFAULT_USER_SETTINGS.dueDmNotificationsEnabled,
+      ),
+      dueNotificationSchedule: pickChoice(
+        src.dueNotificationSchedule,
+        ["morning_only", "morning_and_afternoon"],
+        DEFAULT_USER_SETTINGS.dueNotificationSchedule,
       ),
       completionDmNotificationsEnabled: pickChoice(
         src.completionDmNotificationsEnabled,
@@ -222,6 +228,12 @@ function registerSettingsFeature(deps) {
     return true;
   }
 
+  async function getUserDueSchedule(teamId, userId) {
+    if (!teamId || !userId) return "morning_only";
+    const us = await getUserSettings(teamId, userId);
+    return us.dueNotificationSchedule || "morning_only";
+  }
+
   async function canManageTeamSettings(client, userId) {
     if (!userId) return false;
     try {
@@ -239,24 +251,11 @@ function registerSettingsFeature(deps) {
 
   function buildUserSettingsModalView(teamId, userId, settings, opts = {}) {
     const { projects = [], dashTeams = [] } = opts;
-    const displayModeOptions = [
-      { text: { type: "plain_text", text: "チーム設定に従う" }, value: "inherit" },
-      { text: { type: "plain_text", text: "標準表示" }, value: "standard" },
-      { text: { type: "plain_text", text: "コンパクト表示" }, value: "compact" },
+    const dueScheduleOptions = [
+      { text: { type: "plain_text", text: "朝 9:00 のみ" }, value: "morning_only" },
+      { text: { type: "plain_text", text: "朝 9:00 ＋ 16:00" }, value: "morning_and_afternoon" },
     ];
-    const homeRangeOptions = [
-      { text: { type: "plain_text", text: "チーム設定に従う" }, value: "inherit" },
-      { text: { type: "plain_text", text: "自分に関係あるもの" }, value: "to_me" },
-      { text: { type: "plain_text", text: "自分が依頼したもの" }, value: "requested_by_me" },
-      { text: { type: "plain_text", text: "すべて" }, value: "all" },
-    ];
-    const homeStateOptions = [
-      { text: { type: "plain_text", text: "チーム設定に従う" }, value: "inherit" },
-      { text: { type: "plain_text", text: "進行中" }, value: "active" },
-      { text: { type: "plain_text", text: "完了済み" }, value: "done" },
-    ];
-    const dmOptions = [
-      { text: { type: "plain_text", text: "チーム設定に従う" }, value: "inherit" },
+    const dmOnOffOptions = [
       { text: { type: "plain_text", text: "受け取る" }, value: "true" },
       { text: { type: "plain_text", text: "受け取らない" }, value: "false" },
     ];
@@ -270,60 +269,24 @@ function registerSettingsFeature(deps) {
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
         {
-          type: "input",
-          block_id: "home_display_mode",
-          label: { type: "plain_text", text: "Home の表示モード" },
-          element: {
-            type: "static_select",
-            action_id: "value",
-            options: displayModeOptions,
-            initial_option:
-              displayModeOptions.find(
-                (option) => option.value === settings.homeDisplayMode,
-              ) || displayModeOptions[0],
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "*通知設定*",
           },
         },
         {
           type: "input",
-          block_id: "home_range",
-          label: { type: "plain_text", text: "Home の初期表示範囲" },
+          block_id: "due_notification_schedule",
+          label: { type: "plain_text", text: "期限通知のタイミング" },
           element: {
             type: "static_select",
             action_id: "value",
-            options: homeRangeOptions,
+            options: dueScheduleOptions,
             initial_option:
-              homeRangeOptions.find(
-                (option) => option.value === settings.homeRange,
-              ) || homeRangeOptions[0],
-          },
-        },
-        {
-          type: "input",
-          block_id: "home_state",
-          label: { type: "plain_text", text: "Home の初期ステータス" },
-          element: {
-            type: "static_select",
-            action_id: "value",
-            options: homeStateOptions,
-            initial_option:
-              homeStateOptions.find(
-                (option) => option.value === settings.homeState,
-              ) || homeStateOptions[0],
-          },
-        },
-        {
-          type: "input",
-          block_id: "due_dm_notifications",
-          label: { type: "plain_text", text: "期限通知 DM" },
-          element: {
-            type: "static_select",
-            action_id: "value",
-            options: dmOptions,
-            initial_option:
-              dmOptions.find(
-                (option) =>
-                  option.value === settings.dueDmNotificationsEnabled,
-              ) || dmOptions[0],
+              dueScheduleOptions.find(
+                (option) => option.value === settings.dueNotificationSchedule,
+              ) || dueScheduleOptions[0],
           },
         },
         {
@@ -333,12 +296,12 @@ function registerSettingsFeature(deps) {
           element: {
             type: "static_select",
             action_id: "value",
-            options: dmOptions,
+            options: dmOnOffOptions,
             initial_option:
-              dmOptions.find(
+              dmOnOffOptions.find(
                 (option) =>
-                  option.value === settings.completionDmNotificationsEnabled,
-              ) || dmOptions[0],
+                  option.value === (settings.completionDmNotificationsEnabled === "inherit" ? "true" : settings.completionDmNotificationsEnabled),
+              ) || dmOnOffOptions[0],
           },
         },
         {
@@ -348,12 +311,12 @@ function registerSettingsFeature(deps) {
           element: {
             type: "static_select",
             action_id: "value",
-            options: dmOptions,
+            options: dmOnOffOptions,
             initial_option:
-              dmOptions.find(
+              dmOnOffOptions.find(
                 (option) =>
-                  option.value === settings.commentDmNotificationsEnabled,
-              ) || dmOptions[0],
+                  option.value === (settings.commentDmNotificationsEnabled === "inherit" ? "true" : settings.commentDmNotificationsEnabled),
+              ) || dmOnOffOptions[0],
           },
         },
         // --- Home フィルター ---
@@ -652,19 +615,18 @@ function registerSettingsFeature(deps) {
     }
 
     const nextSettings = normalizeUserSettings({
-      homeDisplayMode:
-        view.state.values.home_display_mode?.value?.selected_option?.value,
-      homeRange:
-        view.state.values.home_range?.value?.selected_option?.value,
-      homeState: view.state.values.home_state?.value?.selected_option?.value,
-      dueDmNotificationsEnabled:
-        view.state.values.due_dm_notifications?.value?.selected_option?.value,
+      homeDisplayMode: "inherit",
+      homeRange: "inherit",
+      homeState: "inherit",
+      dueDmNotificationsEnabled: "true",
+      dueNotificationSchedule:
+        view.state.values.due_notification_schedule?.value?.selected_option?.value || "morning_only",
       completionDmNotificationsEnabled:
         view.state.values.completion_dm_notifications?.value?.selected_option
-          ?.value,
+          ?.value || "true",
       commentDmNotificationsEnabled:
         view.state.values.comment_dm_notifications?.value?.selected_option
-          ?.value,
+          ?.value || "true",
       homeProjectFilter: (() => {
         const v = view.state.values.home_project_filter?.value?.selected_option?.value;
         return v === "__none__" ? "" : (v || "");
@@ -775,6 +737,7 @@ function registerSettingsFeature(deps) {
     canManageTeamSettings,
     getTeamSettings,
     getUserSettings,
+    getUserDueSchedule,
     isOverdueChannelNotificationEnabled,
     isReactionTaskifyEnabled,
     isUserDmEnabled,

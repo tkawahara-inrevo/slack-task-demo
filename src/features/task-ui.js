@@ -1745,7 +1745,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
     view: {
       type: "modal",
       callback_id: "edit_task_modal_saving",
-      title: { type: "plain_text", text: "菫晏ｭ倅ｸｭ." },
+      title: { type: "plain_text", text: "\u4fdd\u5b58\u4e2d..." },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
         { type: "section", text: { type: "mrkdwn", text: "保存しています..." } },
@@ -2442,7 +2442,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
     view: {
       type: "modal",
       callback_id: "edit_due_modal_saving",
-      title: { type: "plain_text", text: "菫晏ｭ倅ｸｭ." },
+      title: { type: "plain_text", text: "\u4fdd\u5b58\u4e2d..." },
       close: { type: "plain_text", text: "閉じる" },
       blocks: [
         { type: "section", text: { type: "mrkdwn", text: "保存しています..." } },

@@ -337,7 +337,9 @@ app.view("home_filters_modal", async ({ ack, body, view, client }) => {
 });
 
 async function publishHome({ client, teamId, userId }) {
+  const _t0 = Date.now();
   await ensureHomeStateLoaded(teamId, userId);
+  const _t1 = Date.now();
   const st = getHomeState(teamId, userId);
   const statuses = st.scopeKey === "done" ? DONE_STATUSES : ACTIVE_STATUSES;
 
@@ -1327,6 +1329,7 @@ async function publishHome({ client, teamId, userId }) {
   // ✅ 最後に“必ず残る”余白を付与
   blocks.push(...FOOTER_BLOCKS);
 
+  const _t2 = Date.now();
   await client.views.publish({
     user_id: userId,
     view: {
@@ -1335,6 +1338,8 @@ async function publishHome({ client, teamId, userId }) {
       blocks,
     },
   });
+  const _t3 = Date.now();
+  console.log(`[publishHome] stateLoad=${_t1-_t0}ms build=${_t2-_t1}ms publish=${_t3-_t2}ms total=${_t3-_t0}ms`);
 }
 
 app.options("home_dept_select", async ({ ack, payload }) => {

@@ -159,12 +159,33 @@ async function ensureHomeStateLoaded(teamId, userId) {
 }
 
 function taskLineForHome(task) {
-  // ✅ Home一覧は「タイトル優先」／無ければ本文
-  // ※ タイトル/本文そのものに replace などの加工はかけない
   const rawTitle = String(task.title || "").trim();
-  const rawDesc = String(task.description || "").trim();
 
-  let preview = rawTitle || rawDesc || "（本文なし）";
+  let preview;
+  if (rawTitle) {
+    preview = rawTitle;
+  } else {
+    // タイトルが空 → descriptionからメンションを除去して表示
+    const desc = String(task.description || "").trim();
+    if (!desc) {
+      preview = "（本文なし）";
+    } else {
+      preview = desc
+        .replace(/<@[^>]+>/g, " ")
+        .replace(/<!subteam\^[^>]+>/g, " ")
+        .replace(/<!channel>/g, " ")
+        .replace(/<!here>/g, " ")
+        .replace(/<!everyone>/g, " ")
+        .replace(/(^|\s)[@＠][^\s　]+/g, " ")
+        .replace(/https?:\/\/\S+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!preview) preview = "（本文なし）";
+    }
+  }
+
+  // @表記を抑止（通知防止）
+  preview = preview.replace(/@/g, "＠");
 
   // ★ 最大5行（読み取りのための split のみ。文字列自体は置換しない）
   const MAX_LINES = 5;

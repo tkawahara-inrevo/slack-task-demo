@@ -53,61 +53,71 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <section className="summary-section">
-        <h2>ステータス概要</h2>
-        {summary && <StatusSummary summary={summary} onFilter={(s) => setFilter(f => ({ ...f, status: s, page: 1 }))} />}
-      </section>
-
-      <section className="members-section">
-        <h2>メンバー別タスク数</h2>
-        <MemberList
-          members={members}
-          onSelect={(id) => setFilter(f => ({ ...f, assignee: f.assignee === id ? '' : id, page: 1 }))}
-          selectedId={filter.assignee}
-        />
-      </section>
-
-      {projects.length > 0 && (
-        <section className="projects-section">
-          <h2>プロジェクト</h2>
-          <div className="project-cards">
-            {projects.map((p) => (
-              <Link key={p.id} to={`/projects/${p.id}`} className="project-card">
-                <span className="project-card-name">{p.name}</span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="tasks-section">
-        <div className="tasks-header">
-          <h2>タスク一覧</h2>
-          <div className="filter-controls">
-            {projects.length > 0 && (
-              <select
-                className="project-filter"
-                value={filter.project}
-                onChange={(e) => setFilter(f => ({ ...f, project: e.target.value, page: 1 }))}
-              >
-                <option value="">全プロジェクト</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            )}
-            <div className="filter-info">
-              {filter.status && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, status: '', page: 1 }))}>ステータス: {filter.status} &times;</span>}
-              {filter.assignee && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, assignee: '', page: 1 }))}>担当者フィルター &times;</span>}
-              {filter.project && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, project: '', page: 1 }))}>プロジェクト &times;</span>}
+      <div className="dashboard-layout">
+        <main className="dashboard-main">
+          <div className="tasks-header">
+            <h2>タスク一覧</h2>
+            <div className="filter-controls">
+              {projects.length > 0 && (
+                <select
+                  className="project-filter"
+                  value={filter.project}
+                  onChange={(e) => setFilter(f => ({ ...f, project: e.target.value, page: 1 }))}
+                >
+                  <option value="">全プロジェクト</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
+              <div className="filter-info">
+                {filter.status && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, status: '', page: 1 }))}>ステータス: {filter.status} &times;</span>}
+                {filter.assignee && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, assignee: '', page: 1 }))}>担当者フィルター &times;</span>}
+                {filter.project && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, project: '', page: 1 }))}>プロジェクト &times;</span>}
+              </div>
             </div>
           </div>
-        </div>
-        <TaskTable
-          tasks={tasks.tasks}
-          total={tasks.total}
-          page={tasks.page}
-          onPageChange={(p) => setFilter(f => ({ ...f, page: p }))}
-        />
-      </section>
+          <TaskTable
+            tasks={tasks.tasks}
+            total={tasks.total}
+            page={tasks.page}
+            onPageChange={(p) => setFilter(f => ({ ...f, page: p }))}
+          />
+        </main>
+
+        <aside className="dashboard-sidebar">
+          <section className="sidebar-section">
+            <h2>状態</h2>
+            {summary && (
+              <StatusSummary
+                summary={summary}
+                onFilter={(s) => setFilter(f => ({ ...f, status: s, page: 1 }))}
+                activeStatus={filter.status}
+              />
+            )}
+          </section>
+
+          <section className="sidebar-section">
+            <h2>メンバー</h2>
+            <MemberList
+              members={members}
+              onSelect={(id) => setFilter(f => ({ ...f, assignee: f.assignee === id ? '' : id, page: 1 }))}
+              selectedId={filter.assignee}
+            />
+          </section>
+
+          {projects.length > 0 && (
+            <section className="sidebar-section">
+              <h2>プロジェクト</h2>
+              <div className="sidebar-project-list">
+                {projects.map((p) => (
+                  <Link key={p.id} to={`/projects/${p.id}`} className="sidebar-project-link">
+                    {p.name}
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }

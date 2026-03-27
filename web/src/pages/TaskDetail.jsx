@@ -106,7 +106,22 @@ export default function TaskDetail() {
 
           <div className="sidebar-section">
             <label>担当者</label>
-            <div className="sidebar-value">{task.assigneeDisplayName || task.assignee_id || '-'}</div>
+            {task.task_type === 'broadcast' ? (
+              <div className="sidebar-value">
+                <div className="broadcast-targets-label">
+                  一斉（{task.assignee_label || `${task.total_count ?? '?'}名`}）
+                </div>
+                {task.targets?.length > 0 && (
+                  <ul className="broadcast-targets-list">
+                    {task.targets.map((t) => (
+                      <li key={t.user_id}>{t.displayName}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              <div className="sidebar-value">{task.assigneeDisplayName || task.assignee_id || '-'}</div>
+            )}
           </div>
 
           <div className="sidebar-section">

@@ -2504,6 +2504,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbInsertTaskComment,
     dbCreateTask,
     dbInsertTaskTargets,
+    dbListTargetUserIds,
     randomUUID,
     // Integrations
     dbCreateIntegration,

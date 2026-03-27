@@ -105,6 +105,7 @@ function registerDashboardApi(deps) {
     dbInsertTaskComment,
     dbCreateTask,
     dbInsertTaskTargets,
+    dbListTargetUserIds,
     randomUUID,
     // Integrations
     dbCreateIntegration,
@@ -291,8 +292,21 @@ function registerDashboardApi(deps) {
         ),
       ]);
 
+      // Resolve assigneeDisplayName for each task
+      const tasksWithNames = await Promise.all(
+        dataResult.rows.map(async (t) => {
+          let assigneeDisplayName = null;
+          if (t.task_type === 'broadcast') {
+            assigneeDisplayName = t.assignee_label || null;
+          } else if (t.assignee_id) {
+            assigneeDisplayName = await getUserDisplayName(teamId, t.assignee_id);
+          }
+          return { ...t, assigneeDisplayName };
+        }),
+      );
+
       res.json({
-        tasks: dataResult.rows,
+        tasks: tasksWithNames,
         total: countResult.rows[0]?.total || 0,
         page,
         limit,
@@ -652,10 +666,11 @@ function registerDashboardApi(deps) {
       if (!task) return res.status(404).json({ error: "not_found" });
 
       // Resolve display names
-      const [requesterName, assigneeName, comments] = await Promise.all([
+      const [requesterName, assigneeName, comments, targetUserIds] = await Promise.all([
         task.requester_user_id ? getUserDisplayName(teamId, task.requester_user_id) : Promise.resolve(null),
         task.assignee_id ? getUserDisplayName(teamId, task.assignee_id) : Promise.resolve(null),
         dbListTaskComments(teamId, req.params.id, 100),
+        task.task_type === 'broadcast' ? dbListTargetUserIds(teamId, req.params.id) : Promise.resolve([]),
       ]);
 
       // Resolve comment author names
@@ -666,11 +681,20 @@ function registerDashboardApi(deps) {
         })),
       );
 
+      // Resolve broadcast target display names
+      const targets = await Promise.all(
+        targetUserIds.map(async (uid) => ({
+          user_id: uid,
+          displayName: await getUserDisplayName(teamId, uid),
+        })),
+      );
+
       res.json({
         task: {
           ...task,
           requesterDisplayName: requesterName,
           assigneeDisplayName: assigneeName,
+          targets: task.task_type === 'broadcast' ? targets : [],
         },
         comments: commentsWithNames,
       });

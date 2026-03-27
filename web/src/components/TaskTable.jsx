@@ -24,9 +24,9 @@ export default function TaskTable({ tasks, total, page, onPageChange }) {
         <thead>
           <tr>
             <th>タイトル</th>
+            <th>担当者</th>
             <th>ステータス</th>
             <th>期限</th>
-            <th>種別</th>
             <th>作成日</th>
           </tr>
         </thead>
@@ -37,6 +37,9 @@ export default function TaskTable({ tasks, total, page, onPageChange }) {
           {tasks.map((t) => {
             const isOverdue = t.due_date && t.status !== 'done' && t.status !== 'cancelled'
               && formatDate(t.due_date) < formatDate(new Date());
+            const assigneeLabel = t.task_type === 'broadcast'
+              ? (t.assignee_label ? `一斉（${t.assignee_label}）` : `一斉（${t.total_count ?? '?'}名）`)
+              : (t.assigneeDisplayName || '-');
             return (
               <tr
                 key={t.id}
@@ -44,9 +47,9 @@ export default function TaskTable({ tasks, total, page, onPageChange }) {
                 onClick={() => navigate(`/tasks/${t.id}`)}
               >
                 <td className="task-title">{t.title?.length > 60 ? t.title.slice(0, 60) + '...' : t.title}</td>
+                <td className="task-assignee">{assigneeLabel}</td>
                 <td><span className={`status-badge ${t.status}`}>{STATUS_LABELS[t.status] || t.status}</span></td>
                 <td className={isOverdue ? 'overdue-date' : ''}>{formatDate(t.due_date)}</td>
-                <td>{t.task_type === 'broadcast' ? '一斉' : '個人'}</td>
                 <td>{formatDate(t.created_at)}</td>
               </tr>
             );

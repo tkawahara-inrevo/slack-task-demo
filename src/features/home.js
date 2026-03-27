@@ -171,12 +171,16 @@ function taskLineForHome(task) {
       preview = "（本文なし）";
     } else {
       preview = desc
+        // Slack内部メンション <@Uxxx> / <!subteam^...> / <!channel> 等
         .replace(/<@[^>]+>/g, " ")
         .replace(/<!subteam\^[^>]+>/g, " ")
         .replace(/<!channel>/g, " ")
         .replace(/<!here>/g, " ")
         .replace(/<!everyone>/g, " ")
-        .replace(/(^|\s)[@＠][^\s　]+/g, " ")
+        // @ハンドル（英数字）
+        .replace(/[@＠][\w][\w.-]*/g, " ")
+        // @日本語名（+姓）(+/英名）— 例: @土井 燎/Kagari Doi
+        .replace(/[@＠][^\x00-\x7F]+(?:\s+[^\x00-\x7F]+)*(?:\s*\/\s*[A-Za-z\s.]+)?/g, " ")
         .replace(/https?:\/\/\S+/g, " ")
         .replace(/\s+/g, " ")
         .trim();

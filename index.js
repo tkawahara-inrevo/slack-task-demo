@@ -1343,22 +1343,48 @@ async function openDetailModal(
     throw e;
   }
 
-  // 笨・縺薙％縺九ｉ蜈医・譎る俣縺後°縺九▲縺ｦ繧０K・・iew_id 縺ｧ譖ｴ譁ｰ縺ｧ縺阪ｋ縺溘ａ・・
-  const task = await dbGetTaskById(teamId, taskId);
-  if (!task || !openedViewId) return;
+  // ここから先は時間がかかってもOK — view_id で更新できるため
+  try {
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task || !openedViewId) return;
 
-  const view = await buildDetailModalView({
-    teamId,
-    task,
-    viewerUserId,
-    origin,
-  });
+    const view = await buildDetailModalView({
+      teamId,
+      task,
+      viewerUserId,
+      origin,
+    });
 
-  // 笨・loading 繧呈悽逡ｪUI縺ｫ蟾ｮ縺玲崛縺・
-  await client.views.update({
-    view_id: openedViewId,
-    view,
-  });
+    // loading を本番UIに差し替え
+    await client.views.update({
+      view_id: openedViewId,
+      view,
+    });
+    console.log("[detail_modal] updated", { teamId, taskId });
+  } catch (e) {
+    console.error("[detail_modal] update failed", e?.data || e);
+    // モーダルをエラー表示に差し替えて固まらないようにする
+    if (openedViewId) {
+      try {
+        await client.views.update({
+          view_id: openedViewId,
+          view: {
+            type: "modal",
+            callback_id: "detail_modal_error",
+            title: { type: "plain_text", text: "タスク" },
+            close: { type: "plain_text", text: "閉じる" },
+            blocks: [
+              {
+                type: "section",
+                text: { type: "mrkdwn", text: "タスク詳細の読み込みに失敗しました。もう一度お試しください。" },
+              },
+            ],
+          },
+        });
+      } catch (_) {}
+    }
+    throw e;
+  }
 }
 
 // ================================

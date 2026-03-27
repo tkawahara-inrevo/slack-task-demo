@@ -823,6 +823,7 @@ app.action("open_detail_modal", async ({ ack, body, action, client }) => {
   const teamId = p.teamId || body.team?.id || body.team_id;
   const taskId = p.taskId;
   const origin = p.origin || "home";
+  console.log("[open_detail_modal] received", { teamId, taskId, origin, viewType: body.view?.type });
   if (!teamId || !taskId) return;
 
   try {
@@ -835,7 +836,7 @@ app.action("open_detail_modal", async ({ ack, body, action, client }) => {
       isFromModal: body.view?.type === "modal",
     });
   } catch (e) {
-    console.error("open_detail_modal error:", e?.data || e);
+    console.error("[open_detail_modal] error:", e?.data || e);
   }
 });
 

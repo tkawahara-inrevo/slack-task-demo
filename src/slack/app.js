@@ -9,6 +9,15 @@ const app = new App({
   receiver,
 });
 
+app.error(async (error) => {
+  const payload = error.original?.payload || error.payload;
+  const actionId = payload?.actions?.[0]?.action_id
+    || payload?.callback_id
+    || payload?.type
+    || '(unknown)';
+  console.error("[app.error] unhandled event:", actionId, error.message || error);
+});
+
 module.exports = {
   app,
   receiver,

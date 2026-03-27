@@ -474,6 +474,14 @@ async function dbHasUserCompleted(teamId, taskId, userId) {
   return !!res.rows[0];
 }
 
+// taskIds[] に対して一括で「このユーザーが完了済みか」を返す → Set<taskId>
+async function dbGetUserCompletedTaskIds(teamId, taskIds, userId) {
+  if (!taskIds || !taskIds.length) return new Set();
+  const q = `SELECT task_id FROM task_completions WHERE team_id=$1 AND user_id=$2 AND task_id = ANY($3)`;
+  const res = await dbQuery(q, [teamId, userId, taskIds]);
+  return new Set(res.rows.map((r) => r.task_id));
+}
+
 async function dbUpsertCompletion(teamId, taskId, userId) {
   const q = `
     INSERT INTO task_completions (task_id, team_id, user_id)
@@ -1041,6 +1049,7 @@ module.exports = {
   dbGetUserDept,
   dbGetUserSettings,
   dbHasUserCompleted,
+  dbGetUserCompletedTaskIds,
   dbInsertTaskComment,
   dbInsertTaskTargets,
   dbIsUserTarget,

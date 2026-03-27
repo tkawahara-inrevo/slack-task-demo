@@ -5,6 +5,7 @@ function registerHomeFeature(deps) {
     buildTaskListModalView,
     canUserSeeChannel,
     dbHasUserCompleted,
+    dbGetUserCompletedTaskIds = async () => new Set(),
     dbListBroadcastTasksByStatuses,
     dbListBroadcastTasksByStatusesWithScope,
     dbListPersonalTasksByStatusesWithScope,
@@ -854,11 +855,13 @@ async function publishHome({ client, teamId, userId }) {
           shortNameMap.set(uid, toAtShortName(full));
         }),
       ),
-      Promise.all(
-        broadcastTaskIdsForViewer.map(async (taskId) => {
-          const completed = await dbHasUserCompleted(teamId, taskId, userId);
-          viewerCompletedMap.set(taskId, completed);
-        }),
+      // broadcastの完了済みタスクを一括取得（N回→1回のDBクエリ）
+      dbGetUserCompletedTaskIds(teamId, broadcastTaskIdsForViewer, userId).then(
+        (completedSet) => {
+          for (const taskId of broadcastTaskIdsForViewer) {
+            viewerCompletedMap.set(taskId, completedSet.has(taskId));
+          }
+        },
       ),
     ];
 

@@ -281,12 +281,13 @@ app.event("reaction_added", async ({ event, client, body }) => {
       notified_at: null,
     });
 
-    // リアクションした人にエフェメラルで通知（チャンネル内、本人にだけ見える）
+    // リアクションした人にエフェメラルで通知（スレッド内、本人にだけ見える）
     try {
       const payload = JSON.stringify({ teamId, taskId: created.id });
       await client.chat.postEphemeral({
         channel: channelId,
         user: actorUserId,
+        thread_ts: msgTs,
         text: `✅ タスク化しました: ${noMention(created.title)}`,
         blocks: [
           {
@@ -426,12 +427,13 @@ app.event("message", async ({ event, client, body }) => {
       notified_at: null,
     });
 
-    // キーワードタスク化した人にエフェメラル通知
+    // キーワードタスク化した人にエフェメラル通知（スレッド内）
     try {
       const payload = JSON.stringify({ teamId, taskId: created.id });
       await client.chat.postEphemeral({
         channel: channelId,
         user: actorUserId,
+        thread_ts: msgTs,
         text: `✅ タスク化しました: ${noMention(created.title)}`,
         blocks: [
           {

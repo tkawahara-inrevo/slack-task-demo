@@ -43,6 +43,7 @@ export const api = {
     return apiFetch(`/tasks?${qs}`);
   },
   members: () => apiFetch('/members'),
+  usergroups: () => apiFetch('/usergroups'),
   overdue: () => apiFetch('/overdue'),
   myTeams: () => apiFetch('/my-teams'),
   projects: () => apiFetch('/projects'),
@@ -98,7 +99,13 @@ export const api = {
   localFields: () => apiFetch('/integrations/local-fields'),
 
   // Analytics
-  analyticsMemberCompletion: () => apiFetch('/analytics/member-completion'),
-  analyticsDueCompliance: () => apiFetch('/analytics/due-compliance'),
+  analyticsMemberCompletion: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/analytics/member-completion${qs ? '?' + qs : ''}`);
+  },
+  analyticsDueCompliance: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/analytics/due-compliance${qs ? '?' + qs : ''}`);
+  },
   analyticsProjectProgress: () => apiFetch('/analytics/project-progress'),
 };

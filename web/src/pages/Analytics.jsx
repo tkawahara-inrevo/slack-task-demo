@@ -50,22 +50,48 @@ export default function Analytics() {
   const [memberData, setMemberData] = useState([]);
   const [dueData, setDueData] = useState([]);
   const [projectData, setProjectData] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [usergroups, setUsergroups] = useState([]);
+  const [filter, setFilter] = useState({ assignee: '', usergroup: '' });
   const [loading, setLoading] = useState(true);
+  const [filterLoading, setFilterLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([
       api.analyticsMemberCompletion(),
       api.analyticsDueCompliance(),
       api.analyticsProjectProgress(),
+      api.members(),
+      api.usergroups(),
     ])
-      .then(([m, d, p]) => {
+      .then(([m, d, p, mem, ug]) => {
         setMemberData(m.members || []);
         setDueData(d.weeks || []);
         setProjectData(p.projects || []);
+        setMembers(mem.members || []);
+        setUsergroups(ug.usergroups || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    setFilterLoading(true);
+    const params = {};
+    if (filter.assignee) params.assignee = filter.assignee;
+    if (filter.usergroup) params.usergroup = filter.usergroup;
+    Promise.all([
+      api.analyticsMemberCompletion(params),
+      api.analyticsDueCompliance(params),
+    ])
+      .then(([m, d]) => {
+        setMemberData(m.members || []);
+        setDueData(d.weeks || []);
+      })
+      .catch(console.error)
+      .finally(() => setFilterLoading(false));
+  }, [filter]);
 
   if (loading) return <div className="loading">読み込み中...</div>;
 
@@ -75,6 +101,39 @@ export default function Analytics() {
     <div className="analytics-page">
       <div className="task-detail-nav">
         <Link to="/" className="back-btn">&larr; ダッシュボード</Link>
+      </div>
+
+      <div className="filter-panel" style={{ marginBottom: 24 }}>
+        <div className="filter-panel-row">
+          <select
+            className="filter-select"
+            value={filter.assignee}
+            onChange={(e) => setFilter(f => ({ ...f, assignee: e.target.value }))}
+          >
+            <option value="">担当者：全員</option>
+            {members.map((m) => (
+              <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>
+            ))}
+          </select>
+          {usergroups.length > 0 && (
+            <select
+              className="filter-select"
+              value={filter.usergroup}
+              onChange={(e) => setFilter(f => ({ ...f, usergroup: e.target.value }))}
+            >
+              <option value="">チーム：すべて</option>
+              {usergroups.map((g) => (
+                <option key={g.id} value={g.id}>@{g.handle}</option>
+              ))}
+            </select>
+          )}
+          {(filter.assignee || filter.usergroup) && (
+            <button className="filter-clear-btn" onClick={() => setFilter({ assignee: '', usergroup: '' })}>
+              クリア
+            </button>
+          )}
+          {filterLoading && <span style={{ color: 'var(--gray-500)', fontSize: 13 }}>更新中...</span>}
+        </div>
       </div>
 
       <h1>分析ダッシュボード</h1>

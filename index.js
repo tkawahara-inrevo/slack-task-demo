@@ -2516,6 +2516,8 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbCreateSyncLog,
     dbUpdateSyncLog,
     dbListSyncLogs,
+    getSubteamIdMap,
+    getUsergroupMembers,
   });
 
   // Root redirect

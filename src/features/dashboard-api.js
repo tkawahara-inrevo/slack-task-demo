@@ -117,6 +117,8 @@ function registerDashboardApi(deps) {
     dbCreateSyncLog,
     dbUpdateSyncLog,
     dbListSyncLogs,
+    getSubteamIdMap,
+    getUsergroupMembers,
   } = deps;
 
   const kintone = require("./kintone-connector");
@@ -231,6 +233,8 @@ function registerDashboardApi(deps) {
       const status = req.query.status || null;
       const assignee = req.query.assignee || null;
       const projectId = req.query.project || null;
+      const overdue = req.query.overdue === "1" || req.query.overdue === "true";
+      const usergroupId = req.query.usergroup || null;
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
       const offset = (page - 1) * limit;
@@ -258,6 +262,19 @@ function registerDashboardApi(deps) {
         conditions.push(`pt.project_id = $${idx++}`);
         params.push(projectId);
       }
+      if (overdue) {
+        conditions.push(`t.due_date < CURRENT_DATE`);
+        conditions.push(`t.status NOT IN ('done','cancelled')`);
+      }
+      if (usergroupId) {
+        const members = await getUsergroupMembers(teamId, usergroupId);
+        if (members.length > 0) {
+          conditions.push(`t.assignee_id = ANY($${idx++})`);
+          params.push(members);
+        } else {
+          conditions.push("false");
+        }
+      }
 
       const where = conditions.join(" AND ");
 
@@ -282,6 +299,19 @@ function registerDashboardApi(deps) {
       });
     } catch (e) {
       console.error("dashboard /tasks error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- /usergroups ---
+  expressApp.get("/api/dashboard/usergroups", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const idToHandle = await getSubteamIdMap(teamId);
+      const usergroups = Array.from(idToHandle.entries()).map(([id, handle]) => ({ id, handle }));
+      res.json({ usergroups });
+    } catch (e) {
+      console.error("dashboard /usergroups error:", e);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -798,13 +828,30 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/dashboard/analytics/member-completion", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
+      const filterAssignee = req.query.assignee || null;
+      const filterUsergroup = req.query.usergroup || null;
       const params = [teamId];
-      let scopeWhere = "";
+      const extraConds = [];
+      let idx = 2;
       if (role !== "admin") {
         const visible = await getVisibleUserIds(teamId, userId);
-        scopeWhere = "AND assignee_id = ANY($2)";
+        extraConds.push(`assignee_id = ANY($${idx++})`);
         params.push(visible);
       }
+      if (filterAssignee) {
+        extraConds.push(`assignee_id = $${idx++}`);
+        params.push(filterAssignee);
+      }
+      if (filterUsergroup) {
+        const members = await getUsergroupMembers(teamId, filterUsergroup);
+        if (members.length > 0) {
+          extraConds.push(`assignee_id = ANY($${idx++})`);
+          params.push(members);
+        } else {
+          extraConds.push("false");
+        }
+      }
+      const scopeWhere = extraConds.length ? "AND " + extraConds.join(" AND ") : "";
 
       const q = `
         SELECT assignee_id,
@@ -841,13 +888,30 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/dashboard/analytics/due-compliance", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
+      const filterAssignee = req.query.assignee || null;
+      const filterUsergroup = req.query.usergroup || null;
       const params = [teamId];
-      let scopeWhere = "";
+      const extraConds = [];
+      let idx = 2;
       if (role !== "admin") {
         const visible = await getVisibleUserIds(teamId, userId);
-        scopeWhere = "AND assignee_id = ANY($2)";
+        extraConds.push(`assignee_id = ANY($${idx++})`);
         params.push(visible);
       }
+      if (filterAssignee) {
+        extraConds.push(`assignee_id = $${idx++}`);
+        params.push(filterAssignee);
+      }
+      if (filterUsergroup) {
+        const members = await getUsergroupMembers(teamId, filterUsergroup);
+        if (members.length > 0) {
+          extraConds.push(`assignee_id = ANY($${idx++})`);
+          params.push(members);
+        } else {
+          extraConds.push("false");
+        }
+      }
+      const scopeWhere = extraConds.length ? "AND " + extraConds.join(" AND ") : "";
 
       // 期限付きで完了したタスクの期限遵守を週別に集計
       const q = `

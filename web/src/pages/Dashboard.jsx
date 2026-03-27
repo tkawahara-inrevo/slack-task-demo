@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import StatusSummary from '../components/StatusSummary';
 import MemberList from '../components/MemberList';
@@ -10,17 +10,19 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [usergroups, setUsergroups] = useState([]);
   const [tasks, setTasks] = useState({ tasks: [], total: 0, page: 1 });
-  const [filter, setFilter] = useState({ status: '', assignee: '', project: '', page: 1 });
+  const [filter, setFilter] = useState({ status: '', assignee: '', project: '', usergroup: '', overdue: false, page: 1 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.me(), api.summary(), api.members(), api.projects()])
-      .then(([me, sum, mem, proj]) => {
+    Promise.all([api.me(), api.summary(), api.members(), api.projects(), api.usergroups()])
+      .then(([me, sum, mem, proj, ug]) => {
         setUser(me);
         setSummary(sum.summary);
         setMembers(mem.members);
         setProjects(proj.projects);
+        setUsergroups(ug.usergroups || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -31,8 +33,14 @@ export default function Dashboard() {
     if (filter.status) params.status = filter.status;
     if (filter.assignee) params.assignee = filter.assignee;
     if (filter.project) params.project = filter.project;
+    if (filter.usergroup) params.usergroup = filter.usergroup;
+    if (filter.overdue) params.overdue = '1';
     api.tasks(params).then(setTasks).catch(console.error);
   }, [filter]);
+
+  const setF = (patch) => setFilter(f => ({ ...f, ...patch, page: 1 }));
+
+  const activeFilterCount = [filter.status, filter.assignee, filter.project, filter.usergroup, filter.overdue].filter(Boolean).length;
 
   if (loading) return <div className="loading">読み込み中...</div>;
 
@@ -55,26 +63,72 @@ export default function Dashboard() {
 
       <div className="dashboard-layout">
         <main className="dashboard-main">
-          <div className="tasks-header">
-            <h2>タスク一覧</h2>
-            <div className="filter-controls">
+          {/* Filter panel */}
+          <div className="filter-panel">
+            <div className="filter-panel-row">
+              <select
+                className="filter-select"
+                value={filter.assignee}
+                onChange={(e) => setF({ assignee: e.target.value })}
+              >
+                <option value="">担当者：全員</option>
+                {members.map((m) => (
+                  <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>
+                ))}
+              </select>
+
+              {usergroups.length > 0 && (
+                <select
+                  className="filter-select"
+                  value={filter.usergroup}
+                  onChange={(e) => setF({ usergroup: e.target.value })}
+                >
+                  <option value="">チーム：すべて</option>
+                  {usergroups.map((g) => (
+                    <option key={g.id} value={g.id}>@{g.handle}</option>
+                  ))}
+                </select>
+              )}
+
               {projects.length > 0 && (
                 <select
-                  className="project-filter"
+                  className="filter-select"
                   value={filter.project}
-                  onChange={(e) => setFilter(f => ({ ...f, project: e.target.value, page: 1 }))}
+                  onChange={(e) => setF({ project: e.target.value })}
                 >
-                  <option value="">全プロジェクト</option>
+                  <option value="">プロジェクト：すべて</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               )}
-              <div className="filter-info">
-                {filter.status && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, status: '', page: 1 }))}>ステータス: {filter.status} &times;</span>}
-                {filter.assignee && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, assignee: '', page: 1 }))}>担当者フィルター &times;</span>}
-                {filter.project && <span className="filter-tag" onClick={() => setFilter(f => ({ ...f, project: '', page: 1 }))}>プロジェクト &times;</span>}
-              </div>
+
+              <label className="filter-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={filter.overdue}
+                  onChange={(e) => setF({ overdue: e.target.checked })}
+                />
+                期限切れのみ
+              </label>
+
+              {activeFilterCount > 0 && (
+                <button
+                  className="filter-clear-btn"
+                  onClick={() => setFilter({ status: '', assignee: '', project: '', usergroup: '', overdue: false, page: 1 })}
+                >
+                  クリア
+                </button>
+              )}
             </div>
+
+            {filter.status && (
+              <div className="filter-tags">
+                <span className="filter-tag" onClick={() => setF({ status: '' })}>
+                  ステータス: {filter.status} &times;
+                </span>
+              </div>
+            )}
           </div>
+
           <TaskTable
             tasks={tasks.tasks}
             total={tasks.total}
@@ -89,7 +143,7 @@ export default function Dashboard() {
             {summary && (
               <StatusSummary
                 summary={summary}
-                onFilter={(s) => setFilter(f => ({ ...f, status: s, page: 1 }))}
+                onFilter={(s) => setF({ status: s })}
                 activeStatus={filter.status}
               />
             )}
@@ -99,7 +153,7 @@ export default function Dashboard() {
             <h2>メンバー</h2>
             <MemberList
               members={members}
-              onSelect={(id) => setFilter(f => ({ ...f, assignee: f.assignee === id ? '' : id, page: 1 }))}
+              onSelect={(id) => setF({ assignee: filter.assignee === id ? '' : id })}
               selectedId={filter.assignee}
             />
           </section>

@@ -2419,7 +2419,7 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
 // ================================
 // Slash Command: /dashboard
 // ================================
-app.command("/dashboard", async ({ ack, body, client }) => {
+app.command("/dashboard", async ({ ack, body, respond }) => {
   await ack();
   try {
     const teamId = body.team_id;
@@ -2427,12 +2427,11 @@ app.command("/dashboard", async ({ ack, body, client }) => {
     if (!teamId || !userId) return;
 
     const token = generateToken(teamId, userId);
-    const baseUrl = (process.env.DASHBOARD_BASE_URL || `https://${process.env.DOMAIN || "localhost:3000"}`).replace(/\/$/, "");
+    const baseUrl = (process.env.DASHBOARD_BASE_URL || "https://inrevo-task.com").replace(/\/$/, "");
     const url = `${baseUrl}/dashboard/auth?token=${token}`;
 
-    await client.chat.postEphemeral({
-      channel: body.channel_id,
-      user: userId,
+    await respond({
+      response_type: "ephemeral",
       text: `管理ダッシュボードを開く: ${url}`,
       blocks: [
         {

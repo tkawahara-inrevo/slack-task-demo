@@ -1314,75 +1314,27 @@ async function openDetailModal(
     isFromModal = false,
   },
 ) {
-  const loadingView = {
-    type: "modal",
-    callback_id: "detail_modal_loading",
-    title: { type: "plain_text", text: "タスク" },
-    close: { type: "plain_text", text: "閉じる" },
-    blocks: [
-      {
-        type: "section",
-        text: { type: "mrkdwn", text: "読み込み中..." },
-      },
-    ],
-  };
+  // DB・表示名解決を先に行い、trigger_id を1回だけ views.open/push に使う
+  // (loading→update の2ステップはモバイル/ブラウザで描画されないことがあるため)
+  const task = await dbGetTaskById(teamId, taskId);
+  if (!task) return;
 
-  let openedViewId = null;
+  const view = await buildDetailModalView({
+    teamId,
+    task,
+    viewerUserId,
+    origin,
+  });
 
   try {
-    // 笨・繝｢繝ｼ繝繝ｫ荳翫・繝懊ち繝ｳ縺九ｉ縺ｯ views.push縲√◎繧御ｻ･螟悶・ views.open
     if (isFromModal) {
-      const res = await client.views.push({ trigger_id, view: loadingView });
-      openedViewId = res?.view?.id || null;
+      await client.views.push({ trigger_id, view });
     } else {
-      const res = await client.views.open({ trigger_id, view: loadingView });
-      openedViewId = res?.view?.id || null;
+      await client.views.open({ trigger_id, view });
     }
+    console.log("[detail_modal] opened", { teamId, taskId });
   } catch (e) {
-    // open/push 閾ｪ菴薙′螟ｱ謨励＠縺溘ｉ縲√％縺薙〒邨ゆｺ・ｼ・rigger_id 蛻・ｌ遲会ｼ・
-    throw e;
-  }
-
-  // ここから先は時間がかかってもOK — view_id で更新できるため
-  try {
-    const task = await dbGetTaskById(teamId, taskId);
-    if (!task || !openedViewId) return;
-
-    const view = await buildDetailModalView({
-      teamId,
-      task,
-      viewerUserId,
-      origin,
-    });
-
-    // loading を本番UIに差し替え
-    await client.views.update({
-      view_id: openedViewId,
-      view,
-    });
-    console.log("[detail_modal] updated", { teamId, taskId });
-  } catch (e) {
-    console.error("[detail_modal] update failed", e?.data || e);
-    // モーダルをエラー表示に差し替えて固まらないようにする
-    if (openedViewId) {
-      try {
-        await client.views.update({
-          view_id: openedViewId,
-          view: {
-            type: "modal",
-            callback_id: "detail_modal_error",
-            title: { type: "plain_text", text: "タスク" },
-            close: { type: "plain_text", text: "閉じる" },
-            blocks: [
-              {
-                type: "section",
-                text: { type: "mrkdwn", text: "タスク詳細の読み込みに失敗しました。もう一度お試しください。" },
-              },
-            ],
-          },
-        });
-      } catch (_) {}
-    }
+    console.error("[detail_modal] open failed", e?.data || e);
     throw e;
   }
 }

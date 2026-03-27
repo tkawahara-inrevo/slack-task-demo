@@ -1349,6 +1349,17 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
         {
           type: "section",
           text: { type: "mrkdwn", text: "*未完了* " + todo.length + "件" },
+          ...(todo.length > 0
+            ? {
+                accessory: {
+                  type: "button",
+                  text: { type: "plain_text", text: "リマインドする" },
+                  action_id: "remind_incomplete_users",
+                  value: JSON.stringify({ teamId, taskId }),
+                  style: "primary",
+                },
+              }
+            : {}),
         },
         ...(todoBlocks.length
           ? todoBlocks
@@ -1468,7 +1479,21 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
         { type: "section", text: { type: "mrkdwn", text: "*完了* " + done2.length + "件" } },
         { type: "section", text: { type: "mrkdwn", text: doneListText2(done2, "まだありません") } },
         { type: "divider" },
-        { type: "section", text: { type: "mrkdwn", text: "*未完了* " + todo2.length + "件" } },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "*未完了* " + todo2.length + "件" },
+          ...(todo2.length > 0
+            ? {
+                accessory: {
+                  type: "button",
+                  text: { type: "plain_text", text: "リマインドする" },
+                  action_id: "remind_incomplete_users",
+                  value: JSON.stringify({ teamId, taskId }),
+                  style: "primary",
+                },
+              }
+            : {}),
+        },
         ...(todoBlocks2.length
           ? todoBlocks2
           : [{ type: "section", text: { type: "mrkdwn", text: "まだありません" } }]),
@@ -1491,6 +1516,98 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
 // ================================
 // Edit Task modal
 // ================================
+// ================================
+// リマインド: 未完了ユーザーにDM送信
+// ================================
+app.action("remind_incomplete_users", async ({ ack, body, action, client }) => {
+  await ack();
+
+  try {
+    const p = safeJsonParse(action?.value || "{}") || {};
+    const { teamId, taskId } = p;
+    if (!teamId || !taskId) return;
+
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) return;
+
+    // 未完了ユーザーを取得
+    const targetUserIds = await dbListTargetUserIds(teamId, taskId);
+    const incompleteUsers = [];
+    for (const uid of targetUserIds) {
+      const done = await dbQuery(
+        `SELECT 1 FROM task_completions WHERE team_id=$1 AND task_id=$2 AND user_id=$3 LIMIT 1`,
+        [teamId, taskId, uid],
+      );
+      if (done.rows.length === 0) {
+        incompleteUsers.push(uid);
+      }
+    }
+
+    if (incompleteUsers.length === 0) return;
+
+    // 未完了ユーザーにDM送信
+    let sentCount = 0;
+    const BATCH = 5;
+    for (let i = 0; i < incompleteUsers.length; i += BATCH) {
+      const batch = incompleteUsers.slice(i, i + BATCH);
+      await Promise.allSettled(
+        batch.map(async (uid) => {
+          try {
+            const dm = await client.conversations.open({ users: uid });
+            const ch = dm.channel?.id;
+            if (!ch) return;
+
+            const payload = JSON.stringify({ teamId, taskId });
+            await client.chat.postMessage({
+              channel: ch,
+              text: `🔔 リマインド: ${noMention(task.title)} がまだ未完了です`,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: `🔔 *リマインド*\n*${noMention(task.title)}* がまだ未完了です。対応をお願いします。`,
+                  },
+                },
+                {
+                  type: "actions",
+                  elements: [
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "詳細を開く" },
+                      action_id: "open_detail_modal",
+                      value: payload,
+                    },
+                  ],
+                },
+              ],
+            });
+            sentCount++;
+          } catch (e) {
+            console.error("remind DM error:", e?.data || e);
+          }
+        }),
+      );
+    }
+
+    // 送信完了のフィードバック（エフェメラルメッセージ的にモーダルを更新）
+    const senderUserId = body?.user?.id;
+    if (senderUserId) {
+      try {
+        const dm = await client.conversations.open({ users: senderUserId });
+        if (dm.channel?.id) {
+          await client.chat.postMessage({
+            channel: dm.channel.id,
+            text: `✅ 未完了の ${sentCount} 名にリマインドを送信しました（${noMention(task.title)}）`,
+          });
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("remind_incomplete_users error:", e?.data || e);
+  }
+});
+
 app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
   await ack();
 

@@ -5,6 +5,8 @@ function registerSettingsFeature(deps) {
     dbGetUserSettings,
     dbUpsertTeamSettings,
     dbUpsertUserSettings,
+    dbListProjects = async () => [],
+    dbListDashTeams = async () => [],
     getTeamIdFromBody,
     getUserIdFromBody,
     publishHome,
@@ -35,6 +37,8 @@ function registerSettingsFeature(deps) {
     dueDmNotificationsEnabled: "inherit",
     completionDmNotificationsEnabled: "inherit",
     commentDmNotificationsEnabled: "inherit",
+    homeProjectFilter: "",  // プロジェクトIDでホームタブをフィルター（空=フィルターなし）
+    homeDashTeamFilter: "", // ダッシュボードチームIDでフィルター（空=フィルターなし）
   });
 
   const teamSettingsCache = new Map();
@@ -127,6 +131,8 @@ function registerSettingsFeature(deps) {
         ["inherit", "true", "false"],
         DEFAULT_USER_SETTINGS.commentDmNotificationsEnabled,
       ),
+      homeProjectFilter: String(src.homeProjectFilter || ""),
+      homeDashTeamFilter: String(src.homeDashTeamFilter || ""),
     };
   }
 
@@ -231,7 +237,8 @@ function registerSettingsFeature(deps) {
     }
   }
 
-  function buildUserSettingsModalView(teamId, userId, settings) {
+  function buildUserSettingsModalView(teamId, userId, settings, opts = {}) {
+    const { projects = [], dashTeams = [] } = opts;
     const displayModeOptions = [
       { text: { type: "plain_text", text: "チーム設定に従う" }, value: "inherit" },
       { text: { type: "plain_text", text: "標準表示" }, value: "standard" },
@@ -349,6 +356,79 @@ function registerSettingsFeature(deps) {
               ) || dmOptions[0],
           },
         },
+        // --- Home フィルター ---
+        ...(projects.length > 0
+          ? [
+              { type: "divider" },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "*Homeタブ フィルター設定*\nダッシュボードのプロジェクト・チームでホームタブの表示を絞り込めます。",
+                },
+              },
+              {
+                type: "input",
+                block_id: "home_project_filter",
+                optional: true,
+                label: { type: "plain_text", text: "プロジェクトで絞り込み" },
+                element: {
+                  type: "static_select",
+                  action_id: "value",
+                  placeholder: { type: "plain_text", text: "フィルターなし" },
+                  options: [
+                    { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
+                    ...projects.map((p) => ({
+                      text: { type: "plain_text", text: p.name },
+                      value: p.id,
+                    })),
+                  ],
+                  ...(settings.homeProjectFilter
+                    ? {
+                        initial_option: projects.find((p) => p.id === settings.homeProjectFilter)
+                          ? {
+                              text: { type: "plain_text", text: projects.find((p) => p.id === settings.homeProjectFilter).name },
+                              value: settings.homeProjectFilter,
+                            }
+                          : { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
+                      }
+                    : {}),
+                },
+              },
+            ]
+          : []),
+        ...(dashTeams.length > 0
+          ? [
+              {
+                type: "input",
+                block_id: "home_dash_team_filter",
+                optional: true,
+                label: { type: "plain_text", text: "チームで絞り込み" },
+                element: {
+                  type: "static_select",
+                  action_id: "value",
+                  placeholder: { type: "plain_text", text: "フィルターなし" },
+                  options: [
+                    { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
+                    ...dashTeams.map((t) => ({
+                      text: { type: "plain_text", text: t.name },
+                      value: t.id,
+                    })),
+                  ],
+                  ...(settings.homeDashTeamFilter
+                    ? {
+                        initial_option: dashTeams.find((t) => t.id === settings.homeDashTeamFilter)
+                          ? {
+                              text: { type: "plain_text", text: dashTeams.find((t) => t.id === settings.homeDashTeamFilter).name },
+                              value: settings.homeDashTeamFilter,
+                            }
+                          : { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
+                      }
+                    : {}),
+                },
+              },
+            ]
+          : []),
       ],
     };
   }
@@ -495,10 +575,14 @@ function registerSettingsFeature(deps) {
 
   async function openUserSettingsModal({ client, triggerId, teamId, userId }) {
     if (!client || !triggerId || !teamId || !userId) return;
-    const settings = await getUserSettings(teamId, userId);
+    const [settings, projects, dashTeams] = await Promise.all([
+      getUserSettings(teamId, userId),
+      dbListProjects(teamId),
+      dbListDashTeams(teamId),
+    ]);
     await client.views.open({
       trigger_id: triggerId,
-      view: buildUserSettingsModalView(teamId, userId, settings),
+      view: buildUserSettingsModalView(teamId, userId, settings, { projects, dashTeams }),
     });
   }
 
@@ -522,10 +606,14 @@ function registerSettingsFeature(deps) {
     const userId = getUserIdFromBody(body);
     if (!teamId || !userId) return;
 
-    const settings = await getUserSettings(teamId, userId);
+    const [settings, projects, dashTeams] = await Promise.all([
+      getUserSettings(teamId, userId),
+      dbListProjects(teamId),
+      dbListDashTeams(teamId),
+    ]);
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: buildUserSettingsModalView(teamId, userId, settings),
+      view: buildUserSettingsModalView(teamId, userId, settings, { projects, dashTeams }),
     });
   });
 
@@ -577,6 +665,14 @@ function registerSettingsFeature(deps) {
       commentDmNotificationsEnabled:
         view.state.values.comment_dm_notifications?.value?.selected_option
           ?.value,
+      homeProjectFilter: (() => {
+        const v = view.state.values.home_project_filter?.value?.selected_option?.value;
+        return v === "__none__" ? "" : (v || "");
+      })(),
+      homeDashTeamFilter: (() => {
+        const v = view.state.values.home_dash_team_filter?.value?.selected_option?.value;
+        return v === "__none__" ? "" : (v || "");
+      })(),
     });
 
     await dbUpsertUserSettings(teamId, userId, nextSettings);

@@ -1,13 +1,16 @@
 ﻿require("dotenv").config();
 const { randomUUID } = require("crypto");
 const cron = require("node-cron");
-const { app } = require("./src/slack/app");
+const path = require("path");
+const cookieParser = require("cookie-parser");
+const { app, receiver } = require("./src/slack/app");
 const { registerAdminFeature } = require("./src/features/admin");
 const { registerHomeFeature } = require("./src/features/home");
 const { registerSettingsFeature } = require("./src/features/settings");
 const { registerNotificationJobs } = require("./src/features/notifications");
 const { registerReactionFeature } = require("./src/features/reaction-task");
 const { registerTaskUiFeature } = require("./src/features/task-ui");
+const { generateToken, registerDashboardApi } = require("./src/features/dashboard-api");
 const {
   __cacheGet,
   __cacheKey,
@@ -73,6 +76,38 @@ const {
   dbUpsertThreadCard,
   dbUpsertUserDept,
   dbUpsertUserSettings,
+  // Dashboard
+  dbGetDashboardRole,
+  dbSetDashboardRole,
+  dbListDashboardAdmins,
+  dbCreateDashTeam,
+  dbListDashTeams,
+  dbGetDashTeam,
+  dbDeleteDashTeam,
+  dbUpdateDashTeam,
+  dbAddDashTeamMember,
+  dbRemoveDashTeamMember,
+  dbListDashTeamMembers,
+  dbGetUserDashTeams,
+  dbCreateProject,
+  dbListProjects,
+  dbGetProject,
+  dbDeleteProject,
+  dbUpdateProject,
+  dbAddProjectTask,
+  dbRemoveProjectTask,
+  dbListProjectTasks,
+  // Integrations
+  dbCreateIntegration,
+  dbListIntegrations,
+  dbGetIntegration,
+  dbUpdateIntegration,
+  dbDeleteIntegration,
+  dbListFieldMappings,
+  dbSetFieldMappings,
+  dbCreateSyncLog,
+  dbUpdateSyncLog,
+  dbListSyncLogs,
 } = require("./src/db");
 
 let resolveHomeDefaultsForHome = async () => ({
@@ -80,6 +115,7 @@ let resolveHomeDefaultsForHome = async () => ({
   rangeKey: "to_me",
   scopeKey: "active",
 });
+let getUserSettingsForHome = async () => ({});
 
 const {
   publishHome,
@@ -105,12 +141,16 @@ const {
   noMention,
   openDetailModal: (...args) => openDetailModal(...args),
   openTaskCreateModal: (...args) => openTaskCreateModal(...args),
+  openUserSettingsModal: (...args) => openUserSettingsModal(...args),
   resolveHomeDefaults: (...args) => resolveHomeDefaultsForHome(...args),
   safeJsonParse,
   searchUsergroups,
   slackDateYmd,
   toAtShortName,
   todayJstYmd,
+  dbQuery,
+  dbListDashTeamMembers,
+  getUserSettings: (...args) => getUserSettingsForHome(...args),
 });
 
 const settingsFeature = registerSettingsFeature({
@@ -119,6 +159,8 @@ const settingsFeature = registerSettingsFeature({
   dbGetUserSettings,
   dbUpsertTeamSettings,
   dbUpsertUserSettings,
+  dbListProjects,
+  dbListDashTeams,
   getTeamIdFromBody,
   getUserIdFromBody,
   publishHome,
@@ -132,9 +174,12 @@ const {
   isReactionTaskifyEnabled,
   isUserDmEnabled,
   openTeamSettingsModal,
+  openUserSettingsModal,
   resolveHomeDefaults,
+  getUserSettings: getUserSettingsFromSettings,
 } = settingsFeature;
 resolveHomeDefaultsForHome = resolveHomeDefaults;
+getUserSettingsForHome = getUserSettingsFromSettings;
 
 registerAdminFeature({
   app,
@@ -2365,9 +2410,118 @@ app.shortcut("create_task_from_message", async ({ shortcut, ack, client }) => {
 // ================================
 // Global Shortcut: Open Task List (Home-like modal)
 // ================================
+
+// ================================
+// Slash Command: /dashboard
+// ================================
+app.command("/dashboard", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = body.team_id;
+    const userId = body.user_id;
+    if (!teamId || !userId) return;
+
+    const token = generateToken(teamId, userId);
+    const baseUrl = (process.env.DASHBOARD_BASE_URL || `https://${process.env.DOMAIN || "localhost:3000"}`).replace(/\/$/, "");
+    const url = `${baseUrl}/dashboard/auth?token=${token}`;
+
+    await client.chat.postEphemeral({
+      channel: body.channel_id,
+      user: userId,
+      text: `管理ダッシュボードを開く: ${url}`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "📊 *管理ダッシュボード*\n下のボタンからダッシュボードを開けます。\nリンクの有効期限は *1時間* です。",
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "ダッシュボードを開く" },
+              style: "primary",
+              url,
+            },
+          ],
+        },
+      ],
+    });
+  } catch (e) {
+    console.error("/dashboard command error:", e?.data || e);
+  }
+});
+
+// ================================
+// Express: Dashboard static + API
+// ================================
 (async () => {
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await dbEnsureSettingsSchema();
+
+  const expressApp = receiver.app;
+  expressApp.use(cookieParser());
+  expressApp.use(require("express").json());
+
+  // Dashboard API
+  registerDashboardApi({
+    expressApp,
+    dbQuery,
+    getUserDisplayName,
+    dbGetDashboardRole,
+    dbSetDashboardRole,
+    dbListDashboardAdmins,
+    dbCreateDashTeam,
+    dbListDashTeams,
+    dbGetDashTeam,
+    dbDeleteDashTeam,
+    dbUpdateDashTeam,
+    dbAddDashTeamMember,
+    dbRemoveDashTeamMember,
+    dbListDashTeamMembers,
+    dbGetUserDashTeams,
+    dbCreateProject,
+    dbListProjects,
+    dbGetProject,
+    dbDeleteProject,
+    dbUpdateProject,
+    dbAddProjectTask,
+    dbRemoveProjectTask,
+    dbListProjectTasks,
+    // Task operations
+    dbGetTaskById,
+    dbUpdateStatus,
+    dbUpdateTaskEditableFields,
+    dbUpdateBroadcastCounts,
+    dbListTaskComments,
+    dbInsertTaskComment,
+    dbCreateTask,
+    dbInsertTaskTargets,
+    randomUUID,
+    // Integrations
+    dbCreateIntegration,
+    dbListIntegrations,
+    dbGetIntegration,
+    dbUpdateIntegration,
+    dbDeleteIntegration,
+    dbListFieldMappings,
+    dbSetFieldMappings,
+    dbCreateSyncLog,
+    dbUpdateSyncLog,
+    dbListSyncLogs,
+  });
+
+  // React SPA static files (web/dist)
+  const distPath = path.join(__dirname, "web", "dist");
+  expressApp.use("/dashboard", require("express").static(distPath));
+  // SPA fallback: /dashboard/* → index.html
+  expressApp.get("/dashboard/*", (_req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+
   await app.start(port);
   console.log(`Slack app is running on port ${port}`);
 })();

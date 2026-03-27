@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc:*)",
+      "Bash(ssh -i /tmp/lightsail-key.pem -o StrictHostKeyChecking=no ubuntu@54.95.63.165 \"uname -a && cat /etc/os-release | head -5 && free -h && df -h /\")",
+      "Bash(ssh -i /tmp/lightsail-key.pem ubuntu@54.95.63.165 \"curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs\")",
+      "Bash(ssh -i /tmp/lightsail-key.pem ubuntu@54.95.63.165 \"sudo apt-get install -y postgresql postgresql-contrib\")",
+      "Bash(ssh -i /tmp/lightsail-key.pem ubuntu@54.95.63.165 \"sudo -u postgres psql -c \"\"CREATE USER slacktask WITH PASSWORD ''slacktask2026'';\"\" && sudo -u postgres psql -c \"\"CREATE DATABASE slacktask OWNER slacktask;\"\" && sudo -u postgres psql -c \"\"\\\\l\"\" | head -10\")",
+      "Bash(ssh -i /tmp/lightsail-key.pem ubuntu@54.95.63.165 \"cd /home/ubuntu && git clone https://github.com/tkawahara-inrevo/slack-task-demo.git && cd slack-task-demo && npm install\")",
+      "Bash(ssh -i:*)",
+      "Bash(node -c index.js)",
+      "Bash(node -c src/features/reaction-task.js)",
+      "Bash(node -c src/features/task-ui.js)",
+      "Bash(node -c src/features/home.js)",
+      "Bash(node -c src/features/notifications.js)",
+      "Bash(nslookup inrevo-task.com 8.8.8.8)",
+      "Bash(npm install:*)",
+      "Bash(npm create:*)",
+      "Bash(npm run:*)",
+      "Bash(node -e \"try { require\\(''./src/features/dashboard-api''\\); require\\(''./src/features/settings''\\); require\\(''./src/db''\\); console.log\\(''OK''\\); } catch\\(e\\) { console.error\\(e.message\\); }\")",
+      "Bash(node -e \"try { require\\(''./src/features/dashboard-api''\\); require\\(''./src/db''\\); console.log\\(''OK''\\); } catch\\(e\\) { console.error\\(e.message\\); }\")"
+    ]
+  }
+}

@@ -94,7 +94,113 @@ async function dbEnsureSettingsSchema() {
         PRIMARY KEY (team_id, channel_id, kind)
       );
     `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS dashboard_roles (
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (team_id, user_id)
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS dash_teams (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS dash_team_members (
+        dash_team_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (dash_team_id, user_id)
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        dash_team_id TEXT,
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS project_tasks (
+        project_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (project_id, task_id)
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS integrations (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        service_type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        config JSONB NOT NULL DEFAULT '{}'::jsonb,
+        enabled BOOLEAN NOT NULL DEFAULT false,
+        last_synced_at TIMESTAMPTZ,
+        last_sync_status TEXT,
+        last_sync_message TEXT,
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS integration_field_mappings (
+        id TEXT PRIMARY KEY,
+        integration_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        local_field TEXT NOT NULL,
+        remote_field TEXT NOT NULL,
+        direction TEXT NOT NULL DEFAULT 'both',
+        transform JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS integration_sync_log (
+        id TEXT PRIMARY KEY,
+        integration_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        status TEXT NOT NULL,
+        records_processed INT DEFAULT 0,
+        records_created INT DEFAULT 0,
+        records_updated INT DEFAULT 0,
+        records_failed INT DEFAULT 0,
+        error_detail TEXT,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        finished_at TIMESTAMPTZ
+      );
+    `),
   ]);
+
+  // 初期admin を設定（存在しなければ）
+  const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
+  if (INITIAL_ADMIN_ID) {
+    const teamsRes = await dbQuery(
+      `SELECT DISTINCT team_id FROM tasks WHERE team_id IS NOT NULL LIMIT 1;`,
+    );
+    const firstTeam = teamsRes.rows[0]?.team_id;
+    if (firstTeam) {
+      await dbQuery(
+        `INSERT INTO dashboard_roles (team_id, user_id, role) VALUES ($1, $2, 'admin')
+         ON CONFLICT (team_id, user_id) DO NOTHING;`,
+        [firstTeam, INITIAL_ADMIN_ID],
+      );
+    }
+  }
 }
 
 function normalizeSettingsObject(value) {
@@ -648,6 +754,279 @@ async function dbInsertTaskComment(teamId, taskId, userId, comment) {
   ]);
 }
 
+// ================================
+// Dashboard roles
+// ================================
+async function dbGetDashboardRole(teamId, userId) {
+  const q = `SELECT role FROM dashboard_roles WHERE team_id=$1 AND user_id=$2 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, userId]);
+  return res.rows[0]?.role || "member";
+}
+
+async function dbSetDashboardRole(teamId, userId, role) {
+  const q = `
+    INSERT INTO dashboard_roles (team_id, user_id, role, updated_at)
+    VALUES ($1, $2, $3, now())
+    ON CONFLICT (team_id, user_id)
+    DO UPDATE SET role = EXCLUDED.role, updated_at = now()
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [teamId, userId, role]);
+  return res.rows[0] || null;
+}
+
+async function dbListDashboardAdmins(teamId) {
+  const q = `SELECT user_id, role, updated_at FROM dashboard_roles WHERE team_id=$1 AND role='admin';`;
+  const res = await dbQuery(q, [teamId]);
+  return res.rows;
+}
+
+// ================================
+// Dash teams
+// ================================
+async function dbCreateDashTeam(id, teamId, name, createdBy) {
+  const q = `
+    INSERT INTO dash_teams (id, team_id, name, created_by, created_at)
+    VALUES ($1, $2, $3, $4, now())
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [id, teamId, name, createdBy]);
+  return res.rows[0];
+}
+
+async function dbListDashTeams(teamId) {
+  const q = `SELECT * FROM dash_teams WHERE team_id=$1 ORDER BY created_at ASC;`;
+  const res = await dbQuery(q, [teamId]);
+  return res.rows;
+}
+
+async function dbGetDashTeam(teamId, dashTeamId) {
+  const q = `SELECT * FROM dash_teams WHERE team_id=$1 AND id=$2 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, dashTeamId]);
+  return res.rows[0] || null;
+}
+
+async function dbDeleteDashTeam(teamId, dashTeamId) {
+  await dbQuery(`DELETE FROM dash_team_members WHERE team_id=$1 AND dash_team_id=$2;`, [teamId, dashTeamId]);
+  await dbQuery(`DELETE FROM dash_teams WHERE team_id=$1 AND id=$2;`, [teamId, dashTeamId]);
+}
+
+async function dbUpdateDashTeam(teamId, dashTeamId, name) {
+  const q = `UPDATE dash_teams SET name=$3 WHERE team_id=$1 AND id=$2 RETURNING *;`;
+  const res = await dbQuery(q, [teamId, dashTeamId, name]);
+  return res.rows[0] || null;
+}
+
+// ================================
+// Dash team members
+// ================================
+async function dbAddDashTeamMember(teamId, dashTeamId, userId) {
+  const q = `
+    INSERT INTO dash_team_members (dash_team_id, team_id, user_id, added_at)
+    VALUES ($1, $2, $3, now())
+    ON CONFLICT (dash_team_id, user_id) DO NOTHING
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [dashTeamId, teamId, userId]);
+  return res.rows[0] || null;
+}
+
+async function dbRemoveDashTeamMember(teamId, dashTeamId, userId) {
+  await dbQuery(
+    `DELETE FROM dash_team_members WHERE team_id=$1 AND dash_team_id=$2 AND user_id=$3;`,
+    [teamId, dashTeamId, userId],
+  );
+}
+
+async function dbListDashTeamMembers(teamId, dashTeamId) {
+  const q = `SELECT user_id, added_at FROM dash_team_members WHERE team_id=$1 AND dash_team_id=$2 ORDER BY added_at ASC;`;
+  const res = await dbQuery(q, [teamId, dashTeamId]);
+  return res.rows;
+}
+
+async function dbGetUserDashTeams(teamId, userId) {
+  const q = `
+    SELECT dt.*
+    FROM dash_teams dt
+    JOIN dash_team_members dtm ON dtm.dash_team_id = dt.id AND dtm.team_id = dt.team_id
+    WHERE dt.team_id = $1 AND dtm.user_id = $2
+    ORDER BY dt.name ASC;
+  `;
+  const res = await dbQuery(q, [teamId, userId]);
+  return res.rows;
+}
+
+// ================================
+// Projects
+// ================================
+async function dbCreateProject(id, teamId, name, dashTeamId, createdBy) {
+  const q = `
+    INSERT INTO projects (id, team_id, name, dash_team_id, created_by, created_at)
+    VALUES ($1, $2, $3, $4, $5, now())
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [id, teamId, name, dashTeamId || null, createdBy]);
+  return res.rows[0];
+}
+
+async function dbListProjects(teamId) {
+  const q = `SELECT * FROM projects WHERE team_id=$1 ORDER BY created_at ASC;`;
+  const res = await dbQuery(q, [teamId]);
+  return res.rows;
+}
+
+async function dbGetProject(teamId, projectId) {
+  const q = `SELECT * FROM projects WHERE team_id=$1 AND id=$2 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, projectId]);
+  return res.rows[0] || null;
+}
+
+async function dbDeleteProject(teamId, projectId) {
+  await dbQuery(`DELETE FROM project_tasks WHERE team_id=$1 AND project_id=$2;`, [teamId, projectId]);
+  await dbQuery(`DELETE FROM projects WHERE team_id=$1 AND id=$2;`, [teamId, projectId]);
+}
+
+async function dbUpdateProject(teamId, projectId, patch) {
+  const q = `
+    UPDATE projects SET name=COALESCE($3, name), dash_team_id=$4
+    WHERE team_id=$1 AND id=$2 RETURNING *;
+  `;
+  const res = await dbQuery(q, [teamId, projectId, patch.name, patch.dash_team_id ?? null]);
+  return res.rows[0] || null;
+}
+
+// ================================
+// Project tasks
+// ================================
+async function dbAddProjectTask(teamId, projectId, taskId) {
+  const q = `
+    INSERT INTO project_tasks (project_id, task_id, team_id, added_at)
+    VALUES ($1, $2, $3, now())
+    ON CONFLICT (project_id, task_id) DO NOTHING;
+  `;
+  await dbQuery(q, [projectId, taskId, teamId]);
+}
+
+async function dbRemoveProjectTask(teamId, projectId, taskId) {
+  await dbQuery(
+    `DELETE FROM project_tasks WHERE team_id=$1 AND project_id=$2 AND task_id=$3;`,
+    [teamId, projectId, taskId],
+  );
+}
+
+async function dbListProjectTasks(teamId, projectId, limit = 200) {
+  const q = `
+    SELECT t.*
+    FROM tasks t
+    JOIN project_tasks pt ON pt.task_id = t.id AND pt.team_id = t.team_id
+    WHERE pt.team_id=$1 AND pt.project_id=$2
+    ORDER BY t.created_at DESC
+    LIMIT $3;
+  `;
+  const res = await dbQuery(q, [teamId, projectId, limit]);
+  return res.rows;
+}
+
+// ================================
+// Integrations
+// ================================
+async function dbCreateIntegration(teamId, { service_type, name, config, created_by }) {
+  const id = randomUUID();
+  const q = `
+    INSERT INTO integrations (id, team_id, service_type, name, config, created_by)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [id, teamId, service_type, name, JSON.stringify(config || {}), created_by]);
+  return res.rows[0];
+}
+
+async function dbListIntegrations(teamId) {
+  const q = `SELECT * FROM integrations WHERE team_id=$1 ORDER BY created_at DESC;`;
+  const res = await dbQuery(q, [teamId]);
+  return res.rows;
+}
+
+async function dbGetIntegration(teamId, integrationId) {
+  const q = `SELECT * FROM integrations WHERE team_id=$1 AND id=$2 LIMIT 1;`;
+  const res = await dbQuery(q, [teamId, integrationId]);
+  return res.rows[0] || null;
+}
+
+async function dbUpdateIntegration(teamId, integrationId, patch) {
+  const sets = [];
+  const params = [teamId, integrationId];
+  let idx = 3;
+  if (patch.name !== undefined) { sets.push(`name=$${idx++}`); params.push(patch.name); }
+  if (patch.config !== undefined) { sets.push(`config=$${idx++}::jsonb`); params.push(JSON.stringify(patch.config)); }
+  if (patch.enabled !== undefined) { sets.push(`enabled=$${idx++}`); params.push(patch.enabled); }
+  if (patch.last_synced_at !== undefined) { sets.push(`last_synced_at=$${idx++}`); params.push(patch.last_synced_at); }
+  if (patch.last_sync_status !== undefined) { sets.push(`last_sync_status=$${idx++}`); params.push(patch.last_sync_status); }
+  if (patch.last_sync_message !== undefined) { sets.push(`last_sync_message=$${idx++}`); params.push(patch.last_sync_message); }
+  if (sets.length === 0) return dbGetIntegration(teamId, integrationId);
+  sets.push("updated_at=now()");
+  const q = `UPDATE integrations SET ${sets.join(",")} WHERE team_id=$1 AND id=$2 RETURNING *;`;
+  const res = await dbQuery(q, params);
+  return res.rows[0] || null;
+}
+
+async function dbDeleteIntegration(teamId, integrationId) {
+  await dbQuery(`DELETE FROM integration_field_mappings WHERE team_id=$1 AND integration_id=$2;`, [teamId, integrationId]);
+  await dbQuery(`DELETE FROM integration_sync_log WHERE team_id=$1 AND integration_id=$2;`, [teamId, integrationId]);
+  await dbQuery(`DELETE FROM integrations WHERE team_id=$1 AND id=$2;`, [teamId, integrationId]);
+}
+
+// Field mappings
+async function dbListFieldMappings(teamId, integrationId) {
+  const q = `SELECT * FROM integration_field_mappings WHERE team_id=$1 AND integration_id=$2 ORDER BY created_at ASC;`;
+  const res = await dbQuery(q, [teamId, integrationId]);
+  return res.rows;
+}
+
+async function dbSetFieldMappings(teamId, integrationId, mappings) {
+  await dbQuery(`DELETE FROM integration_field_mappings WHERE team_id=$1 AND integration_id=$2;`, [teamId, integrationId]);
+  for (const m of mappings) {
+    const id = randomUUID();
+    await dbQuery(
+      `INSERT INTO integration_field_mappings (id, integration_id, team_id, local_field, remote_field, direction, transform)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb);`,
+      [id, integrationId, teamId, m.local_field, m.remote_field, m.direction || "both", JSON.stringify(m.transform || null)],
+    );
+  }
+  return dbListFieldMappings(teamId, integrationId);
+}
+
+// Sync log
+async function dbCreateSyncLog(teamId, integrationId, direction) {
+  const id = randomUUID();
+  await dbQuery(
+    `INSERT INTO integration_sync_log (id, integration_id, team_id, direction, status) VALUES ($1, $2, $3, $4, 'running');`,
+    [id, integrationId, teamId, direction],
+  );
+  return id;
+}
+
+async function dbUpdateSyncLog(logId, patch) {
+  const sets = [];
+  const params = [logId];
+  let idx = 2;
+  if (patch.status !== undefined) { sets.push(`status=$${idx++}`); params.push(patch.status); }
+  if (patch.records_processed !== undefined) { sets.push(`records_processed=$${idx++}`); params.push(patch.records_processed); }
+  if (patch.records_created !== undefined) { sets.push(`records_created=$${idx++}`); params.push(patch.records_created); }
+  if (patch.records_updated !== undefined) { sets.push(`records_updated=$${idx++}`); params.push(patch.records_updated); }
+  if (patch.records_failed !== undefined) { sets.push(`records_failed=$${idx++}`); params.push(patch.records_failed); }
+  if (patch.error_detail !== undefined) { sets.push(`error_detail=$${idx++}`); params.push(patch.error_detail); }
+  if (patch.finished_at !== undefined) { sets.push(`finished_at=$${idx++}`); params.push(patch.finished_at); }
+  if (sets.length === 0) return;
+  await dbQuery(`UPDATE integration_sync_log SET ${sets.join(",")} WHERE id=$1;`, params);
+}
+
+async function dbListSyncLogs(teamId, integrationId, limit = 20) {
+  const q = `SELECT * FROM integration_sync_log WHERE team_id=$1 AND integration_id=$2 ORDER BY started_at DESC LIMIT $3;`;
+  const res = await dbQuery(q, [teamId, integrationId, limit]);
+  return res.rows;
+}
+
 module.exports = {
   dbEnsureSettingsSchema,
   dbCountCompletions,
@@ -684,4 +1063,36 @@ module.exports = {
   dbUpsertUserDept,
   dbUpsertUserSettings,
   pool,
+  // Dashboard
+  dbGetDashboardRole,
+  dbSetDashboardRole,
+  dbListDashboardAdmins,
+  dbCreateDashTeam,
+  dbListDashTeams,
+  dbGetDashTeam,
+  dbDeleteDashTeam,
+  dbUpdateDashTeam,
+  dbAddDashTeamMember,
+  dbRemoveDashTeamMember,
+  dbListDashTeamMembers,
+  dbGetUserDashTeams,
+  dbCreateProject,
+  dbListProjects,
+  dbGetProject,
+  dbDeleteProject,
+  dbUpdateProject,
+  dbAddProjectTask,
+  dbRemoveProjectTask,
+  dbListProjectTasks,
+  // Integrations
+  dbCreateIntegration,
+  dbListIntegrations,
+  dbGetIntegration,
+  dbUpdateIntegration,
+  dbDeleteIntegration,
+  dbListFieldMappings,
+  dbSetFieldMappings,
+  dbCreateSyncLog,
+  dbUpdateSyncLog,
+  dbListSyncLogs,
 };

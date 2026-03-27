@@ -24,6 +24,12 @@ function registerReactionFeature(deps) {
 
 const TASK_REACTION_NAME = "task";
 
+// キーワードタスク化：全角・半角両対応
+const TASK_KEYWORD_PATTERNS = [
+  /＜タスク化＞/,
+  /<タスク化>/,
+];
+
 // blocks から user_id を拾う（rich_text の user mention を拾う）
 function extractUserIdsFromBlocks(blocks) {
   const out = [];
@@ -297,6 +303,127 @@ app.event("reaction_added", async ({ event, client, body }) => {
   } catch (e) {
     if (e?.data?.error !== "not_in_channel")
       console.error("reaction_added error:", e?.data || e);
+  }
+});
+
+// ================================
+// キーワードタスク化: メッセージに ＜タスク化＞ or <タスク化> が含まれたら即タスク作成
+// ================================
+app.event("message", async ({ event, client, body }) => {
+  try {
+    // bot メッセージ・編集・削除は無視
+    if (event?.subtype) return;
+
+    const rawText = event?.text || "";
+    const matched = TASK_KEYWORD_PATTERNS.some((re) => re.test(rawText));
+    if (!matched) return;
+
+    const teamId = body?.team_id || body?.team?.id || event?.team;
+    if (!teamId) return;
+    if (!(await isReactionTaskifyEnabled(teamId))) return;
+
+    const channelId = event?.channel;
+    const msgTs = event?.ts;
+    const actorUserId = event?.user;
+    if (!channelId || !msgTs || !actorUserId) return;
+
+    // すでにタスク化済みなら無視
+    const existingTask = await dbGetTaskBySource(teamId, channelId, msgTs);
+    if (existingTask?.id) return;
+
+    // キーワードを除去したテキストをタイトルにする
+    let cleanText = rawText;
+    for (const re of TASK_KEYWORD_PATTERNS) {
+      cleanText = cleanText.replace(re, "");
+    }
+    cleanText = cleanText.trim();
+
+    // 対応者推定（メンション先 or 投稿者自身）
+    const { userIds: initialUsers } = inferTargetsFromMessage(
+      rawText,
+      actorUserId,
+      event?.blocks || null,
+    );
+    const assigneeId = initialUsers[0] || actorUserId;
+
+    const dueYmd = slackDateYmd(new Date());
+    const threadRootTs = event?.thread_ts || msgTs;
+
+    const [permalinkResult, prettyTextResult, requesterDept, assigneeDept] =
+      await Promise.all([
+        client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
+          .then((r) => r?.permalink || "").catch(() => ""),
+        (async () => {
+          try {
+            let t = await prettifySlackText(cleanText, teamId);
+            t = await prettifyUserMentions(t, teamId);
+            return t;
+          } catch (_) { return cleanText; }
+        })(),
+        resolveDeptForUser(teamId, actorUserId),
+        resolveDeptForUser(teamId, assigneeId),
+      ]);
+
+    const description = String(prettyTextResult || cleanText || "").trim();
+    const title = description || "（本文なし）";
+    const taskId = randomUUID();
+
+    const created = await dbCreateTask({
+      id: taskId,
+      team_id: teamId,
+      channel_id: channelId,
+      message_ts: msgTs,
+      source_permalink: permalinkResult || null,
+      title,
+      description,
+      requester_user_id: actorUserId,
+      created_by_user_id: actorUserId,
+      assignee_id: assigneeId,
+      assignee_label: null,
+      status: "in_progress",
+      due_date: dueYmd,
+      requester_dept: requesterDept,
+      assignee_dept: assigneeDept,
+      task_type: "personal",
+      broadcast_group_handle: null,
+      broadcast_group_id: null,
+      total_count: null,
+      completed_count: 0,
+      notified_at: null,
+    });
+
+    // スレッドにタスク化完了カードを表示
+    const doneBlocks = await buildThreadCardBlocks({ teamId, task: created });
+
+    if (!String(channelId || "").startsWith("D")) {
+      await upsertThreadCard(client, {
+        teamId,
+        channelId,
+        parentTs: msgTs,
+        threadTs: threadRootTs,
+        blocks: doneBlocks,
+      });
+    } else {
+      // DMの場合はスレッドに直接投稿
+      await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadRootTs,
+        text: `✅ タスク化しました: ${noMention(title)}`,
+        blocks: doneBlocks,
+      });
+    }
+
+    try {
+      await publishHomeBurst(
+        client,
+        teamId,
+        [actorUserId, assigneeId].filter(Boolean),
+        200,
+      );
+    } catch (_) {}
+  } catch (e) {
+    if (e?.data?.error !== "not_in_channel")
+      console.error("keyword_taskify error:", e?.data || e);
   }
 });
 

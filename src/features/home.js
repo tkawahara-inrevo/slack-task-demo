@@ -29,6 +29,10 @@ function registerHomeFeature(deps) {
     slackDateYmd,
     toAtShortName,
     todayJstYmd,
+    openUserSettingsModal,
+    dbQuery = async () => ({ rows: [] }),
+    dbListDashTeamMembers = async () => [],
+    getUserSettings = async () => ({}),
   } = deps;
 
   async function isBroadcastAssignedToUser(task, teamId, userId) {
@@ -387,6 +391,13 @@ async function publishHome({ client, teamId, userId }) {
     value: JSON.stringify({ teamId, userId }),
   });
 
+  actionElements.push({
+    type: "button",
+    action_id: "open_user_settings_from_home",
+    text: { type: "plain_text", text: "設定" },
+    value: JSON.stringify({ teamId, userId }),
+  });
+
   blocks.push({ type: "actions", elements: actionElements });
 
   blocks.push({ type: "divider" });
@@ -585,6 +596,30 @@ async function publishHome({ client, teamId, userId }) {
       // 通常ルール：publicのみOK（private/その他はNG）
       return okMap.get(ch) === true;
     });
+  }
+
+  // ✅ ダッシュボード連携フィルター（個人設定で指定されたプロジェクトorチームで絞り込み）
+  {
+    const userSettings = await getUserSettings(teamId, userId);
+    const projectFilterId = userSettings.homeProjectFilter || "";
+    const teamFilterId = userSettings.homeDashTeamFilter || "";
+
+    if (projectFilterId) {
+      // プロジェクトに紐づくタスクIDだけ表示
+      const ptRes = await dbQuery(
+        `SELECT task_id FROM project_tasks WHERE team_id=$1 AND project_id=$2`,
+        [teamId, projectFilterId],
+      );
+      const projectTaskIds = new Set(ptRes.rows.map((r) => String(r.task_id)));
+      tasks = tasks.filter((t) => projectTaskIds.has(String(t.id)));
+    } else if (teamFilterId) {
+      // チームメンバーのタスクだけ表示
+      const members = await dbListDashTeamMembers(teamId, teamFilterId);
+      const memberIds = new Set(members.map((m) => m.user_id));
+      tasks = tasks.filter((t) =>
+        memberIds.has(t.assignee_id) || memberIds.has(t.requester_user_id),
+      );
+    }
   }
 
   // 表示：未完了はステータス別に分ける（完了/取り下げはまとめ）
@@ -1780,6 +1815,19 @@ app.action("open_home_task_create_modal", async ({ ack, body, client }) => {
     });
   } catch (e) {
     console.error("open_home_task_create_modal error:", e?.data || e);
+  }
+});
+
+app.action("open_user_settings_from_home", async ({ ack, body, action, client }) => {
+  await ack();
+  try {
+    const p = safeJsonParse(action?.value || "{}") || {};
+    const teamId = p.teamId || getTeamIdFromBody(body);
+    const userId = p.userId || getUserIdFromBody(body);
+    if (!teamId || !userId) return;
+    await openUserSettingsModal({ client, triggerId: body.trigger_id, teamId, userId });
+  } catch (e) {
+    console.error("open_user_settings_from_home error:", e?.data || e);
   }
 });
 

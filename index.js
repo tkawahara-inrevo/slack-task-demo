@@ -2517,6 +2517,9 @@ app.command("/dashboard", async ({ ack, body, client }) => {
     dbListSyncLogs,
   });
 
+  // Root redirect
+  expressApp.get("/", (_req, res) => res.redirect("/dashboard"));
+
   // React SPA static files (web/dist)
   const distPath = path.join(__dirname, "web", "dist");
   expressApp.use("/dashboard", require("express").static(distPath));

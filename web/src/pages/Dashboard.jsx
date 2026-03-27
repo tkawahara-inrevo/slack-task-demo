@@ -66,22 +66,11 @@ export default function Dashboard() {
           {/* Filter panel */}
           <div className="filter-panel">
             <div className="filter-panel-row">
-              <select
-                className="filter-select"
-                value={filter.assignee}
-                onChange={(e) => setF({ assignee: e.target.value })}
-              >
-                <option value="">担当者：全員</option>
-                {members.map((m) => (
-                  <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>
-                ))}
-              </select>
-
               {usergroups.length > 0 && (
                 <select
                   className="filter-select"
                   value={filter.usergroup}
-                  onChange={(e) => setF({ usergroup: e.target.value })}
+                  onChange={(e) => setF({ usergroup: e.target.value, assignee: '' })}
                 >
                   <option value="">チーム：すべて</option>
                   {usergroups.map((g) => (
@@ -89,6 +78,23 @@ export default function Dashboard() {
                   ))}
                 </select>
               )}
+
+              <select
+                className="filter-select"
+                value={filter.assignee}
+                onChange={(e) => setF({ assignee: e.target.value })}
+              >
+                <option value="">担当者：全員</option>
+                {members
+                  .filter((m) => {
+                    if (!filter.usergroup) return true;
+                    const ug = usergroups.find((g) => g.id === filter.usergroup);
+                    return ug?.memberIds?.includes(m.assignee_id);
+                  })
+                  .map((m) => (
+                    <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>
+                  ))}
+              </select>
 
               {projects.length > 0 && (
                 <select

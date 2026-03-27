@@ -308,7 +308,12 @@ function registerDashboardApi(deps) {
     try {
       const { teamId } = req.dashboardUser;
       const idToHandle = await getSubteamIdMap(teamId);
-      const usergroups = Array.from(idToHandle.entries()).map(([id, handle]) => ({ id, handle }));
+      const usergroups = await Promise.all(
+        Array.from(idToHandle.entries()).map(async ([id, handle]) => {
+          const memberIds = await getUsergroupMembers(teamId, id);
+          return { id, handle, memberIds };
+        }),
+      );
       res.json({ usergroups });
     } catch (e) {
       console.error("dashboard /usergroups error:", e);

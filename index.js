@@ -248,6 +248,7 @@ const {
   safeJsonParse,
   slackDateYmd,
   upsertThreadCard: (...args) => upsertThreadCard(...args),
+  notifyTaskSimpleDM: (...args) => notifyTaskSimpleDM(...args),
 });
 
 const { expandTargetsFromGroups } = registerTaskUiFeature({

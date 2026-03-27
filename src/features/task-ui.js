@@ -602,18 +602,41 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       console.error("create notify error:", e?.data || e);
     }
 
-    if (created?.channel_id && created?.message_ts && !created.channel_id.startsWith("D")) {
-      try {
-        const blocks = await buildThreadCardBlocks({ teamId, task: created });
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: created.channel_id,
-          parentTs: created.message_ts,
-          blocks,
-        });
-      } catch (e) {
-        console.error("thread card error:", e?.data || e);
+    // 依頼者に「タスク発行しました」DM
+    try {
+      if (actorUserId) {
+        const dm = await client.conversations.open({ users: actorUserId });
+        const ch = dm.channel?.id;
+        if (ch) {
+          const payload = JSON.stringify({ teamId, taskId: created.id });
+          await client.chat.postMessage({
+            channel: ch,
+            text: `✅ タスクを発行しました: ${noMention(created.title)}`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: `✅ *タスクを発行しました*\n*${noMention(created.title)}*`,
+                },
+              },
+              {
+                type: "actions",
+                elements: [
+                  {
+                    type: "button",
+                    text: { type: "plain_text", text: "詳細を開く" },
+                    action_id: "open_detail_modal",
+                    value: payload,
+                  },
+                ],
+              },
+            ],
+          });
+        }
       }
+    } catch (e) {
+      console.error("requester DM error:", e?.data || e);
     }
 try {
   await notifyCreateResultOnSource({
@@ -918,23 +941,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
         }
       }
 
-      if (task.channel_id && task.message_ts) {
-        const refreshed = await dbGetTaskById(teamId, taskId);
-        if (refreshed) {
-          const blocks = await buildThreadCardBlocks({
-            teamId,
-            task: refreshed,
-          });
-          if (!refreshed.channel_id?.startsWith("D")) {
-            await upsertThreadCard(client, {
-              teamId,
-              channelId: refreshed.channel_id,
-              parentTs: refreshed.message_ts,
-              blocks,
-            });
-          }
-        }
-      }
+      // スレッドカード廃止（DM通知に一本化）
       // 笨・Home view 縺ｫ縺ｯ views.update 縺励↑縺・ｼ亥崋縺ｾ繧・蜿肴丐荳ｭ蟇ｾ遲厄ｼ・
       // 笨・detail_modal 縺ｮ縺ｨ縺阪□縺第峩譁ｰ縺吶ｋ
       if (body?.view?.id && body.view.callback_id === "detail_modal") {
@@ -986,14 +993,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
           },
         },
       ];
-      if (!updated.channel_id?.startsWith("D")) {
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: updated.channel_id,
-          parentTs: updated.message_ts,
-          blocks: doneBlocks,
-        });
-      }
+      // スレッドカード廃止（DM通知に一本化）
     }
 
     if (body.view?.id && body.view.callback_id === "detail_modal") {
@@ -1088,18 +1088,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
       await publishHomeBurst(client, teamId, toRefresh, 200);
     } catch (_) {}
 
-    // thread card update
-    if (updated.channel_id && updated.message_ts) {
-      const blocks = await buildThreadCardBlocks({ teamId, task: updated });
-      if (!updated.channel_id?.startsWith("D")) {
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: updated.channel_id,
-          parentTs: updated.message_ts,
-          blocks,
-        });
-      }
-    }
+    // スレッドカード廃止（DM通知に一本化）
 
     // modal refresh・井ｸ隕ｧ繝｢繝ｼ繝繝ｫ蟒・ｭ｢・壼ｸｸ縺ｫ detail_modal 繧呈峩譁ｰ・・
     if (body.view?.id) {
@@ -1199,17 +1188,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
     }
 
     // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝会ｼ夊｡ｨ遉ｺ譖ｴ譁ｰ
-    if (updated.channel_id && updated.message_ts) {
-      const blocks = await buildThreadCardBlocks({ teamId, task: updated });
-      if (!updated.channel_id?.startsWith("D")) {
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: updated.channel_id,
-          parentTs: updated.message_ts,
-          blocks,
-        });
-      }
-    }
+    // スレッドカード廃止（DM通知に一本化）
     // 笘・夂衍・壼ｮ御ｺ・ｼ・ersonal縺ｮ縺ｿ・・
     try {
       if (nextStatus === "done") {
@@ -1911,20 +1890,7 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
       console.error("assignee notify error:", e?.data || e);
     }
 
-    if (updated.channel_id && updated.message_ts && !updated.channel_id.startsWith("D")) {
-      try {
-        const cardBlocks = await buildThreadCardBlocks({ teamId, task: updated });
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: updated.channel_id,
-          parentTs: updated.message_ts,
-          threadTs: updated.message_ts,
-          blocks: cardBlocks,
-        });
-      } catch (e) {
-        console.error("upsertThreadCard error:", e?.data || e);
-      }
-    }
+    // スレッドカード廃止（DM通知に一本化）
 
     try {
       await publishHomeBurst(client, teamId, usersToRefresh, 250);
@@ -2507,23 +2473,7 @@ app.view("edit_due_modal", async ({ ack, body, view, client }) => {
     if (!updated) return;
 
     // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝画峩譁ｰ・郁ｨｼ霍｡・・
-    if (updated.channel_id && updated.message_ts) {
-      try {
-        const cardBlocks = await buildThreadCardBlocks({
-          teamId,
-          task: updated,
-        });
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: updated.channel_id,
-          parentTs: updated.message_ts,
-          threadTs: updated.message_ts,
-          blocks: cardBlocks,
-        });
-      } catch (e) {
-        console.error("upsertThreadCard error:", e?.data || e);
-      }
-    }
+    // スレッドカード廃止（DM通知に一本化）
 
     // Home 蜀肴緒逕ｻ・亥ｺ・ａ縺ｫ・・
     try {
@@ -2648,17 +2598,7 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
     }
 
     // 繧ｹ繝ｬ繝・ラ繧ｫ繝ｼ繝会ｼ夊｡ｨ遉ｺ譖ｴ譁ｰ
-    if (updated.channel_id && updated.message_ts) {
-      const blocks = await buildThreadCardBlocks({ teamId, task: updated });
-      if (!updated.channel_id?.startsWith("D")) {
-        await upsertThreadCard(client, {
-          teamId,
-          channelId: updated.channel_id,
-          parentTs: updated.message_ts,
-          blocks,
-        });
-      }
-    }
+    // スレッドカード廃止（DM通知に一本化）
 
     // Home 蜀肴緒逕ｻ・磯未菫り・ｼ・
     try {

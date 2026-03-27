@@ -20,6 +20,7 @@ function registerReactionFeature(deps) {
     slackDateYmd,
     publishHomeBurst = () => {},
     upsertThreadCard,
+    notifyTaskSimpleDM = async () => {},
   } = deps;
 
 const TASK_REACTION_NAME = "task";
@@ -280,18 +281,51 @@ app.event("reaction_added", async ({ event, client, body }) => {
       notified_at: null,
     });
 
-    // タスク化完了カードをスレッドに表示（「詳細を開く」ボタン付き）
-    const doneBlocks = await buildThreadCardBlocks({ teamId, task: created });
-
-    if (!String(channelId || "").startsWith("D")) {
-      await upsertThreadCard(client, {
-        teamId,
-        channelId,
-        parentTs: msgTs,
-        threadTs: threadRootTs,
-        blocks: doneBlocks,
+    // リアクションした人にエフェメラルで通知（チャンネル内、本人にだけ見える）
+    try {
+      const payload = JSON.stringify({ teamId, taskId: created.id });
+      await client.chat.postEphemeral({
+        channel: channelId,
+        user: actorUserId,
+        text: `✅ タスク化しました: ${noMention(created.title)}`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `✅ *タスク化しました*\n*${noMention(created.title)}*`,
+            },
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "詳細を開く" },
+                action_id: "open_detail_modal",
+                value: payload,
+              },
+              {
+                type: "button",
+                text: { type: "plain_text", text: "内容を編集" },
+                action_id: "open_edit_task_modal",
+                value: payload,
+              },
+            ],
+          },
+        ],
       });
+    } catch (e) {
+      console.error("ephemeral notify error:", e?.data || e);
     }
+
+    // 対応者にDM（依頼者と別の場合）
+    try {
+      if (assigneeId && assigneeId !== actorUserId) {
+        await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました");
+      }
+    } catch (_) {}
+
     try {
       await publishHomeBurst(
         client,
@@ -392,26 +426,50 @@ app.event("message", async ({ event, client, body }) => {
       notified_at: null,
     });
 
-    // スレッドにタスク化完了カードを表示
-    const doneBlocks = await buildThreadCardBlocks({ teamId, task: created });
-
-    if (!String(channelId || "").startsWith("D")) {
-      await upsertThreadCard(client, {
-        teamId,
-        channelId,
-        parentTs: msgTs,
-        threadTs: threadRootTs,
-        blocks: doneBlocks,
-      });
-    } else {
-      // DMの場合はスレッドに直接投稿
-      await client.chat.postMessage({
+    // キーワードタスク化した人にエフェメラル通知
+    try {
+      const payload = JSON.stringify({ teamId, taskId: created.id });
+      await client.chat.postEphemeral({
         channel: channelId,
-        thread_ts: threadRootTs,
-        text: `✅ タスク化しました: ${noMention(title)}`,
-        blocks: doneBlocks,
+        user: actorUserId,
+        text: `✅ タスク化しました: ${noMention(created.title)}`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `✅ *タスク化しました*\n*${noMention(created.title)}*`,
+            },
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "詳細を開く" },
+                action_id: "open_detail_modal",
+                value: payload,
+              },
+              {
+                type: "button",
+                text: { type: "plain_text", text: "内容を編集" },
+                action_id: "open_edit_task_modal",
+                value: payload,
+              },
+            ],
+          },
+        ],
       });
+    } catch (e) {
+      console.error("ephemeral notify error:", e?.data || e);
     }
+
+    // 対応者にDM（依頼者と別の場合）
+    try {
+      if (assigneeId && assigneeId !== actorUserId) {
+        await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました");
+      }
+    } catch (_) {}
 
     try {
       await publishHomeBurst(
@@ -498,19 +556,49 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
       notified_at: null,
     });
 
-    // タスク詳細カードに差し替え（スレッドに出せるチャンネルだけ）
-    const doneBlocks = await buildThreadCardBlocks({ teamId, task: created });
-
-    // DM（Dxxxx）は thread card を作らない（仕様）
-    if (!String(channelId || "").startsWith("D")) {
-      await upsertThreadCard(client, {
-        teamId,
-        channelId,
-        parentTs: msgTs, // 一意キー（リアクション対象）
-        threadTs: payload.threadTs || msgTs, // 投稿先スレッド親（threadRootTs）
-        blocks: doneBlocks,
-      });
+    // 依頼者に「タスク発行しました」DM
+    try {
+      if (actorUserId) {
+        const dm = await client.conversations.open({ users: actorUserId });
+        const ch = dm.channel?.id;
+        if (ch) {
+          const dmPayload = JSON.stringify({ teamId, taskId: created.id });
+          await client.chat.postMessage({
+            channel: ch,
+            text: `✅ タスクを発行しました: ${noMention(created.title)}`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: `✅ *タスクを発行しました*\n*${noMention(created.title)}*`,
+                },
+              },
+              {
+                type: "actions",
+                elements: [
+                  {
+                    type: "button",
+                    text: { type: "plain_text", text: "詳細を開く" },
+                    action_id: "open_detail_modal",
+                    value: dmPayload,
+                  },
+                ],
+              },
+            ],
+          });
+        }
+      }
+    } catch (e) {
+      console.error("requester DM error:", e?.data || e);
     }
+
+    // 対応者にDM（依頼者と別の場合）
+    try {
+      if (assigneeId && assigneeId !== actorUserId) {
+        await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました");
+      }
+    } catch (_) {}
   } catch (e) {
     console.error("reaction_task_confirm_create error:", e?.data || e);
   }

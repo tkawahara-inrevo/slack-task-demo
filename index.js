@@ -2533,12 +2533,14 @@ app.command("/dashboard", async ({ ack, body, client }) => {
   await app.start(port);
   console.log(`Slack app is running on port ${port}`);
 
-  // 起動時にユーザー情報を一括プリロード（users.info の個別呼び出しを減らす）
-  prefetchAllUsers().catch((e) => console.warn("[prefetch] failed:", e.message));
+  // 起動時にキャッシュをウォームアップ
+  prefetchAll().catch((e) => console.warn("[prefetch] failed:", e.message));
 })();
 
-async function prefetchAllUsers() {
+async function prefetchAll() {
   const now = Date.now();
+
+  // ユーザー一覧を一括取得
   let cursor;
   let count = 0;
   do {
@@ -2569,4 +2571,16 @@ async function prefetchAllUsers() {
     cursor = res?.response_metadata?.next_cursor;
   } while (cursor);
   console.log(`[prefetch] loaded ${count} users into cache`);
+
+  // usergroups（subteam）を一括取得してキャッシュ
+  try {
+    const authRes = await app.client.auth.test();
+    const teamId = authRes?.team_id;
+    if (teamId) {
+      await getSubteamIdMap(teamId);
+      console.log(`[prefetch] usergroups warmed for team ${teamId}`);
+    }
+  } catch (e) {
+    console.warn("[prefetch] usergroups failed:", e.message);
+  }
 }

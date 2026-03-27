@@ -1610,13 +1610,22 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
   let openedViewId = null;
 
   try {
-    const pushed = await client.views.push({
-      trigger_id: body.trigger_id,
-      view: loadingView,
-    });
+    // まず push（既存モーダルがある場合）を試み、失敗したら open にフォールバック
+    let pushed;
+    try {
+      pushed = await client.views.push({
+        trigger_id: body.trigger_id,
+        view: loadingView,
+      });
+    } catch (_pushErr) {
+      pushed = await client.views.open({
+        trigger_id: body.trigger_id,
+        view: loadingView,
+      });
+    }
     openedViewId = pushed?.view?.id || null;
   } catch (e) {
-    console.error("open_edit_task_modal push error:", e?.data || e);
+    console.error("open_edit_task_modal push/open error:", e?.data || e);
     return;
   }
 

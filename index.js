@@ -2518,7 +2518,7 @@ app.command("/dashboard", async ({ ack, body, client }) => {
   const distPath = path.join(__dirname, "web", "dist");
   expressApp.use("/dashboard", require("express").static(distPath));
   // SPA fallback: /dashboard/* → index.html
-  expressApp.get("/dashboard/*", (_req, res) => {
+  expressApp.get("/dashboard/{*splat}", (_req, res) => {
     res.sendFile(path.join(distPath, "index.html"));
   });
 

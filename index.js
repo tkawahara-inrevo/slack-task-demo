@@ -2530,4 +2530,41 @@ app.command("/dashboard", async ({ ack, body, client }) => {
 
   await app.start(port);
   console.log(`Slack app is running on port ${port}`);
+
+  // 起動時にユーザー情報を一括プリロード（users.info の個別呼び出しを減らす）
+  prefetchAllUsers().catch((e) => console.warn("[prefetch] failed:", e.message));
 })();
+
+async function prefetchAllUsers() {
+  const now = Date.now();
+  let cursor;
+  let count = 0;
+  do {
+    const res = await app.client.users.list({
+      limit: 200,
+      ...(cursor ? { cursor } : {}),
+    });
+    for (const u of res?.members || []) {
+      if (u.deleted || u.is_bot) continue;
+      const teamId = u.team_id;
+      const userId = u.id;
+      if (!teamId || !userId) continue;
+      const key = `${teamId}:${userId}`;
+      const name =
+        (u?.profile?.display_name && u.profile.display_name.trim()) ||
+        (u?.real_name && u.real_name.trim()) ||
+        (u?.name && String(u.name).trim()) ||
+        userId;
+      userNameCache.set(key, { at: now, name });
+      const url =
+        u?.profile?.image_24 ||
+        u?.profile?.image_32 ||
+        u?.profile?.image_48 ||
+        null;
+      if (url) userIconCache.set(key, { at: now, url });
+      count++;
+    }
+    cursor = res?.response_metadata?.next_cursor;
+  } while (cursor);
+  console.log(`[prefetch] loaded ${count} users into cache`);
+}

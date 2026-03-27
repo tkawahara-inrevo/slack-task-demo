@@ -158,35 +158,28 @@ async function ensureHomeStateLoaded(teamId, userId) {
   });
 }
 
+function stripMentions(text) {
+  return text
+    .replace(/<@[^>]+>/g, " ")
+    .replace(/<!subteam\^[^>]+>/g, " ")
+    .replace(/<!channel>/g, " ")
+    .replace(/<!here>/g, " ")
+    .replace(/<!everyone>/g, " ")
+    // @ハンドル（英数字）
+    .replace(/[@＠][\w][\w.-]*/g, " ")
+    // @日本語名（+姓）(+/英名）— 例: @土井 燎/Kagari Doi
+    .replace(/[@＠][^\x00-\x7F]+(?:\s+[^\x00-\x7F]+)*(?:\s*\/\s*[A-Za-z\s.]+)?/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function taskLineForHome(task) {
   const rawTitle = String(task.title || "").trim();
+  const rawDesc = String(task.description || "").trim();
 
-  let preview;
-  if (rawTitle) {
-    preview = rawTitle;
-  } else {
-    // タイトルが空 → descriptionからメンションを除去して表示
-    const desc = String(task.description || "").trim();
-    if (!desc) {
-      preview = "（本文なし）";
-    } else {
-      preview = desc
-        // Slack内部メンション <@Uxxx> / <!subteam^...> / <!channel> 等
-        .replace(/<@[^>]+>/g, " ")
-        .replace(/<!subteam\^[^>]+>/g, " ")
-        .replace(/<!channel>/g, " ")
-        .replace(/<!here>/g, " ")
-        .replace(/<!everyone>/g, " ")
-        // @ハンドル（英数字）
-        .replace(/[@＠][\w][\w.-]*/g, " ")
-        // @日本語名（+姓）(+/英名）— 例: @土井 燎/Kagari Doi
-        .replace(/[@＠][^\x00-\x7F]+(?:\s+[^\x00-\x7F]+)*(?:\s*\/\s*[A-Za-z\s.]+)?/g, " ")
-        .replace(/https?:\/\/\S+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (!preview) preview = "（本文なし）";
-    }
-  }
+  // タイトル・本文どちらもメンションを除去して表示
+  let preview = stripMentions(rawTitle) || stripMentions(rawDesc) || "（本文なし）";
 
   // @表記を抑止（通知防止）
   preview = preview.replace(/@/g, "＠");

@@ -50,7 +50,6 @@ export default function Dashboard() {
         <h1>タスク管理ダッシュボード</h1>
         <div className="header-right">
           <Link to="/analytics" className="analytics-link">分析</Link>
-          <Link to="/tasks/new" className="create-task-link">＋ タスク作成</Link>
           {user?.role === 'admin' && (
             <Link to="/admin" className="admin-link">管理設定</Link>
           )}

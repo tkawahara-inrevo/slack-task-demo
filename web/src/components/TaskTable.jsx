@@ -1,5 +1,27 @@
 import { useNavigate } from 'react-router-dom';
 
+// <@U123> や <#C123|channel> などのSlackメンションを除去
+function stripMentions(text) {
+  return (text || '')
+    .replace(/<@[A-Z0-9]+>/g, '')
+    .replace(/<#[A-Z0-9]+\|[^>]*>/g, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function trimTitle(title) {
+  const t = stripMentions(title || '');
+  return t.length > 60 ? t.slice(0, 60) + '…' : t || '（タイトルなし）';
+}
+
+// "名前 太郎/Tarou Name" → "名前 太郎"
+function trimDisplayName(name) {
+  if (!name) return '-';
+  const slash = name.indexOf('/');
+  return slash > 0 ? name.slice(0, slash).trim() : name;
+}
+
 const STATUS_LABELS = {
   in_progress: '進行中',
   done: '完了',
@@ -39,14 +61,14 @@ export default function TaskTable({ tasks, total, page, onPageChange }) {
               && formatDate(t.due_date) < formatDate(new Date());
             const assigneeLabel = t.task_type === 'broadcast'
               ? (t.assignee_label ? `一斉（${t.assignee_label}）` : `一斉（${t.total_count ?? '?'}名）`)
-              : (t.assigneeDisplayName || '-');
+              : trimDisplayName(t.assigneeDisplayName);
             return (
               <tr
                 key={t.id}
                 className={`clickable-row ${isOverdue ? 'overdue-row' : ''}`}
                 onClick={() => navigate(`/tasks/${t.id}`)}
               >
-                <td className="task-title">{t.title?.length > 60 ? t.title.slice(0, 60) + '...' : t.title}</td>
+                <td className="task-title">{trimTitle(t.title)}</td>
                 <td className="task-assignee">{assigneeLabel}</td>
                 <td><span className={`status-badge ${t.status}`}>{STATUS_LABELS[t.status] || t.status}</span></td>
                 <td className={isOverdue ? 'overdue-date' : ''}>{formatDate(t.due_date)}</td>

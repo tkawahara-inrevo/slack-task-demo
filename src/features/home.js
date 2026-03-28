@@ -1357,9 +1357,11 @@ async function publishHome({ client, teamId, userId }) {
 }
 
 app.options("home_dept_select", async ({ ack, payload }) => {
+  console.log("[home_dept_select] options called, q=", payload?.value);
   try {
     const q = payload?.value || "";
     const groups = await searchUsergroups(q);
+    console.log("[home_dept_select] groups count=", groups.length);
     const options = [
       { text: { type: "plain_text", text: "すべて" }, value: "all" },
       { text: { type: "plain_text", text: "未設定" }, value: "__none__" },

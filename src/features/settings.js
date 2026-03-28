@@ -392,6 +392,17 @@ function registerSettingsFeature(deps) {
               },
             ]
           : []),
+        { type: "divider" },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "*個人チームフィルタ*\nHomeタブの部署フィルタで使えるチームを作成できます。自分だけに反映されます。" },
+          accessory: {
+            type: "button",
+            action_id: "open_personal_filter_modal",
+            text: { type: "plain_text", text: "フィルタ作成" },
+            value: JSON.stringify({ teamId, userId }),
+          },
+        },
       ],
     };
   }

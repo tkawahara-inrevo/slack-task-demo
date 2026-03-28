@@ -429,13 +429,6 @@ async function publishHome({ client, teamId, userId }) {
 
   actionElements.push({
     type: "button",
-    action_id: "open_personal_filter_modal",
-    text: { type: "plain_text", text: "フィルタ作成" },
-    value: JSON.stringify({ teamId, userId }),
-  });
-
-  actionElements.push({
-    type: "button",
     action_id: "open_user_settings_from_home",
     text: { type: "plain_text", text: "設定" },
     value: JSON.stringify({ teamId, userId }),
@@ -1869,8 +1862,10 @@ app.action("open_personal_filter_modal", async ({ ack, body, client }) => {
   const userId = getUserIdFromBody(body);
   if (!teamId || !userId) return;
 
+  const isFromModal = body.view?.type === "modal";
   try {
-    await client.views.open({
+    const openFn = isFromModal ? client.views.push : client.views.open;
+    await openFn.call(client.views, {
       trigger_id: body.trigger_id,
       view: {
         type: "modal",

@@ -130,6 +130,16 @@ const {
   dbRemoveDealMember,
   dbListDealMembers,
   dbIsDealMember,
+  dbCreateDealActivity,
+  dbListDealActivities,
+  dbDeleteDealActivity,
+  dbCreateDealPayment,
+  dbListDealPayments,
+  dbUpdateDealPayment,
+  dbDeleteDealPayment,
+  dbAddDealTask,
+  dbRemoveDealTask,
+  dbListDealTasks,
 } = require("./src/db");
 
 let resolveHomeDefaultsForHome = async () => ({
@@ -2539,6 +2549,16 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbRemoveDealMember,
     dbListDealMembers,
     dbIsDealMember,
+    dbCreateDealActivity,
+    dbListDealActivities,
+    dbDeleteDealActivity,
+    dbCreateDealPayment,
+    dbListDealPayments,
+    dbUpdateDealPayment,
+    dbDeleteDealPayment,
+    dbAddDealTask,
+    dbRemoveDealTask,
+    dbListDealTasks,
   });
 
   // Root redirect

@@ -81,8 +81,8 @@ export default function ClientList() {
             </thead>
             <tbody>
               {clients.map(c => (
-                <tr key={c.id} style={{ borderBottom: '1px solid #f0f0f0' }}
-                  className="task-row" onClick={() => navigate(`/crm/clients/${c.id}`)}
+                <tr key={c.id}
+                  onClick={() => navigate(`/crm/clients/${c.id}`)}
                   style={{ borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}>
                   <td style={{ padding: '10px 12px', fontWeight: 600 }}>
                     <Link to={`/crm/clients/${c.id}`} onClick={e => e.stopPropagation()}>{c.name}</Link>

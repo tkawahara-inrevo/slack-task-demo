@@ -240,6 +240,41 @@ async function dbEnsureSettingsSchema() {
         PRIMARY KEY (deal_id, user_id)
       );
     `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS deal_activities (
+        id TEXT PRIMARY KEY,
+        deal_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        activity_type TEXT NOT NULL,
+        content TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS deal_payments (
+        id TEXT PRIMARY KEY,
+        deal_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        due_date DATE,
+        paid_date DATE,
+        status TEXT NOT NULL DEFAULT 'pending',
+        notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS deal_tasks (
+        deal_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (deal_id, task_id)
+      );
+    `),
   ]);
 
   // 初期admin を設定（存在しなければ）
@@ -1265,6 +1300,93 @@ async function dbIsDealMember(teamId, dealId, userId) {
   return res.rows.length > 0;
 }
 
+// ================================
+// CRM: Deal Activities
+// ================================
+async function dbCreateDealActivity(teamId, id, { dealId, userId, activityType, content, metadata }) {
+  await dbQuery(
+    `INSERT INTO deal_activities (id, deal_id, team_id, user_id, activity_type, content, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, dealId, teamId, userId, activityType, content || null, JSON.stringify(metadata || {})],
+  );
+  const res = await dbQuery(`SELECT * FROM deal_activities WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListDealActivities(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT * FROM deal_activities WHERE team_id=$1 AND deal_id=$2 ORDER BY created_at DESC`,
+    [teamId, dealId],
+  );
+  return res.rows;
+}
+
+async function dbDeleteDealActivity(teamId, id) {
+  await dbQuery(`DELETE FROM deal_activities WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
+// CRM: Deal Payments
+// ================================
+async function dbCreateDealPayment(teamId, id, { dealId, label, amount, dueDate, notes }) {
+  await dbQuery(
+    `INSERT INTO deal_payments (id, deal_id, team_id, label, amount, due_date, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, dealId, teamId, label, amount, dueDate || null, notes || null],
+  );
+  const res = await dbQuery(`SELECT * FROM deal_payments WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListDealPayments(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT * FROM deal_payments WHERE team_id=$1 AND deal_id=$2 ORDER BY created_at`,
+    [teamId, dealId],
+  );
+  return res.rows;
+}
+
+async function dbUpdateDealPayment(teamId, id, fields) {
+  const allowed = ['label', 'amount', 'due_date', 'paid_date', 'status', 'notes'];
+  const sets = [];
+  const vals = [];
+  let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return;
+  await dbQuery(`UPDATE deal_payments SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+}
+
+async function dbDeleteDealPayment(teamId, id) {
+  await dbQuery(`DELETE FROM deal_payments WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
+// CRM: Deal Tasks
+// ================================
+async function dbAddDealTask(teamId, dealId, taskId) {
+  await dbQuery(
+    `INSERT INTO deal_tasks (deal_id, task_id, team_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+    [dealId, taskId, teamId],
+  );
+}
+
+async function dbRemoveDealTask(teamId, dealId, taskId) {
+  await dbQuery(`DELETE FROM deal_tasks WHERE team_id=$1 AND deal_id=$2 AND task_id=$3`, [teamId, dealId, taskId]);
+}
+
+async function dbListDealTasks(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT t.* FROM tasks t
+     JOIN deal_tasks dt ON dt.task_id=t.id AND dt.team_id=t.team_id
+     WHERE dt.team_id=$1 AND dt.deal_id=$2
+     ORDER BY t.created_at DESC`,
+    [teamId, dealId],
+  );
+  return res.rows;
+}
+
 module.exports = {
   dbEnsureSettingsSchema,
   dbCountCompletions,
@@ -1345,6 +1467,19 @@ module.exports = {
   dbRemoveDealMember,
   dbListDealMembers,
   dbIsDealMember,
+  // CRM: Activities
+  dbCreateDealActivity,
+  dbListDealActivities,
+  dbDeleteDealActivity,
+  // CRM: Payments
+  dbCreateDealPayment,
+  dbListDealPayments,
+  dbUpdateDealPayment,
+  dbDeleteDealPayment,
+  // CRM: Deal-Task linkage
+  dbAddDealTask,
+  dbRemoveDealTask,
+  dbListDealTasks,
   // Integrations
   dbCreateIntegration,
   dbListIntegrations,

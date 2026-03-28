@@ -137,6 +137,27 @@ export const api = {
   crmAddDealMember: (dealId, userId, role) => crmPost(`/deals/${dealId}/members`, { userId, role }),
   crmRemoveDealMember: (dealId, userId) => crmDelete(`/deals/${dealId}/members/${userId}`),
 
+  // CRM: Deal full detail
+  crmDealFull: (id) => crmFetch(`/deals/${id}/full`),
+
+  // CRM: Activities
+  crmActivities: (dealId) => crmFetch(`/deals/${dealId}/activities`),
+  crmAddActivity: (dealId, body) => crmPost(`/deals/${dealId}/activities`, body),
+  crmDeleteActivity: (dealId, actId) => crmDelete(`/deals/${dealId}/activities/${actId}`),
+
+  // CRM: Payments
+  crmPayments: (dealId) => crmFetch(`/deals/${dealId}/payments`),
+  crmAddPayment: (dealId, body) => crmPost(`/deals/${dealId}/payments`, body),
+  crmUpdatePayment: (dealId, payId, body) => crmFetch(`/deals/${dealId}/payments/${payId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  crmDeletePayment: (dealId, payId) => crmDelete(`/deals/${dealId}/payments/${payId}`),
+
+  // CRM: Deal Tasks
+  crmDealTasks: (dealId) => crmFetch(`/deals/${dealId}/tasks`),
+  crmAddDealTask: (dealId, taskId) => crmPost(`/deals/${dealId}/tasks`, { taskId }),
+  crmRemoveDealTask: (dealId, taskId) => crmDelete(`/deals/${dealId}/tasks/${taskId}`),
+
   // Analytics
   analyticsMemberCompletion: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

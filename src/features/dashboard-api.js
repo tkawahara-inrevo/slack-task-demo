@@ -135,6 +135,16 @@ function registerDashboardApi(deps) {
     dbRemoveDealMember,
     dbListDealMembers,
     dbIsDealMember,
+    dbCreateDealActivity,
+    dbListDealActivities,
+    dbDeleteDealActivity,
+    dbCreateDealPayment,
+    dbListDealPayments,
+    dbUpdateDealPayment,
+    dbDeleteDealPayment,
+    dbAddDealTask,
+    dbRemoveDealTask,
+    dbListDealTasks,
   } = deps;
 
   const kintone = require("./kintone-connector");
@@ -1501,6 +1511,154 @@ function registerDashboardApi(deps) {
     try {
       await dbRemoveDealMember(teamId, req.params.id, req.params.userId);
       res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal Activities
+  // ================================
+  expressApp.get("/api/crm/deals/:id/activities", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      const activities = await dbListDealActivities(teamId, req.params.id);
+      res.json({ activities });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/activities", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.session;
+    const { activityType, content, metadata } = req.body;
+    if (!activityType) return res.status(400).json({ error: "activityType required" });
+    try {
+      const id = randomUUID();
+      const activity = await dbCreateDealActivity(teamId, id, {
+        dealId: req.params.id, userId, activityType, content, metadata,
+      });
+      res.json({ activity });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/activities/:actId", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbDeleteDealActivity(teamId, req.params.actId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal Payments
+  // ================================
+  expressApp.get("/api/crm/deals/:id/payments", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      const payments = await dbListDealPayments(teamId, req.params.id);
+      res.json({ payments });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/payments", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    const { label, amount, dueDate, notes } = req.body;
+    if (!label || !amount) return res.status(400).json({ error: "label and amount required" });
+    try {
+      const id = randomUUID();
+      const payment = await dbCreateDealPayment(teamId, id, {
+        dealId: req.params.id, label, amount: Number(amount), dueDate, notes,
+      });
+      res.json({ payment });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/payments/:payId", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbUpdateDealPayment(teamId, req.params.payId, req.body);
+      const payments = await dbListDealPayments(teamId, req.params.id);
+      res.json({ payments });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/payments/:payId", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbDeleteDealPayment(teamId, req.params.payId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal-Task Linkage
+  // ================================
+  expressApp.get("/api/crm/deals/:id/tasks", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      const tasks = await dbListDealTasks(teamId, req.params.id);
+      res.json({ tasks });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/tasks", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    const { taskId } = req.body;
+    if (!taskId) return res.status(400).json({ error: "taskId required" });
+    try {
+      await dbAddDealTask(teamId, req.params.id, taskId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/tasks/:taskId", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbRemoveDealTask(teamId, req.params.id, req.params.taskId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal detail (full)
+  // ================================
+  expressApp.get("/api/crm/deals/:id/full", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      const [deal, members, activities, payments, tasks] = await Promise.all([
+        dbGetDeal(teamId, req.params.id),
+        dbListDealMembers(teamId, req.params.id),
+        dbListDealActivities(teamId, req.params.id),
+        dbListDealPayments(teamId, req.params.id),
+        dbListDealTasks(teamId, req.params.id),
+      ]);
+      if (!deal) return res.status(404).json({ error: "not found" });
+      const membersWithNames = await Promise.all(
+        members.map(async (m) => ({ ...m, displayName: await getUserDisplayName(teamId, m.user_id) }))
+      );
+      const activitiesWithNames = await Promise.all(
+        activities.map(async (a) => ({ ...a, displayName: await getUserDisplayName(teamId, a.user_id) }))
+      );
+      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

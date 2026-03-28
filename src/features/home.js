@@ -1356,25 +1356,10 @@ async function publishHome({ client, teamId, userId }) {
   });
 }
 
-app.options("home_dept_select", async ({ ack, payload, body }) => {
+app.options("home_dept_select", async ({ ack, payload }) => {
   try {
     const q = payload?.value || "";
-    const slackTeamId = body?.team?.id;
-    const userId = body?.user?.id;
-
-    const [groups, rawFilters] = await Promise.all([
-      searchUsergroups(q),
-      slackTeamId && userId ? dbListPersonalFilters(slackTeamId, userId) : Promise.resolve([]),
-    ]);
-
-    // 個人フィルタ（このユーザーが作成したもの）
-    const personalOptions = rawFilters
-      .filter((f) => !q || f.name.toLowerCase().includes(q.toLowerCase()))
-      .map((f) => ({
-        text: { type: "plain_text", text: f.name },
-        value: `pf:${f.id}`,
-      }));
-
+    const groups = await searchUsergroups(q);
     const options = [
       { text: { type: "plain_text", text: "すべて" }, value: "all" },
       { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
@@ -1382,9 +1367,7 @@ app.options("home_dept_select", async ({ ack, payload, body }) => {
         text: { type: "plain_text", text: `@${g.handle}` },
         value: g.id,
       })),
-      ...personalOptions,
     ];
-
     await ack({ options });
   } catch (e) {
     console.error("home_dept_select options error:", e?.data || e);

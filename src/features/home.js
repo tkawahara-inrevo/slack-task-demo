@@ -1356,6 +1356,12 @@ async function publishHome({ client, teamId, userId }) {
   });
 }
 
+// DEBUG: catch-all options handler
+app.options(/.*/, async ({ ack, payload }) => {
+  console.log("[any_options] action_id=", payload?.action_id, "q=", payload?.value);
+  await ack({ options: [] });
+});
+
 app.options("home_dept_select", async ({ ack, payload }) => {
   console.log("[home_dept_select] options called, q=", payload?.value);
   try {

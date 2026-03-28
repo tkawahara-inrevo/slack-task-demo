@@ -201,6 +201,45 @@ async function dbEnsureSettingsSchema() {
         finished_at TIMESTAMPTZ
       );
     `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS clients (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        contact_name TEXT,
+        contact_email TEXT,
+        contact_phone TEXT,
+        source TEXT,
+        notes TEXT,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS deals (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        stage TEXT NOT NULL DEFAULT 'mk',
+        budget INTEGER,
+        notes TEXT,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS deal_members (
+        deal_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (deal_id, user_id)
+      );
+    `),
   ]);
 
   // 初期admin を設定（存在しなければ）
@@ -1094,6 +1133,138 @@ async function dbGetPersonalFilterMemberIds(teamId, filterId) {
   return (res.rows || []).map((r) => r.user_id);
 }
 
+// ================================
+// CRM: Clients
+// ================================
+async function dbCreateClient(teamId, id, { name, contactName, contactEmail, contactPhone, source, notes, createdBy }) {
+  await dbQuery(
+    `INSERT INTO clients (id, team_id, name, contact_name, contact_email, contact_phone, source, notes, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, teamId, name, contactName || null, contactEmail || null, contactPhone || null, source || null, notes || null, createdBy],
+  );
+  return dbGetClient(teamId, id);
+}
+
+async function dbListClients(teamId, { search = '', limit = 50, offset = 0 } = {}) {
+  const q = search
+    ? `SELECT * FROM clients WHERE team_id=$1 AND name ILIKE $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4`
+    : `SELECT * FROM clients WHERE team_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`;
+  const params = search ? [teamId, `%${search}%`, limit, offset] : [teamId, limit, offset];
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+async function dbGetClient(teamId, id) {
+  const res = await dbQuery(`SELECT * FROM clients WHERE team_id=$1 AND id=$2`, [teamId, id]);
+  return res.rows[0] || null;
+}
+
+async function dbUpdateClient(teamId, id, fields) {
+  const allowed = ['name', 'contact_name', 'contact_email', 'contact_phone', 'source', 'notes'];
+  const sets = [];
+  const vals = [];
+  let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return dbGetClient(teamId, id);
+  sets.push(`updated_at=now()`);
+  await dbQuery(`UPDATE clients SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  return dbGetClient(teamId, id);
+}
+
+async function dbDeleteClient(teamId, id) {
+  await dbQuery(`DELETE FROM deal_members WHERE team_id=$1 AND deal_id IN (SELECT id FROM deals WHERE team_id=$1 AND client_id=$2)`, [teamId, id]);
+  await dbQuery(`DELETE FROM deals WHERE team_id=$1 AND client_id=$2`, [teamId, id]);
+  await dbQuery(`DELETE FROM clients WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
+// CRM: Deals
+// ================================
+async function dbCreateDeal(teamId, id, { clientId, name, stage, budget, notes, createdBy }) {
+  await dbQuery(
+    `INSERT INTO deals (id, team_id, client_id, name, stage, budget, notes, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [id, teamId, clientId, name, stage || 'mk', budget || null, notes || null, createdBy],
+  );
+  return dbGetDeal(teamId, id);
+}
+
+async function dbListDeals(teamId, { clientId, stage, userId, limit = 100 } = {}) {
+  let q = `SELECT d.*, c.name AS client_name FROM deals d
+           JOIN clients c ON c.id=d.client_id AND c.team_id=d.team_id
+           WHERE d.team_id=$1`;
+  const params = [teamId];
+  let i = 2;
+  if (clientId) { q += ` AND d.client_id=$${i++}`; params.push(clientId); }
+  if (stage) { q += ` AND d.stage=$${i++}`; params.push(stage); }
+  if (userId) {
+    q += ` AND EXISTS (SELECT 1 FROM deal_members dm WHERE dm.deal_id=d.id AND dm.user_id=$${i++})`;
+    params.push(userId);
+  }
+  q += ` ORDER BY d.updated_at DESC LIMIT $${i}`; params.push(limit);
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+async function dbGetDeal(teamId, id) {
+  const res = await dbQuery(
+    `SELECT d.*, c.name AS client_name FROM deals d
+     JOIN clients c ON c.id=d.client_id AND c.team_id=d.team_id
+     WHERE d.team_id=$1 AND d.id=$2`,
+    [teamId, id],
+  );
+  return res.rows[0] || null;
+}
+
+async function dbUpdateDeal(teamId, id, fields) {
+  const allowed = ['name', 'stage', 'budget', 'notes', 'client_id'];
+  const sets = [];
+  const vals = [];
+  let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return dbGetDeal(teamId, id);
+  sets.push(`updated_at=now()`);
+  await dbQuery(`UPDATE deals SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  return dbGetDeal(teamId, id);
+}
+
+async function dbDeleteDeal(teamId, id) {
+  await dbQuery(`DELETE FROM deal_members WHERE deal_id=$1 AND team_id=$2`, [id, teamId]);
+  await dbQuery(`DELETE FROM deals WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+async function dbAddDealMember(teamId, dealId, userId, role = 'member') {
+  await dbQuery(
+    `INSERT INTO deal_members (deal_id, team_id, user_id, role) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (deal_id, user_id) DO UPDATE SET role=$4`,
+    [dealId, teamId, userId, role],
+  );
+}
+
+async function dbRemoveDealMember(teamId, dealId, userId) {
+  await dbQuery(`DELETE FROM deal_members WHERE deal_id=$1 AND team_id=$2 AND user_id=$3`, [dealId, teamId, userId]);
+}
+
+async function dbListDealMembers(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT user_id, role, added_at FROM deal_members WHERE deal_id=$1 AND team_id=$2 ORDER BY added_at`,
+    [dealId, teamId],
+  );
+  return res.rows;
+}
+
+async function dbIsDealMember(teamId, dealId, userId) {
+  const res = await dbQuery(
+    `SELECT 1 FROM deal_members WHERE deal_id=$1 AND team_id=$2 AND user_id=$3`,
+    [dealId, teamId, userId],
+  );
+  return res.rows.length > 0;
+}
+
 module.exports = {
   dbEnsureSettingsSchema,
   dbCountCompletions,
@@ -1158,6 +1329,22 @@ module.exports = {
   dbDeletePersonalFilter,
   dbSetPersonalFilterMembers,
   dbGetPersonalFilterMemberIds,
+  // CRM: Clients
+  dbCreateClient,
+  dbListClients,
+  dbGetClient,
+  dbUpdateClient,
+  dbDeleteClient,
+  // CRM: Deals
+  dbCreateDeal,
+  dbListDeals,
+  dbGetDeal,
+  dbUpdateDeal,
+  dbDeleteDeal,
+  dbAddDealMember,
+  dbRemoveDealMember,
+  dbListDealMembers,
+  dbIsDealMember,
   // Integrations
   dbCreateIntegration,
   dbListIntegrations,

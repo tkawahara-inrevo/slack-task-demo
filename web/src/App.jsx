@@ -10,6 +10,10 @@ import RolesAdmin from './pages/admin/RolesAdmin'
 import IntegrationsAdmin from './pages/admin/IntegrationsAdmin'
 import ProjectView from './pages/ProjectView'
 import Analytics from './pages/Analytics'
+import ClientList from './pages/crm/ClientList'
+import ClientDetail from './pages/crm/ClientDetail'
+import DealList from './pages/crm/DealList'
+import DealDetail from './pages/crm/DealDetail'
 import './App.css'
 
 function App() {
@@ -21,6 +25,10 @@ function App() {
       <Route path="/projects/:id" element={<ProjectView />} />
       <Route path="/analytics" element={<Analytics />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
+      <Route path="/crm/clients" element={<ClientList />} />
+      <Route path="/crm/clients/:id" element={<ClientDetail />} />
+      <Route path="/crm/deals" element={<DealList />} />
+      <Route path="/crm/deals/:id" element={<DealDetail />} />
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="teams" replace />} />
         <Route path="teams" element={<TeamsAdmin />} />

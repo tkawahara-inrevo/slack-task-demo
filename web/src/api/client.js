@@ -1,4 +1,5 @@
 const BASE = '/api/dashboard';
+const CRM = '/api/crm';
 
 async function apiFetch(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -32,6 +33,22 @@ function jsonPut(path, body) {
 
 function apiDelete(path) {
   return apiFetch(path, { method: 'DELETE' });
+}
+
+async function crmFetch(path, opts = {}) {
+  const res = await fetch(`${CRM}${path}`, { credentials: 'include', ...opts });
+  if (res.status === 401) { window.location.href = '/dashboard/unauthorized'; throw new Error('Unauthorized'); }
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+function crmPost(path, body) {
+  return crmFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+function crmPut(path, body) {
+  return crmFetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+function crmDelete(path) {
+  return crmFetch(path, { method: 'DELETE' });
 }
 
 export const api = {
@@ -97,6 +114,28 @@ export const api = {
   integrationSync: (id, direction) => jsonPost(`/integrations/${id}/sync`, { direction }),
   integrationLogs: (id) => apiFetch(`/integrations/${id}/logs`),
   localFields: () => apiFetch('/integrations/local-fields'),
+
+  // CRM: Clients
+  crmClients: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return crmFetch(`/clients${qs ? '?' + qs : ''}`);
+  },
+  crmClientDetail: (id) => crmFetch(`/clients/${id}`),
+  crmCreateClient: (body) => crmPost('/clients', body),
+  crmUpdateClient: (id, body) => crmPut(`/clients/${id}`, body),
+  crmDeleteClient: (id) => crmDelete(`/clients/${id}`),
+
+  // CRM: Deals
+  crmDeals: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return crmFetch(`/deals${qs ? '?' + qs : ''}`);
+  },
+  crmDealDetail: (id) => crmFetch(`/deals/${id}`),
+  crmCreateDeal: (body) => crmPost('/deals', body),
+  crmUpdateDeal: (id, body) => crmPut(`/deals/${id}`, body),
+  crmDeleteDeal: (id) => crmDelete(`/deals/${id}`),
+  crmAddDealMember: (dealId, userId, role) => crmPost(`/deals/${dealId}/members`, { userId, role }),
+  crmRemoveDealMember: (dealId, userId) => crmDelete(`/deals/${dealId}/members/${userId}`),
 
   // Analytics
   analyticsMemberCompletion: (params = {}) => {

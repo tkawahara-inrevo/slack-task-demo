@@ -115,6 +115,21 @@ const {
   dbCreateSyncLog,
   dbUpdateSyncLog,
   dbListSyncLogs,
+  // CRM
+  dbCreateClient,
+  dbListClients,
+  dbGetClient,
+  dbUpdateClient,
+  dbDeleteClient,
+  dbCreateDeal,
+  dbListDeals,
+  dbGetDeal,
+  dbUpdateDeal,
+  dbDeleteDeal,
+  dbAddDealMember,
+  dbRemoveDealMember,
+  dbListDealMembers,
+  dbIsDealMember,
 } = require("./src/db");
 
 let resolveHomeDefaultsForHome = async () => ({
@@ -2509,6 +2524,21 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbListSyncLogs,
     getSubteamIdMap,
     getUsergroupMembers,
+    // CRM
+    dbCreateClient,
+    dbListClients,
+    dbGetClient,
+    dbUpdateClient,
+    dbDeleteClient,
+    dbCreateDeal,
+    dbListDeals,
+    dbGetDeal,
+    dbUpdateDeal,
+    dbDeleteDeal,
+    dbAddDealMember,
+    dbRemoveDealMember,
+    dbListDealMembers,
+    dbIsDealMember,
   });
 
   // Root redirect

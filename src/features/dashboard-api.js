@@ -120,6 +120,21 @@ function registerDashboardApi(deps) {
     dbListSyncLogs,
     getSubteamIdMap,
     getUsergroupMembers,
+    // CRM
+    dbCreateClient,
+    dbListClients,
+    dbGetClient,
+    dbUpdateClient,
+    dbDeleteClient,
+    dbCreateDeal,
+    dbListDeals,
+    dbGetDeal,
+    dbUpdateDeal,
+    dbDeleteDeal,
+    dbAddDealMember,
+    dbRemoveDealMember,
+    dbListDealMembers,
+    dbIsDealMember,
   } = deps;
 
   const kintone = require("./kintone-connector");
@@ -1340,6 +1355,156 @@ function registerDashboardApi(deps) {
       });
     }
   }
+
+  // ================================
+  // CRM: Clients
+  // ================================
+  expressApp.get("/api/crm/clients", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    const { search, limit, offset } = req.query;
+    try {
+      const clients = await dbListClients(teamId, {
+        search: search || '',
+        limit: Number(limit) || 50,
+        offset: Number(offset) || 0,
+      });
+      res.json({ clients });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/clients", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.session;
+    const { name, contactName, contactEmail, contactPhone, source, notes } = req.body;
+    if (!name) return res.status(400).json({ error: "name required" });
+    try {
+      const id = randomUUID();
+      const client = await dbCreateClient(teamId, id, { name, contactName, contactEmail, contactPhone, source, notes, createdBy: userId });
+      res.json({ client });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/clients/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      const client = await dbGetClient(teamId, req.params.id);
+      if (!client) return res.status(404).json({ error: "not found" });
+      const deals = await dbListDeals(teamId, { clientId: client.id });
+      res.json({ client, deals });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.put("/api/crm/clients/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    const { name, contact_name, contact_email, contact_phone, source, notes } = req.body;
+    try {
+      const client = await dbUpdateClient(teamId, req.params.id, { name, contact_name, contact_email, contact_phone, source, notes });
+      res.json({ client });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/clients/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbDeleteClient(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deals
+  // ================================
+  expressApp.get("/api/crm/deals", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.session;
+    const { clientId, stage } = req.query;
+    try {
+      const deals = await dbListDeals(teamId, { clientId, stage });
+      res.json({ deals });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.session;
+    const { clientId, name, stage, budget, notes } = req.body;
+    if (!clientId || !name) return res.status(400).json({ error: "clientId and name required" });
+    try {
+      const id = randomUUID();
+      const deal = await dbCreateDeal(teamId, id, { clientId, name, stage, budget, notes, createdBy: userId });
+      await dbAddDealMember(teamId, id, userId, 'admin');
+      res.json({ deal });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/deals/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      const deal = await dbGetDeal(teamId, req.params.id);
+      if (!deal) return res.status(404).json({ error: "not found" });
+      const members = await dbListDealMembers(teamId, deal.id);
+      const membersWithNames = await Promise.all(
+        members.map(async (m) => ({ ...m, displayName: await getUserDisplayName(teamId, m.user_id) }))
+      );
+      res.json({ deal, members: membersWithNames });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.put("/api/crm/deals/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    const { name, stage, budget, notes, client_id } = req.body;
+    try {
+      const deal = await dbUpdateDeal(teamId, req.params.id, { name, stage, budget, notes, client_id });
+      res.json({ deal });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbDeleteDeal(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/members", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    const { userId, role } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId required" });
+    try {
+      await dbAddDealMember(teamId, req.params.id, userId, role || 'member');
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/members/:userId", authMiddleware, async (req, res) => {
+    const { teamId } = req.session;
+    try {
+      await dbRemoveDealMember(teamId, req.params.id, req.params.userId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 }
 
 module.exports = {

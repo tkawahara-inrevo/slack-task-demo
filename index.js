@@ -77,6 +77,12 @@ const {
   dbUpsertThreadCard,
   dbUpsertUserDept,
   dbUpsertUserSettings,
+  // Personal filters
+  dbCreatePersonalFilter,
+  dbListPersonalFilters,
+  dbDeletePersonalFilter,
+  dbSetPersonalFilterMembers,
+  dbGetPersonalFilterMemberIds,
   // Dashboard
   dbGetDashboardRole,
   dbSetDashboardRole,
@@ -153,6 +159,12 @@ const {
   dbQuery,
   dbListDashTeamMembers,
   getUserSettings: (...args) => getUserSettingsForHome(...args),
+  dbCreatePersonalFilter,
+  dbListPersonalFilters,
+  dbDeletePersonalFilter,
+  dbSetPersonalFilterMembers,
+  dbGetPersonalFilterMemberIds,
+  randomUUID,
 });
 
 const settingsFeature = registerSettingsFeature({

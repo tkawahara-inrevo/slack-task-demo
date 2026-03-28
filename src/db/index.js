@@ -141,6 +141,23 @@ async function dbEnsureSettingsSchema() {
       );
     `),
     dbQuery(`
+      CREATE TABLE IF NOT EXISTS personal_filters (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS personal_filter_members (
+        filter_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        PRIMARY KEY (filter_id, user_id)
+      );
+    `),
+    dbQuery(`
       CREATE TABLE IF NOT EXISTS integrations (
         id TEXT PRIMARY KEY,
         team_id TEXT NOT NULL,
@@ -1035,6 +1052,48 @@ async function dbListSyncLogs(teamId, integrationId, limit = 20) {
   return res.rows;
 }
 
+// ================================
+// Personal filters (Slack Home個人フィルタ)
+// ================================
+async function dbCreatePersonalFilter(teamId, ownerUserId, id, name) {
+  await dbQuery(
+    `INSERT INTO personal_filters (id, team_id, owner_user_id, name) VALUES ($1, $2, $3, $4)`,
+    [id, teamId, ownerUserId, name],
+  );
+  return { id, name };
+}
+
+async function dbListPersonalFilters(teamId, ownerUserId) {
+  const res = await dbQuery(
+    `SELECT id, name, created_at FROM personal_filters WHERE team_id=$1 AND owner_user_id=$2 ORDER BY created_at ASC`,
+    [teamId, ownerUserId],
+  );
+  return res.rows || [];
+}
+
+async function dbDeletePersonalFilter(teamId, ownerUserId, id) {
+  await dbQuery(`DELETE FROM personal_filter_members WHERE team_id=$1 AND filter_id=$2`, [teamId, id]);
+  await dbQuery(`DELETE FROM personal_filters WHERE team_id=$1 AND owner_user_id=$2 AND id=$3`, [teamId, ownerUserId, id]);
+}
+
+async function dbSetPersonalFilterMembers(teamId, filterId, userIds) {
+  await dbQuery(`DELETE FROM personal_filter_members WHERE team_id=$1 AND filter_id=$2`, [teamId, filterId]);
+  for (const userId of userIds) {
+    await dbQuery(
+      `INSERT INTO personal_filter_members (filter_id, team_id, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [filterId, teamId, userId],
+    );
+  }
+}
+
+async function dbGetPersonalFilterMemberIds(teamId, filterId) {
+  const res = await dbQuery(
+    `SELECT user_id FROM personal_filter_members WHERE team_id=$1 AND filter_id=$2`,
+    [teamId, filterId],
+  );
+  return (res.rows || []).map((r) => r.user_id);
+}
+
 module.exports = {
   dbEnsureSettingsSchema,
   dbCountCompletions,
@@ -1093,6 +1152,12 @@ module.exports = {
   dbAddProjectTask,
   dbRemoveProjectTask,
   dbListProjectTasks,
+  // Personal filters
+  dbCreatePersonalFilter,
+  dbListPersonalFilters,
+  dbDeletePersonalFilter,
+  dbSetPersonalFilterMembers,
+  dbGetPersonalFilterMemberIds,
   // Integrations
   dbCreateIntegration,
   dbListIntegrations,

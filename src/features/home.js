@@ -34,6 +34,12 @@ function registerHomeFeature(deps) {
     dbQuery = async () => ({ rows: [] }),
     dbListDashTeamMembers = async () => [],
     getUserSettings = async () => ({}),
+    dbCreatePersonalFilter = async () => {},
+    dbListPersonalFilters = async () => [],
+    dbDeletePersonalFilter = async () => {},
+    dbSetPersonalFilterMembers = async () => {},
+    dbGetPersonalFilterMemberIds = async () => [],
+    randomUUID = () => require("crypto").randomUUID(),
   } = deps;
 
   async function isBroadcastAssignedToUser(task, teamId, userId) {
@@ -362,12 +368,23 @@ async function publishHome({ client, teamId, userId }) {
   let deptInitialText = "部署：すべて";
   if (deptKey0 === "__none__") deptInitialText = "部署：未設定";
   if (deptKey0 !== "all" && deptKey0 !== "__none__") {
-    try {
-      const idToHandle = await getSubteamIdMap(teamId);
-      const h = idToHandle.get(deptKey0);
-      deptInitialText = h ? `部署：@${h}` : "部署：指定";
-    } catch (_) {
-      deptInitialText = "部署：指定";
+    if (deptKey0.startsWith("pf:")) {
+      const filterId = deptKey0.slice(3);
+      try {
+        const filters = await dbListPersonalFilters(teamId, userId);
+        const f = filters.find((x) => x.id === filterId);
+        deptInitialText = f ? `チーム：${f.name}` : "チーム：指定";
+      } catch (_) {
+        deptInitialText = "チーム：指定";
+      }
+    } else {
+      try {
+        const idToHandle = await getSubteamIdMap(teamId);
+        const h = idToHandle.get(deptKey0);
+        deptInitialText = h ? `部署：@${h}` : "部署：指定";
+      } catch (_) {
+        deptInitialText = "部署：指定";
+      }
     }
   }
 
@@ -407,6 +424,13 @@ async function publishHome({ client, teamId, userId }) {
     action_id: "open_home_task_create_modal",
     text: { type: "plain_text", text: "＋ タスク作成" },
     style: "primary",
+    value: JSON.stringify({ teamId, userId }),
+  });
+
+  actionElements.push({
+    type: "button",
+    action_id: "open_personal_filter_modal",
+    text: { type: "plain_text", text: "フィルタ作成" },
     value: JSON.stringify({ teamId, userId }),
   });
 
@@ -529,7 +553,9 @@ async function publishHome({ client, teamId, userId }) {
 
   // ★範囲=すべて かつ 部署指定 のときだけ「@mkに関わる全て」に絞る（JS側）
   if (rangeKey === "all" && deptKey && deptKey !== "all") {
-    const members = await getUsergroupMembers(teamId, deptKey);
+    const members = deptKey.startsWith("pf:")
+      ? await dbGetPersonalFilterMemberIds(teamId, deptKey.slice(3))
+      : await getUsergroupMembers(teamId, deptKey);
     const memberSet = new Set((members || []).filter(Boolean));
 
     // personal: 担当者 or 依頼者 が部署メンバーに含まれるもの
@@ -1337,10 +1363,24 @@ async function publishHome({ client, teamId, userId }) {
   });
 }
 
-app.options("home_dept_select", async ({ ack, payload }) => {
+app.options("home_dept_select", async ({ ack, payload, body }) => {
   try {
     const q = payload?.value || "";
+    const slackTeamId = body?.team?.id;
+    const userId = body?.user?.id;
     const groups = await searchUsergroups(q);
+
+    // 個人フィルタ（このユーザーが作成したもの）
+    let personalOptions = [];
+    if (slackTeamId && userId) {
+      const filters = await dbListPersonalFilters(slackTeamId, userId);
+      personalOptions = filters
+        .filter((f) => !q || f.name.toLowerCase().includes(q.toLowerCase()))
+        .map((f) => ({
+          text: { type: "plain_text", text: f.name },
+          value: `pf:${f.id}`,
+        }));
+    }
 
     const options = [
       { text: { type: "plain_text", text: "すべて" }, value: "all" },
@@ -1349,6 +1389,7 @@ app.options("home_dept_select", async ({ ack, payload }) => {
         text: { type: "plain_text", text: `@${g.handle}` },
         value: g.id,
       })),
+      ...personalOptions,
     ];
 
     await ack({ options });
@@ -1422,7 +1463,9 @@ app.options("home_person_assignee_select", async ({ ack, body, payload }) => {
     // dept 絞り込み用の許可集合（null=絞り込みなし）
     let allowed = null;
     if (deptKey && deptKey !== "all" && deptKey !== "__none__") {
-      const members = await getUsergroupMembers(teamId, deptKey);
+      const members = deptKey.startsWith("pf:")
+        ? await dbGetPersonalFilterMemberIds(teamId, deptKey.slice(3))
+        : await getUsergroupMembers(teamId, deptKey);
       allowed = new Set(members || []);
     } else if (deptKey === "__none__") {
       // 未設定を実用にしていないため候補なし
@@ -1814,6 +1857,78 @@ app.action("home_task_overflow", async ({ ack, body, client, action }) => {
     }
   } catch (e) {
     console.error("home_task_overflow error:", e?.data || e);
+  }
+});
+
+// ================================
+// Personal filter create
+// ================================
+app.action("open_personal_filter_modal", async ({ ack, body, client }) => {
+  await ack();
+  const teamId = getTeamIdFromBody(body);
+  const userId = getUserIdFromBody(body);
+  if (!teamId || !userId) return;
+
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: "modal",
+        callback_id: "personal_filter_create_modal",
+        private_metadata: JSON.stringify({ teamId, userId }),
+        title: { type: "plain_text", text: "フィルタ作成" },
+        submit: { type: "plain_text", text: "作成" },
+        close: { type: "plain_text", text: "キャンセル" },
+        blocks: [
+          {
+            type: "input",
+            block_id: "filter_name",
+            label: { type: "plain_text", text: "チーム名" },
+            element: {
+              type: "plain_text_input",
+              action_id: "value",
+              placeholder: { type: "plain_text", text: "例：営業チーム" },
+            },
+          },
+          {
+            type: "input",
+            block_id: "filter_members",
+            label: { type: "plain_text", text: "メンバー" },
+            element: {
+              type: "multi_users_select",
+              action_id: "value",
+              placeholder: { type: "plain_text", text: "メンバーを選択（複数可）" },
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.error("open_personal_filter_modal error:", e?.data || e);
+  }
+});
+
+app.view("personal_filter_create_modal", async ({ ack, body, view, client }) => {
+  await ack();
+  const meta = safeJsonParse(view.private_metadata) || {};
+  const teamId = meta.teamId || getTeamIdFromBody(body);
+  const userId = meta.userId || getUserIdFromBody(body);
+  if (!teamId || !userId) return;
+
+  const name = view.state.values.filter_name?.value?.value?.trim();
+  const memberIds = view.state.values.filter_members?.value?.selected_users || [];
+  if (!name) return;
+
+  try {
+    const id = randomUUID();
+    await dbCreatePersonalFilter(teamId, userId, id, name);
+    await dbSetPersonalFilterMembers(teamId, id, memberIds);
+
+    // 作成したフィルタを即座にアクティブにして Home を更新
+    setHomeState(teamId, userId, { deptKey: `pf:${id}`, broadcastScopeKey: "all" });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("personal_filter_create_modal error:", e?.data || e);
   }
 });
 

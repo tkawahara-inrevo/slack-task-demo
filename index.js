@@ -2570,6 +2570,7 @@ async function prefetchAll() {
     const teamId = authRes?.team_id;
     if (teamId) {
       await getSubteamIdMap(teamId);
+      await getSubteamIdMap("global");
       console.log(`[prefetch] usergroups warmed for team ${teamId}`);
     }
   } catch (e) {

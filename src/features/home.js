@@ -1361,19 +1361,19 @@ app.options("home_dept_select", async ({ ack, payload, body }) => {
     const q = payload?.value || "";
     const slackTeamId = body?.team?.id;
     const userId = body?.user?.id;
-    const groups = await searchUsergroups(q);
+
+    const [groups, rawFilters] = await Promise.all([
+      searchUsergroups(q),
+      slackTeamId && userId ? dbListPersonalFilters(slackTeamId, userId) : Promise.resolve([]),
+    ]);
 
     // 個人フィルタ（このユーザーが作成したもの）
-    let personalOptions = [];
-    if (slackTeamId && userId) {
-      const filters = await dbListPersonalFilters(slackTeamId, userId);
-      personalOptions = filters
-        .filter((f) => !q || f.name.toLowerCase().includes(q.toLowerCase()))
-        .map((f) => ({
-          text: { type: "plain_text", text: f.name },
-          value: `pf:${f.id}`,
-        }));
-    }
+    const personalOptions = rawFilters
+      .filter((f) => !q || f.name.toLowerCase().includes(q.toLowerCase()))
+      .map((f) => ({
+        text: { type: "plain_text", text: f.name },
+        value: `pf:${f.id}`,
+      }));
 
     const options = [
       { text: { type: "plain_text", text: "すべて" }, value: "all" },

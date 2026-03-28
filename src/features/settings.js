@@ -250,7 +250,7 @@ function registerSettingsFeature(deps) {
   }
 
   function buildUserSettingsModalView(teamId, userId, settings, opts = {}) {
-    const { projects = [], dashTeams = [] } = opts;
+    const { projects = [] } = opts;
     const dueScheduleOptions = [
       { text: { type: "plain_text", text: "朝 9:00 のみ" }, value: "morning_only" },
       { text: { type: "plain_text", text: "朝 9:00 ＋ 16:00" }, value: "morning_and_afternoon" },
@@ -352,38 +352,6 @@ function registerSettingsFeature(deps) {
                           ? {
                               text: { type: "plain_text", text: projects.find((p) => p.id === settings.homeProjectFilter).name },
                               value: settings.homeProjectFilter,
-                            }
-                          : { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
-                      }
-                    : {}),
-                },
-              },
-            ]
-          : []),
-        ...(dashTeams.length > 0
-          ? [
-              {
-                type: "input",
-                block_id: "home_dash_team_filter",
-                optional: true,
-                label: { type: "plain_text", text: "チームで絞り込み" },
-                element: {
-                  type: "static_select",
-                  action_id: "value",
-                  placeholder: { type: "plain_text", text: "フィルターなし" },
-                  options: [
-                    { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
-                    ...dashTeams.map((t) => ({
-                      text: { type: "plain_text", text: t.name },
-                      value: t.id,
-                    })),
-                  ],
-                  ...(settings.homeDashTeamFilter
-                    ? {
-                        initial_option: dashTeams.find((t) => t.id === settings.homeDashTeamFilter)
-                          ? {
-                              text: { type: "plain_text", text: dashTeams.find((t) => t.id === settings.homeDashTeamFilter).name },
-                              value: settings.homeDashTeamFilter,
                             }
                           : { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
                       }
@@ -538,14 +506,13 @@ function registerSettingsFeature(deps) {
 
   async function openUserSettingsModal({ client, triggerId, teamId, userId }) {
     if (!client || !triggerId || !teamId || !userId) return;
-    const [settings, projects, dashTeams] = await Promise.all([
+    const [settings, projects] = await Promise.all([
       getUserSettings(teamId, userId),
       dbListProjects(teamId),
-      dbListDashTeams(teamId),
     ]);
     await client.views.open({
       trigger_id: triggerId,
-      view: buildUserSettingsModalView(teamId, userId, settings, { projects, dashTeams }),
+      view: buildUserSettingsModalView(teamId, userId, settings, { projects }),
     });
   }
 
@@ -569,14 +536,13 @@ function registerSettingsFeature(deps) {
     const userId = getUserIdFromBody(body);
     if (!teamId || !userId) return;
 
-    const [settings, projects, dashTeams] = await Promise.all([
+    const [settings, projects] = await Promise.all([
       getUserSettings(teamId, userId),
       dbListProjects(teamId),
-      dbListDashTeams(teamId),
     ]);
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: buildUserSettingsModalView(teamId, userId, settings, { projects, dashTeams }),
+      view: buildUserSettingsModalView(teamId, userId, settings, { projects }),
     });
   });
 

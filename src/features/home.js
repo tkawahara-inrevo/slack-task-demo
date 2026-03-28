@@ -208,10 +208,15 @@ function taskLineForHome(task) {
   return preview;
 }
 
-function buildHomeFiltersModalView({ teamId, userId, st, deptText }) {
+function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [] }) {
   const rangeKey = st.broadcastScopeKey || "to_me";
   const scopeKey = st.scopeKey || "active";
   const deptKey = st.deptKey || "all";
+  const deptOptions = [
+    { text: { type: "plain_text", text: "すべて" }, value: "all" },
+    { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
+    ...groups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
+  ];
 
   const rangeOptions = [
     { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
@@ -267,18 +272,11 @@ function buildHomeFiltersModalView({ teamId, userId, st, deptText }) {
           text: "部署（範囲=すべて のときのみ有効）",
         },
         element: {
-          type: "external_select",
+          type: "static_select",
           action_id: "home_dept_select",
-          placeholder: { type: "plain_text", text: "部署（@グループ）を検索" },
-          min_query_length: 0,
-          ...(deptKey
-            ? {
-                initial_option: {
-                  text: { type: "plain_text", text: deptText || "部署" },
-                  value: deptKey,
-                },
-              }
-            : {}),
+          placeholder: { type: "plain_text", text: "部署（@グループ）を選択" },
+          options: deptOptions,
+          initial_option: deptOptions.find((o) => o.value === deptKey) || deptOptions[0],
         },
       },
     ],
@@ -295,20 +293,11 @@ app.action("open_home_filters_modal", async ({ ack, body, client }) => {
   await ensureHomeStateLoaded(teamId, userId);
   const st = getHomeState(teamId, userId);
 
-  // dept 表示名（雑でOK：無ければ "すべて" など）
-  const deptValue = st.deptKey || "all";
-  let deptText =
-    deptValue === "all" ? "すべて" : deptValue === "__none__" ? "未設定" : null;
-
-  if (!deptText && deptValue) {
-    const idToHandle = await getSubteamIdMap(teamId);
-    const h = idToHandle.get(deptValue);
-    deptText = h ? `@${h}` : "部署";
-  }
+  const groups = await searchUsergroups("");
 
   await client.views.open({
     trigger_id: body.trigger_id,
-    view: buildHomeFiltersModalView({ teamId, userId, st, deptText }),
+    view: buildHomeFiltersModalView({ teamId, userId, st, groups }),
   });
 });
 
@@ -364,29 +353,13 @@ async function publishHome({ client, teamId, userId }) {
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
   ];
 
-  // 範囲=すべての時だけ「部署」フィルタを出す（おすすめUX）
-  let deptInitialText = "部署：すべて";
-  if (deptKey0 === "__none__") deptInitialText = "部署：未設定";
-  if (deptKey0 !== "all" && deptKey0 !== "__none__") {
-    if (deptKey0.startsWith("pf:")) {
-      const filterId = deptKey0.slice(3);
-      try {
-        const filters = await dbListPersonalFilters(teamId, userId);
-        const f = filters.find((x) => x.id === filterId);
-        deptInitialText = f ? `チーム：${f.name}` : "チーム：指定";
-      } catch (_) {
-        deptInitialText = "チーム：指定";
-      }
-    } else {
-      try {
-        const idToHandle = await getSubteamIdMap(teamId);
-        const h = idToHandle.get(deptKey0);
-        deptInitialText = h ? `部署：@${h}` : "部署：指定";
-      } catch (_) {
-        deptInitialText = "部署：指定";
-      }
-    }
-  }
+  // 範囲=すべての時だけ「部署」フィルタを出す
+  const deptGroups = await searchUsergroups("");
+  const deptOptions = [
+    { text: { type: "plain_text", text: "部署：すべて" }, value: "all" },
+    { text: { type: "plain_text", text: "部署：未設定" }, value: "__none__" },
+    ...deptGroups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
+  ];
 
   const actionElements = [
     {
@@ -400,14 +373,10 @@ async function publishHome({ client, teamId, userId }) {
 
   if (rangeKey0 === "all") {
     actionElements.push({
-      type: "external_select",
+      type: "static_select",
       action_id: "home_dept_select",
-      placeholder: { type: "plain_text", text: "部署：すべて" },
-      min_query_length: 0,
-      initial_option: {
-        text: { type: "plain_text", text: deptInitialText },
-        value: deptKey0,
-      },
+      options: deptOptions,
+      initial_option: deptOptions.find((o) => o.value === deptKey0) || deptOptions[0],
     });
   }
 
@@ -1355,38 +1324,6 @@ async function publishHome({ client, teamId, userId }) {
     },
   });
 }
-
-// DEBUG: catch-all options handler
-app.options(/.*/, async ({ ack, payload }) => {
-  console.log("[any_options] action_id=", payload?.action_id, "q=", payload?.value);
-  await ack({ options: [] });
-});
-
-app.options("home_dept_select", async ({ ack, payload }) => {
-  console.log("[home_dept_select] options called, q=", payload?.value);
-  try {
-    const q = payload?.value || "";
-    const groups = await searchUsergroups(q);
-    console.log("[home_dept_select] groups count=", groups.length);
-    const options = [
-      { text: { type: "plain_text", text: "すべて" }, value: "all" },
-      { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
-      ...groups.map((g) => ({
-        text: { type: "plain_text", text: `@${g.handle}` },
-        value: g.id,
-      })),
-    ];
-    await ack({ options });
-  } catch (e) {
-    console.error("home_dept_select options error:", e?.data || e);
-    await ack({
-      options: [
-        { text: { type: "plain_text", text: "すべて" }, value: "all" },
-        { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
-      ],
-    });
-  }
-});
 
 app.options("assignee_groups_select", async ({ ack, payload }) => {
   try {

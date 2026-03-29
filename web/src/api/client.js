@@ -125,6 +125,9 @@ export const api = {
   crmUpdateClient: (id, body) => crmPut(`/clients/${id}`, body),
   crmDeleteClient: (id) => crmDelete(`/clients/${id}`),
 
+  // CRM: Pipeline summary
+  crmPipelineSummary: () => crmFetch('/pipeline-summary'),
+
   // CRM: Deals
   crmDeals: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
@@ -152,6 +155,14 @@ export const api = {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }),
   crmDeletePayment: (dealId, payId) => crmDelete(`/deals/${dealId}/payments/${payId}`),
+
+  // CRM: Deliverables
+  crmDeliverables: (dealId) => crmFetch(`/deals/${dealId}/deliverables`),
+  crmAddDeliverable: (dealId, body) => crmPost(`/deals/${dealId}/deliverables`, body),
+  crmUpdateDeliverable: (dealId, dlvId, body) => crmFetch(`/deals/${dealId}/deliverables/${dlvId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  crmDeleteDeliverable: (dealId, dlvId) => crmFetch(`/deals/${dealId}/deliverables/${dlvId}`, { method: 'DELETE' }),
 
   // CRM: Deal Tasks
   crmDealTasks: (dealId) => crmFetch(`/deals/${dealId}/tasks`),

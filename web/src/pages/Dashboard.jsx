@@ -5,24 +5,37 @@ import StatusSummary from '../components/StatusSummary';
 import MemberList from '../components/MemberList';
 import TaskTable from '../components/TaskTable';
 
+const PIPELINE_STAGES = [
+  { value: 'mk', label: 'MK', color: '#6c8ebf' },
+  { value: 'bc', label: 'BC', color: '#d79b00' },
+  { value: 'contracted', label: '受注済', color: '#00897b' },
+  { value: 'hr', label: 'HR分析', color: '#7b1fa2' },
+  { value: 'direction', label: 'DIR', color: '#e65100' },
+  { value: 'cs', label: 'CS', color: '#0277bd' },
+  { value: 'completed', label: '完了', color: '#388e3c' },
+  { value: 'lost', label: '失注', color: '#9e9e9e' },
+];
+
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [summary, setSummary] = useState(null);
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [usergroups, setUsergroups] = useState([]);
+  const [pipeline, setPipeline] = useState([]);
   const [tasks, setTasks] = useState({ tasks: [], total: 0, page: 1 });
   const [filter, setFilter] = useState({ status: '', assignee: '', project: '', usergroup: '', overdue: false, page: 1 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.me(), api.summary(), api.members(), api.projects(), api.usergroups()])
-      .then(([me, sum, mem, proj, ug]) => {
+    Promise.all([api.me(), api.summary(), api.members(), api.projects(), api.usergroups(), api.crmPipelineSummary()])
+      .then(([me, sum, mem, proj, ug, pipe]) => {
         setUser(me);
         setSummary(sum.summary);
         setMembers(mem.members);
         setProjects(proj.projects);
         setUsergroups(ug.usergroups || []);
+        setPipeline(pipe.summary || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -164,6 +177,32 @@ export default function Dashboard() {
               selectedId={filter.assignee}
             />
           </section>
+
+          {pipeline.length > 0 && (
+            <section className="sidebar-section">
+              <h2>
+                <Link to="/crm/deals" style={{ color: 'inherit', textDecoration: 'none' }}>案件パイプライン</Link>
+              </h2>
+              <div className="pipeline-summary">
+                {PIPELINE_STAGES.map((s) => {
+                  const row = pipeline.find((r) => r.stage === s.value);
+                  if (!row || Number(row.count) === 0) return null;
+                  return (
+                    <Link key={s.value} to={`/crm/deals?stage=${s.value}`} className="pipeline-summary-row">
+                      <span className="pipeline-stage-dot" style={{ background: s.color }} />
+                      <span className="pipeline-stage-label">{s.label}</span>
+                      <span className="pipeline-stage-count">{row.count}件</span>
+                      {Number(row.total_budget) > 0 && (
+                        <span className="pipeline-stage-budget">
+                          ¥{Number(row.total_budget).toLocaleString()}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           {projects.length > 0 && (
             <section className="sidebar-section">

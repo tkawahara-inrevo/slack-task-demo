@@ -47,7 +47,7 @@ export default function DealDetail() {
   const [editingInfo, setEditingInfo] = useState(false);
   const [infoForm, setInfoForm] = useState({});
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState('activity'); // 'activity' | 'payments' | 'tasks' | 'members'
+  const [tab, setTab] = useState('activity'); // 'activity' | 'payments' | 'deliverables' | 'tasks' | 'members'
 
   // Activity
   const [actForm, setActForm] = useState({ activityType: 'note', content: '' });
@@ -56,6 +56,10 @@ export default function DealDetail() {
   // Payment
   const [showPayment, setShowPayment] = useState(false);
   const [payForm, setPayForm] = useState({ label: '', amount: '', dueDate: '', notes: '' });
+
+  // Deliverables
+  const [showDeliverable, setShowDeliverable] = useState(false);
+  const [dlvForm, setDlvForm] = useState({ title: '', description: '', dueDate: '' });
 
   // Member
   const [memberInput, setMemberInput] = useState('');
@@ -166,7 +170,7 @@ export default function DealDetail() {
   if (loading) return <div className="loading">読み込み中...</div>;
   if (!data) return <div className="loading">案件が見つかりません</div>;
 
-  const { deal, members, activities, payments, tasks } = data;
+  const { deal, members, activities, payments, tasks, deliverables = [] } = data;
   const stageIdx = STAGES.findIndex(s => s.value === deal.stage);
   const totalPayments = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const paidPayments = payments.filter(p => p.status === 'paid').reduce((s, p) => s + (p.amount || 0), 0);
@@ -229,6 +233,7 @@ export default function DealDetail() {
             {[
               { key: 'activity', label: `活動（${activities.length}）` },
               { key: 'payments', label: `入金（${payments.length}）` },
+              { key: 'deliverables', label: `納品物（${deliverables.length}）` },
               { key: 'tasks', label: `タスク（${tasks.length}）` },
               { key: 'members', label: `メンバー（${members.length}）` },
             ].map(t => (
@@ -378,6 +383,92 @@ export default function DealDetail() {
                       </div>
                     </form>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 納品物タブ */}
+          {tab === 'deliverables' && (
+            <div>
+              {/* 進捗バー */}
+              {deliverables.length > 0 && (() => {
+                const done = deliverables.filter(d => d.status === 'done').length;
+                const pct = Math.round((done / deliverables.length) * 100);
+                return (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ background: '#e0e0e0', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                      <div style={{ background: '#388e3c', width: `${pct}%`, height: '100%', transition: 'width 0.3s' }} />
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666', textAlign: 'right', marginTop: 4 }}>
+                      {done} / {deliverables.length} 完了 ({pct}%)
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 追加フォーム */}
+              {showDeliverable ? (
+                <div style={{ background: '#fff', borderRadius: 8, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 14 }}>
+                  <h4 style={{ fontSize: 13, marginBottom: 10 }}>納品物を追加</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    <input placeholder="タイトル *" value={dlvForm.title} onChange={e => setDlvForm(f => ({ ...f, title: e.target.value }))}
+                      style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, gridColumn: '1/-1' }} />
+                    <input placeholder="説明（任意）" value={dlvForm.description} onChange={e => setDlvForm(f => ({ ...f, description: e.target.value }))}
+                      style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    <input type="date" value={dlvForm.dueDate} onChange={e => setDlvForm(f => ({ ...f, dueDate: e.target.value }))}
+                      style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button onClick={() => { setShowDeliverable(false); setDlvForm({ title: '', description: '', dueDate: '' }); }}
+                      style={{ padding: '6px 12px', border: '1px solid #ddd', borderRadius: 6, background: 'none', cursor: 'pointer', fontSize: 13 }}>キャンセル</button>
+                    <button onClick={() => {
+                      if (!dlvForm.title.trim()) return;
+                      api.crmAddDeliverable(id, { title: dlvForm.title.trim(), description: dlvForm.description, dueDate: dlvForm.dueDate || undefined })
+                        .then(() => { load(); setShowDeliverable(false); setDlvForm({ title: '', description: '', dueDate: '' }); });
+                    }} style={{ padding: '6px 14px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>追加</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setShowDeliverable(true)}
+                  style={{ marginBottom: 12, padding: '7px 14px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13 }}>
+                  ＋ 納品物を追加
+                </button>
+              )}
+
+              {deliverables.length === 0 ? (
+                <div style={{ color: '#aaa', textAlign: 'center', padding: 24 }}>納品物がありません</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {deliverables.map(d => (
+                    <div key={d.id} style={{
+                      background: '#fff', borderRadius: 8, padding: '12px 16px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      opacity: d.status === 'done' ? 0.7 : 1,
+                    }}>
+                      <input type="checkbox" checked={d.status === 'done'}
+                        onChange={() => api.crmUpdateDeliverable(id, d.id, {
+                          status: d.status === 'done' ? 'pending' : 'done',
+                          completed_at: d.status === 'done' ? null : new Date().toISOString(),
+                        }).then(load)}
+                        style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, textDecoration: d.status === 'done' ? 'line-through' : 'none', color: '#333' }}>{d.title}</div>
+                        {d.description && <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{d.description}</div>}
+                        {d.due_date && (
+                          <div style={{ fontSize: 11, color: new Date(d.due_date) < new Date() && d.status !== 'done' ? '#e74c3c' : '#888', marginTop: 2 }}>
+                            期限: {new Date(d.due_date).toLocaleDateString('ja-JP')}
+                          </div>
+                        )}
+                      </div>
+                      {d.completed_at && (
+                        <span style={{ fontSize: 11, color: '#388e3c' }}>✓ {new Date(d.completed_at).toLocaleDateString('ja-JP')}</span>
+                      )}
+                      <button onClick={() => { if (confirm('削除しますか？')) api.crmDeleteDeliverable(id, d.id).then(load); }}
+                        style={{ background: 'none', border: 'none', color: '#ccc', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

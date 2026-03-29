@@ -5,6 +5,17 @@ const { randomUUID } = require("crypto");
 // Dashboard API + Token Auth
 // ================================
 
+const STAGE_LABELS = {
+  mk: 'MK（アポ取り）',
+  bc: 'BC（商談中）',
+  contracted: '受注済',
+  hr: 'HR分析中',
+  direction: 'ディレクション',
+  cs: 'CS（スカウト）',
+  completed: '完了',
+  lost: '失注',
+};
+
 const authTokens = new Map();
 const sessions = new Map();
 
@@ -74,6 +85,7 @@ function authMiddleware(req, res, next) {
 function registerDashboardApi(deps) {
   const {
     expressApp,
+    slackClient,
     dbQuery,
     getUserDisplayName,
     dbGetDashboardRole,
@@ -145,6 +157,11 @@ function registerDashboardApi(deps) {
     dbAddDealTask,
     dbRemoveDealTask,
     dbListDealTasks,
+    dbCreateDeliverable,
+    dbListDeliverables,
+    dbUpdateDeliverable,
+    dbDeleteDeliverable,
+    dbPipelineSummary,
   } = deps;
 
   const kintone = require("./kintone-connector");
@@ -1370,7 +1387,7 @@ function registerDashboardApi(deps) {
   // CRM: Clients
   // ================================
   expressApp.get("/api/crm/clients", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     const { search, limit, offset } = req.query;
     try {
       const clients = await dbListClients(teamId, {
@@ -1385,7 +1402,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.post("/api/crm/clients", authMiddleware, async (req, res) => {
-    const { teamId, userId } = req.session;
+    const { teamId, userId } = req.dashboardUser;
     const { name, contactName, contactEmail, contactPhone, source, notes } = req.body;
     if (!name) return res.status(400).json({ error: "name required" });
     try {
@@ -1398,7 +1415,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.get("/api/crm/clients/:id", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       const client = await dbGetClient(teamId, req.params.id);
       if (!client) return res.status(404).json({ error: "not found" });
@@ -1410,7 +1427,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.put("/api/crm/clients/:id", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     const { name, contact_name, contact_email, contact_phone, source, notes } = req.body;
     try {
       const client = await dbUpdateClient(teamId, req.params.id, { name, contact_name, contact_email, contact_phone, source, notes });
@@ -1421,7 +1438,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.delete("/api/crm/clients/:id", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbDeleteClient(teamId, req.params.id);
       res.json({ ok: true });
@@ -1434,10 +1451,13 @@ function registerDashboardApi(deps) {
   // CRM: Deals
   // ================================
   expressApp.get("/api/crm/deals", authMiddleware, async (req, res) => {
-    const { teamId, userId } = req.session;
+    const { teamId, userId } = req.dashboardUser;
     const { clientId, stage } = req.query;
     try {
-      const deals = await dbListDeals(teamId, { clientId, stage });
+      const role = await dbGetDashboardRole(teamId, userId);
+      // Admins see all deals; regular users only see 'all' visibility or deals they're members of
+      const effectiveUserId = role === 'admin' ? undefined : userId;
+      const deals = await dbListDeals(teamId, { clientId, stage, userId: effectiveUserId });
       res.json({ deals });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1445,7 +1465,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.post("/api/crm/deals", authMiddleware, async (req, res) => {
-    const { teamId, userId } = req.session;
+    const { teamId, userId } = req.dashboardUser;
     const { clientId, name, stage, budget, notes } = req.body;
     if (!clientId || !name) return res.status(400).json({ error: "clientId and name required" });
     try {
@@ -1459,7 +1479,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.get("/api/crm/deals/:id", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       const deal = await dbGetDeal(teamId, req.params.id);
       if (!deal) return res.status(404).json({ error: "not found" });
@@ -1474,10 +1494,53 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.put("/api/crm/deals/:id", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
-    const { name, stage, budget, notes, client_id } = req.body;
+    const { teamId, userId } = req.dashboardUser;
+    const { name, stage, budget, notes, client_id, visibility } = req.body;
     try {
-      const deal = await dbUpdateDeal(teamId, req.params.id, { name, stage, budget, notes, client_id });
+      const prevDeal = await dbGetDeal(teamId, req.params.id);
+      const deal = await dbUpdateDeal(teamId, req.params.id, { name, stage, budget, notes, client_id, visibility });
+
+      // On stage change: auto-log activity and notify members
+      if (prevDeal && stage && stage !== prevDeal.stage) {
+        const actId = randomUUID();
+        const prevLabel = STAGE_LABELS[prevDeal.stage] || prevDeal.stage;
+        const nextLabel = STAGE_LABELS[stage] || stage;
+        await dbCreateDealActivity(teamId, actId, {
+          dealId: req.params.id,
+          userId,
+          activityType: 'stage_change',
+          content: `${prevLabel} → ${nextLabel}`,
+          metadata: { from: prevDeal.stage, to: stage },
+        });
+
+        if (slackClient) {
+          const members = await dbListDealMembers(teamId, req.params.id);
+          const actorName = await getUserDisplayName(teamId, userId);
+          const dealUrl = `${process.env.DASHBOARD_BASE_URL || ''}/crm/deals/${req.params.id}`;
+          for (const m of members) {
+            if (m.user_id === userId) continue;
+            try {
+              const dm = await slackClient.conversations.open({ users: m.user_id });
+              const ch = dm.channel?.id;
+              if (!ch) continue;
+              await slackClient.chat.postMessage({
+                channel: ch,
+                text: `📋 案件ステージが変更されました: ${deal.name}`,
+                blocks: [
+                  {
+                    type: 'section',
+                    text: {
+                      type: 'mrkdwn',
+                      text: `*📋 案件ステージ変更*\n<${dealUrl}|${deal.name}>\n*${prevLabel}* → *${nextLabel}*\n変更者: ${actorName}`,
+                    },
+                  },
+                ],
+              });
+            } catch (_) { /* ignore per-user DM errors */ }
+          }
+        }
+      }
+
       res.json({ deal });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1485,7 +1548,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.delete("/api/crm/deals/:id", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbDeleteDeal(teamId, req.params.id);
       res.json({ ok: true });
@@ -1495,7 +1558,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.post("/api/crm/deals/:id/members", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     const { userId, role } = req.body;
     if (!userId) return res.status(400).json({ error: "userId required" });
     try {
@@ -1507,7 +1570,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.delete("/api/crm/deals/:id/members/:userId", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbRemoveDealMember(teamId, req.params.id, req.params.userId);
       res.json({ ok: true });
@@ -1520,7 +1583,7 @@ function registerDashboardApi(deps) {
   // CRM: Deal Activities
   // ================================
   expressApp.get("/api/crm/deals/:id/activities", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       const activities = await dbListDealActivities(teamId, req.params.id);
       res.json({ activities });
@@ -1530,7 +1593,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.post("/api/crm/deals/:id/activities", authMiddleware, async (req, res) => {
-    const { teamId, userId } = req.session;
+    const { teamId, userId } = req.dashboardUser;
     const { activityType, content, metadata } = req.body;
     if (!activityType) return res.status(400).json({ error: "activityType required" });
     try {
@@ -1545,7 +1608,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.delete("/api/crm/deals/:id/activities/:actId", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbDeleteDealActivity(teamId, req.params.actId);
       res.json({ ok: true });
@@ -1558,7 +1621,7 @@ function registerDashboardApi(deps) {
   // CRM: Deal Payments
   // ================================
   expressApp.get("/api/crm/deals/:id/payments", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       const payments = await dbListDealPayments(teamId, req.params.id);
       res.json({ payments });
@@ -1568,7 +1631,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.post("/api/crm/deals/:id/payments", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     const { label, amount, dueDate, notes } = req.body;
     if (!label || !amount) return res.status(400).json({ error: "label and amount required" });
     try {
@@ -1583,7 +1646,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.patch("/api/crm/deals/:id/payments/:payId", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbUpdateDealPayment(teamId, req.params.payId, req.body);
       const payments = await dbListDealPayments(teamId, req.params.id);
@@ -1594,7 +1657,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.delete("/api/crm/deals/:id/payments/:payId", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbDeleteDealPayment(teamId, req.params.payId);
       res.json({ ok: true });
@@ -1607,7 +1670,7 @@ function registerDashboardApi(deps) {
   // CRM: Deal-Task Linkage
   // ================================
   expressApp.get("/api/crm/deals/:id/tasks", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       const tasks = await dbListDealTasks(teamId, req.params.id);
       res.json({ tasks });
@@ -1617,7 +1680,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.post("/api/crm/deals/:id/tasks", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     const { taskId } = req.body;
     if (!taskId) return res.status(400).json({ error: "taskId required" });
     try {
@@ -1629,7 +1692,7 @@ function registerDashboardApi(deps) {
   });
 
   expressApp.delete("/api/crm/deals/:id/tasks/:taskId", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+    const { teamId } = req.dashboardUser;
     try {
       await dbRemoveDealTask(teamId, req.params.id, req.params.taskId);
       res.json({ ok: true });
@@ -1641,15 +1704,74 @@ function registerDashboardApi(deps) {
   // ================================
   // CRM: Deal detail (full)
   // ================================
-  expressApp.get("/api/crm/deals/:id/full", authMiddleware, async (req, res) => {
-    const { teamId } = req.session;
+  // ================================
+  // CRM: Deliverables
+  // ================================
+  expressApp.get("/api/crm/deals/:id/deliverables", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
     try {
-      const [deal, members, activities, payments, tasks] = await Promise.all([
+      const deliverables = await dbListDeliverables(teamId, req.params.id);
+      res.json({ deliverables });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/deliverables", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { title, description, dueDate } = req.body;
+    if (!title) return res.status(400).json({ error: "title required" });
+    try {
+      const id = randomUUID();
+      const deliverable = await dbCreateDeliverable(teamId, id, {
+        dealId: req.params.id, title, description, dueDate, createdBy: userId,
+      });
+      res.json({ deliverable });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/deliverables/:dlvId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const deliverable = await dbUpdateDeliverable(teamId, req.params.dlvId, req.body);
+      res.json({ deliverable });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/deliverables/:dlvId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDeliverable(teamId, req.params.dlvId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/pipeline-summary", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const rows = await dbPipelineSummary(teamId);
+      res.json({ summary: rows });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/deals/:id/full", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const [deal, members, activities, payments, tasks, deliverables] = await Promise.all([
         dbGetDeal(teamId, req.params.id),
         dbListDealMembers(teamId, req.params.id),
         dbListDealActivities(teamId, req.params.id),
         dbListDealPayments(teamId, req.params.id),
         dbListDealTasks(teamId, req.params.id),
+        dbListDeliverables(teamId, req.params.id),
       ]);
       if (!deal) return res.status(404).json({ error: "not found" });
       const membersWithNames = await Promise.all(
@@ -1658,7 +1780,7 @@ function registerDashboardApi(deps) {
       const activitiesWithNames = await Promise.all(
         activities.map(async (a) => ({ ...a, displayName: await getUserDisplayName(teamId, a.user_id) }))
       );
-      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks });
+      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks, deliverables });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

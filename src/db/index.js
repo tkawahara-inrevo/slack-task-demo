@@ -277,6 +277,24 @@ async function dbEnsureSettingsSchema() {
     `),
   ]);
 
+  // Migrations: add columns that may not exist in older schemas
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'all'`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS deal_deliverables (
+      id TEXT PRIMARY KEY,
+      deal_id TEXT NOT NULL,
+      team_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      due_date DATE,
+      completed_at TIMESTAMPTZ,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
   if (INITIAL_ADMIN_ID) {
@@ -1234,8 +1252,9 @@ async function dbListDeals(teamId, { clientId, stage, userId, limit = 100 } = {}
   let i = 2;
   if (clientId) { q += ` AND d.client_id=$${i++}`; params.push(clientId); }
   if (stage) { q += ` AND d.stage=$${i++}`; params.push(stage); }
+  // Visibility: if userId provided, show deals that are either 'all' visibility or user is a member
   if (userId) {
-    q += ` AND EXISTS (SELECT 1 FROM deal_members dm WHERE dm.deal_id=d.id AND dm.user_id=$${i++})`;
+    q += ` AND (d.visibility='all' OR EXISTS (SELECT 1 FROM deal_members dm WHERE dm.deal_id=d.id AND dm.user_id=$${i++}))`;
     params.push(userId);
   }
   q += ` ORDER BY d.updated_at DESC LIMIT $${i}`; params.push(limit);
@@ -1254,7 +1273,7 @@ async function dbGetDeal(teamId, id) {
 }
 
 async function dbUpdateDeal(teamId, id, fields) {
-  const allowed = ['name', 'stage', 'budget', 'notes', 'client_id'];
+  const allowed = ['name', 'stage', 'budget', 'notes', 'client_id', 'visibility'];
   const sets = [];
   const vals = [];
   let i = 3;
@@ -1387,6 +1406,59 @@ async function dbListDealTasks(teamId, dealId) {
   return res.rows;
 }
 
+// ================================
+// CRM: Deal Deliverables
+// ================================
+async function dbCreateDeliverable(teamId, id, { dealId, title, description, dueDate, createdBy }) {
+  await dbQuery(
+    `INSERT INTO deal_deliverables (id, deal_id, team_id, title, description, due_date, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, dealId, teamId, title, description || null, dueDate || null, createdBy],
+  );
+  const res = await dbQuery(`SELECT * FROM deal_deliverables WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListDeliverables(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT * FROM deal_deliverables WHERE team_id=$1 AND deal_id=$2 ORDER BY created_at`,
+    [teamId, dealId],
+  );
+  return res.rows;
+}
+
+async function dbUpdateDeliverable(teamId, id, fields) {
+  const allowed = ['title', 'description', 'status', 'due_date', 'completed_at'];
+  const sets = [];
+  const vals = [];
+  let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return;
+  sets.push(`updated_at=now()`);
+  await dbQuery(`UPDATE deal_deliverables SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  const res = await dbQuery(`SELECT * FROM deal_deliverables WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbDeleteDeliverable(teamId, id) {
+  await dbQuery(`DELETE FROM deal_deliverables WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+async function dbPipelineSummary(teamId) {
+  const res = await dbQuery(
+    `SELECT stage,
+            COUNT(*) AS count,
+            COALESCE(SUM(budget), 0) AS total_budget
+     FROM deals
+     WHERE team_id=$1
+     GROUP BY stage`,
+    [teamId],
+  );
+  return res.rows;
+}
+
 module.exports = {
   dbEnsureSettingsSchema,
   dbCountCompletions,
@@ -1476,6 +1548,13 @@ module.exports = {
   dbListDealPayments,
   dbUpdateDealPayment,
   dbDeleteDealPayment,
+  // CRM: Deliverables
+  dbCreateDeliverable,
+  dbListDeliverables,
+  dbUpdateDeliverable,
+  dbDeleteDeliverable,
+  // CRM: Pipeline
+  dbPipelineSummary,
   // CRM: Deal-Task linkage
   dbAddDealTask,
   dbRemoveDealTask,

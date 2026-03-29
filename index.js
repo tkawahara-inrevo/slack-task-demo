@@ -140,6 +140,11 @@ const {
   dbAddDealTask,
   dbRemoveDealTask,
   dbListDealTasks,
+  dbCreateDeliverable,
+  dbListDeliverables,
+  dbUpdateDeliverable,
+  dbDeleteDeliverable,
+  dbPipelineSummary,
 } = require("./src/db");
 
 let resolveHomeDefaultsForHome = async () => ({
@@ -2488,6 +2493,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   // Dashboard API
   registerDashboardApi({
     expressApp,
+    slackClient: app.client,
     dbQuery,
     getUserDisplayName,
     dbGetDashboardRole,
@@ -2559,6 +2565,11 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbAddDealTask,
     dbRemoveDealTask,
     dbListDealTasks,
+    dbCreateDeliverable,
+    dbListDeliverables,
+    dbUpdateDeliverable,
+    dbDeleteDeliverable,
+    dbPipelineSummary,
   });
 
   // Root redirect

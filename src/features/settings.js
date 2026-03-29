@@ -358,8 +358,37 @@ function registerSettingsFeature(deps) {
                     : {}),
                 },
               },
+              { type: "divider" },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "*パーソナルフィルター*\nメンバーを選んで「チーム」として保存し、部署フィルターで使えます。",
+                },
+                accessory: {
+                  type: "button",
+                  action_id: "open_personal_filter_create_modal",
+                  text: { type: "plain_text", text: "＋ フィルター作成" },
+                  value: JSON.stringify({ teamId, userId }),
+                },
+              },
             ]
-          : []),
+          : [
+              { type: "divider" },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "*パーソナルフィルター*\nメンバーを選んで「チーム」として保存し、部署フィルターで使えます。",
+                },
+                accessory: {
+                  type: "button",
+                  action_id: "open_personal_filter_create_modal",
+                  text: { type: "plain_text", text: "＋ フィルター作成" },
+                  value: JSON.stringify({ teamId, userId }),
+                },
+              },
+            ]),
       ],
     };
   }

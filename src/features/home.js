@@ -208,7 +208,7 @@ function taskLineForHome(task) {
   return preview;
 }
 
-function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [] }) {
+function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [], personalFilters = [] }) {
   const rangeKey = st.broadcastScopeKey || "to_me";
   const scopeKey = st.scopeKey || "active";
   const deptKey = st.deptKey || "all";
@@ -216,6 +216,7 @@ function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [] }
     { text: { type: "plain_text", text: "すべて" }, value: "all" },
     { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
     ...groups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
+    ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
   ];
 
   const rangeOptions = [
@@ -293,11 +294,14 @@ app.action("open_home_filters_modal", async ({ ack, body, client }) => {
   await ensureHomeStateLoaded(teamId, userId);
   const st = getHomeState(teamId, userId);
 
-  const groups = await searchUsergroups("");
+  const [groups, personalFilters] = await Promise.all([
+    searchUsergroups(""),
+    dbListPersonalFilters(teamId, userId).catch(() => []),
+  ]);
 
   await client.views.open({
     trigger_id: body.trigger_id,
-    view: buildHomeFiltersModalView({ teamId, userId, st, groups }),
+    view: buildHomeFiltersModalView({ teamId, userId, st, groups, personalFilters }),
   });
 });
 
@@ -354,11 +358,15 @@ async function publishHome({ client, teamId, userId }) {
   ];
 
   // 範囲=すべての時だけ「部署」フィルタを出す
-  const deptGroups = await searchUsergroups("");
+  const [deptGroups, personalFilters] = await Promise.all([
+    searchUsergroups(""),
+    dbListPersonalFilters(teamId, userId).catch(() => []),
+  ]);
   const deptOptions = [
     { text: { type: "plain_text", text: "部署：すべて" }, value: "all" },
     { text: { type: "plain_text", text: "部署：未設定" }, value: "__none__" },
     ...deptGroups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
+    ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
   ];
 
   const actionElements = [

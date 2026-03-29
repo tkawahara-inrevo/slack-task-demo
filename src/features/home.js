@@ -36,6 +36,7 @@ function registerHomeFeature(deps) {
     getUserSettings = async () => ({}),
     dbCreatePersonalFilter = async () => {},
     dbListPersonalFilters = async () => [],
+    dbUpdatePersonalFilter = async () => {},
     dbDeletePersonalFilter = async () => {},
     dbSetPersonalFilterMembers = async () => {},
     dbGetPersonalFilterMemberIds = async () => [],
@@ -1860,6 +1861,152 @@ app.view("personal_filter_create_modal", async ({ ack, body, view, client }) => 
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("personal_filter_create_modal error:", e?.data || e);
+  }
+});
+
+// ================================
+// パーソナルフィルター管理（一覧・削除・名前変更）
+// ================================
+
+function buildPersonalFilterManageView(teamId, userId, filters) {
+  const blocks = [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: filters.length === 0 ? "まだフィルターがありません。" : `*${filters.length}件* のフィルターがあります。` },
+      accessory: {
+        type: "button",
+        action_id: "open_personal_filter_modal",
+        text: { type: "plain_text", text: "＋ 新規作成" },
+        value: JSON.stringify({ teamId, userId }),
+      },
+    },
+  ];
+
+  for (const f of filters) {
+    const meta = JSON.stringify({ teamId, userId, filterId: f.id, filterName: f.name });
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `★ *${f.name}*` },
+      accessory: {
+        type: "overflow",
+        action_id: "personal_filter_overflow",
+        options: [
+          { text: { type: "plain_text", text: "✏️ 名前を変更" }, value: `rename:${meta}` },
+          { text: { type: "plain_text", text: "🗑️ 削除" }, value: `delete:${meta}` },
+        ],
+      },
+    });
+  }
+
+  return {
+    type: "modal",
+    callback_id: "personal_filter_manage_modal",
+    private_metadata: JSON.stringify({ teamId, userId }),
+    title: { type: "plain_text", text: "フィルター管理" },
+    close: { type: "plain_text", text: "閉じる" },
+    blocks,
+  };
+}
+
+app.action("open_personal_filter_manage_modal", async ({ ack, body, client }) => {
+  await ack();
+  const teamId = getTeamIdFromBody(body);
+  const userId = getUserIdFromBody(body);
+  if (!teamId || !userId) return;
+
+  const isFromModal = body.view?.type === "modal";
+  try {
+    const filters = await dbListPersonalFilters(teamId, userId);
+    const openFn = isFromModal ? client.views.push : client.views.open;
+    await openFn.call(client.views, {
+      trigger_id: body.trigger_id,
+      view: buildPersonalFilterManageView(teamId, userId, filters),
+    });
+  } catch (e) {
+    console.error("open_personal_filter_manage_modal error:", e?.data || e);
+  }
+});
+
+app.action("personal_filter_overflow", async ({ ack, body, client, action }) => {
+  await ack();
+  const teamId = getTeamIdFromBody(body);
+  const userId = getUserIdFromBody(body);
+  if (!teamId || !userId) return;
+
+  const raw = action.selected_option?.value || "";
+  const colonIdx = raw.indexOf(":");
+  const op = raw.slice(0, colonIdx);
+  const meta = safeJsonParse(raw.slice(colonIdx + 1)) || {};
+
+  try {
+    if (op === "delete") {
+      await dbDeletePersonalFilter(teamId, userId, meta.filterId);
+      // アクティブなフィルターが削除されたらリセット
+      const st = getHomeState(teamId, userId);
+      if (st.deptKey === `pf:${meta.filterId}`) {
+        setHomeState(teamId, userId, { deptKey: "all" });
+        await publishHome({ client, teamId, userId });
+      }
+      // 管理モーダルを更新
+      const filters = await dbListPersonalFilters(teamId, userId);
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildPersonalFilterManageView(teamId, userId, filters),
+      });
+    } else if (op === "rename") {
+      // 名前変更モーダルをpush
+      await client.views.push({
+        trigger_id: body.trigger_id,
+        view: {
+          type: "modal",
+          callback_id: "personal_filter_rename_modal",
+          private_metadata: JSON.stringify({ teamId, userId, filterId: meta.filterId }),
+          title: { type: "plain_text", text: "名前を変更" },
+          submit: { type: "plain_text", text: "変更" },
+          close: { type: "plain_text", text: "キャンセル" },
+          blocks: [
+            {
+              type: "input",
+              block_id: "filter_name",
+              label: { type: "plain_text", text: "新しい名前" },
+              element: {
+                type: "plain_text_input",
+                action_id: "value",
+                initial_value: meta.filterName || "",
+              },
+            },
+          ],
+        },
+      });
+    }
+  } catch (e) {
+    console.error("personal_filter_overflow error:", e?.data || e);
+  }
+});
+
+app.view("personal_filter_rename_modal", async ({ ack, body, view, client }) => {
+  await ack();
+  const meta = safeJsonParse(view.private_metadata) || {};
+  const { teamId, userId, filterId } = meta;
+  if (!teamId || !userId || !filterId) return;
+
+  const name = view.state.values.filter_name?.value?.value?.trim();
+  if (!name) return;
+
+  try {
+    await dbUpdatePersonalFilter(teamId, userId, filterId, name);
+    // 管理モーダル（1つ前のview）を更新
+    const filters = await dbListPersonalFilters(teamId, userId);
+    const previousViewId = body.view?.root_view_id;
+    if (previousViewId) {
+      await client.views.update({
+        view_id: previousViewId,
+        view: buildPersonalFilterManageView(teamId, userId, filters),
+      });
+    }
+  } catch (e) {
+    console.error("personal_filter_rename_modal error:", e?.data || e);
   }
 });
 

@@ -80,6 +80,7 @@ const {
   // Personal filters
   dbCreatePersonalFilter,
   dbListPersonalFilters,
+  dbUpdatePersonalFilter,
   dbDeletePersonalFilter,
   dbSetPersonalFilterMembers,
   dbGetPersonalFilterMemberIds,
@@ -191,6 +192,7 @@ const {
   getUserSettings: (...args) => getUserSettingsForHome(...args),
   dbCreatePersonalFilter,
   dbListPersonalFilters,
+  dbUpdatePersonalFilter,
   dbDeletePersonalFilter,
   dbSetPersonalFilterMembers,
   dbGetPersonalFilterMemberIds,

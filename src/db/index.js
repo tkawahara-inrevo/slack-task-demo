@@ -1163,6 +1163,13 @@ async function dbListPersonalFilters(teamId, ownerUserId) {
   return res.rows || [];
 }
 
+async function dbUpdatePersonalFilter(teamId, ownerUserId, id, name) {
+  await dbQuery(
+    `UPDATE personal_filters SET name=$4 WHERE team_id=$1 AND owner_user_id=$2 AND id=$3`,
+    [teamId, ownerUserId, id, name],
+  );
+}
+
 async function dbDeletePersonalFilter(teamId, ownerUserId, id) {
   await dbQuery(`DELETE FROM personal_filter_members WHERE team_id=$1 AND filter_id=$2`, [teamId, id]);
   await dbQuery(`DELETE FROM personal_filters WHERE team_id=$1 AND owner_user_id=$2 AND id=$3`, [teamId, ownerUserId, id]);
@@ -1520,6 +1527,7 @@ module.exports = {
   // Personal filters
   dbCreatePersonalFilter,
   dbListPersonalFilters,
+  dbUpdatePersonalFilter,
   dbDeletePersonalFilter,
   dbSetPersonalFilterMembers,
   dbGetPersonalFilterMemberIds,

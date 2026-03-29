@@ -367,8 +367,8 @@ function registerSettingsFeature(deps) {
                 },
                 accessory: {
                   type: "button",
-                  action_id: "open_personal_filter_modal",
-                  text: { type: "plain_text", text: "＋ フィルター作成" },
+                  action_id: "open_personal_filter_manage_modal",
+                  text: { type: "plain_text", text: "フィルター管理" },
                   value: JSON.stringify({ teamId, userId }),
                 },
               },
@@ -383,8 +383,8 @@ function registerSettingsFeature(deps) {
                 },
                 accessory: {
                   type: "button",
-                  action_id: "open_personal_filter_modal",
-                  text: { type: "plain_text", text: "＋ フィルター作成" },
+                  action_id: "open_personal_filter_manage_modal",
+                  text: { type: "plain_text", text: "フィルター管理" },
                   value: JSON.stringify({ teamId, userId }),
                 },
               },

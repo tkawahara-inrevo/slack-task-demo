@@ -169,6 +169,38 @@ export const api = {
   crmAddDealTask: (dealId, taskId) => crmPost(`/deals/${dealId}/tasks`, { taskId }),
   crmRemoveDealTask: (dealId, taskId) => crmDelete(`/deals/${dealId}/tasks/${taskId}`),
 
+  // CRM: Client Contacts
+  crmClientContacts: (clientId) => crmFetch(`/clients/${clientId}/contacts`),
+  crmAddClientContact: (clientId, body) => crmPost(`/clients/${clientId}/contacts`, body),
+  crmUpdateClientContact: (clientId, cid, body) => crmFetch(`/clients/${clientId}/contacts/${cid}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  crmDeleteClientContact: (clientId, cid) => crmFetch(`/clients/${clientId}/contacts/${cid}`, { method: 'DELETE' }),
+
+  // CRM: Deal Positions
+  crmDealPositions: (dealId) => crmFetch(`/deals/${dealId}/positions`),
+  crmAddDealPosition: (dealId, body) => crmPost(`/deals/${dealId}/positions`, body),
+  crmUpdateDealPosition: (dealId, posId, body) => crmFetch(`/deals/${dealId}/positions/${posId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  crmDeleteDealPosition: (dealId, posId) => crmFetch(`/deals/${dealId}/positions/${posId}`, { method: 'DELETE' }),
+
+  // CRM: Deal Media Plans
+  crmDealMediaPlans: (dealId) => crmFetch(`/deals/${dealId}/media-plans`),
+  crmAddDealMediaPlan: (dealId, body) => crmPost(`/deals/${dealId}/media-plans`, body),
+  crmUpdateDealMediaPlan: (dealId, planId, body) => crmFetch(`/deals/${dealId}/media-plans/${planId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  crmDeleteDealMediaPlan: (dealId, planId) => crmFetch(`/deals/${dealId}/media-plans/${planId}`, { method: 'DELETE' }),
+
+  // CRM: Calc Defs
+  crmCalcDefs: () => crmFetch('/calc-defs'),
+  crmAddCalcDef: (body) => crmPost('/calc-defs', body),
+  crmUpdateCalcDef: (defId, body) => crmFetch(`/calc-defs/${defId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }),
+  crmDeleteCalcDef: (defId) => crmFetch(`/calc-defs/${defId}`, { method: 'DELETE' }),
+
   // Analytics
   analyticsMemberCompletion: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

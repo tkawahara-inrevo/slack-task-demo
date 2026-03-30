@@ -161,6 +161,22 @@ function registerDashboardApi(deps) {
     dbListDeliverables,
     dbUpdateDeliverable,
     dbDeleteDeliverable,
+    dbCreateClientContact,
+    dbListClientContacts,
+    dbUpdateClientContact,
+    dbDeleteClientContact,
+    dbCreateDealPosition,
+    dbListDealPositions,
+    dbUpdateDealPosition,
+    dbDeleteDealPosition,
+    dbCreateDealMediaPlan,
+    dbListDealMediaPlans,
+    dbUpdateDealMediaPlan,
+    dbDeleteDealMediaPlan,
+    dbCreateCalcDef,
+    dbListCalcDefs,
+    dbUpdateCalcDef,
+    dbDeleteCalcDef,
     dbPipelineSummary,
   } = deps;
 
@@ -1752,6 +1768,150 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // ================================
+  // CRM: Client Contacts
+  // ================================
+  expressApp.get("/api/crm/clients/:id/contacts", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const contacts = await dbListClientContacts(teamId, req.params.id);
+      res.json({ contacts });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/clients/:id/contacts", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const contact = await dbCreateClientContact(teamId, id, { clientId: req.params.id, ...req.body });
+      res.json({ contact });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/clients/:id/contacts/:cid", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const contact = await dbUpdateClientContact(teamId, req.params.cid, req.body);
+      res.json({ contact });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/clients/:id/contacts/:cid", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteClientContact(teamId, req.params.cid);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ================================
+  // CRM: Deal Positions (募集職種別進捗)
+  // ================================
+  expressApp.get("/api/crm/deals/:id/positions", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const positions = await dbListDealPositions(teamId, req.params.id);
+      res.json({ positions });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/deals/:id/positions", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const position = await dbCreateDealPosition(teamId, id, { dealId: req.params.id, ...req.body });
+      res.json({ position });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/positions/:posId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const position = await dbUpdateDealPosition(teamId, req.params.posId, req.body);
+      res.json({ position });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/positions/:posId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDealPosition(teamId, req.params.posId);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ================================
+  // CRM: Deal Media Plans (媒体選定)
+  // ================================
+  expressApp.get("/api/crm/deals/:id/media-plans", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const plans = await dbListDealMediaPlans(teamId, req.params.id);
+      res.json({ plans });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/deals/:id/media-plans", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const plan = await dbCreateDealMediaPlan(teamId, id, { dealId: req.params.id, ...req.body });
+      res.json({ plan });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/media-plans/:planId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const plan = await dbUpdateDealMediaPlan(teamId, req.params.planId, req.body);
+      res.json({ plan });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/media-plans/:planId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDealMediaPlan(teamId, req.params.planId);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ================================
+  // CRM: Calc Defs (管理者が設定する計算フィールド)
+  // ================================
+  expressApp.get("/api/crm/calc-defs", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const defs = await dbListCalcDefs(teamId);
+      res.json({ defs });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/calc-defs", authMiddleware, adminOnly, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const def = await dbCreateCalcDef(teamId, id, req.body);
+      res.json({ def });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/calc-defs/:defId", authMiddleware, adminOnly, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const def = await dbUpdateCalcDef(teamId, req.params.defId, req.body);
+      res.json({ def });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/calc-defs/:defId", authMiddleware, adminOnly, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteCalcDef(teamId, req.params.defId);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   expressApp.get("/api/crm/pipeline-summary", authMiddleware, async (req, res) => {
     const { teamId } = req.dashboardUser;
     try {
@@ -1765,13 +1925,16 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/crm/deals/:id/full", authMiddleware, async (req, res) => {
     const { teamId } = req.dashboardUser;
     try {
-      const [deal, members, activities, payments, tasks, deliverables] = await Promise.all([
+      const [deal, members, activities, payments, tasks, deliverables, positions, mediaplans, calcDefs] = await Promise.all([
         dbGetDeal(teamId, req.params.id),
         dbListDealMembers(teamId, req.params.id),
         dbListDealActivities(teamId, req.params.id),
         dbListDealPayments(teamId, req.params.id),
         dbListDealTasks(teamId, req.params.id),
         dbListDeliverables(teamId, req.params.id),
+        dbListDealPositions(teamId, req.params.id),
+        dbListDealMediaPlans(teamId, req.params.id),
+        dbListCalcDefs(teamId),
       ]);
       if (!deal) return res.status(404).json({ error: "not found" });
       const membersWithNames = await Promise.all(
@@ -1780,7 +1943,7 @@ function registerDashboardApi(deps) {
       const activitiesWithNames = await Promise.all(
         activities.map(async (a) => ({ ...a, displayName: await getUserDisplayName(teamId, a.user_id) }))
       );
-      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks, deliverables });
+      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks, deliverables, positions, mediaplans, calcDefs });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

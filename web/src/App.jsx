@@ -8,6 +8,7 @@ import TeamsAdmin from './pages/admin/TeamsAdmin'
 import ProjectsAdmin from './pages/admin/ProjectsAdmin'
 import RolesAdmin from './pages/admin/RolesAdmin'
 import IntegrationsAdmin from './pages/admin/IntegrationsAdmin'
+import FormulasAdmin from './pages/admin/FormulasAdmin'
 import ProjectView from './pages/ProjectView'
 import Analytics from './pages/Analytics'
 import ClientList from './pages/crm/ClientList'
@@ -35,6 +36,7 @@ function App() {
         <Route path="projects" element={<ProjectsAdmin />} />
         <Route path="roles" element={<RolesAdmin />} />
         <Route path="integrations" element={<IntegrationsAdmin />} />
+        <Route path="formulas" element={<FormulasAdmin />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

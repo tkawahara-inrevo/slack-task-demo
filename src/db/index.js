@@ -295,6 +295,148 @@ async function dbEnsureSettingsSchema() {
     )
   `);
 
+  // ─── CRM Phase 4: kintone full parity migrations ───────────────────────────
+
+  // clients: new columns
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS industry TEXT`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS prefecture TEXT`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS employee_range TEXT`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS inrevo_person TEXT`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS competition JSONB DEFAULT '[]'::jsonb`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS corporate_url TEXT`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS service_url1 TEXT`);
+  await dbQuery(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS service_url2 TEXT`);
+
+  // client contacts (担当者情報 subtable)
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS client_contacts (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      team_id TEXT NOT NULL,
+      last_name TEXT,
+      first_name TEXT,
+      furigana TEXT,
+      title TEXT,
+      department TEXT,
+      email TEXT,
+      phone TEXT,
+      notes TEXT,
+      do_not_contact BOOLEAN NOT NULL DEFAULT FALSE,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  // deals: new columns
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS yomi TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS inrevo_person TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS sales_person TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS acquisition_person TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS appointment_type TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_type TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS payment_method TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS hire_type JSONB DEFAULT '[]'::jsonb`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS first_meeting_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS acquisition_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_approval_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_send_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS order_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS conclusion_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS next_action_date DATE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS next_action_content TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS next_action_detail TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS loss_reason TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS loss_reason_detail TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_budget TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_budget_memo TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_authority TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_authority_memo TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_needs TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_needs_memo TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_timeframe TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS bant_timeframe_memo TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS initial_cost INTEGER`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS monthly_cost INTEGER`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS unit_price INTEGER`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_months INTEGER`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS guarantee_count INTEGER`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS guarantee_salary INTEGER`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS rate NUMERIC(6,2)`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS advance_payment TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS legal_check BOOLEAN DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS antisocial_check BOOLEAN DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS hearing_collected BOOLEAN DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_approval BOOLEAN DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_sent BOOLEAN DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS sales_memo TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS hearing_challenges JSONB DEFAULT '{}'::jsonb`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS invoice_to_name TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS invoice_to_email TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS invoice_cc_email TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_to_name TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_to_email TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_cc_email TEXT`);
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS preliminary_info JSONB DEFAULT '{}'::jsonb`);
+
+  // deal_activities: add result
+  await dbQuery(`ALTER TABLE deal_activities ADD COLUMN IF NOT EXISTS result TEXT`);
+
+  // deal_payments: add direction, invoice_sent, incentive_amount
+  await dbQuery(`ALTER TABLE deal_payments ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT '入金'`);
+  await dbQuery(`ALTER TABLE deal_payments ADD COLUMN IF NOT EXISTS invoice_sent BOOLEAN DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE deal_payments ADD COLUMN IF NOT EXISTS incentive_amount INTEGER`);
+
+  // deal positions (募集職種別進捗)
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS deal_positions (
+      id TEXT PRIMARY KEY,
+      deal_id TEXT NOT NULL,
+      team_id TEXT NOT NULL,
+      position_name TEXT NOT NULL,
+      target_applications INTEGER DEFAULT 0,
+      actual_applications INTEGER DEFAULT 0,
+      target_hires INTEGER DEFAULT 0,
+      actual_hires INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  // deal media plans (媒体選定)
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS deal_media_plans (
+      id TEXT PRIMARY KEY,
+      deal_id TEXT NOT NULL,
+      team_id TEXT NOT NULL,
+      media_name TEXT NOT NULL,
+      position TEXT,
+      hire_count INTEGER DEFAULT 0,
+      listing_cost INTEGER DEFAULT 0,
+      performance_cost INTEGER DEFAULT 0,
+      margin NUMERIC(5,2) DEFAULT 0,
+      notes TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  // deal calc defs (計算フィールド定義)
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS deal_calc_defs (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      expression TEXT NOT NULL,
+      description TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
   if (INITIAL_ADMIN_ID) {
@@ -1220,17 +1362,61 @@ async function dbGetClient(teamId, id) {
 }
 
 async function dbUpdateClient(teamId, id, fields) {
-  const allowed = ['name', 'contact_name', 'contact_email', 'contact_phone', 'source', 'notes'];
+  const allowed = [
+    'name', 'contact_name', 'contact_email', 'contact_phone', 'source', 'notes',
+    'industry', 'prefecture', 'employee_range', 'inrevo_person', 'competition',
+    'corporate_url', 'service_url1', 'service_url2',
+  ];
   const sets = [];
   const vals = [];
   let i = 3;
   for (const [k, v] of Object.entries(fields)) {
-    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+    if (allowed.includes(k)) {
+      sets.push(`${k}=$${i++}`);
+      vals.push(Array.isArray(v) ? JSON.stringify(v) : v);
+    }
   }
   if (!sets.length) return dbGetClient(teamId, id);
   sets.push(`updated_at=now()`);
   await dbQuery(`UPDATE clients SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
   return dbGetClient(teamId, id);
+}
+
+// ================================
+// CRM: Client Contacts (担当者情報)
+// ================================
+async function dbCreateClientContact(teamId, id, { clientId, lastName, firstName, furigana, title, department, email, phone, notes, doNotContact, sortOrder }) {
+  await dbQuery(
+    `INSERT INTO client_contacts (id, client_id, team_id, last_name, first_name, furigana, title, department, email, phone, notes, do_not_contact, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [id, clientId, teamId, lastName||null, firstName||null, furigana||null, title||null, department||null, email||null, phone||null, notes||null, doNotContact||false, sortOrder||0],
+  );
+  const res = await dbQuery(`SELECT * FROM client_contacts WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListClientContacts(teamId, clientId) {
+  const res = await dbQuery(
+    `SELECT * FROM client_contacts WHERE team_id=$1 AND client_id=$2 ORDER BY sort_order, created_at`,
+    [teamId, clientId],
+  );
+  return res.rows;
+}
+
+async function dbUpdateClientContact(teamId, id, fields) {
+  const allowed = ['last_name','first_name','furigana','title','department','email','phone','notes','do_not_contact','sort_order'];
+  const sets = []; const vals = []; let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return;
+  await dbQuery(`UPDATE client_contacts SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  const res = await dbQuery(`SELECT * FROM client_contacts WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbDeleteClientContact(teamId, id) {
+  await dbQuery(`DELETE FROM client_contacts WHERE team_id=$1 AND id=$2`, [teamId, id]);
 }
 
 async function dbDeleteClient(teamId, id) {
@@ -1279,13 +1465,35 @@ async function dbGetDeal(teamId, id) {
   return res.rows[0] || null;
 }
 
+const DEAL_JSONB_FIELDS = new Set(['hire_type', 'hearing_challenges', 'preliminary_info', 'competition']);
+
 async function dbUpdateDeal(teamId, id, fields) {
-  const allowed = ['name', 'stage', 'budget', 'notes', 'client_id', 'visibility'];
+  const allowed = [
+    'name', 'stage', 'budget', 'notes', 'client_id', 'visibility',
+    'yomi', 'inrevo_person', 'sales_person', 'acquisition_person',
+    'appointment_type', 'contract_type', 'payment_method', 'hire_type',
+    'first_meeting_date', 'acquisition_date', 'contract_approval_date',
+    'contract_send_date', 'order_date', 'conclusion_date',
+    'next_action_date', 'next_action_content', 'next_action_detail',
+    'loss_reason', 'loss_reason_detail',
+    'bant_budget', 'bant_budget_memo', 'bant_authority', 'bant_authority_memo',
+    'bant_needs', 'bant_needs_memo', 'bant_timeframe', 'bant_timeframe_memo',
+    'initial_cost', 'monthly_cost', 'unit_price', 'contract_months',
+    'guarantee_count', 'guarantee_salary', 'rate', 'advance_payment',
+    'legal_check', 'antisocial_check', 'hearing_collected',
+    'contract_approval', 'contract_sent', 'sales_memo',
+    'hearing_challenges', 'preliminary_info',
+    'invoice_to_name', 'invoice_to_email', 'invoice_cc_email',
+    'contract_to_name', 'contract_to_email', 'contract_cc_email',
+  ];
   const sets = [];
   const vals = [];
   let i = 3;
   for (const [k, v] of Object.entries(fields)) {
-    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+    if (allowed.includes(k)) {
+      sets.push(`${k}=$${i++}`);
+      vals.push(DEAL_JSONB_FIELDS.has(k) ? JSON.stringify(v) : v);
+    }
   }
   if (!sets.length) return dbGetDeal(teamId, id);
   sets.push(`updated_at=now()`);
@@ -1354,11 +1562,11 @@ async function dbDeleteDealActivity(teamId, id) {
 // ================================
 // CRM: Deal Payments
 // ================================
-async function dbCreateDealPayment(teamId, id, { dealId, label, amount, dueDate, notes }) {
+async function dbCreateDealPayment(teamId, id, { dealId, label, amount, dueDate, notes, direction, incentiveAmount }) {
   await dbQuery(
-    `INSERT INTO deal_payments (id, deal_id, team_id, label, amount, due_date, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [id, dealId, teamId, label, amount, dueDate || null, notes || null],
+    `INSERT INTO deal_payments (id, deal_id, team_id, label, amount, due_date, notes, direction, incentive_amount)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, dealId, teamId, label, amount, dueDate || null, notes || null, direction || '入金', incentiveAmount || null],
   );
   const res = await dbQuery(`SELECT * FROM deal_payments WHERE id=$1`, [id]);
   return res.rows[0];
@@ -1373,7 +1581,7 @@ async function dbListDealPayments(teamId, dealId) {
 }
 
 async function dbUpdateDealPayment(teamId, id, fields) {
-  const allowed = ['label', 'amount', 'due_date', 'paid_date', 'status', 'notes'];
+  const allowed = ['label', 'amount', 'due_date', 'paid_date', 'status', 'notes', 'direction', 'invoice_sent', 'incentive_amount'];
   const sets = [];
   const vals = [];
   let i = 3;
@@ -1451,6 +1659,120 @@ async function dbUpdateDeliverable(teamId, id, fields) {
 
 async function dbDeleteDeliverable(teamId, id) {
   await dbQuery(`DELETE FROM deal_deliverables WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
+// CRM: Deal Positions (募集職種別進捗)
+// ================================
+async function dbCreateDealPosition(teamId, id, { dealId, positionName, targetApplications, targetHires, sortOrder }) {
+  await dbQuery(
+    `INSERT INTO deal_positions (id, deal_id, team_id, position_name, target_applications, target_hires, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, dealId, teamId, positionName, targetApplications||0, targetHires||0, sortOrder||0],
+  );
+  const res = await dbQuery(`SELECT * FROM deal_positions WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListDealPositions(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT * FROM deal_positions WHERE team_id=$1 AND deal_id=$2 ORDER BY sort_order, created_at`,
+    [teamId, dealId],
+  );
+  return res.rows;
+}
+
+async function dbUpdateDealPosition(teamId, id, fields) {
+  const allowed = ['position_name','target_applications','actual_applications','target_hires','actual_hires','status','sort_order'];
+  const sets = []; const vals = []; let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return;
+  sets.push(`updated_at=now()`);
+  await dbQuery(`UPDATE deal_positions SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  const res = await dbQuery(`SELECT * FROM deal_positions WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbDeleteDealPosition(teamId, id) {
+  await dbQuery(`DELETE FROM deal_positions WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
+// CRM: Deal Media Plans (媒体選定)
+// ================================
+async function dbCreateDealMediaPlan(teamId, id, { dealId, mediaName, position, hireCount, listingCost, performanceCost, margin, notes, sortOrder }) {
+  await dbQuery(
+    `INSERT INTO deal_media_plans (id, deal_id, team_id, media_name, position, hire_count, listing_cost, performance_cost, margin, notes, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [id, dealId, teamId, mediaName, position||null, hireCount||0, listingCost||0, performanceCost||0, margin||0, notes||null, sortOrder||0],
+  );
+  const res = await dbQuery(`SELECT * FROM deal_media_plans WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListDealMediaPlans(teamId, dealId) {
+  const res = await dbQuery(
+    `SELECT * FROM deal_media_plans WHERE team_id=$1 AND deal_id=$2 ORDER BY sort_order, created_at`,
+    [teamId, dealId],
+  );
+  return res.rows;
+}
+
+async function dbUpdateDealMediaPlan(teamId, id, fields) {
+  const allowed = ['media_name','position','hire_count','listing_cost','performance_cost','margin','notes','sort_order'];
+  const sets = []; const vals = []; let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return;
+  sets.push(`updated_at=now()`);
+  await dbQuery(`UPDATE deal_media_plans SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  const res = await dbQuery(`SELECT * FROM deal_media_plans WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbDeleteDealMediaPlan(teamId, id) {
+  await dbQuery(`DELETE FROM deal_media_plans WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
+// CRM: Deal Calc Defs (計算フィールド定義)
+// ================================
+async function dbCreateCalcDef(teamId, id, { name, expression, description, sortOrder }) {
+  await dbQuery(
+    `INSERT INTO deal_calc_defs (id, team_id, name, expression, description, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [id, teamId, name, expression, description||null, sortOrder||0],
+  );
+  const res = await dbQuery(`SELECT * FROM deal_calc_defs WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbListCalcDefs(teamId) {
+  const res = await dbQuery(
+    `SELECT * FROM deal_calc_defs WHERE team_id=$1 ORDER BY sort_order, created_at`,
+    [teamId],
+  );
+  return res.rows;
+}
+
+async function dbUpdateCalcDef(teamId, id, fields) {
+  const allowed = ['name','expression','description','sort_order'];
+  const sets = []; const vals = []; let i = 3;
+  for (const [k, v] of Object.entries(fields)) {
+    if (allowed.includes(k)) { sets.push(`${k}=$${i++}`); vals.push(v); }
+  }
+  if (!sets.length) return;
+  sets.push(`updated_at=now()`);
+  await dbQuery(`UPDATE deal_calc_defs SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, [teamId, id, ...vals]);
+  const res = await dbQuery(`SELECT * FROM deal_calc_defs WHERE id=$1`, [id]);
+  return res.rows[0];
+}
+
+async function dbDeleteCalcDef(teamId, id) {
+  await dbQuery(`DELETE FROM deal_calc_defs WHERE team_id=$1 AND id=$2`, [teamId, id]);
 }
 
 async function dbPipelineSummary(teamId) {
@@ -1537,6 +1859,11 @@ module.exports = {
   dbGetClient,
   dbUpdateClient,
   dbDeleteClient,
+  // CRM: Client Contacts
+  dbCreateClientContact,
+  dbListClientContacts,
+  dbUpdateClientContact,
+  dbDeleteClientContact,
   // CRM: Deals
   dbCreateDeal,
   dbListDeals,
@@ -1561,6 +1888,21 @@ module.exports = {
   dbListDeliverables,
   dbUpdateDeliverable,
   dbDeleteDeliverable,
+  // CRM: Deal Positions
+  dbCreateDealPosition,
+  dbListDealPositions,
+  dbUpdateDealPosition,
+  dbDeleteDealPosition,
+  // CRM: Deal Media Plans
+  dbCreateDealMediaPlan,
+  dbListDealMediaPlans,
+  dbUpdateDealMediaPlan,
+  dbDeleteDealMediaPlan,
+  // CRM: Calc Defs
+  dbCreateCalcDef,
+  dbListCalcDefs,
+  dbUpdateCalcDef,
+  dbDeleteCalcDef,
   // CRM: Pipeline
   dbPipelineSummary,
   // CRM: Deal-Task linkage

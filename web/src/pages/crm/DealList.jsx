@@ -104,7 +104,10 @@ export default function DealList() {
                     }}>
                     <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{d.name}</div>
                     <div style={{ fontSize: 12, color: '#888' }}>{d.client_name}</div>
-                    {d.budget && <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>¥{d.budget.toLocaleString()}</div>}
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+                      {d.yomi && <span style={{ fontSize: 10, background: '#fff3e0', color: '#e65100', padding: '1px 6px', borderRadius: 8, border: '1px solid #ffe0b2' }}>{d.yomi}</span>}
+                      {d.budget && <span style={{ fontSize: 11, color: '#555' }}>¥{d.budget.toLocaleString()}</span>}
+                    </div>
                     <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>
                       {new Date(d.updated_at).toLocaleDateString('ja-JP')}
                     </div>

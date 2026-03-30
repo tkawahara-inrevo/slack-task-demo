@@ -12,6 +12,7 @@
 
 require('dotenv').config();
 const { Pool } = require('pg');
+const { randomUUID } = require('crypto');
 
 const SUBDOMAIN = 'ca7n5wh2hfvv';
 const TOKENS = {
@@ -148,11 +149,11 @@ async function main() {
     }
 
     const ins = await pool.query(
-      `INSERT INTO clients (team_id, name, inrevo_person, industry, prefecture, employee_range, competition, corporate_url, service_url1, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      `INSERT INTO clients (id, team_id, name, inrevo_person, industry, prefecture, employee_range, competition, corporate_url, service_url1, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT DO NOTHING
        RETURNING id`,
-      [teamId, clientData.name, clientData.inrevo_person, clientData.industry, clientData.prefecture,
+      [randomUUID(), teamId, clientData.name, clientData.inrevo_person, clientData.industry, clientData.prefecture,
        clientData.employee_range, clientData.competition, clientData.corporate_url, clientData.service_url1, clientData.notes]
     );
 
@@ -170,10 +171,10 @@ async function main() {
         const firstName = cv['文字列__1行__0']?.value || '';
         if (!lastName && !firstName) continue;
         await pool.query(
-          `INSERT INTO client_contacts (client_id, team_id, last_name, first_name, furigana, title, department, email, phone, notes, do_not_contact, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          `INSERT INTO client_contacts (id, client_id, team_id, last_name, first_name, furigana, title, department, email, phone, notes, do_not_contact, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            ON CONFLICT DO NOTHING`,
-          [clientId, teamId, lastName, firstName,
+          [randomUUID(), clientId, teamId, lastName, firstName,
            cv['担当者名_ふりがな']?.value || null,
            cv['役職']?.value || null,
            cv['部署名']?.value || null,
@@ -267,7 +268,7 @@ async function main() {
 
     const ins = await pool.query(
       `INSERT INTO deals (
-        team_id, client_id, name, stage, yomi, sales_person, acquisition_person,
+        id, team_id, client_id, name, stage, yomi, sales_person, acquisition_person,
         payment_method, first_meeting_date, acquisition_date, contract_approval_date,
         contract_send_date, order_date, conclusion_date, next_action_date, next_action_detail,
         initial_cost, unit_price, contract_months,
@@ -276,16 +277,17 @@ async function main() {
         anti_social_check, legal_check, contract_approval_done,
         loss_reason_detail, invoice_name, notes, sales_memo
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,
-        $8,$9,$10,$11,
-        $12,$13,$14,$15,$16,
-        $17,$18,$19,
-        $20,$21,$22,$23,
-        $24,$25,$26,$27,
-        $28,$29,$30,
-        $31,$32,$33,$34
+        $1,$2,$3,$4,$5,$6,$7,$8,
+        $9,$10,$11,$12,
+        $13,$14,$15,$16,$17,
+        $18,$19,$20,
+        $21,$22,$23,$24,
+        $25,$26,$27,$28,
+        $29,$30,$31,
+        $32,$33,$34,$35
       ) ON CONFLICT DO NOTHING RETURNING id`,
       [
+        randomUUID(),
         dealData.team_id, dealData.client_id, dealData.name, dealData.stage, dealData.yomi,
         dealData.sales_person, dealData.acquisition_person,
         dealData.payment_method, dealData.first_meeting_date, dealData.acquisition_date,
@@ -345,9 +347,9 @@ async function main() {
     }
 
     await pool.query(
-      `INSERT INTO deal_payments (deal_id, team_id, label, amount, direction, due_date, paid_date, status, invoice_sent, incentive_amount)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [dealId, teamId, label, amount, direction, dueDate, paidDate, status, invoiceSent, incentive]
+      `INSERT INTO deal_payments (id, deal_id, team_id, label, amount, direction, due_date, paid_date, status, invoice_sent, incentive_amount)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [randomUUID(), dealId, teamId, label, amount, direction, dueDate, paidDate, status, invoiceSent, incentive]
     );
     payImported++;
   }

@@ -1358,6 +1358,7 @@ app.options("assignee_groups_select", async ({ ack, payload }) => {
   try {
     const q = payload?.value || "";
     const groups = await searchUsergroups(q);
+    console.info("[options] assignee_groups_select", { q, count: groups.length, handles: groups.map(g => g.handle) });
     await ack({
       options: groups.map((g) => ({
         text: { type: "plain_text", text: `@${g.handle}` },

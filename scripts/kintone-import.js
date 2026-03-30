@@ -149,12 +149,12 @@ async function main() {
     }
 
     const ins = await pool.query(
-      `INSERT INTO clients (id, team_id, name, inrevo_person, industry, prefecture, employee_range, competition, corporate_url, service_url1, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO clients (id, team_id, name, inrevo_person, industry, prefecture, employee_range, competition, corporate_url, service_url1, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT DO NOTHING
        RETURNING id`,
       [randomUUID(), teamId, clientData.name, clientData.inrevo_person, clientData.industry, clientData.prefecture,
-       clientData.employee_range, clientData.competition, clientData.corporate_url, clientData.service_url1, clientData.notes]
+       clientData.employee_range, clientData.competition, clientData.corporate_url, clientData.service_url1, clientData.notes, 'kintone-import']
     );
 
     if (ins.rows.length) {

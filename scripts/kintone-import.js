@@ -270,7 +270,7 @@ async function main() {
 
     const ins = await pool.query(
       `INSERT INTO deals (
-        id, team_id, client_id, name, stage, yomi, sales_person, acquisition_person,
+        id, team_id, client_id, name, stage, created_by, yomi, sales_person, acquisition_person,
         payment_method, first_meeting_date, acquisition_date, contract_approval_date,
         contract_send_date, order_date, conclusion_date, next_action_date, next_action_detail,
         initial_cost, unit_price, contract_months,
@@ -279,18 +279,18 @@ async function main() {
         antisocial_check, legal_check, contract_approval, contract_sent,
         loss_reason_detail, invoice_to_name, contract_to_name, notes, sales_memo
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,
-        $9,$10,$11,$12,
-        $13,$14,$15,$16,$17,
-        $18,$19,$20,
-        $21,$22,$23,$24,
-        $25,$26,$27,$28,
-        $29,$30,$31,$32,
-        $33,$34,$35,$36,$37
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,
+        $10,$11,$12,$13,
+        $14,$15,$16,$17,$18,
+        $19,$20,$21,
+        $22,$23,$24,$25,
+        $26,$27,$28,$29,
+        $30,$31,$32,$33,
+        $34,$35,$36,$37,$38
       ) ON CONFLICT DO NOTHING RETURNING id`,
       [
         randomUUID(),
-        dealData.team_id, dealData.client_id, dealData.name, dealData.stage, dealData.yomi,
+        dealData.team_id, dealData.client_id, dealData.name, dealData.stage, 'kintone-import', dealData.yomi,
         dealData.sales_person, dealData.acquisition_person,
         dealData.payment_method, dealData.first_meeting_date, dealData.acquisition_date,
         dealData.contract_approval_date, dealData.contract_send_date, dealData.order_date,

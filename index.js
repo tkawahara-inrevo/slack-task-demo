@@ -1661,8 +1661,9 @@ const CHANNEL_VIS_CACHE_MS = 10 * 60 * 1000;
 const channelVisCache = new Map(); // `${teamId}:${channelId}` -> { at, ok }
 
 // user -> joined channels cache・・PI遽邏・ｼ・
-const USER_JOINED_CH_CACHE_MS = 10 * 60 * 1000;
+const USER_JOINED_CH_CACHE_MS = 60 * 60 * 1000; // 10min → 60min: チャンネル参加状態は頻繁に変わらない
 const userJoinedChCache = new Map(); // `${teamId}:${userId}` -> { at, set: Set<string> }
+const userJoinedChInflight = new Map(); // 同一ユーザーへの重複API呼び出しを防ぐ
 
 async function listUserJoinedChannelsSet(client, teamId, userId) {
   const key = `${teamId}:${userId}`;
@@ -1670,29 +1671,39 @@ async function listUserJoinedChannelsSet(client, teamId, userId) {
   if (cached && Date.now() - cached.at < USER_JOINED_CH_CACHE_MS)
     return cached.set;
 
-  const set = new Set();
-  let cursor;
-  try {
-    do {
-      const res = await client.users.conversations({
-        user: userId,
-        types: "public_channel,private_channel",
-        limit: 200,
-        cursor,
-        exclude_archived: true,
-      });
-      for (const ch of res?.channels || []) {
-        if (ch?.id) set.add(ch.id);
-      }
-      cursor = res?.response_metadata?.next_cursor || null;
-    } while (cursor);
-  } catch (e) {
-    // 螟ｱ謨玲凾縺ｯ遨ｺ・・ 陦ｨ遉ｺ縺励↑縺・ｼ峨↓蛟偵☆
-    console.error("users.conversations error:", e?.data || e);
-  }
+  // 同じユーザーへの同時リクエストがあれば同じPromiseを使い回す
+  if (userJoinedChInflight.has(key)) return userJoinedChInflight.get(key);
 
-  userJoinedChCache.set(key, { at: Date.now(), set });
-  return set;
+  const loadPromise = (async () => {
+    const set = new Set();
+    let cursor;
+    try {
+      do {
+        const res = await client.users.conversations({
+          user: userId,
+          types: "public_channel,private_channel",
+          limit: 200,
+          cursor,
+          exclude_archived: true,
+        });
+        for (const ch of res?.channels || []) {
+          if (ch?.id) set.add(ch.id);
+        }
+        cursor = res?.response_metadata?.next_cursor || null;
+      } while (cursor);
+    } catch (e) {
+      console.error("users.conversations error:", e?.data || e);
+    }
+    userJoinedChCache.set(key, { at: Date.now(), set });
+    return set;
+  })();
+
+  userJoinedChInflight.set(key, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    userJoinedChInflight.delete(key);
+  }
 }
 
 async function canUserSeeChannel({ client, teamId, channelId, userId }) {

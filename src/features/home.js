@@ -358,11 +358,13 @@ async function publishHome({ client, teamId, userId }) {
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
   ];
 
-  // 範囲=すべての時だけ「部署」フィルタを出す
-  const [deptGroups, personalFilters] = await Promise.all([
-    searchUsergroups(""),
-    dbListPersonalFilters(teamId, userId).catch(() => []),
-  ]);
+  // 部署フィルタは rangeKey=all のときしか表示しないため、それ以外はスキップ
+  const [deptGroups, personalFilters] = rangeKey0 === "all"
+    ? await Promise.all([
+        searchUsergroups(""),
+        dbListPersonalFilters(teamId, userId).catch(() => []),
+      ])
+    : [[], []];
   const deptOptions = [
     { text: { type: "plain_text", text: "部署：すべて" }, value: "all" },
     { text: { type: "plain_text", text: "部署：未設定" }, value: "__none__" },
@@ -389,13 +391,15 @@ async function publishHome({ client, teamId, userId }) {
     });
   }
 
-  actionElements.push({
-    type: "static_select",
-    action_id: "home_scope_select",
-    options: stateOptions0,
-    initial_option:
-      stateOptions0.find((o) => o.value === stateKey0) || stateOptions0[0],
-  });
+  if (rangeKey0 !== "all") {
+    actionElements.push({
+      type: "static_select",
+      action_id: "home_scope_select",
+      options: stateOptions0,
+      initial_option:
+        stateOptions0.find((o) => o.value === stateKey0) || stateOptions0[0],
+    });
+  }
 
   actionElements.push({
     type: "button",
@@ -448,40 +452,25 @@ async function publishHome({ client, teamId, userId }) {
   const personalScope =
     rangeKey === "to_me" || rangeKey === "requested_by_me" ? rangeKey : "all";
   const listFetchLimit = rangeKey === "requested_by_me" ? 200 : 60;
-  let personalTasks = await dbListPersonalTasksByStatusesWithScope(
-    teamId,
-    statuses,
-    personalScope,
-    userId,
-    listFetchLimit,
-  );
+  // personal / broadcast を並列取得
+  const [personalTasksRaw, broadcastTasksRaw] = await Promise.all([
+    dbListPersonalTasksByStatusesWithScope(teamId, statuses, personalScope, userId, listFetchLimit),
+    rangeKey === "to_me" || rangeKey === "requested_by_me"
+      ? dbListBroadcastTasksByStatusesWithScope(teamId, statuses, rangeKey, userId, listFetchLimit)
+      : dbListBroadcastTasksByStatuses(teamId, statuses, "all", listFetchLimit),
+  ]);
 
   // ✅ 方針：依頼者=対応者 の personal タスクは「範囲=すべて」では出さない
   // - to_me / requested_by_me では今まで通り見える（自分の整理には必要）
-  if (rangeKey === "all") {
-    personalTasks = (personalTasks || []).filter((t) => {
-      const r = t?.requester_user_id;
-      const a = t?.assignee_id;
-      return !(r && a && r === a);
-    });
-  }
+  let personalTasks = rangeKey === "all"
+    ? (personalTasksRaw || []).filter((t) => {
+        const r = t?.requester_user_id;
+        const a = t?.assignee_id;
+        return !(r && a && r === a);
+      })
+    : personalTasksRaw;
 
-  // broadcast は範囲で絞る（to_me は JOIN、requested_by_me は requester、all は JOINなし）
-  let broadcastTasks =
-    rangeKey === "to_me" || rangeKey === "requested_by_me"
-      ? await dbListBroadcastTasksByStatusesWithScope(
-          teamId,
-          statuses,
-          rangeKey,
-          userId,
-          listFetchLimit,
-        )
-      : await dbListBroadcastTasksByStatuses(
-          teamId,
-          statuses,
-          "all",
-          listFetchLimit,
-        );
+  let broadcastTasks = broadcastTasksRaw;
 
   if (rangeKey === "to_me") {
     const fallbackBroadcastTasks = await dbListBroadcastTasksByStatuses(
@@ -496,24 +485,37 @@ async function publishHome({ client, teamId, userId }) {
       (t) => !existingIds.has(String(t.id)),
     );
     if (candidates.length > 0) {
-      const checks = await Promise.all(
-        candidates.map((task) =>
-          Promise.all([
-            isBroadcastAssignedToUser(task, teamId, userId),
-            dbHasUserCompleted(teamId, task.id, userId),
-          ]).then(([isAssigned, alreadyCompleted]) => ({
-            task,
-            isAssigned,
-            alreadyCompleted,
-          })),
-        ),
+      // グループメンバーをグループIDごとに1回だけ取得（N+1 → K回）
+      const uniqueGroupIds = [
+        ...new Set(candidates.map((t) => t.broadcast_group_id).filter(Boolean)),
+      ];
+      const groupMemberSets = new Map();
+      await Promise.all(
+        uniqueGroupIds.map(async (gid) => {
+          const members = await getUsergroupMembers(teamId, gid).catch(() => []);
+          groupMemberSets.set(gid, new Set(members || []));
+        }),
       );
-      for (const { task, isAssigned, alreadyCompleted } of checks) {
+
+      // 完了済みタスクを一括取得（N回 → 1回）
+      const candidateIds = candidates.map((t) => t.id);
+      const completedSet = await dbGetUserCompletedTaskIds(teamId, candidateIds, userId).catch(() => new Set());
+
+      for (const task of candidates) {
+        const isAssigned =
+          String(task.assignee_label || "").includes(`<@${userId}>`) ||
+          (task.broadcast_group_id
+            ? (groupMemberSets.get(task.broadcast_group_id)?.has(userId) ?? false)
+            : false);
+
+        if (!isAssigned) continue;
+
+        const alreadyCompleted = completedSet.has(task.id);
         const shouldInclude =
-          isAssigned &&
-          (st.scopeKey === "done"
+          st.scopeKey === "done"
             ? task.status === "done" || alreadyCompleted
-            : !alreadyCompleted);
+            : !alreadyCompleted;
+
         if (shouldInclude) {
           broadcastTasks.push(task);
           existingIds.add(String(task.id));
@@ -712,19 +714,24 @@ async function publishHome({ client, teamId, userId }) {
         elements: [{ type: "mrkdwn", text: "（直近の完了なし）" }],
       });
     } else {
+      // Slack Home は100ブロック上限 → footer(3) + 余裕(3) を残す
+      const DONE_BLOCK_LIMIT = 94;
+      let doneShown = 0;
+
       for (const t of recentDoneTasks) {
         const isBroadcast = t.task_type === "broadcast";
-
-        // ✅ broadcast は Home で「未完了に戻す」を表示しない
         const canReopen =
           !isBroadcast &&
           (userId === t.requester_user_id || userId === t.assignee_id);
+
+        // この1タスクで使うブロック数 = section + context + actions + divider
+        const estimated = 4;
+        if (blocks.length + estimated > DONE_BLOCK_LIMIT) break;
 
         const rawDesc = String(t.description || "")
           .replace(/\r\n/g, "\n")
           .trim();
 
-        // プレビュー：最大2行 + 最大160文字（軽くて読みやすい）
         const MAX_LINES = 2;
         const MAX_CHARS = 160;
 
@@ -736,13 +743,11 @@ async function publishHome({ client, teamId, userId }) {
           preview = preview.slice(0, MAX_CHARS) + "…";
         preview = noMention(preview);
 
-        // タイトル + プレビュー
         blocks.push({
           type: "section",
           text: { type: "mrkdwn", text: `${preview}` },
         });
 
-        // 補助情報（小さく）
         blocks.push({
           type: "context",
           elements: [
@@ -753,9 +758,7 @@ async function publishHome({ client, teamId, userId }) {
           ],
         });
 
-        // ボタン行：未完了に戻す（personalのみ） / 詳細
         const elems = [];
-
         if (canReopen) {
           elems.push({
             type: "button",
@@ -773,7 +776,6 @@ async function publishHome({ client, teamId, userId }) {
             },
           });
         }
-
         elems.push({
           type: "button",
           text: { type: "plain_text", text: "詳細" },
@@ -783,6 +785,19 @@ async function publishHome({ client, teamId, userId }) {
 
         blocks.push({ type: "actions", elements: elems });
         blocks.push({ type: "divider" });
+        doneShown++;
+      }
+
+      if (doneShown < recentDoneTasks.length) {
+        blocks.push({
+          type: "actions",
+          elements: [{
+            type: "button",
+            text: { type: "plain_text", text: `…他 ${recentDoneTasks.length - doneShown}件を一覧で見る` },
+            action_id: "open_task_list_modal",
+            value: JSON.stringify({ teamId, userId, rangeKey: st.broadcastScopeKey || "to_me", scopeKey: "done" }),
+          }],
+        });
       }
     }
   } else {
@@ -1169,8 +1184,13 @@ async function publishHome({ client, teamId, userId }) {
 
       if (shown < list.length && canAdd(2)) {
         blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: `…他 ${list.length - shown}件` }],
+          type: "actions",
+          elements: [{
+            type: "button",
+            text: { type: "plain_text", text: `…他 ${list.length - shown}件を一覧で見る` },
+            action_id: "open_task_list_modal",
+            value: JSON.stringify({ teamId, userId, rangeKey, scopeKey: st.scopeKey || "active" }),
+          }],
         });
         blocks.push({ type: "divider" });
       }
@@ -1285,13 +1305,13 @@ async function publishHome({ client, teamId, userId }) {
 
   // Slack blocks 上限は 100。末尾の余白ブロック分を先に確保する
   const SLACK_BLOCK_LIMIT = 100;
-  const RESERVE = FOOTER_BLOCKS.length;
+  const RESERVE = FOOTER_BLOCKS.length; // 3
 
   // ✅ blocks が多すぎる場合、末尾が切られて「スクロールできない」原因になるので削る
   if (blocks.length > SLACK_BLOCK_LIMIT - RESERVE) {
-    // 末尾は中途半端に切るとUIが崩れやすいので、
-    // 「安全に収まるところまで」ガツッと切って注意文を入れる
-    const keep = SLACK_BLOCK_LIMIT - RESERVE - 1; // 注意文1個分も確保
+    // splice(keep) → keep 個残す。その後 context(1) + actions(1) + footer(3) = 5 を追加 → keep + 5 <= 100
+    // なので keep <= 95
+    const keep = SLACK_BLOCK_LIMIT - RESERVE - 2; // = 95
     blocks.splice(keep);
 
     blocks.push({
@@ -2044,6 +2064,24 @@ app.action("open_user_settings_from_home", async ({ ack, body, action, client })
     console.error("open_user_settings_from_home error:", e?.data || e);
   }
 });
+
+// タスク一覧モーダル：ページネーション（前へ / 次へ）
+async function handleTaskListModalPage({ ack, body, client }) {
+  await ack();
+  try {
+    const p = safeJsonParse(body.actions?.[0]?.value || "{}") || {};
+    const teamId = p.teamId || getTeamIdFromBody(body);
+    const userId = p.userId || getUserIdFromBody(body);
+    const { rangeKey = "to_me", scopeKey = "active", page = 0 } = p;
+    if (!teamId || !userId) return;
+    const view = await buildTaskListModalView({ teamId, userId, rangeKey, scopeKey, page });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+  } catch (e) {
+    console.error("task_list_modal_page error:", e?.data || e);
+  }
+}
+app.action("task_list_modal_prev", handleTaskListModalPage);
+app.action("task_list_modal_next", handleTaskListModalPage);
 
   return {
     getHomeState,

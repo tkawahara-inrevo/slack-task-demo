@@ -242,19 +242,21 @@ async function main() {
       initial_cost: numVal(rec, '初期請求費用_税抜き'),
       unit_price: numVal(rec, '_1ヶ月or1名_当たりの単価_税抜き'),
       contract_months: numVal(rec, '契約月数or採用人数_税抜き'),
-      budget_confirmed: boolVal(rec, 'Budget_予算'),
-      budget_detail: val(rec, 'Budget_予算_概要'),
-      authority_confirmed: boolVal(rec, 'Authority_決済権'),
-      authority_detail: val(rec, 'Authority_決済権_概要'),
-      needs_confirmed: boolVal(rec, 'Needs_ニーズ'),
-      needs_detail: val(rec, 'Needs_ニーズ_概要'),
-      timeframe_confirmed: boolVal(rec, 'Timeframe_導入時期'),
-      timeframe_detail: val(rec, 'Timeframe_導入時期_概要'),
-      anti_social_check: boolVal(rec, '反社チェック完了'),
+      bant_budget: boolVal(rec, 'Budget_予算') ? '確認済' : '',
+      bant_budget_memo: val(rec, 'Budget_予算_概要'),
+      bant_authority: boolVal(rec, 'Authority_決済権') ? '確認済' : '',
+      bant_authority_memo: val(rec, 'Authority_決済権_概要'),
+      bant_needs: boolVal(rec, 'Needs_ニーズ') ? '確認済' : '',
+      bant_needs_memo: val(rec, 'Needs_ニーズ_概要'),
+      bant_timeframe: boolVal(rec, 'Timeframe_導入時期') ? '確認済' : '',
+      bant_timeframe_memo: val(rec, 'Timeframe_導入時期_概要'),
+      antisocial_check: boolVal(rec, '反社チェック完了'),
       legal_check: boolVal(rec, 'リーガルチェック完了'),
-      contract_approval_done: boolVal(rec, '契約稟議完了'),
+      contract_approval: boolVal(rec, '契約稟議完了'),
+      contract_sent: boolVal(rec, '契約書送付完了'),
       loss_reason_detail: val(rec, '失注理由') || null,
-      invoice_name: val(rec, '請求書送付先宛名') || val(rec, '契約書送付先宛名') || null,
+      invoice_to_name: val(rec, '請求書送付先宛名') || null,
+      contract_to_name: val(rec, '契約書送付先宛名') || null,
       notes: val(rec, '文字列__複数行_'),
       sales_memo: val(rec, '案件最新状況'),
     };
@@ -272,10 +274,10 @@ async function main() {
         payment_method, first_meeting_date, acquisition_date, contract_approval_date,
         contract_send_date, order_date, conclusion_date, next_action_date, next_action_detail,
         initial_cost, unit_price, contract_months,
-        budget_confirmed, budget_detail, authority_confirmed, authority_detail,
-        needs_confirmed, needs_detail, timeframe_confirmed, timeframe_detail,
-        anti_social_check, legal_check, contract_approval_done,
-        loss_reason_detail, invoice_name, notes, sales_memo
+        bant_budget, bant_budget_memo, bant_authority, bant_authority_memo,
+        bant_needs, bant_needs_memo, bant_timeframe, bant_timeframe_memo,
+        antisocial_check, legal_check, contract_approval, contract_sent,
+        loss_reason_detail, invoice_to_name, contract_to_name, notes, sales_memo
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,
         $9,$10,$11,$12,
@@ -283,8 +285,8 @@ async function main() {
         $18,$19,$20,
         $21,$22,$23,$24,
         $25,$26,$27,$28,
-        $29,$30,$31,
-        $32,$33,$34,$35
+        $29,$30,$31,$32,
+        $33,$34,$35,$36,$37
       ) ON CONFLICT DO NOTHING RETURNING id`,
       [
         randomUUID(),
@@ -294,10 +296,10 @@ async function main() {
         dealData.contract_approval_date, dealData.contract_send_date, dealData.order_date,
         dealData.conclusion_date, dealData.next_action_date, dealData.next_action_detail,
         dealData.initial_cost, dealData.unit_price, dealData.contract_months,
-        dealData.budget_confirmed, dealData.budget_detail, dealData.authority_confirmed, dealData.authority_detail,
-        dealData.needs_confirmed, dealData.needs_detail, dealData.timeframe_confirmed, dealData.timeframe_detail,
-        dealData.anti_social_check, dealData.legal_check, dealData.contract_approval_done,
-        dealData.loss_reason_detail, dealData.invoice_name, dealData.notes, dealData.sales_memo,
+        dealData.bant_budget, dealData.bant_budget_memo, dealData.bant_authority, dealData.bant_authority_memo,
+        dealData.bant_needs, dealData.bant_needs_memo, dealData.bant_timeframe, dealData.bant_timeframe_memo,
+        dealData.antisocial_check, dealData.legal_check, dealData.contract_approval, dealData.contract_sent,
+        dealData.loss_reason_detail, dealData.invoice_to_name, dealData.contract_to_name, dealData.notes, dealData.sales_memo,
       ]
     );
 

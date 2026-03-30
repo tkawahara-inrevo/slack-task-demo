@@ -126,14 +126,14 @@ function buildInfoForm(deal) {
     next_action_detail: deal.next_action_detail || '',
     loss_reason: deal.loss_reason || '',
     loss_reason_detail: deal.loss_reason_detail || '',
-    budget_confirmed: deal.budget_confirmed || false,
-    budget_detail: deal.budget_detail || '',
-    authority_confirmed: deal.authority_confirmed || false,
-    authority_detail: deal.authority_detail || '',
-    needs_confirmed: deal.needs_confirmed || false,
-    needs_detail: deal.needs_detail || '',
-    timeframe_confirmed: deal.timeframe_confirmed || false,
-    timeframe_detail: deal.timeframe_detail || '',
+    bant_budget: deal.bant_budget || '',
+    bant_budget_memo: deal.bant_budget_memo || '',
+    bant_authority: deal.bant_authority || '',
+    bant_authority_memo: deal.bant_authority_memo || '',
+    bant_needs: deal.bant_needs || '',
+    bant_needs_memo: deal.bant_needs_memo || '',
+    bant_timeframe: deal.bant_timeframe || '',
+    bant_timeframe_memo: deal.bant_timeframe_memo || '',
     initial_cost: deal.initial_cost ?? '',
     monthly_cost: deal.monthly_cost ?? '',
     unit_price: deal.unit_price ?? '',
@@ -142,17 +142,18 @@ function buildInfoForm(deal) {
     guarantee_salary: deal.guarantee_salary ?? '',
     rate: deal.rate ?? '',
     advance_payment: deal.advance_payment ?? '',
-    anti_social_check: deal.anti_social_check || false,
+    antisocial_check: deal.antisocial_check || false,
     legal_check: deal.legal_check || false,
-    contract_approval_done: deal.contract_approval_done || false,
+    contract_approval: deal.contract_approval || false,
+    contract_sent: deal.contract_sent || false,
     hearing_collected: deal.hearing_collected || false,
     sales_memo: deal.sales_memo || '',
-    postal_code: deal.postal_code || '',
-    address: deal.address || '',
-    invoice_postal_code: deal.invoice_postal_code || '',
-    invoice_address: deal.invoice_address || '',
-    invoice_company_name: deal.invoice_company_name || '',
-    invoice_name: deal.invoice_name || '',
+    invoice_to_name: deal.invoice_to_name || '',
+    invoice_to_email: deal.invoice_to_email || '',
+    invoice_cc_email: deal.invoice_cc_email || '',
+    contract_to_name: deal.contract_to_name || '',
+    contract_to_email: deal.contract_to_email || '',
+    contract_cc_email: deal.contract_cc_email || '',
     hearing_challenges: {
       applications: hc.applications || '',
       quality: hc.quality || '',
@@ -385,7 +386,7 @@ export default function DealDetail() {
 
   const memberIds = members.map(m => m.user_id);
   const availableToAdd = allMembers.filter(m => !memberIds.includes(m.assignee_id));
-  const bantCount = [deal.budget_confirmed, deal.authority_confirmed, deal.needs_confirmed, deal.timeframe_confirmed].filter(Boolean).length;
+  const bantCount = [deal.bant_budget, deal.bant_authority, deal.bant_needs, deal.bant_timeframe].filter(v => v === '確認済').length;
 
   return (
     <div className="dashboard" style={{ minHeight: '100vh', background: '#f8f9fa' }}>
@@ -1008,26 +1009,27 @@ export default function DealDetail() {
                 <>
                   <dt style={{ color: '#888', marginBottom: 4, marginTop: 10, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>BANT ({bantCount}/4)</dt>
                   {[
-                    { key: 'budget_confirmed', label: 'B' },
-                    { key: 'authority_confirmed', label: 'A' },
-                    { key: 'needs_confirmed', label: 'N' },
-                    { key: 'timeframe_confirmed', label: 'T' },
+                    { key: 'bant_budget', label: 'B' },
+                    { key: 'bant_authority', label: 'A' },
+                    { key: 'bant_needs', label: 'N' },
+                    { key: 'bant_timeframe', label: 'T' },
                   ].map(b => (
                     <dd key={b.key} style={{ margin: '0 0 3px', display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: '#aaa' }}>{b.label}</span>
-                      <span style={{ color: deal[b.key] ? '#388e3c' : '#ddd' }}>{deal[b.key] ? '✓' : '○'}</span>
+                      <span style={{ color: deal[b.key] === '確認済' ? '#388e3c' : '#ddd' }}>{deal[b.key] === '確認済' ? '✓' : '○'}</span>
                     </dd>
                   ))}
                 </>
               )}
 
-              {(deal.anti_social_check || deal.legal_check || deal.contract_approval_done || deal.hearing_collected) && (
+              {(deal.antisocial_check || deal.legal_check || deal.contract_approval || deal.contract_sent || deal.hearing_collected) && (
                 <>
                   <dt style={{ color: '#888', marginBottom: 4, marginTop: 10, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>チェック済</dt>
                   {[
-                    { key: 'anti_social_check', label: '反社' },
+                    { key: 'antisocial_check', label: '反社' },
                     { key: 'legal_check', label: 'リーガル' },
-                    { key: 'contract_approval_done', label: '契約稟議' },
+                    { key: 'contract_approval', label: '契約稟議' },
+                    { key: 'contract_sent', label: '契約書送付' },
                     { key: 'hearing_collected', label: 'ヒアリング' },
                   ].filter(c => deal[c.key]).map(c => (
                     <dd key={c.key} style={{ margin: '0 0 3px', fontSize: 12, color: '#388e3c' }}>✓ {c.label}</dd>
@@ -1213,22 +1215,22 @@ export default function DealDetail() {
 
             <SectionHeader title="BANT分析" />
             {[
-              { conf: 'budget_confirmed', detail: 'budget_detail', label: 'B（Budget）予算' },
-              { conf: 'authority_confirmed', detail: 'authority_detail', label: 'A（Authority）決裁者' },
-              { conf: 'needs_confirmed', detail: 'needs_detail', label: 'N（Needs）ニーズ' },
-              { conf: 'timeframe_confirmed', detail: 'timeframe_detail', label: 'T（Timeframe）時期' },
+              { conf: 'bant_budget', memo: 'bant_budget_memo', label: 'B（Budget）予算' },
+              { conf: 'bant_authority', memo: 'bant_authority_memo', label: 'A（Authority）決裁者' },
+              { conf: 'bant_needs', memo: 'bant_needs_memo', label: 'N（Needs）ニーズ' },
+              { conf: 'bant_timeframe', memo: 'bant_timeframe_memo', label: 'T（Timeframe）時期' },
             ].map(b => (
               <div key={b.conf} style={{ marginBottom: 12, background: '#f9f9f9', borderRadius: 6, padding: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={infoForm[b.conf] || false}
-                      onChange={e => setInfoForm(f => ({ ...f, [b.conf]: e.target.checked }))} />
+                    <input type="checkbox" checked={infoForm[b.conf] === '確認済'}
+                      onChange={e => setInfoForm(f => ({ ...f, [b.conf]: e.target.checked ? '確認済' : '' }))} />
                     {b.label}
                   </label>
-                  <span style={{ fontSize: 11, color: infoForm[b.conf] ? '#388e3c' : '#aaa' }}>{infoForm[b.conf] ? '確認済' : '未確認'}</span>
+                  <span style={{ fontSize: 11, color: infoForm[b.conf] === '確認済' ? '#388e3c' : '#aaa' }}>{infoForm[b.conf] === '確認済' ? '確認済' : '未確認'}</span>
                 </div>
                 <textarea placeholder="概要・詳細メモ" style={{ ...inputSx, height: 50, resize: 'vertical' }}
-                  value={infoForm[b.detail] || ''} onChange={e => setInfoForm(f => ({ ...f, [b.detail]: e.target.value }))} />
+                  value={infoForm[b.memo] || ''} onChange={e => setInfoForm(f => ({ ...f, [b.memo]: e.target.value }))} />
               </div>
             ))}
 
@@ -1262,9 +1264,10 @@ export default function DealDetail() {
             <SectionHeader title="チェックリスト" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[
-                { key: 'anti_social_check', label: '反社チェック' },
+                { key: 'antisocial_check', label: '反社チェック' },
                 { key: 'legal_check', label: 'リーガルチェック' },
-                { key: 'contract_approval_done', label: '契約稟議完了' },
+                { key: 'contract_approval', label: '契約稟議完了' },
+                { key: 'contract_sent', label: '契約書送付済' },
                 { key: 'hearing_collected', label: 'ヒアリング回収' },
               ].map(c => (
                 <label key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '8px 10px', background: '#f9f9f9', borderRadius: 6 }}>
@@ -1274,25 +1277,25 @@ export default function DealDetail() {
               ))}
             </div>
 
-            <SectionHeader title="請求・契約先住所" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <FormRow label="郵便番号">
-                <input style={inputSx} value={infoForm.postal_code} onChange={e => setInfoForm(f => ({ ...f, postal_code: e.target.value }))} />
+            <SectionHeader title="請求書・契約書送付先" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <FormRow label="請求先 氏名">
+                <input style={inputSx} value={infoForm.invoice_to_name} onChange={e => setInfoForm(f => ({ ...f, invoice_to_name: e.target.value }))} />
               </FormRow>
-              <FormRow label="住所">
-                <input style={inputSx} value={infoForm.address} onChange={e => setInfoForm(f => ({ ...f, address: e.target.value }))} />
+              <FormRow label="請求先 メール">
+                <input style={inputSx} type="email" value={infoForm.invoice_to_email} onChange={e => setInfoForm(f => ({ ...f, invoice_to_email: e.target.value }))} />
               </FormRow>
-              <FormRow label="請求先 郵便番号">
-                <input style={inputSx} value={infoForm.invoice_postal_code} onChange={e => setInfoForm(f => ({ ...f, invoice_postal_code: e.target.value }))} />
+              <FormRow label="請求先 CC">
+                <input style={inputSx} type="email" value={infoForm.invoice_cc_email} onChange={e => setInfoForm(f => ({ ...f, invoice_cc_email: e.target.value }))} />
               </FormRow>
-              <FormRow label="請求先 住所">
-                <input style={inputSx} value={infoForm.invoice_address} onChange={e => setInfoForm(f => ({ ...f, invoice_address: e.target.value }))} />
+              <FormRow label="契約書送付先 氏名">
+                <input style={inputSx} value={infoForm.contract_to_name} onChange={e => setInfoForm(f => ({ ...f, contract_to_name: e.target.value }))} />
               </FormRow>
-              <FormRow label="請求先 会社名">
-                <input style={inputSx} value={infoForm.invoice_company_name} onChange={e => setInfoForm(f => ({ ...f, invoice_company_name: e.target.value }))} />
+              <FormRow label="契約書送付先 メール">
+                <input style={inputSx} type="email" value={infoForm.contract_to_email} onChange={e => setInfoForm(f => ({ ...f, contract_to_email: e.target.value }))} />
               </FormRow>
-              <FormRow label="請求先 担当者名">
-                <input style={inputSx} value={infoForm.invoice_name} onChange={e => setInfoForm(f => ({ ...f, invoice_name: e.target.value }))} />
+              <FormRow label="契約書送付先 CC">
+                <input style={inputSx} type="email" value={infoForm.contract_cc_email} onChange={e => setInfoForm(f => ({ ...f, contract_cc_email: e.target.value }))} />
               </FormRow>
             </div>
 

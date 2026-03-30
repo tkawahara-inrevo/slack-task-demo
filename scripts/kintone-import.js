@@ -87,10 +87,10 @@ function yomiToStage(yomi) {
 async function main() {
   console.log(`\n🚀 Kintone import — limit: ${LIMIT}, dry-run: ${DRY_RUN}\n`);
 
-  // チームID取得
-  const teamRes = await pool.query('SELECT id FROM teams LIMIT 1');
-  if (!teamRes.rows.length) throw new Error('No teams found in DB');
-  const teamId = teamRes.rows[0].id;
+  // チームID取得（tasksテーブルから推定）
+  const teamRes = await pool.query('SELECT team_id FROM tasks GROUP BY team_id ORDER BY count(*) DESC LIMIT 1');
+  if (!teamRes.rows.length) throw new Error('No team_id found in tasks table');
+  const teamId = teamRes.rows[0].team_id;
   console.log(`📌 Team ID: ${teamId}`);
 
   // ─── 1. App94 → clients ───────────────────────────────────

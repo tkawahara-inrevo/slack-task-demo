@@ -3,11 +3,15 @@ function registerReactionFeature(deps) {
     __cacheKey,
     __cachePut,
     app,
+    buildAssigneeLabelRaw = async (tid, users) => users.map(u => `<@${u}>`).join(" "),
     buildThreadCardBlocks,
     dbCreateTask,
     dbGetTaskBySource,
     dbGetThreadCard,
+    dbInsertTaskTargets = async () => {},
+    getSubteamIdMap = async () => new Map(),
     getTeamIdFromBody,
+    getUsergroupMembers = async () => [],
     isReactionTaskifyEnabled = async () => true,
     noMention,
     openTaskCreateModal,
@@ -19,9 +23,99 @@ function registerReactionFeature(deps) {
     safeJsonParse,
     slackDateYmd,
     publishHomeBurst = () => {},
+    uniqIds = (arr) => [...new Set(arr)],
     upsertThreadCard,
     notifyTaskSimpleDM = async () => {},
   } = deps;
+
+  // メンション情報からタスクを作成するヘルパー
+  // userIds/groupIds が複数 or グループあり → broadcast、そうでなければ personal
+  async function createTaskFromMentions({
+    teamId, channelId, msgTs, rawText, baseText,
+    blocks = null,
+    requesterUserId, actorUserId, dueYmd, permalink,
+  }) {
+    const { userIds, groupIds } = inferTargetsFromMessage(rawText, actorUserId, blocks);
+    const isMulti = groupIds.length > 0 || userIds.length > 1;
+
+    // テキスト整形
+    let prettyText;
+    try {
+      prettyText = await prettifySlackText(baseText, teamId);
+      prettyText = await prettifyUserMentions(prettyText, teamId);
+    } catch (_) { prettyText = baseText; }
+    const description = String(prettyText || baseText || "").trim();
+    const title = description || "（本文なし）";
+    const taskId = randomUUID();
+
+    if (!isMulti) {
+      // === PERSONAL ===
+      const assigneeId = userIds[0] || actorUserId;
+      const [requesterDept, assigneeDept] = await Promise.all([
+        resolveDeptForUser(teamId, requesterUserId),
+        resolveDeptForUser(teamId, assigneeId),
+      ]);
+      const created = await dbCreateTask({
+        id: taskId, team_id: teamId, channel_id: channelId, message_ts: msgTs,
+        source_permalink: permalink || null, title, description,
+        requester_user_id: requesterUserId, created_by_user_id: actorUserId,
+        assignee_id: assigneeId, assignee_label: null,
+        status: "in_progress", due_date: dueYmd,
+        requester_dept: requesterDept, assignee_dept: assigneeDept,
+        task_type: "personal", broadcast_group_handle: null, broadcast_group_id: null,
+        total_count: null, completed_count: 0, notified_at: null,
+      });
+      if (assigneeId && assigneeId !== actorUserId) {
+        await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました").catch(() => {});
+      }
+      return { created, targetList: [assigneeId] };
+    }
+
+    // === BROADCAST ===
+    const idToHandle = await getSubteamIdMap(teamId).catch(() => new Map());
+    const groupHandles = groupIds.map(gid => idToHandle.get(gid) || gid);
+    let expanded = [...userIds];
+    for (const gid of groupIds) {
+      const members = await getUsergroupMembers(teamId, gid).catch(() => []);
+      expanded.push(...(members || []));
+    }
+    const targetList = uniqIds(expanded.filter(Boolean));
+    if (!targetList.length) {
+      // グループが空だったなどのフォールバック → personal with actor
+      const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+      const created = await dbCreateTask({
+        id: taskId, team_id: teamId, channel_id: channelId, message_ts: msgTs,
+        source_permalink: permalink || null, title, description,
+        requester_user_id: requesterUserId, created_by_user_id: actorUserId,
+        assignee_id: actorUserId, assignee_label: null,
+        status: "in_progress", due_date: dueYmd,
+        requester_dept: requesterDept, assignee_dept: requesterDept,
+        task_type: "personal", broadcast_group_handle: null, broadcast_group_id: null,
+        total_count: null, completed_count: 0, notified_at: null,
+      });
+      return { created, targetList: [actorUserId] };
+    }
+
+    const assigneeLabel = await buildAssigneeLabelRaw(teamId, targetList, groupHandles).catch(() => targetList.map(u => `<@${u}>`).join(" "));
+    const requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+    const created = await dbCreateTask({
+      id: taskId, team_id: teamId, channel_id: channelId, message_ts: msgTs,
+      source_permalink: permalink || null, title, description,
+      requester_user_id: requesterUserId, created_by_user_id: actorUserId,
+      assignee_id: null, assignee_label: assigneeLabel,
+      status: "in_progress", due_date: dueYmd,
+      requester_dept: requesterDept, assignee_dept: null,
+      task_type: "broadcast",
+      broadcast_group_handle: groupHandles[0] || null,
+      broadcast_group_id: groupIds[0] || null,
+      total_count: targetList.length, completed_count: 0, notified_at: null,
+    });
+    await dbInsertTaskTargets(teamId, taskId, targetList);
+    for (const uid of targetList.filter(u => u !== actorUserId)) {
+      await notifyTaskSimpleDM(uid, created, "タスクが割り当てられました").catch(() => {});
+    }
+    return { created, targetList };
+  }
 
 const TASK_REACTION_NAME = "task";
 
@@ -216,78 +310,33 @@ app.event("reaction_added", async ({ event, client, body }) => {
       }
     }
 
-    // ✅ 対応者推定（blocks優先 → text → fallback）
-    const { userIds: initialUsers } = inferTargetsFromMessage(
-      rawText,
-      actorUserId,
-      mm?.blocks || null,
-    );
-
-    // 代表1名（既存ロジック互換用）
-    const assigneeId = initialUsers[0] || actorUserId;
-
     // 期限は今日固定
     const dueYmd = slackDateYmd(new Date());
-
-    // スレッド親（そのスレッドに出す）
-    const threadRootTs = mm?.thread_ts || mm?.ts || msgTs;
-
     const effectiveRequester = requesterUserId || actorUserId;
 
-    // permalink取得・テキスト整形・dept解決を並列実行
-    const [permalinkResult, prettyTextResult, requesterDept, assigneeDept] =
-      await Promise.all([
-        client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
-          .then(r => r?.permalink || "").catch(() => ""),
-        (async () => {
-          try {
-            let t = await prettifySlackText(rawText, teamId);
-            t = await prettifyUserMentions(t, teamId);
-            return t;
-          } catch (_) { return rawText; }
-        })(),
-        resolveDeptForUser(teamId, effectiveRequester),
-        resolveDeptForUser(teamId, assigneeId),
-      ]);
+    // permalink取得
+    const permalink = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
+      .then(r => r?.permalink || "").catch(() => "");
 
-    const permalink = permalinkResult;
-    const prettyText = prettyTextResult;
-    const description = String(prettyText || rawText || "").trim();
-    const title = description || "（本文なし）";
-
-    const taskId = randomUUID();
-
-    const created = await dbCreateTask({
-      id: taskId,
-      team_id: teamId,
-      channel_id: channelId,
-      message_ts: msgTs,
-      source_permalink: permalink || null,
-      title,
-      description,
-      requester_user_id: effectiveRequester,
-      created_by_user_id: actorUserId,
-      assignee_id: assigneeId,
-      assignee_label: null,
-      status: "in_progress",
-      due_date: dueYmd,
-      requester_dept: requesterDept,
-      assignee_dept: assigneeDept,
-      task_type: "personal",
-      broadcast_group_handle: null,
-      broadcast_group_id: null,
-      total_count: null,
-      completed_count: 0,
-      notified_at: null,
+    // メンション情報に基づいてタスク作成（single → personal, multi/group → broadcast）
+    const { created, targetList } = await createTaskFromMentions({
+      teamId, channelId, msgTs,
+      rawText, baseText: rawText,
+      blocks: mm?.blocks || null,
+      requesterUserId: effectiveRequester,
+      actorUserId, dueYmd, permalink,
     });
 
-    // リアクションした人にエフェメラルで通知（スレッド内、本人にだけ見える）
+    // 元メッセージがスレッド返信か親かを判定
+    const isParentMsg = !mm?.thread_ts || mm?.thread_ts === mm?.ts;
+
+    // リアクションした人にエフェメラルで通知
+    // 親メッセージの場合はチャンネル内に表示（thread_ts なし）、スレッド返信の場合はスレッド内
     try {
       const payload = JSON.stringify({ teamId, taskId: created.id });
-      await client.chat.postEphemeral({
+      const ephemeralArgs = {
         channel: channelId,
         user: actorUserId,
-        thread_ts: msgTs,
         text: `✅ タスク化しました: ${noMention(created.title)}`,
         blocks: [
           {
@@ -315,23 +364,18 @@ app.event("reaction_added", async ({ event, client, body }) => {
             ],
           },
         ],
-      });
+      };
+      if (!isParentMsg) ephemeralArgs.thread_ts = msgTs;
+      await client.chat.postEphemeral(ephemeralArgs);
     } catch (e) {
       console.error("ephemeral notify error:", e?.data || e);
     }
-
-    // 対応者にDM（依頼者と別の場合）
-    try {
-      if (assigneeId && assigneeId !== actorUserId) {
-        await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました");
-      }
-    } catch (_) {}
 
     try {
       await publishHomeBurst(
         client,
         teamId,
-        [effectiveRequester, actorUserId, assigneeId].filter(Boolean),
+        [...new Set([effectiveRequester, actorUserId, ...targetList])].filter(Boolean),
         200,
       );
     } catch (_) {}
@@ -373,67 +417,31 @@ app.event("message", async ({ event, client, body }) => {
     }
     cleanText = cleanText.trim();
 
-    // 対応者推定（メンション先 or 投稿者自身）
-    const { userIds: initialUsers } = inferTargetsFromMessage(
-      rawText,
-      actorUserId,
-      event?.blocks || null,
-    );
-    const assigneeId = initialUsers[0] || actorUserId;
-
     const dueYmd = slackDateYmd(new Date());
-    const threadRootTs = event?.thread_ts || msgTs;
 
-    const [permalinkResult, prettyTextResult, requesterDept, assigneeDept] =
-      await Promise.all([
-        client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
-          .then((r) => r?.permalink || "").catch(() => ""),
-        (async () => {
-          try {
-            let t = await prettifySlackText(cleanText, teamId);
-            t = await prettifyUserMentions(t, teamId);
-            return t;
-          } catch (_) { return cleanText; }
-        })(),
-        resolveDeptForUser(teamId, actorUserId),
-        resolveDeptForUser(teamId, assigneeId),
-      ]);
+    // permalink取得
+    const permalink = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
+      .then((r) => r?.permalink || "").catch(() => "");
 
-    const description = String(prettyTextResult || cleanText || "").trim();
-    const title = description || "（本文なし）";
-    const taskId = randomUUID();
-
-    const created = await dbCreateTask({
-      id: taskId,
-      team_id: teamId,
-      channel_id: channelId,
-      message_ts: msgTs,
-      source_permalink: permalinkResult || null,
-      title,
-      description,
-      requester_user_id: actorUserId,
-      created_by_user_id: actorUserId,
-      assignee_id: assigneeId,
-      assignee_label: null,
-      status: "in_progress",
-      due_date: dueYmd,
-      requester_dept: requesterDept,
-      assignee_dept: assigneeDept,
-      task_type: "personal",
-      broadcast_group_handle: null,
-      broadcast_group_id: null,
-      total_count: null,
-      completed_count: 0,
-      notified_at: null,
+    // メンション情報に基づいてタスク作成（single → personal, multi/group → broadcast）
+    const { created, targetList } = await createTaskFromMentions({
+      teamId, channelId, msgTs,
+      rawText, baseText: cleanText,
+      blocks: event?.blocks || null,
+      requesterUserId: actorUserId,
+      actorUserId, dueYmd, permalink,
     });
 
-    // キーワードタスク化した人にエフェメラル通知（スレッド内）
+    // 元メッセージがスレッド返信か親かを判定
+    const isParentMsg = !event?.thread_ts || event?.thread_ts === msgTs;
+
+    // キーワードタスク化した人にエフェメラル通知
+    // 親メッセージの場合はチャンネル内に表示（thread_ts なし）、スレッド返信の場合はスレッド内
     try {
       const payload = JSON.stringify({ teamId, taskId: created.id });
-      await client.chat.postEphemeral({
+      const ephemeralArgs = {
         channel: channelId,
         user: actorUserId,
-        thread_ts: msgTs,
         text: `✅ タスク化しました: ${noMention(created.title)}`,
         blocks: [
           {
@@ -461,23 +469,18 @@ app.event("message", async ({ event, client, body }) => {
             ],
           },
         ],
-      });
+      };
+      if (!isParentMsg) ephemeralArgs.thread_ts = msgTs;
+      await client.chat.postEphemeral(ephemeralArgs);
     } catch (e) {
       console.error("ephemeral notify error:", e?.data || e);
     }
-
-    // 対応者にDM（依頼者と別の場合）
-    try {
-      if (assigneeId && assigneeId !== actorUserId) {
-        await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました");
-      }
-    } catch (_) {}
 
     try {
       await publishHomeBurst(
         client,
         teamId,
-        [actorUserId, assigneeId].filter(Boolean),
+        [...new Set([actorUserId, ...targetList])].filter(Boolean),
         200,
       );
     } catch (_) {}

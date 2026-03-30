@@ -293,11 +293,15 @@ const {
   __cacheKey,
   __cachePut,
   app,
+  buildAssigneeLabelRaw: (...args) => buildAssigneeLabelRaw(...args),
   buildThreadCardBlocks: (...args) => buildThreadCardBlocks(...args),
   dbCreateTask,
   dbGetTaskBySource,
   dbGetThreadCard,
+  dbInsertTaskTargets,
+  getSubteamIdMap: (...args) => getSubteamIdMap(...args),
   getTeamIdFromBody,
+  getUsergroupMembers: (...args) => getUsergroupMembers(...args),
   isReactionTaskifyEnabled,
   noMention,
   openTaskCreateModal: (...args) => openTaskCreateModal(...args),
@@ -309,6 +313,7 @@ const {
   safeEphemeral: (...args) => safeEphemeral(...args),
   safeJsonParse,
   slackDateYmd,
+  uniqIds,
   upsertThreadCard: (...args) => upsertThreadCard(...args),
   notifyTaskSimpleDM: (...args) => notifyTaskSimpleDM(...args),
 });
@@ -1358,6 +1363,148 @@ async function buildDetailModalView({
     callback_id: "detail_modal",
     private_metadata: JSON.stringify(meta),
     title: { type: "plain_text", text: "タスク" },
+    close: { type: "plain_text", text: "閉じる" },
+    blocks,
+  };
+}
+
+// ================================
+// タスク一覧モーダル（ページング付き）
+// ================================
+async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scopeKey = "active", page = 0 }) {
+  const PAGE_SIZE = 18;
+  const statuses = scopeKey === "done" ? ["done"] : ["in_progress"];
+  const personalScope = (rangeKey === "to_me" || rangeKey === "requested_by_me") ? rangeKey : "all";
+  const fetchLimit = 300;
+
+  const [personalTasks, broadcastTasks] = await Promise.all([
+    dbListPersonalTasksByStatusesWithScope(teamId, statuses, personalScope, userId, fetchLimit),
+    (rangeKey === "to_me" || rangeKey === "requested_by_me")
+      ? dbListBroadcastTasksByStatusesWithScope(teamId, statuses, rangeKey, userId, fetchLimit)
+      : dbListBroadcastTasksByStatuses(teamId, statuses, "all", fetchLimit),
+  ]);
+
+  const toTime = (d) => {
+    if (!d) return null;
+    const dt = d instanceof Date ? d : new Date(d);
+    return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+  };
+  const cmp = (a, b) => {
+    const at = toTime(a.due_date), bt = toTime(b.due_date);
+    if (at === null && bt !== null) return 1;
+    if (at !== null && bt === null) return -1;
+    if (at !== null && bt !== null && at !== bt) return at - bt;
+    const ac = toTime(a.created_at), bc = toTime(b.created_at);
+    if (ac !== null && bc !== null && ac !== bc) return bc - ac;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  };
+
+  const seen = new Set();
+  const tasks = [];
+  for (const t of [...(personalTasks || []), ...(broadcastTasks || [])].sort(cmp)) {
+    const key = `${t.task_type || "personal"}:${t.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tasks.push(t);
+  }
+
+  const total = tasks.length;
+  const start = page * PAGE_SIZE;
+  const pageTasks = tasks.slice(start, start + PAGE_SIZE);
+
+  const rangeOptions = [
+    { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
+    { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
+    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
+  ];
+  const statusOptions = [
+    { text: { type: "plain_text", text: "状態：未完了" }, value: "active" },
+    { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
+  ];
+
+  const meta = JSON.stringify({ teamId, userId, rangeKey, scopeKey, page });
+  const blocks = [];
+
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "static_select",
+        action_id: "my_tasks_scope_select",
+        options: rangeOptions,
+        initial_option: rangeOptions.find((o) => o.value === rangeKey) || rangeOptions[0],
+      },
+      {
+        type: "static_select",
+        action_id: "my_tasks_status_select",
+        options: statusOptions,
+        initial_option: statusOptions.find((o) => o.value === scopeKey) || statusOptions[0],
+      },
+    ],
+  });
+  blocks.push({ type: "divider" });
+
+  if (!pageTasks.length) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: "（該当するタスクなし）" } });
+  }
+
+  for (const t of pageTasks) {
+    const payload = JSON.stringify({ teamId, taskId: t.id, origin: "list_modal" });
+    const rawTitle = String(t.title || t.description || "（本文なし）");
+    const titleText = noMention(rawTitle).slice(0, 150);
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: titleText },
+      accessory: {
+        type: "button",
+        text: { type: "plain_text", text: "詳細" },
+        action_id: "open_detail_modal",
+        value: payload,
+      },
+    });
+    blocks.push({
+      type: "context",
+      elements: [{
+        type: "mrkdwn",
+        text: `<@${t.requester_user_id}> → ${assigneeDisplay(t)}  /  ${formatDueDateOnly(t.due_date) || "期限なし"}`,
+      }],
+    });
+  }
+
+  const hasPrev = page > 0;
+  const hasNext = start + PAGE_SIZE < total;
+  if (hasPrev || hasNext) {
+    const navButtons = [];
+    if (hasPrev) {
+      navButtons.push({
+        type: "button",
+        text: { type: "plain_text", text: `← 前${PAGE_SIZE}件` },
+        action_id: "task_list_modal_prev",
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey, page: page - 1 }),
+      });
+    }
+    if (hasNext) {
+      navButtons.push({
+        type: "button",
+        text: { type: "plain_text", text: `次${PAGE_SIZE}件 →` },
+        action_id: "task_list_modal_next",
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey, page: page + 1 }),
+      });
+    }
+    blocks.push({ type: "divider" });
+    blocks.push({ type: "actions", elements: navButtons });
+  }
+
+  if (total > 0) {
+    const showing = `${start + 1}〜${Math.min(start + PAGE_SIZE, total)} / ${total}件`;
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: showing }] });
+  }
+
+  return {
+    type: "modal",
+    callback_id: "task_list_modal",
+    private_metadata: meta,
+    title: { type: "plain_text", text: "タスク一覧" },
     close: { type: "plain_text", text: "閉じる" },
     blocks,
   };

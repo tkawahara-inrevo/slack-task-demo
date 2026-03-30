@@ -1222,131 +1222,128 @@ app.action("status_select", async ({ ack, body, action, client }) => {
   }
 });
 
-// progress modal: MVP placeholder (螳溯｣・・蠕後〒諡｡蠑ｵ縺励ｄ縺吶＞繧医≧縺ｫ蜈･蜿｣縺縺・
+
+// ================================
+// 進捗一覧モーダルのビルダー（ページング対応）
+// ================================
+async function buildProgressView({ teamId, taskId, page = 0 }) {
+  const PAGE_SIZE = 20;
+
+  const [targetsRes, completionsRes] = await Promise.all([
+    dbQuery(
+      `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+      [teamId, taskId],
+    ),
+    dbQuery(
+      `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
+      [teamId, taskId],
+    ),
+  ]);
+
+  const targets = (targetsRes.rows || []).map((r) => r.user_id).filter(Boolean);
+  const doneSet = new Set((completionsRes.rows || []).map((r) => r.user_id).filter(Boolean));
+
+  const done = targets.filter((u) => doneSet.has(u));
+  const todo = targets.filter((u) => !doneSet.has(u));
+
+  const DONE_MAX = 50;
+  const doneHead = done.slice(0, DONE_MAX).map((u) => `・ <@${u}>`).join("\n");
+  const doneMore = done.length > DONE_MAX ? `\n...ほか ${done.length - DONE_MAX} 人` : "";
+  const doneListText = done.length ? doneHead + doneMore : "まだありません";
+
+  const start = page * PAGE_SIZE;
+  const pageTodo = todo.slice(start, start + PAGE_SIZE);
+  const hasPrev = page > 0;
+  const hasNext = start + PAGE_SIZE < todo.length;
+
+  const todoBlocks = pageTodo.map((u) => ({
+    type: "section",
+    text: { type: "mrkdwn", text: `<@${u}>` },
+    accessory: {
+      type: "button",
+      text: { type: "plain_text", text: "対象から外す" },
+      action_id: "remove_target_user",
+      value: JSON.stringify({ teamId, taskId, userId: u }),
+      confirm: {
+        title: { type: "plain_text", text: "確認" },
+        text: { type: "mrkdwn", text: `<@${u}> をこのタスクの対象から外しますか？` },
+        confirm: { type: "plain_text", text: "外す" },
+        deny: { type: "plain_text", text: "キャンセル" },
+      },
+    },
+  }));
+
+  const blocks = [
+    { type: "header", text: { type: "plain_text", text: "完了 / 未完了" } },
+    { type: "divider" },
+    { type: "section", text: { type: "mrkdwn", text: `*完了* ${done.length}件` } },
+    { type: "section", text: { type: "mrkdwn", text: doneListText } },
+    { type: "divider" },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*未完了* ${todo.length}件` },
+      ...(todo.length > 0
+        ? {
+            accessory: {
+              type: "button",
+              text: { type: "plain_text", text: "リマインドする" },
+              action_id: "remind_incomplete_users",
+              value: JSON.stringify({ teamId, taskId }),
+              style: "primary",
+            },
+          }
+        : {}),
+    },
+    ...(todoBlocks.length
+      ? todoBlocks
+      : [{ type: "section", text: { type: "mrkdwn", text: "まだありません" } }]),
+  ];
+
+  if (hasPrev || hasNext) {
+    const navElems = [];
+    if (hasPrev) {
+      navElems.push({
+        type: "button",
+        text: { type: "plain_text", text: `← 前${PAGE_SIZE}件` },
+        action_id: "progress_modal_prev",
+        value: JSON.stringify({ teamId, taskId, page: page - 1 }),
+      });
+    }
+    if (hasNext) {
+      navElems.push({
+        type: "button",
+        text: { type: "plain_text", text: `次${PAGE_SIZE}件 →` },
+        action_id: "progress_modal_next",
+        value: JSON.stringify({ teamId, taskId, page: page + 1 }),
+      });
+    }
+    blocks.push({ type: "divider" });
+    blocks.push({ type: "actions", elements: navElems });
+    const showing = `未完了 ${start + 1}〜${Math.min(start + PAGE_SIZE, todo.length)} / ${todo.length}人`;
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: showing }] });
+  }
+
+  return {
+    type: "modal",
+    callback_id: "progress_modal",
+    private_metadata: JSON.stringify({ teamId, taskId, origin: "progress", page }),
+    title: { type: "plain_text", text: "進捗一覧" },
+    close: { type: "plain_text", text: "閉じる" },
+    blocks,
+  };
+}
+
 app.action("open_progress_modal", async ({ ack, body, action, client }) => {
   await ack();
-
-  // value 縺九ｉ蜿悶ｌ縺ｪ縺・こ繝ｼ繧ｹ縺後≠繧九・縺ｧ縲［odal meta 繧ょ盾辣ｧ縺吶ｋ・亥・欧蛹厄ｼ・
   const p = safeJsonParse(action?.value || "{}") || {};
   const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
   const teamId = p.teamId || meta.teamId || body.team?.id || body.team_id;
   const taskId = p.taskId || meta.taskId;
   if (!teamId || !taskId) return;
-
   try {
     const task = await dbGetTaskById(teamId, taskId);
-    if (!task) return;
-    if (task.task_type !== "broadcast") return;
-
-    // 莉墓ｧ伜､画峩・夊ｪｰ縺ｧ繧る夢隕ｧ蜿ｯ・井ｾ晞ｼ閠・・蟇ｾ蠢懆・・蟇ｾ雎｡閠・・繧ｦ繧ｩ繝・メ繝｣繝ｼ繝ｻ縺昴・莉厄ｼ・
-    // targets / completions
-    const [targetsRes, completionsRes] = await Promise.all([
-      dbQuery(
-        `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
-        [teamId, taskId],
-      ),
-      dbQuery(
-        `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
-        [teamId, taskId],
-      ),
-    ]);
-
-    const targets = (targetsRes.rows || [])
-      .map((r) => r.user_id)
-      .filter(Boolean);
-    const doneSet = new Set(
-      (completionsRes.rows || []).map((r) => r.user_id).filter(Boolean),
-    );
-
-    const done = targets.filter((u) => doneSet.has(u));
-    const todo = targets.filter((u) => !doneSet.has(u));
-
-    const doneListText = (arr, emptyText) => {
-      if (!arr.length) return emptyText;
-      const MAX = 50;
-      const head = arr
-        .slice(0, MAX)
-        .map((u) => `・ <@${u}>`)
-        .join("\n");
-      const more = arr.length > MAX ? "\n...ほか " + (arr.length - MAX) + " 人" : "";
-      return head + more;
-    };
-
-    const meta2 = { teamId, taskId, origin: "progress" };
-
-    // 未完了者: 各ユーザーに「外す」ボタンを付ける
-    const todoBlocks = [];
-    const MAX_TODO_DISPLAY = 50;
-    for (let i = 0; i < Math.min(todo.length, MAX_TODO_DISPLAY); i++) {
-      const u = todo[i];
-      todoBlocks.push({
-        type: "section",
-        text: { type: "mrkdwn", text: `<@${u}>` },
-        accessory: {
-          type: "button",
-          text: { type: "plain_text", text: "対象から外す" },
-          action_id: "remove_target_user",
-          value: JSON.stringify({ teamId, taskId, userId: u }),
-          confirm: {
-            title: { type: "plain_text", text: "確認" },
-            text: { type: "mrkdwn", text: `<@${u}> をこのタスクの対象から外しますか？` },
-            confirm: { type: "plain_text", text: "外す" },
-            deny: { type: "plain_text", text: "キャンセル" },
-          },
-        },
-      });
-    }
-    if (todo.length > MAX_TODO_DISPLAY) {
-      todoBlocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `...ほか ${todo.length - MAX_TODO_DISPLAY} 人` }],
-      });
-    }
-
-    const view = {
-      type: "modal",
-      callback_id: "progress_modal",
-      private_metadata: JSON.stringify(meta2),
-      title: { type: "plain_text", text: "進捗一覧" },
-      close: { type: "plain_text", text: "閉じる" },
-      blocks: [
-        {
-          type: "header",
-          text: { type: "plain_text", text: "完了 / 未完了" },
-        },
-        { type: "divider" },
-
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: "*完了* " + done.length + "件" },
-        },
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: doneListText(done, "まだありません") },
-        },
-        { type: "divider" },
-
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: "*未完了* " + todo.length + "件" },
-          ...(todo.length > 0
-            ? {
-                accessory: {
-                  type: "button",
-                  text: { type: "plain_text", text: "リマインドする" },
-                  action_id: "remind_incomplete_users",
-                  value: JSON.stringify({ teamId, taskId }),
-                  style: "primary",
-                },
-              }
-            : {}),
-        },
-        ...(todoBlocks.length
-          ? todoBlocks
-          : [{ type: "section", text: { type: "mrkdwn", text: "まだありません" } }]),
-      ],
-    };
-
+    if (!task || task.task_type !== "broadcast") return;
+    const view = await buildProgressView({ teamId, taskId, page: 0 });
     if (body.view?.id) {
       await client.views.push({ trigger_id: body.trigger_id, view });
     } else {
@@ -1356,6 +1353,21 @@ app.action("open_progress_modal", async ({ ack, body, action, client }) => {
     console.error("open_progress_modal error:", e?.data || e);
   }
 });
+
+async function handleProgressModalPage({ ack, body, client }) {
+  await ack();
+  try {
+    const p = safeJsonParse(body.actions?.[0]?.value || "{}") || {};
+    const { teamId, taskId, page = 0 } = p;
+    if (!teamId || !taskId) return;
+    const view = await buildProgressView({ teamId, taskId, page });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+  } catch (e) {
+    console.error("progress_modal_page error:", e?.data || e);
+  }
+}
+app.action("progress_modal_prev", handleProgressModalPage);
+app.action("progress_modal_next", handleProgressModalPage);
 
 // ================================
 // Remove target user from broadcast task
@@ -1371,13 +1383,11 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
     const task = await dbGetTaskById(teamId, taskId);
     if (!task || task.task_type !== "broadcast") return;
 
-    // 対象者から削除
     await dbQuery(
       `DELETE FROM task_targets WHERE team_id=$1 AND task_id=$2 AND user_id=$3`,
       [teamId, taskId, targetUserId],
     );
 
-    // total_count を更新
     const countRes = await dbQuery(
       `SELECT COUNT(*) as cnt FROM task_targets WHERE team_id=$1 AND task_id=$2`,
       [teamId, taskId],
@@ -1388,105 +1398,17 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
       [teamId, taskId, newTotal],
     );
 
-    // 全員完了チェック（削除後に全員完了になるケース）
     const doneCount = await dbCountCompletions(teamId, taskId);
     if (newTotal > 0 && doneCount >= newTotal && !["done", "cancelled"].includes(task.status)) {
       await dbUpdateStatus(teamId, taskId, "done");
     }
 
-    // 進捗一覧モーダルを更新（再構築）
-    const [targetsRes2, completionsRes2] = await Promise.all([
-      dbQuery(
-        `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
-        [teamId, taskId],
-      ),
-      dbQuery(
-        `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2 ORDER BY user_id`,
-        [teamId, taskId],
-      ),
-    ]);
+    // 現在のページを維持してモーダルを再描画
+    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+    const currentPage = meta.page || 0;
+    const view = await buildProgressView({ teamId, taskId, page: currentPage });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
 
-    const targets2 = (targetsRes2.rows || []).map((r) => r.user_id).filter(Boolean);
-    const doneSet2 = new Set((completionsRes2.rows || []).map((r) => r.user_id).filter(Boolean));
-    const done2 = targets2.filter((u) => doneSet2.has(u));
-    const todo2 = targets2.filter((u) => !doneSet2.has(u));
-
-    const doneListText2 = (arr, emptyText) => {
-      if (!arr.length) return emptyText;
-      const MAX = 50;
-      const head = arr.slice(0, MAX).map((u) => `・ <@${u}>`).join("\n");
-      const more = arr.length > MAX ? "\n...ほか " + (arr.length - MAX) + " 人" : "";
-      return head + more;
-    };
-
-    const todoBlocks2 = [];
-    const MAX_TODO = 50;
-    for (let i = 0; i < Math.min(todo2.length, MAX_TODO); i++) {
-      const u = todo2[i];
-      todoBlocks2.push({
-        type: "section",
-        text: { type: "mrkdwn", text: `<@${u}>` },
-        accessory: {
-          type: "button",
-          text: { type: "plain_text", text: "対象から外す" },
-          action_id: "remove_target_user",
-          value: JSON.stringify({ teamId, taskId, userId: u }),
-          confirm: {
-            title: { type: "plain_text", text: "確認" },
-            text: { type: "mrkdwn", text: `<@${u}> をこのタスクの対象から外しますか？` },
-            confirm: { type: "plain_text", text: "外す" },
-            deny: { type: "plain_text", text: "キャンセル" },
-          },
-        },
-      });
-    }
-    if (todo2.length > MAX_TODO) {
-      todoBlocks2.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `...ほか ${todo2.length - MAX_TODO} 人` }],
-      });
-    }
-
-    const updatedView = {
-      type: "modal",
-      callback_id: "progress_modal",
-      private_metadata: JSON.stringify({ teamId, taskId, origin: "progress" }),
-      title: { type: "plain_text", text: "進捗一覧" },
-      close: { type: "plain_text", text: "閉じる" },
-      blocks: [
-        { type: "header", text: { type: "plain_text", text: "完了 / 未完了" } },
-        { type: "divider" },
-        { type: "section", text: { type: "mrkdwn", text: "*完了* " + done2.length + "件" } },
-        { type: "section", text: { type: "mrkdwn", text: doneListText2(done2, "まだありません") } },
-        { type: "divider" },
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: "*未完了* " + todo2.length + "件" },
-          ...(todo2.length > 0
-            ? {
-                accessory: {
-                  type: "button",
-                  text: { type: "plain_text", text: "リマインドする" },
-                  action_id: "remind_incomplete_users",
-                  value: JSON.stringify({ teamId, taskId }),
-                  style: "primary",
-                },
-              }
-            : {}),
-        },
-        ...(todoBlocks2.length
-          ? todoBlocks2
-          : [{ type: "section", text: { type: "mrkdwn", text: "まだありません" } }]),
-      ],
-    };
-
-    await client.views.update({
-      view_id: body.view.id,
-      hash: body.view.hash,
-      view: updatedView,
-    });
-
-    // ホームタブ更新
     await publishHomeBurst(client, teamId, [body.user.id, task.requester_user_id].filter(Boolean), 200);
   } catch (e) {
     console.error("remove_target_user error:", e?.data || e);

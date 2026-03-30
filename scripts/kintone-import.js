@@ -326,21 +326,21 @@ async function main() {
   let payImported = 0, paySkipped = 0;
 
   for (const rec of app170) {
-    const dealName = (val(rec, '案件名') || '').trim();
+    const dealName = (val(rec, 'CompanyName') || '').trim();
     const dealId = dealNameToId[dealName];
     if (!dealId) { paySkipped++; continue; }
 
-    const amount = numVal(rec, '金額');
+    const amount = numVal(rec, '数値');
     if (!amount) { paySkipped++; continue; }
 
-    const directionRaw = rec['入出金']?.value || [];
+    const directionRaw = rec['onof']?.value || [];
     const direction = directionRaw.includes('出金') ? '出金' : '入金';
-    const label = val(rec, '契約プラン') || '入金';
-    const dueDate = dateVal(rec, '入金予定日');
-    const paidDate = dateVal(rec, '入金日');
+    const label = val(rec, 'plan') || '入金';
+    const dueDate = dateVal(rec, 'date');
+    const paidDate = dateVal(rec, '日付');
     const status = paidDate ? 'paid' : 'pending';
-    const invoiceSent = boolVal(rec, '請求書発行状況');
-    const incentive = numVal(rec, 'インセン金額');
+    const invoiceSent = false;
+    const incentive = numVal(rec, '数値_0');
 
     if (DRY_RUN) {
       console.log(`  [DRY] payment: ${dealName} | ${direction} ¥${amount} | ${label}`);

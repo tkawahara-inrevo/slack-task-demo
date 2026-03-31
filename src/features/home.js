@@ -217,7 +217,6 @@ function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [], 
     { text: { type: "plain_text", text: "すべて" }, value: "all" },
     { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
     ...groups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
-    ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
   ];
 
   const rangeOptions = [
@@ -227,6 +226,7 @@ function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [], 
       value: "requested_by_me",
     },
     { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
+    ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
   ];
   const stateOptions = [
     { text: { type: "plain_text", text: "状態：未完了" }, value: "active" },
@@ -348,28 +348,26 @@ async function publishHome({ client, teamId, userId }) {
   const stateKey0 = st.scopeKey || "active";
   const deptKey0 = st.deptKey || "all";
 
-  const rangeOptions0 = [
-    { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
-    { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
-    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
-  ];
   const stateOptions0 = [
     { text: { type: "plain_text", text: "状態：未完了" }, value: "active" },
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
   ];
 
-  // 部署フィルタは rangeKey=all のときしか表示しないため、それ以外はスキップ
-  const [deptGroups, personalFilters] = rangeKey0 === "all"
-    ? await Promise.all([
-        searchUsergroups(""),
-        dbListPersonalFilters(teamId, userId).catch(() => []),
-      ])
-    : [[], []];
+  // パーソナルフィルターは常に取得（範囲選択肢に使う）。部署グループは rangeKey=all のときだけ取得
+  const [deptGroups, personalFilters] = await Promise.all([
+    rangeKey0 === "all" ? searchUsergroups("") : Promise.resolve([]),
+    dbListPersonalFilters(teamId, userId).catch(() => []),
+  ]);
+  const rangeOptions0 = [
+    { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
+    { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
+    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
+    ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
+  ];
   const deptOptions = [
     { text: { type: "plain_text", text: "部署：すべて" }, value: "all" },
     { text: { type: "plain_text", text: "部署：未設定" }, value: "__none__" },
     ...deptGroups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
-    ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
   ];
 
   const actionElements = [
@@ -547,6 +545,24 @@ async function publishHome({ client, teamId, userId }) {
       if (gid && String(gid) === String(deptKey)) return true;
 
       return false;
+    });
+  }
+
+  // ★パーソナルフィルター範囲：フィルターメンバーで絞り込む（依頼者=対応者も除外しない）
+  if (rangeKey.startsWith("pf:")) {
+    const pfId = rangeKey.slice(3);
+    const members = await dbGetPersonalFilterMemberIds(teamId, pfId).catch(() => []);
+    const memberSet = new Set((members || []).filter(Boolean));
+
+    personalTasks = (personalTasks || []).filter((t) => {
+      const a = t?.assignee_id;
+      const r = t?.requester_user_id;
+      return (a && memberSet.has(a)) || (r && memberSet.has(r));
+    });
+
+    broadcastTasks = (broadcastTasks || []).filter((t) => {
+      const r = t?.requester_user_id;
+      return r && memberSet.has(r);
     });
   }
 

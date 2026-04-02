@@ -181,6 +181,7 @@ const {
   buildTaskListModalView: (...args) => buildTaskListModalView(...args),
   canUserSeeChannel: (...args) => canUserSeeChannel(...args),
   dbHasUserCompleted,
+  dbIsUserTarget,
   dbGetUserCompletedTaskIds,
   dbListBroadcastTasksByStatuses,
   dbListBroadcastTasksByStatusesWithScope,

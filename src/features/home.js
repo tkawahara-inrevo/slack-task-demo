@@ -5,12 +5,12 @@ function registerHomeFeature(deps) {
     buildTaskListModalView,
     canUserSeeChannel,
     dbHasUserCompleted,
+    dbIsUserTarget = async () => false,
     dbGetUserCompletedTaskIds = async () => new Set(),
     dbListBroadcastTasksByStatuses,
     dbListBroadcastTasksByStatusesWithScope,
     dbListPersonalTasksByStatusesWithScope,
     formatDueDateOnly,
-    getSubteamIdMap,
     getTeamIdFromBody,
     getUserDisplayName,
     getUserIconUrl,
@@ -45,19 +45,7 @@ function registerHomeFeature(deps) {
 
   async function isBroadcastAssignedToUser(task, teamId, userId) {
     if (!task || task.task_type !== "broadcast" || !userId) return false;
-
-    if (String(task.assignee_label || "").includes(`<@${userId}>`)) {
-      return true;
-    }
-
-    if (task.broadcast_group_id) {
-      try {
-        const members = await getUsergroupMembers(teamId, task.broadcast_group_id);
-        if ((members || []).includes(userId)) return true;
-      } catch (_) {}
-    }
-
-    return false;
+    return !!(await dbIsUserTarget(teamId, task.id, userId));
   }
 
 async function publishHomeForUsers(client, teamId, userIds, intervalMs = 200) {
@@ -209,7 +197,7 @@ function taskLineForHome(task) {
   return preview;
 }
 
-function buildHomeFiltersModalView({ teamId, userId, st, deptText, groups = [], personalFilters = [] }) {
+function buildHomeFiltersModalView({ teamId, userId, st, deptText: _deptText, groups = [], personalFilters = [] }) {
   const rangeKey = st.broadcastScopeKey || "to_me";
   const scopeKey = st.scopeKey || "active";
   const deptKey = st.deptKey || "all";
@@ -483,28 +471,21 @@ async function publishHome({ client, teamId, userId }) {
       (t) => !existingIds.has(String(t.id)),
     );
     if (candidates.length > 0) {
-      // グループメンバーをグループIDごとに1回だけ取得（N+1 → K回）
-      const uniqueGroupIds = [
-        ...new Set(candidates.map((t) => t.broadcast_group_id).filter(Boolean)),
-      ];
-      const groupMemberSets = new Map();
-      await Promise.all(
-        uniqueGroupIds.map(async (gid) => {
-          const members = await getUsergroupMembers(teamId, gid).catch(() => []);
-          groupMemberSets.set(gid, new Set(members || []));
-        }),
-      );
-
       // 完了済みタスクを一括取得（N回 → 1回）
       const candidateIds = candidates.map((t) => t.id);
       const completedSet = await dbGetUserCompletedTaskIds(teamId, candidateIds, userId).catch(() => new Set());
+      const assignedIds = new Set(
+        (
+          await Promise.all(
+            candidates.map(async (task) =>
+              (await dbIsUserTarget(teamId, task.id, userId)) ? String(task.id) : null,
+            ),
+          )
+        ).filter(Boolean),
+      );
 
       for (const task of candidates) {
-        const isAssigned =
-          String(task.assignee_label || "").includes(`<@${userId}>`) ||
-          (task.broadcast_group_id
-            ? (groupMemberSets.get(task.broadcast_group_id)?.has(userId) ?? false)
-            : false);
+        const isAssigned = assignedIds.has(String(task.id));
 
         if (!isAssigned) continue;
 

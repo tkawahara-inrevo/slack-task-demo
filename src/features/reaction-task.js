@@ -28,6 +28,62 @@ function registerReactionFeature(deps) {
     notifyTaskSimpleDM = async () => {},
   } = deps;
 
+  async function isDmLikeConversation(client, channelId) {
+    const id = String(channelId || "");
+    if (!id) return false;
+    if (id.startsWith("D")) return true;
+    try {
+      const info = await client.conversations.info({ channel: id });
+      const ch = info?.channel || {};
+      return !!ch.is_im || !!ch.is_mpim;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function notifyActorResult({
+    client,
+    actorUserId,
+    channelId,
+    threadTs = null,
+    text,
+    blocks = null,
+    dmOnly = false,
+  }) {
+    const isDmLike = await isDmLikeConversation(client, channelId);
+
+    if (!dmOnly && !isDmLike) {
+      try {
+        const ephemeralArgs = {
+          channel: channelId,
+          user: actorUserId,
+          text,
+          ...(blocks ? { blocks } : {}),
+        };
+        if (threadTs) ephemeralArgs.thread_ts = threadTs;
+        await client.chat.postEphemeral(ephemeralArgs);
+        return;
+      } catch (e) {
+        console.error("reaction notify ephemeral error:", e?.data || e);
+      }
+    }
+
+    if (dmOnly && !isDmLike) return;
+
+    try {
+      const dm = await app.client.conversations.open({ users: actorUserId });
+      const dmChannel = dm.channel?.id;
+      if (!dmChannel) return;
+      await app.client.chat.postMessage({
+        channel: dmChannel,
+        text,
+        ...(blocks ? { blocks } : {}),
+      });
+    } catch (e) {
+      console.error("reaction notify dm error:", e?.data || e);
+    }
+  }
+
   // メンション情報からタスクを作成するヘルパー
   // userIds/groupIds が複数 or グループあり → broadcast、そうでなければ personal
   async function createTaskFromMentions({
@@ -260,9 +316,30 @@ app.event("reaction_added", async ({ event, client, body }) => {
     const actorUserId = event?.user; // リアクションした人
     if (!teamId || !channelId || !msgTs || !actorUserId) return;
 
+    console.info("reaction_added start", {
+      teamId,
+      channelId,
+      msgTs,
+      actorUserId,
+      reaction: event?.reaction,
+    });
+
     // すでに「確認UI（スレッドカード）」を出していたら何もしない（1メッセージ1回）
     const existingCard = await dbGetThreadCard(teamId, channelId, msgTs);
     if (existingCard?.card_ts) return;
+
+    const existingTaskForActor = await dbGetTaskBySource(teamId, channelId, msgTs);
+    if (existingTaskForActor?.id) {
+      await notifyActorResult({
+        client,
+        actorUserId,
+        channelId,
+        threadTs: msgTs,
+        text: "タスク化済みです。",
+        dmOnly: true,
+      });
+      return;
+    }
 
     // すでにタスク化済みなら案内だけ（ここは現行踏襲）
     const existingTask = await dbGetTaskBySource(teamId, channelId, msgTs);
@@ -372,6 +449,46 @@ app.event("reaction_added", async ({ event, client, body }) => {
     }
 
     try {
+      const payload = JSON.stringify({ teamId, taskId: created.id });
+      await notifyActorResult({
+        client,
+        actorUserId,
+        channelId,
+        threadTs: !isParentMsg ? msgTs : null,
+        text: `タスク化しました: ${noMention(created.title)}`,
+        dmOnly: true,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `✅ *タスク化しました*\n*${noMention(created.title)}*`,
+            },
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "詳細を開く" },
+                action_id: "open_detail_modal",
+                value: payload,
+              },
+              {
+                type: "button",
+                text: { type: "plain_text", text: "内容を編集" },
+                action_id: "open_edit_task_modal",
+                value: payload,
+              },
+            ],
+          },
+        ],
+      });
+    } catch (e) {
+      console.error("reaction dm notify error:", e?.data || e);
+    }
+
+    try {
       await publishHomeBurst(
         client,
         teamId,
@@ -379,9 +496,16 @@ app.event("reaction_added", async ({ event, client, body }) => {
         200,
       );
     } catch (_) {}
+    console.info("reaction_added success", {
+      teamId,
+      channelId,
+      msgTs,
+      actorUserId,
+      taskId: created.id,
+      targetCount: targetList.length,
+    });
   } catch (e) {
-    if (e?.data?.error !== "not_in_channel")
-      console.error("reaction_added error:", e?.data || e);
+    console.error("reaction_added error:", e?.data || e);
   }
 });
 

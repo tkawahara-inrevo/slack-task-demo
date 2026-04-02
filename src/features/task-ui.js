@@ -387,6 +387,8 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
 
   const isDmChannel = String(channelId || "")[0] === "D";
   const isStandalone = sourceMode === "standalone";
+  const cacheKey = meta.cacheKey || __cacheKey(teamId, channelId, parentTs);
+  const cachedDescription = __cacheGet(cacheKey);
 
   try {
     if (!teamId || !actorUserId) {
@@ -411,8 +413,9 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       } catch (_) {}
     }
 
-    // 元メッセージが通常チャンネルのときだけ参加確認する
-    if (!isStandalone && !isDmLikeSource && channelId) {
+    // ショートカット時点で本文を受け取れているなら、そのままタスク化を進める。
+    // 参加確認は「元メッセージを追加で取りに行く必要がある通常チャンネル」のときだけ行う。
+    if (!isStandalone && !isDmLikeSource && channelId && !cachedDescription) {
       const joinRes = await ensureBotInChannel({ client, channelId });
 
       if (!joinRes.ok) {
@@ -454,8 +457,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
         return;
       }
     } else {
-      const cacheKey = meta.cacheKey || __cacheKey(teamId, channelId, parentTs);
-      description = __cacheGet(cacheKey);
+      description = cachedDescription;
 
       if (!description) {
         const raw = await fetchMessageTextByTs(client, channelId, parentTs);

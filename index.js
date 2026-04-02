@@ -1114,7 +1114,7 @@ async function buildDetailModalView({
       viewerUserId === task.assignee_id);
 
   const meta = { teamId, taskId: task.id, origin };
-  const detailInitialUserIds = isBroadcast
+  let detailInitialUserIds = isBroadcast
     ? uniqIds(await dbListTargetUserIds(teamId, task.id))
     : uniqIds([task.assignee_id].filter(Boolean));
   let detailInitialGroupOptions = [];
@@ -1133,6 +1133,11 @@ async function buildDetailModalView({
           },
         ];
       }
+      try {
+        const groupMembers = await getUsergroupMembers(teamId, task.broadcast_group_id);
+        const memberSet = new Set(groupMembers || []);
+        detailInitialUserIds = detailInitialUserIds.filter((userId) => !memberSet.has(userId));
+      } catch (_) {}
     } catch (_) {}
   }
 

@@ -1811,6 +1811,63 @@ app.action("home_task_overflow", async ({ ack, body, client, action }) => {
 // ================================
 // Personal filter create
 // ================================
+function buildPersonalFilterEditorView({
+  mode = "create",
+  teamId,
+  userId,
+  filterId = null,
+  filterName = "",
+  memberIds = [],
+}) {
+  const isEdit = mode === "edit";
+  return {
+    type: "modal",
+    callback_id: isEdit
+      ? "personal_filter_edit_modal"
+      : "personal_filter_create_modal",
+    private_metadata: JSON.stringify({ teamId, userId, filterId }),
+    title: {
+      type: "plain_text",
+      text: isEdit ? "フィルター編集" : "フィルター作成",
+    },
+    submit: {
+      type: "plain_text",
+      text: isEdit ? "保存" : "作成",
+    },
+    close: { type: "plain_text", text: "キャンセル" },
+    blocks: [
+      {
+        type: "input",
+        block_id: "filter_name",
+        label: { type: "plain_text", text: "フィルター名" },
+        element: {
+          type: "plain_text_input",
+          action_id: "value",
+          placeholder: {
+            type: "plain_text",
+            text: "分かりやすい名前を入力",
+          },
+          ...(filterName ? { initial_value: filterName } : {}),
+        },
+      },
+      {
+        type: "input",
+        block_id: "filter_members",
+        label: { type: "plain_text", text: "メンバー" },
+        element: {
+          type: "multi_users_select",
+          action_id: "value",
+          placeholder: {
+            type: "plain_text",
+            text: "メンバーを選択",
+          },
+          ...(memberIds.length ? { initial_users: memberIds } : {}),
+        },
+      },
+    ],
+  };
+}
+
 app.action("open_personal_filter_modal", async ({ ack, body, client }) => {
   await ack();
   const teamId = getTeamIdFromBody(body);
@@ -1822,36 +1879,7 @@ app.action("open_personal_filter_modal", async ({ ack, body, client }) => {
     const openFn = isFromModal ? client.views.push : client.views.open;
     await openFn.call(client.views, {
       trigger_id: body.trigger_id,
-      view: {
-        type: "modal",
-        callback_id: "personal_filter_create_modal",
-        private_metadata: JSON.stringify({ teamId, userId }),
-        title: { type: "plain_text", text: "フィルタ作成" },
-        submit: { type: "plain_text", text: "作成" },
-        close: { type: "plain_text", text: "キャンセル" },
-        blocks: [
-          {
-            type: "input",
-            block_id: "filter_name",
-            label: { type: "plain_text", text: "チーム名" },
-            element: {
-              type: "plain_text_input",
-              action_id: "value",
-              placeholder: { type: "plain_text", text: "例：営業チーム" },
-            },
-          },
-          {
-            type: "input",
-            block_id: "filter_members",
-            label: { type: "plain_text", text: "メンバー" },
-            element: {
-              type: "multi_users_select",
-              action_id: "value",
-              placeholder: { type: "plain_text", text: "メンバーを選択（複数可）" },
-            },
-          },
-        ],
-      },
+      view: buildPersonalFilterEditorView({ mode: "create", teamId, userId }),
     });
   } catch (e) {
     console.error("open_personal_filter_modal error:", e?.data || e);
@@ -1918,7 +1946,7 @@ function buildPersonalFilterManageView(teamId, userId, filters) {
         type: "overflow",
         action_id: "personal_filter_overflow",
         options: [
-          { text: { type: "plain_text", text: "✏️ 名前を変更" }, value: `rename:${meta}` },
+          { text: { type: "plain_text", text: "編集" }, value: `edit:${meta}` },
           { text: { type: "plain_text", text: "🗑️ 削除" }, value: `delete:${meta}` },
         ],
       },
@@ -1980,30 +2008,18 @@ app.action("personal_filter_overflow", async ({ ack, body, client, action }) => 
         view_id: body.view.id,
         view: buildPersonalFilterManageView(teamId, userId, filters),
       });
-    } else if (op === "rename") {
-      // 名前変更モーダルをpush
+    } else if (op === "edit") {
+      const memberIds = await dbGetPersonalFilterMemberIds(teamId, meta.filterId);
       await client.views.push({
         trigger_id: body.trigger_id,
-        view: {
-          type: "modal",
-          callback_id: "personal_filter_rename_modal",
-          private_metadata: JSON.stringify({ teamId, userId, filterId: meta.filterId }),
-          title: { type: "plain_text", text: "名前を変更" },
-          submit: { type: "plain_text", text: "変更" },
-          close: { type: "plain_text", text: "キャンセル" },
-          blocks: [
-            {
-              type: "input",
-              block_id: "filter_name",
-              label: { type: "plain_text", text: "新しい名前" },
-              element: {
-                type: "plain_text_input",
-                action_id: "value",
-                initial_value: meta.filterName || "",
-              },
-            },
-          ],
-        },
+        view: buildPersonalFilterEditorView({
+          mode: "edit",
+          teamId,
+          userId,
+          filterId: meta.filterId,
+          filterName: meta.filterName || "",
+          memberIds,
+        }),
       });
     }
   } catch (e) {
@@ -2011,18 +2027,19 @@ app.action("personal_filter_overflow", async ({ ack, body, client, action }) => 
   }
 });
 
-app.view("personal_filter_rename_modal", async ({ ack, body, view, client }) => {
+app.view("personal_filter_edit_modal", async ({ ack, body, view, client }) => {
   await ack();
   const meta = safeJsonParse(view.private_metadata) || {};
   const { teamId, userId, filterId } = meta;
   if (!teamId || !userId || !filterId) return;
 
   const name = view.state.values.filter_name?.value?.value?.trim();
+  const memberIds = view.state.values.filter_members?.value?.selected_users || [];
   if (!name) return;
 
   try {
     await dbUpdatePersonalFilter(teamId, userId, filterId, name);
-    // 管理モーダル（1つ前のview）を更新
+    await dbSetPersonalFilterMembers(teamId, filterId, memberIds);
     const filters = await dbListPersonalFilters(teamId, userId);
     const previousViewId = body.view?.root_view_id;
     if (previousViewId) {
@@ -2031,8 +2048,13 @@ app.view("personal_filter_rename_modal", async ({ ack, body, view, client }) => 
         view: buildPersonalFilterManageView(teamId, userId, filters),
       });
     }
+
+    const st = getHomeState(teamId, userId);
+    if (st.deptKey === `pf:${filterId}`) {
+      await publishHome({ client, teamId, userId });
+    }
   } catch (e) {
-    console.error("personal_filter_rename_modal error:", e?.data || e);
+    console.error("personal_filter_edit_modal error:", e?.data || e);
   }
 });
 

@@ -1875,8 +1875,16 @@ app.view("personal_filter_create_modal", async ({ ack, body, view, client }) => 
     await dbSetPersonalFilterMembers(teamId, id, memberIds);
 
     // 作成したフィルタを即座にアクティブにして Home を更新
-    setHomeState(teamId, userId, { deptKey: `pf:${id}`, broadcastScopeKey: "all" });
-    await publishHome({ client, teamId, userId });
+    const filters = await dbListPersonalFilters(teamId, userId).catch(() => []);
+    const previousViewId =
+      body.view?.previous_view_id || body.view?.root_view_id || null;
+
+    if (previousViewId) {
+      await client.views.update({
+        view_id: previousViewId,
+        view: buildPersonalFilterManageView(teamId, userId, filters),
+      });
+    }
   } catch (e) {
     console.error("personal_filter_create_modal error:", e?.data || e);
   }

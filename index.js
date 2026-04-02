@@ -1144,23 +1144,86 @@ async function buildDetailModalView({
         text: `*ステータス*：${statusLabel(task.status)}`,
       },
     },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` },
-    },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` },
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*期限*：${formatDueDateOnly(task.due_date)}`,
-      },
-    },
-    { type: "divider" },
   ];
+
+  if (canEdit) {
+    blocks.push(
+      {
+        type: "input",
+        block_id: "requester",
+        label: { type: "plain_text", text: "依頼者" },
+        element: {
+          type: "users_select",
+          action_id: "requester_user_select",
+          placeholder: { type: "plain_text", text: "依頼者を選択" },
+          initial_user: task.requester_user_id,
+        },
+      },
+      {
+        type: "input",
+        optional: true,
+        block_id: "assignee_users",
+        label: { type: "plain_text", text: "対応者（複数可）" },
+        element: {
+          type: "multi_users_select",
+          action_id: "assignee_users_select",
+          placeholder: { type: "plain_text", text: "ユーザーを選択" },
+          ...(detailInitialUserIds.length
+            ? { initial_users: detailInitialUserIds }
+            : {}),
+        },
+      },
+      {
+        type: "input",
+        optional: true,
+        block_id: "assignee_groups",
+        label: { type: "plain_text", text: "対応者グループ（例: @mk）" },
+        element: {
+          type: "multi_external_select",
+          action_id: "assignee_groups_select",
+          placeholder: { type: "plain_text", text: "グループを検索" },
+          min_query_length: 0,
+          ...(detailInitialGroupOptions.length
+            ? { initial_options: detailInitialGroupOptions }
+            : {}),
+        },
+      },
+      {
+        type: "input",
+        optional: true,
+        block_id: "due",
+        label: { type: "plain_text", text: "期日" },
+        element: {
+          type: "datepicker",
+          action_id: "due_date",
+          ...(slackDateYmd(task.due_date)
+            ? { initial_date: slackDateYmd(task.due_date) }
+            : {}),
+          placeholder: { type: "plain_text", text: "日付を選択" },
+        },
+      },
+      { type: "divider" },
+    );
+  } else {
+    blocks.push(
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `*依頼者*：<@${task.requester_user_id}>` },
+      },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `*対応者*：${assigneeDisplay(task)}` },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*期限*：${formatDueDateOnly(task.due_date)}`,
+        },
+      },
+      { type: "divider" },
+    );
+  }
 
   if (!isBroadcast) {
     if (canCompletePersonal && task.status !== "cancelled") {
@@ -1228,80 +1291,6 @@ async function buildDetailModalView({
         },
       ],
     });
-  }
-
-  blocks.push({ type: "divider" });
-  if (canEdit) {
-    blocks.push({
-      type: "input",
-      block_id: "requester",
-      label: { type: "plain_text", text: "依頼者" },
-      element: {
-        type: "users_select",
-        action_id: "requester_user_select",
-        placeholder: { type: "plain_text", text: "依頼者を選択" },
-        initial_user: task.requester_user_id,
-      },
-    });
-
-    blocks.push({
-      type: "input",
-      optional: true,
-      block_id: "assignee_users",
-      label: { type: "plain_text", text: "対応者（複数可）" },
-      element: {
-        type: "multi_users_select",
-        action_id: "assignee_users_select",
-        placeholder: { type: "plain_text", text: "ユーザーを選択" },
-        ...(detailInitialUserIds.length
-          ? { initial_users: detailInitialUserIds }
-          : {}),
-      },
-    });
-
-    blocks.push({
-      type: "input",
-      optional: true,
-      block_id: "assignee_groups",
-      label: { type: "plain_text", text: "対応者グループ（例: @mk）" },
-      element: {
-        type: "multi_external_select",
-        action_id: "assignee_groups_select",
-        placeholder: { type: "plain_text", text: "グループを検索" },
-        min_query_length: 0,
-        ...(detailInitialGroupOptions.length
-          ? { initial_options: detailInitialGroupOptions }
-          : {}),
-      },
-    });
-
-    blocks.push({
-      type: "input",
-      optional: true,
-      block_id: "due",
-      label: { type: "plain_text", text: "期日" },
-      element: {
-        type: "datepicker",
-        action_id: "due_date",
-        ...(slackDateYmd(task.due_date)
-          ? { initial_date: slackDateYmd(task.due_date) }
-          : {}),
-        placeholder: { type: "plain_text", text: "日付を選択" },
-      },
-    });
-
-    blocks.push({
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          action_id: "open_edit_task_modal",
-          text: { type: "plain_text", text: "本文を編集" },
-          value: JSON.stringify({ teamId, taskId: task.id, origin }),
-        },
-      ],
-    });
-    blocks.push({ type: "divider" });
   }
 
   let __comments = [];

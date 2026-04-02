@@ -1538,34 +1538,23 @@ app.view("detail_modal", async ({ ack, body, view, client }) => {
   const requesterUserId =
     view.state.values.requester?.requester_user_select?.selected_user || null;
   const nextDue = view.state.values.due?.due_date?.selected_date || null;
-
-  await ack({
-    response_action: "update",
-    view: {
-      type: "modal",
-      callback_id: "detail_modal_saving",
-      title: { type: "plain_text", text: "保存中..." },
-      close: { type: "plain_text", text: "閉じる" },
-      blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: "保存しています..." },
-        },
-      ],
-    },
-  });
+  const before = await dbGetTaskById(teamId, taskId);
+  if (!before) {
+    await ack();
+    return;
+  }
 
   try {
-    const before = await dbGetTaskById(teamId, taskId);
-    if (!before) return;
-
     const isBroadcast = before.task_type === "broadcast";
     const canEditTask =
       before.status !== "cancelled" &&
       (isBroadcast ||
         actorUserId === before.requester_user_id ||
         actorUserId === before.assignee_id);
-    if (!canEditTask) return;
+    if (!canEditTask) {
+      await ack();
+      return;
+    }
 
     const selection = await getBroadcastEditSelectionFromView(
       teamId,
@@ -1581,28 +1570,22 @@ app.view("detail_modal", async ({ ack, body, view, client }) => {
     } = selection;
 
     if (!requesterUserId || !nextTargets.length) {
-      await client.views.update({
-        view_id: body.view.id,
-        view: {
-          type: "modal",
-          callback_id: "detail_modal_error",
-          title: { type: "plain_text", text: "保存できませんでした" },
-          close: { type: "plain_text", text: "閉じる" },
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: !requesterUserId
-                  ? "依頼者を選択してください。"
-                  : "対応者またはグループを1つ以上選択してください。",
-              },
-            },
-          ],
+      await ack({
+        response_action: "errors",
+        errors: {
+          ...(!requesterUserId ? { requester: "依頼者を選択してください。" } : {}),
+          ...(!nextTargets.length
+            ? {
+                assignee_users:
+                  "対応者またはグループを1つ以上選択してください。",
+              }
+            : {}),
         },
       });
       return;
     }
+
+    await ack();
 
     const nextTaskType =
       nextTargets.length === 1 && selectedGroupIds.length === 0
@@ -1710,35 +1693,8 @@ app.view("detail_modal", async ({ ack, body, view, client }) => {
     try {
       await publishHomeBurst(client, teamId, usersToRefresh, 250);
     } catch (_) {}
-
-    await client.views.update({
-      view_id: body.view.id,
-      view: await buildDetailModalView({
-        teamId,
-        task: updated,
-        viewerUserId: actorUserId,
-        origin: meta.origin || "home",
-      }),
-    });
   } catch (e) {
     console.error("detail_modal submit error:", e?.data || e);
-    try {
-      await client.views.update({
-        view_id: body.view.id,
-        view: {
-          type: "modal",
-          callback_id: "detail_modal_error",
-          title: { type: "plain_text", text: "保存できませんでした" },
-          close: { type: "plain_text", text: "閉じる" },
-          blocks: [
-            {
-              type: "section",
-              text: { type: "mrkdwn", text: "もう一度お試しください。" },
-            },
-          ],
-        },
-      });
-    } catch (_) {}
   }
 });
 

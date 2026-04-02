@@ -714,8 +714,19 @@ async function ensureBotInChannel({ client, channelId }) {
   try {
     const info = await client.conversations.info({ channel: id });
     const ch = info?.channel || {};
+    const isMpim = !!ch.is_mpim;
+    const isIm = !!ch.is_im;
     const isPrivate = !!ch.is_private;
     const isMember = !!ch.is_member;
+
+    if (isMpim || isIm) {
+      return {
+        ok: true,
+        isPrivate: false,
+        joined: false,
+        reason: isMpim ? "mpim" : "im",
+      };
+    }
 
     if (isMember)
       return { ok: true, isPrivate, joined: false, reason: "already_member" };
@@ -1714,7 +1725,6 @@ async function canUserSeeChannel({ client, teamId, channelId, userId }) {
   // 縺ｾ縺唔D繝励Ξ繝輔ぅ繝・け繧ｹ縺ｧ鬮倬溷愛螳夲ｼ・PI遽邏・ｼ・
   const id0 = String(channelId)[0];
   if (id0 === "D") return false; // DM
-  if (id0 === "G") return false; // private channel・・ome縺ｫ縺ｯ蜃ｺ縺輔↑縺・婿驥晢ｼ・
 
   // public channel: 蜿ょ刈縺励※縺・ｋ蝣ｴ蜷医・縺ｿ陦ｨ遉ｺ
   if (id0 === "C") {
@@ -1734,6 +1744,8 @@ async function canUserSeeChannel({ client, teamId, channelId, userId }) {
   try {
     const info = await client.conversations.info({ channel: channelId });
     const ch = info?.channel;
+    const isMpim = !!ch?.is_mpim;
+    if (isMpim) return true;
     const isPublic = !!ch?.is_channel && !ch?.is_private;
     channelVisCache.set(key, { at: Date.now(), ok: isPublic });
     if (!isPublic) return false;

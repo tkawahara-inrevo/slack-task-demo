@@ -402,8 +402,17 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       parentTs,
     });
 
-    // 蜈・Γ繝・そ繝ｼ繧ｸ逕ｱ譚･縺縺大盾蜉遒ｺ隱・
-    if (!isStandalone && !isDmChannel && channelId) {
+    let isDmLikeSource = isDmChannel;
+    if (!isStandalone && channelId && !isDmLikeSource) {
+      try {
+        const info = await client.conversations.info({ channel: channelId });
+        const ch = info?.channel || {};
+        isDmLikeSource = !!ch.is_im || !!ch.is_mpim;
+      } catch (_) {}
+    }
+
+    // 元メッセージが通常チャンネルのときだけ参加確認する
+    if (!isStandalone && !isDmLikeSource && channelId) {
       const joinRes = await ensureBotInChannel({ client, channelId });
 
       if (!joinRes.ok) {
@@ -646,7 +655,7 @@ try {
     actorUserId,
     text: isStandalone
       ? "タスクを作成しました。結果は DM に送ります。"
-      : isDmChannel
+      : isDmLikeSource
         ? "DM からタスクを作成しました。"
         : "タスクを作成しました。",
   });
@@ -654,11 +663,15 @@ try {
   console.error("create result notify failed:", e?.data || e);
 }
 
-    await publishHomeBurst(client, teamId, [
-      actorUserId,
-      requesterUserId,
-      ...targetList,
-    ]);
+    try {
+      await publishHomeBurst(client, teamId, [
+        actorUserId,
+        requesterUserId,
+        ...targetList,
+      ]);
+    } catch (e) {
+      console.error("publish home after create failed:", e?.data || e);
+    }
 
     console.info("task_modal submit success", {
       teamId,
@@ -668,24 +681,28 @@ try {
       targetCount: targetList.length,
     });
 
-    await client.views.update({
-      view_id: view.id,
-      view: {
-        type: "modal",
-        callback_id: "task_modal_done",
-        title: { type: "plain_text", text: "タスク作成" },
-        close: { type: "plain_text", text: "閉じる" },
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: "タスクを作成しました。必要なら Home や詳細画面で続けて確認できます。",
+    try {
+      await client.views.update({
+        view_id: view.id,
+        view: {
+          type: "modal",
+          callback_id: "task_modal_done",
+          title: { type: "plain_text", text: "タスク作成" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: "タスクを作成しました。必要なら Home や詳細画面で続けて確認できます。",
+              },
             },
-          },
-        ],
-      },
-    });
+          ],
+        },
+      });
+    } catch (e) {
+      console.error("task_modal success view update failed:", e?.data || e);
+    }
   } catch (e) {
     console.error("view submit error:", e?.data || e);
     console.error("task_modal submit failed", {

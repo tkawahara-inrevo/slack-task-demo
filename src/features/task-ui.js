@@ -7,7 +7,7 @@
     buildDetailModalView,
     buildAssigneeLabelRaw,
     buildTaskListModalView,
-    buildThreadCardBlocks,
+    buildThreadCardBlocks: _buildThreadCardBlocks,
     dbCountCompletions,
     dbCountTargets,
     dbCreateTask,
@@ -49,7 +49,7 @@
     slackDateYmd,
     statusLabel,
     uniqIds,
-    upsertThreadCard,
+    upsertThreadCard: _upsertThreadCard,
   } = deps;
 
 async function notifyCreateResultOnSource({
@@ -1000,7 +1000,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
     } catch (_) {}
 
     if (updated.channel_id && updated.message_ts) {
-      const doneBlocks = [
+      const _doneBlocks = [
         {
           type: "header",
           text: { type: "plain_text", text: "タスクが完了しました" },
@@ -1526,6 +1526,219 @@ app.action("remind_incomplete_users", async ({ ack, body, action, client }) => {
     }
   } catch (e) {
     console.error("remind_incomplete_users error:", e?.data || e);
+  }
+});
+
+app.view("detail_modal", async ({ ack, body, view, client }) => {
+  const meta = safeJsonParse(view.private_metadata || "{}") || {};
+  const teamId = meta.teamId || getTeamIdFromBody(body);
+  const taskId = meta.taskId;
+  const actorUserId = getUserIdFromBody(body);
+
+  const requesterUserId =
+    view.state.values.requester?.requester_user_select?.selected_user || null;
+  const nextDue = view.state.values.due?.due_date?.selected_date || null;
+
+  await ack({
+    response_action: "update",
+    view: {
+      type: "modal",
+      callback_id: "detail_modal_saving",
+      title: { type: "plain_text", text: "保存中..." },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "保存しています..." },
+        },
+      ],
+    },
+  });
+
+  try {
+    const before = await dbGetTaskById(teamId, taskId);
+    if (!before) return;
+
+    const isBroadcast = before.task_type === "broadcast";
+    const canEditTask =
+      before.status !== "cancelled" &&
+      (isBroadcast ||
+        actorUserId === before.requester_user_id ||
+        actorUserId === before.assignee_id);
+    if (!canEditTask) return;
+
+    const selection = await getBroadcastEditSelectionFromView(
+      teamId,
+      before,
+      view.state.values,
+    );
+    const {
+      changed,
+      selectedUsers,
+      selectedGroupIds,
+      groupHandles,
+      nextTargets,
+    } = selection;
+
+    if (!requesterUserId || !nextTargets.length) {
+      await client.views.update({
+        view_id: body.view.id,
+        view: {
+          type: "modal",
+          callback_id: "detail_modal_error",
+          title: { type: "plain_text", text: "保存できませんでした" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: !requesterUserId
+                  ? "依頼者を選択してください。"
+                  : "対応者またはグループを1つ以上選択してください。",
+              },
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    const nextTaskType =
+      nextTargets.length === 1 && selectedGroupIds.length === 0
+        ? "personal"
+        : "broadcast";
+
+    const beforeTargets =
+      before.task_type === "broadcast"
+        ? uniqIds(await dbListTargetUserIds(teamId, taskId))
+        : uniqIds([before.assignee_id].filter(Boolean));
+
+    let updated = null;
+    if (nextTaskType === "broadcast") {
+      if (changed || before.task_type !== "broadcast") {
+        await dbReplaceTaskTargets(teamId, taskId, nextTargets);
+      }
+
+      const completedCount =
+        changed || before.task_type !== "broadcast"
+          ? await dbCountCompletions(teamId, taskId)
+          : before.completed_count ?? 0;
+
+      const assigneeLabelRaw = await buildAssigneeLabelRaw(
+        teamId,
+        selectedUsers,
+        groupHandles,
+      );
+
+      updated = await dbUpdateTaskEditableFields(teamId, taskId, {
+        task_type: "broadcast",
+        assignee_id: null,
+        assignee_label: assigneeLabelRaw || null,
+        assignee_dept: null,
+        due_date: nextDue,
+        description: before.description,
+        broadcast_group_handle: groupHandles.length
+          ? `@${groupHandles[0]}`
+          : null,
+        broadcast_group_id: selectedGroupIds.length
+          ? selectedGroupIds[0]
+          : null,
+        total_count: nextTargets.length,
+        completed_count: completedCount,
+      });
+    } else {
+      const nextAssignee = nextTargets[0];
+      let patchAssigneeDept = null;
+      try {
+        patchAssigneeDept = await resolveDeptForUser(teamId, nextAssignee);
+      } catch (_) {}
+
+      if (before.task_type === "broadcast") {
+        await dbReplaceTaskTargets(teamId, taskId, []);
+      }
+
+      updated = await dbUpdateTaskEditableFields(teamId, taskId, {
+        task_type: "personal",
+        assignee_id: nextAssignee,
+        assignee_label: null,
+        assignee_dept: patchAssigneeDept,
+        due_date: nextDue,
+        description: before.description,
+        broadcast_group_handle: null,
+        broadcast_group_id: null,
+        total_count: null,
+        completed_count: 0,
+      });
+    }
+
+    if (!updated) return;
+
+    let requesterDept = null;
+    try {
+      requesterDept = await resolveDeptForUser(teamId, requesterUserId);
+    } catch (_) {}
+
+    const requesterUpdatedRes = await dbQuery(
+      `UPDATE tasks
+         SET requester_user_id=$3,
+             requester_dept=$4,
+             updated_at=now()
+       WHERE team_id=$1 AND id=$2
+       RETURNING *`,
+      [teamId, taskId, requesterUserId, requesterDept],
+    );
+    updated = requesterUpdatedRes.rows[0] || updated;
+
+    const usersToNotify = nextTargets.filter((u) => !beforeTargets.includes(u));
+    const usersToRefresh = uniqIds([
+      actorUserId,
+      before.requester_user_id,
+      requesterUserId,
+      ...beforeTargets,
+      ...nextTargets,
+    ]);
+
+    try {
+      for (const uid of usersToNotify.filter((u) => u && u !== actorUserId)) {
+        await notifyTaskSimpleDM(uid, updated, "担当者が更新されました");
+      }
+    } catch (e) {
+      console.error("detail_modal assignee notify error:", e?.data || e);
+    }
+
+    try {
+      await publishHomeBurst(client, teamId, usersToRefresh, 250);
+    } catch (_) {}
+
+    await client.views.update({
+      view_id: body.view.id,
+      view: await buildDetailModalView({
+        teamId,
+        task: updated,
+        viewerUserId: actorUserId,
+        origin: meta.origin || "home",
+      }),
+    });
+  } catch (e) {
+    console.error("detail_modal submit error:", e?.data || e);
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: {
+          type: "modal",
+          callback_id: "detail_modal_error",
+          title: { type: "plain_text", text: "保存できませんでした" },
+          close: { type: "plain_text", text: "閉じる" },
+          blocks: [
+            {
+              type: "section",
+              text: { type: "mrkdwn", text: "もう一度お試しください。" },
+            },
+          ],
+        },
+      });
+    } catch (_) {}
   }
 });
 

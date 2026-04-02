@@ -1107,7 +1107,34 @@ async function buildDetailModalView({
     (viewerUserId === task.requester_user_id ||
       viewerUserId === task.assignee_id);
 
+  const canEdit =
+    task.status !== "cancelled" &&
+    (isBroadcast ||
+      viewerUserId === task.requester_user_id ||
+      viewerUserId === task.assignee_id);
+
   const meta = { teamId, taskId: task.id, origin };
+  const detailInitialUserIds = isBroadcast
+    ? uniqIds(await dbListTargetUserIds(teamId, task.id))
+    : uniqIds([task.assignee_id].filter(Boolean));
+  let detailInitialGroupOptions = [];
+  if (task.broadcast_group_id) {
+    try {
+      const subteams = await getSubteamIdMap(teamId);
+      const g = subteams.get(task.broadcast_group_id);
+      if (g) {
+        detailInitialGroupOptions = [
+          {
+            text: {
+              type: "plain_text",
+              text: "@" + (g.handle || g.name || task.broadcast_group_id),
+            },
+            value: task.broadcast_group_id,
+          },
+        ];
+      }
+    } catch (_) {}
+  }
 
   const blocks = [
     {
@@ -1204,26 +1231,77 @@ async function buildDetailModalView({
   }
 
   blocks.push({ type: "divider" });
-  {
-    const canEdit =
-      task.status !== "cancelled" &&
-      (isBroadcast ||
-        viewerUserId === task.requester_user_id ||
-        viewerUserId === task.assignee_id);
+  if (canEdit) {
+    blocks.push({
+      type: "input",
+      block_id: "requester",
+      label: { type: "plain_text", text: "依頼者" },
+      element: {
+        type: "users_select",
+        action_id: "requester_user_select",
+        placeholder: { type: "plain_text", text: "依頼者を選択" },
+        initial_user: task.requester_user_id,
+      },
+    });
 
-    if (canEdit) {
-      blocks.push({
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            action_id: "open_edit_task_modal",
-            text: { type: "plain_text", text: "期日・内容を編集" },
-            value: JSON.stringify({ teamId, taskId: task.id, origin }),
-          },
-        ],
-      });
-    }
+    blocks.push({
+      type: "input",
+      optional: true,
+      block_id: "assignee_users",
+      label: { type: "plain_text", text: "対応者（複数可）" },
+      element: {
+        type: "multi_users_select",
+        action_id: "assignee_users_select",
+        placeholder: { type: "plain_text", text: "ユーザーを選択" },
+        ...(detailInitialUserIds.length
+          ? { initial_users: detailInitialUserIds }
+          : {}),
+      },
+    });
+
+    blocks.push({
+      type: "input",
+      optional: true,
+      block_id: "assignee_groups",
+      label: { type: "plain_text", text: "対応者グループ（例: @mk）" },
+      element: {
+        type: "multi_external_select",
+        action_id: "assignee_groups_select",
+        placeholder: { type: "plain_text", text: "グループを検索" },
+        min_query_length: 0,
+        ...(detailInitialGroupOptions.length
+          ? { initial_options: detailInitialGroupOptions }
+          : {}),
+      },
+    });
+
+    blocks.push({
+      type: "input",
+      optional: true,
+      block_id: "due",
+      label: { type: "plain_text", text: "期日" },
+      element: {
+        type: "datepicker",
+        action_id: "due_date",
+        ...(slackDateYmd(task.due_date)
+          ? { initial_date: slackDateYmd(task.due_date) }
+          : {}),
+        placeholder: { type: "plain_text", text: "日付を選択" },
+      },
+    });
+
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "open_edit_task_modal",
+          text: { type: "plain_text", text: "本文を編集" },
+          value: JSON.stringify({ teamId, taskId: task.id, origin }),
+        },
+      ],
+    });
+    blocks.push({ type: "divider" });
   }
 
   let __comments = [];
@@ -1364,6 +1442,7 @@ async function buildDetailModalView({
     callback_id: "detail_modal",
     private_metadata: JSON.stringify(meta),
     title: { type: "plain_text", text: "タスク" },
+    ...(canEdit ? { submit: { type: "plain_text", text: "保存" } } : {}),
     close: { type: "plain_text", text: "閉じる" },
     blocks,
   };

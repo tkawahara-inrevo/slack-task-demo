@@ -1136,15 +1136,7 @@ async function buildDetailModalView({
     } catch (_) {}
   }
 
-  const blocks = [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*ステータス*：${statusLabel(task.status)}`,
-      },
-    },
-  ];
+  const blocks = [];
 
   if (canEdit) {
     blocks.push(

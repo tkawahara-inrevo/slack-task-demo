@@ -1121,13 +1121,13 @@ async function buildDetailModalView({
   if (task.broadcast_group_id) {
     try {
       const subteams = await getSubteamIdMap(teamId);
-      const g = subteams.get(task.broadcast_group_id);
-      if (g) {
+      const handle = subteams.get(task.broadcast_group_id);
+      if (handle) {
         detailInitialGroupOptions = [
           {
             text: {
               type: "plain_text",
-              text: "@" + (g.handle || g.name || task.broadcast_group_id),
+              text: "@" + String(handle).replace(/^@/, ""),
             },
             value: task.broadcast_group_id,
           },

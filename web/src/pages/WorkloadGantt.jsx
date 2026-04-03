@@ -44,6 +44,7 @@ export default function WorkloadGantt() {
   const [loading, setLoading] = useState(true);
   const [paintMode, setPaintMode] = useState('2');
   const [draggingItemId, setDraggingItemId] = useState('');
+  const [draggingOwnerUserId, setDraggingOwnerUserId] = useState('');
   const dragStateRef = useRef({ active: false, dirty: new Set() });
   const cellsRef = useRef({});
 
@@ -190,6 +191,19 @@ export default function WorkloadGantt() {
     await loadBoard(selectedTeamId, monthKey);
   };
 
+  const persistOwnerItems = async (ownerUserId, ownerItems) => {
+    await Promise.all(
+      ownerItems.map((item, orderIndex) => api.updateWorkloadItem(item.id, {
+        dashTeamId: selectedTeamId,
+        ownerUserId,
+        title: item.title,
+        category: item.category,
+        notes: item.notes,
+        sortOrder: orderIndex + 1,
+      })),
+    );
+  };
+
   const handleReorder = async (ownerUserId, itemId, direction) => {
     const ownerItems = [...(itemsByOwner[ownerUserId] || [])];
     const index = ownerItems.findIndex((item) => item.id === itemId);
@@ -198,16 +212,44 @@ export default function WorkloadGantt() {
     if (swapIndex < 0 || swapIndex >= ownerItems.length) return;
     const reordered = [...ownerItems];
     [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
-    await Promise.all(
-      reordered.map((item, orderIndex) => api.updateWorkloadItem(item.id, {
-        dashTeamId: selectedTeamId,
-        ownerUserId: item.owner_user_id,
-        title: item.title,
-        category: item.category,
-        notes: item.notes,
-        sortOrder: orderIndex + 1,
-      })),
-    );
+    await persistOwnerItems(ownerUserId, reordered);
+    await loadBoard(selectedTeamId, monthKey);
+  };
+
+  const handleDropOnItem = async (targetOwnerUserId, targetItemId) => {
+    if (!draggingItemId) return;
+    const draggedItem = items.find((item) => item.id === draggingItemId);
+    if (!draggedItem || draggedItem.id === targetItemId) return;
+
+    const sourceOwnerUserId = draggingOwnerUserId || draggedItem.owner_user_id;
+    const sourceItems = [...(itemsByOwner[sourceOwnerUserId] || [])];
+    const targetItems = sourceOwnerUserId === targetOwnerUserId
+      ? sourceItems
+      : [...(itemsByOwner[targetOwnerUserId] || [])];
+
+    const draggedIndex = sourceItems.findIndex((item) => item.id === draggedItem.id);
+    const targetIndex = targetItems.findIndex((item) => item.id === targetItemId);
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    if (sourceOwnerUserId === targetOwnerUserId) {
+      const reordered = [...sourceItems];
+      const [moved] = reordered.splice(draggedIndex, 1);
+      const adjustedTargetIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+      reordered.splice(adjustedTargetIndex, 0, moved);
+      await persistOwnerItems(targetOwnerUserId, reordered);
+    } else {
+      const nextSourceItems = [...sourceItems];
+      const [moved] = nextSourceItems.splice(draggedIndex, 1);
+      const nextTargetItems = [...targetItems];
+      nextTargetItems.splice(targetIndex, 0, moved);
+      await Promise.all([
+        persistOwnerItems(sourceOwnerUserId, nextSourceItems),
+        persistOwnerItems(targetOwnerUserId, nextTargetItems),
+      ]);
+    }
+
+    setDraggingItemId('');
+    setDraggingOwnerUserId('');
     await loadBoard(selectedTeamId, monthKey);
   };
 
@@ -265,6 +307,7 @@ export default function WorkloadGantt() {
                 if (!draggingItemId) return;
                 await handleMoveItem(draggingItemId, member.user_id);
                 setDraggingItemId('');
+                setDraggingOwnerUserId('');
               }}
             >
               <div className="workload-member-header">
@@ -288,8 +331,20 @@ export default function WorkloadGantt() {
                     key={item.id}
                     className="workload-grid-row"
                     draggable
-                    onDragStart={() => setDraggingItemId(item.id)}
-                    onDragEnd={() => setDraggingItemId('')}
+                    onDragStart={() => {
+                      setDraggingItemId(item.id);
+                      setDraggingOwnerUserId(member.user_id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingItemId('');
+                      setDraggingOwnerUserId('');
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={async (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      await handleDropOnItem(member.user_id, item.id);
+                    }}
                   >
                     <div className="workload-item-label">
                       <div className="workload-item-texts">

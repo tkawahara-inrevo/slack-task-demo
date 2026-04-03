@@ -154,6 +154,22 @@ export default function WorkloadGantt() {
     await loadBoard(selectedTeamId, monthKey);
   };
 
+  const handleEditItem = async (item) => {
+    const title = window.prompt('業務名を編集してください', item.title || '');
+    if (title == null) return;
+    const category = window.prompt('カテゴリ名を編集してください（任意）', item.category || '');
+    if (category == null) return;
+    await api.updateWorkloadItem(item.id, {
+      dashTeamId: selectedTeamId,
+      ownerUserId: item.owner_user_id,
+      title: title.trim(),
+      category: category.trim(),
+      notes: item.notes,
+      sortOrder: item.sort_order,
+    });
+    await loadBoard(selectedTeamId, monthKey);
+  };
+
   const handleDeleteItem = async (itemId) => {
     if (!window.confirm('この業務を削除しますか？')) return;
     await api.deleteWorkloadItem(itemId);
@@ -171,6 +187,27 @@ export default function WorkloadGantt() {
       notes: item.notes,
       sortOrder: item.sort_order,
     });
+    await loadBoard(selectedTeamId, monthKey);
+  };
+
+  const handleReorder = async (ownerUserId, itemId, direction) => {
+    const ownerItems = [...(itemsByOwner[ownerUserId] || [])];
+    const index = ownerItems.findIndex((item) => item.id === itemId);
+    if (index === -1) return;
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= ownerItems.length) return;
+    const reordered = [...ownerItems];
+    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+    await Promise.all(
+      reordered.map((item, orderIndex) => api.updateWorkloadItem(item.id, {
+        dashTeamId: selectedTeamId,
+        ownerUserId: item.owner_user_id,
+        title: item.title,
+        category: item.category,
+        notes: item.notes,
+        sortOrder: orderIndex + 1,
+      })),
+    );
     await loadBoard(selectedTeamId, monthKey);
   };
 
@@ -207,9 +244,9 @@ export default function WorkloadGantt() {
         </div>
 
         <div className="paint-mode-group">
-          <label><input type="radio" name="paint-mode" value="0" checked={paintMode === '0'} onChange={(e) => setPaintMode(e.target.value)} />消す</label>
-          <label><input type="radio" name="paint-mode" value="1" checked={paintMode === '1'} onChange={(e) => setPaintMode(e.target.value)} />薄い</label>
-          <label><input type="radio" name="paint-mode" value="2" checked={paintMode === '2'} onChange={(e) => setPaintMode(e.target.value)} />濃い</label>
+          <label><input type="radio" name="paint-mode" value="0" checked={paintMode === '0'} onChange={(event) => setPaintMode(event.target.value)} />消す</label>
+          <label><input type="radio" name="paint-mode" value="1" checked={paintMode === '1'} onChange={(event) => setPaintMode(event.target.value)} />薄い</label>
+          <label><input type="radio" name="paint-mode" value="2" checked={paintMode === '2'} onChange={(event) => setPaintMode(event.target.value)} />濃い</label>
         </div>
 
         <button className="btn-primary" onClick={handleCopyPrevious}>前月をコピー</button>
@@ -246,7 +283,7 @@ export default function WorkloadGantt() {
                   ))}
                 </div>
 
-                {(itemsByOwner[member.user_id] || []).map((item) => (
+                {(itemsByOwner[member.user_id] || []).map((item, index, ownerItems) => (
                   <div
                     key={item.id}
                     className="workload-grid-row"
@@ -259,7 +296,12 @@ export default function WorkloadGantt() {
                         <strong>{item.title}</strong>
                         <span>{item.category || 'カテゴリ未設定'}</span>
                       </div>
-                      <button className="btn-sm btn-danger" onClick={() => handleDeleteItem(item.id)}>削除</button>
+                      <div className="workload-item-actions">
+                        <button className="btn-sm" onClick={() => handleEditItem(item)}>編集</button>
+                        <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'up')} disabled={index === 0}>↑</button>
+                        <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'down')} disabled={index === ownerItems.length - 1}>↓</button>
+                        <button className="btn-sm btn-danger" onClick={() => handleDeleteItem(item.id)}>削除</button>
+                      </div>
                     </div>
                     {days.map((day) => {
                       const intensity = cellsByItem[item.id]?.[day] || 0;

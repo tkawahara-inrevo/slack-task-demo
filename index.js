@@ -2899,6 +2899,7 @@ async function prefetchAll() {
         u?.profile?.image_48 ||
         null;
       if (url) userIconCache.set(key, { at: now, url });
+      await dbUpsertDashboardUserDirectoryMember(teamId, u);
       count++;
     }
     cursor = res?.response_metadata?.next_cursor;
@@ -2918,3 +2919,11 @@ async function prefetchAll() {
     console.warn("[prefetch] usergroups failed:", e.message);
   }
 }
+
+cron.schedule(
+  "15 3 * * *",
+  () => {
+    prefetchAll().catch((e) => console.warn("[prefetch] scheduled sync failed:", e.message));
+  },
+  { timezone: "Asia/Tokyo" },
+);

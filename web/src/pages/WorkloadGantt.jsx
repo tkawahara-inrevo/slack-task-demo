@@ -45,6 +45,12 @@ export default function WorkloadGantt() {
   const [paintMode, setPaintMode] = useState('2');
   const [draggingItemId, setDraggingItemId] = useState('');
   const [draggingOwnerUserId, setDraggingOwnerUserId] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState('create');
+  const [editorOwnerUserId, setEditorOwnerUserId] = useState('');
+  const [editingItemId, setEditingItemId] = useState('');
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftNotes, setDraftNotes] = useState('');
   const dragStateRef = useRef({ active: false, dirty: new Set() });
   const cellsRef = useRef({});
 
@@ -148,32 +154,59 @@ export default function WorkloadGantt() {
     applyPaint(itemId, dayNum);
   };
 
-  const handleAddItem = async (ownerUserId) => {
-    const title = window.prompt('業務名を入力してください');
-    if (!title?.trim()) return;
-    const category = window.prompt('カテゴリ名を入力してください（任意）') || '';
-    await api.createWorkloadItem({
-      dashTeamId: selectedTeamId,
-      ownerUserId,
-      title: title.trim(),
-      category: category.trim(),
-    });
-    await loadBoard(selectedTeamId, monthKey);
+  const openCreateModal = (ownerUserId) => {
+    setEditorMode('create');
+    setEditorOwnerUserId(ownerUserId);
+    setEditingItemId('');
+    setDraftTitle('');
+    setDraftNotes('');
+    setEditorOpen(true);
   };
 
-  const handleEditItem = async (item) => {
-    const title = window.prompt('業務名を編集してください', item.title || '');
-    if (title == null) return;
-    const category = window.prompt('カテゴリ名を編集してください（任意）', item.category || '');
-    if (category == null) return;
-    await api.updateWorkloadItem(item.id, {
-      dashTeamId: selectedTeamId,
-      ownerUserId: item.owner_user_id,
-      title: title.trim(),
-      category: category.trim(),
-      notes: item.notes,
-      sortOrder: item.sort_order,
-    });
+  const openEditModal = (item) => {
+    setEditorMode('edit');
+    setEditorOwnerUserId(item.owner_user_id);
+    setEditingItemId(item.id);
+    setDraftTitle(item.title || '');
+    setDraftNotes(item.notes || '');
+    setEditorOpen(true);
+  };
+
+  const closeEditor = () => {
+    setEditorOpen(false);
+    setEditorMode('create');
+    setEditorOwnerUserId('');
+    setEditingItemId('');
+    setDraftTitle('');
+    setDraftNotes('');
+  };
+
+  const handleSubmitEditor = async () => {
+    const title = draftTitle.trim();
+    if (!title || !selectedTeamId || !editorOwnerUserId) return;
+
+    if (editorMode === 'create') {
+      await api.createWorkloadItem({
+        dashTeamId: selectedTeamId,
+        ownerUserId: editorOwnerUserId,
+        title,
+        category: null,
+        notes: draftNotes.trim() || null,
+      });
+    } else {
+      const currentItem = items.find((item) => item.id === editingItemId);
+      if (!currentItem) return;
+      await api.updateWorkloadItem(editingItemId, {
+        dashTeamId: selectedTeamId,
+        ownerUserId: editorOwnerUserId,
+        title,
+        category: currentItem.category,
+        notes: draftNotes.trim(),
+        sortOrder: currentItem.sort_order,
+      });
+    }
+
+    closeEditor();
     await loadBoard(selectedTeamId, monthKey);
   };
 
@@ -301,9 +334,9 @@ export default function WorkloadGantt() {
       </div>
 
       {!teams.length ? (
-        <p className="empty-text">{'\u5229\u7528\u53EF\u80FD\u306A\u30C1\u30FC\u30E0\u304C\u307E\u3060\u3042\u308A\u307E\u305B\u3093'}</p>
+        <p className="empty-text">利用可能なチームがまだありません</p>
       ) : loading ? (
-        <p className="empty-text">{'\u8AAD\u307F\u8FBC\u307F\u4E2D...'}</p>
+        <p className="empty-text">読み込み中...</p>
       ) : (
         <div className="workload-board">
           {members.map((member) => (
@@ -323,7 +356,7 @@ export default function WorkloadGantt() {
                   <h2>{member.display_name || member.real_name || member.user_id}</h2>
                   <p>{member.real_name && member.real_name !== member.display_name ? member.real_name : member.user_id}</p>
                 </div>
-                <button className="btn-primary" onClick={() => handleAddItem(member.user_id)}>＋ 業務追加</button>
+                <button className="btn-primary" onClick={() => openCreateModal(member.user_id)}>＋ 業務追加</button>
               </div>
 
               <div className="workload-grid">
@@ -357,10 +390,10 @@ export default function WorkloadGantt() {
                     <div className="workload-item-label">
                       <div className="workload-item-texts">
                         <strong>{item.title}</strong>
-                        <span>{item.category || 'カテゴリ未設定'}</span>
+                        <span>{item.notes || item.category || '補足未設定'}</span>
                       </div>
                       <div className="workload-item-actions">
-                        <button className="btn-sm" onClick={() => handleEditItem(item)}>編集</button>
+                        <button className="btn-sm" onClick={() => openEditModal(item)}>編集</button>
                         <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'up')} disabled={index === 0}>↑</button>
                         <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'down')} disabled={index === ownerItems.length - 1}>↓</button>
                         <button className="btn-sm btn-danger" onClick={() => handleDeleteItem(item.id)}>削除</button>
@@ -386,6 +419,39 @@ export default function WorkloadGantt() {
               </div>
             </section>
           ))}
+        </div>
+      )}
+
+      {editorOpen && (
+        <div className="modal-overlay" onClick={closeEditor}>
+          <div className="modal-content" onClick={(event) => event.stopPropagation()} style={{ maxWidth: 560 }}>
+            <h3>{editorMode === 'create' ? '業務を追加' : '業務を編集'}</h3>
+            <div className="admin-form-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+              <label htmlFor="workload-title">タイトル</label>
+              <input
+                id="workload-title"
+                type="text"
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                placeholder="業務タイトルを入力"
+              />
+            </div>
+            <div className="admin-form-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginTop: 12 }}>
+              <label htmlFor="workload-notes">補足</label>
+              <textarea
+                id="workload-notes"
+                value={draftNotes}
+                onChange={(event) => setDraftNotes(event.target.value)}
+                placeholder="補足事項を入力"
+                rows={4}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+            </div>
+            <div className="crm-modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn-secondary" onClick={closeEditor}>キャンセル</button>
+              <button className="btn-primary" onClick={handleSubmitEditor} disabled={!draftTitle.trim()}>保存</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

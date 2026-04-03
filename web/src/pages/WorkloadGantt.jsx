@@ -41,7 +41,7 @@ export default function WorkloadGantt() {
   const [members, setMembers] = useState([]);
   const [items, setItems] = useState([]);
   const [cellsByItem, setCellsByItem] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [paintMode, setPaintMode] = useState('2');
   const [draggingItemId, setDraggingItemId] = useState('');
   const [draggingOwnerUserId, setDraggingOwnerUserId] = useState('');
@@ -58,6 +58,12 @@ export default function WorkloadGantt() {
     setTeams(nextTeams);
     if (!selectedTeamId && nextTeams[0]?.id) {
       setSelectedTeamId(nextTeams[0].id);
+    }
+    if (!nextTeams.length) {
+      setMembers([]);
+      setItems([]);
+      setCellsByItem({});
+      setLoading(false);
     }
   }, [selectedTeamId]);
 
@@ -294,8 +300,10 @@ export default function WorkloadGantt() {
         <button className="btn-primary" onClick={handleCopyPrevious}>前月をコピー</button>
       </div>
 
-      {loading ? (
-        <p className="empty-text">読み込み中...</p>
+      {!teams.length ? (
+        <p className="empty-text">{'\u5229\u7528\u53EF\u80FD\u306A\u30C1\u30FC\u30E0\u304C\u307E\u3060\u3042\u308A\u307E\u305B\u3093'}</p>
+      ) : loading ? (
+        <p className="empty-text">{'\u8AAD\u307F\u8FBC\u307F\u4E2D...'}</p>
       ) : (
         <div className="workload-board">
           {members.map((member) => (

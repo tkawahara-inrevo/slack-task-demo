@@ -65,6 +65,18 @@ export const api = {
   myTeams: () => apiFetch('/my-teams'),
   projects: () => apiFetch('/projects'),
   projectTasks: (id) => apiFetch(`/projects/${id}/tasks`),
+  workloadTeams: () => apiFetch('/workload/teams'),
+  workloadUsers: (teamId) => apiFetch(`/workload/users?teamId=${encodeURIComponent(teamId)}`),
+  workloadData: (teamId, month) => apiFetch(`/workload?teamId=${encodeURIComponent(teamId)}&month=${encodeURIComponent(month)}`),
+  createWorkloadItem: (body) => jsonPost('/workload/items', body),
+  updateWorkloadItem: (id, body) => apiFetch(`/workload/items/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  deleteWorkloadItem: (id) => apiDelete(`/workload/items/${id}`),
+  setWorkloadCells: (body) => jsonPut('/workload/cells', body),
+  copyPreviousWorkloadMonth: (dashTeamId, monthKey) => jsonPost('/workload/copy-prev', { dashTeamId, monthKey }),
 
   // Admin: roles
   adminRoles: () => apiFetch('/admin/roles'),
@@ -80,6 +92,8 @@ export const api = {
   adminTeamMembers: (id) => apiFetch(`/admin/teams/${id}/members`),
   adminAddTeamMember: (id, userId) => jsonPost(`/admin/teams/${id}/members`, { userId }),
   adminRemoveTeamMember: (id, userId) => apiDelete(`/admin/teams/${id}/members/${userId}`),
+  adminUserMapping: (query = '') => apiFetch(`/admin/user-mapping${query ? `?q=${encodeURIComponent(query)}` : ''}`),
+  adminSyncUserMapping: () => jsonPost('/admin/user-mapping/sync', {}),
 
   // Admin: projects
   adminProjects: () => apiFetch('/admin/projects'),

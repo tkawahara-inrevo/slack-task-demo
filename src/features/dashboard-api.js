@@ -100,6 +100,17 @@ function registerDashboardApi(deps) {
     dbRemoveDashTeamMember,
     dbListDashTeamMembers,
     dbGetUserDashTeams,
+    dbUpsertDashboardUserDirectoryMember,
+    dbListDashboardUserDirectory,
+    dbGetDashboardDirectoryMember,
+    dbListWorkloadItems,
+    dbGetWorkloadItem,
+    dbCreateWorkloadItem,
+    dbUpdateWorkloadItem,
+    dbDeleteWorkloadItem,
+    dbListWorkloadCells,
+    dbSetWorkloadCells,
+    dbCopyWorkloadMonth,
     dbCreateProject,
     dbListProjects,
     dbGetProject,
@@ -208,7 +219,7 @@ function registerDashboardApi(deps) {
   // Helper: get visible user_ids for non-admin
   async function getVisibleUserIds(teamId, userId) {
     const teams = await dbGetUserDashTeams(teamId, userId);
-    if (!teams.length) return [userId]; // チーム未所属なら自分だけ
+    if (!teams.length) return [userId];
     const allMembers = new Set();
     for (const t of teams) {
       const members = await dbListDashTeamMembers(teamId, t.id);
@@ -216,6 +227,41 @@ function registerDashboardApi(deps) {
     }
     allMembers.add(userId);
     return Array.from(allMembers);
+  }
+
+  function parseMonthKey(input) {
+    const raw = String(input || '').trim();
+    return /^\d{4}-\d{2}$/.test(raw) ? raw : null;
+  }
+
+  async function canAccessDashTeam(teamId, userId, role, dashTeamId) {
+    if (!dashTeamId) return false;
+    if (role === 'admin') {
+      const team = await dbGetDashTeam(teamId, dashTeamId);
+      return !!team;
+    }
+    const teams = await dbGetUserDashTeams(teamId, userId);
+    return teams.some((team) => team.id === dashTeamId);
+  }
+
+  async function syncDashboardUserDirectory(teamId) {
+    let cursor = '';
+    let count = 0;
+    do {
+      const resp = await slackClient.users.list({
+        limit: 200,
+        cursor,
+        team_id: teamId,
+      });
+      const members = Array.isArray(resp?.members) ? resp.members : [];
+      for (const member of members) {
+        if (!member?.id || member.is_bot || member.id === 'USLACKBOT') continue;
+        await dbUpsertDashboardUserDirectoryMember(teamId, member);
+        count += 1;
+      }
+      cursor = resp?.response_metadata?.next_cursor || '';
+    } while (cursor);
+    return count;
   }
 
   // --- Token exchange ---
@@ -604,6 +650,30 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // --- Admin: user mapping ---
+  expressApp.get("/api/dashboard/admin/user-mapping", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const query = String(req.query.q || "");
+      const members = await dbListDashboardUserDirectory(teamId, { query, limit: 300 });
+      res.json({ members });
+    } catch (e) {
+      console.error("dashboard /admin/user-mapping error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.post("/api/dashboard/admin/user-mapping/sync", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const synced = await syncDashboardUserDirectory(teamId);
+      res.json({ ok: true, synced });
+    } catch (e) {
+      console.error("dashboard POST /admin/user-mapping/sync error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // --- Projects ---
   expressApp.get("/api/dashboard/admin/projects", authWithRole, adminOnly, async (req, res) => {
     try {
@@ -696,6 +766,177 @@ function registerDashboardApi(deps) {
       res.json({ teams });
     } catch (e) {
       console.error("dashboard /my-teams error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- Workload gantt ---
+  expressApp.get("/api/dashboard/workload/teams", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const teams = role === "admin"
+        ? await dbListDashTeams(teamId)
+        : await dbGetUserDashTeams(teamId, userId);
+      res.json({ teams });
+    } catch (e) {
+      console.error("dashboard /workload/teams error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.get("/api/dashboard/workload/users", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const dashTeamId = String(req.query.teamId || "");
+      if (!(await canAccessDashTeam(teamId, userId, role, dashTeamId))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      const members = await dbListDashTeamMembers(teamId, dashTeamId);
+      const hydrated = await Promise.all(
+        members.map(async (member) => {
+          const directory = await dbGetDashboardDirectoryMember(teamId, member.user_id);
+          const fallbackName = await getUserDisplayName(teamId, member.user_id);
+          return {
+            user_id: member.user_id,
+            added_at: member.added_at,
+            display_name: directory?.display_name || fallbackName,
+            real_name: directory?.real_name || fallbackName,
+          };
+        }),
+      );
+      res.json({ members: hydrated });
+    } catch (e) {
+      console.error("dashboard /workload/users error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.get("/api/dashboard/workload", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const dashTeamId = String(req.query.teamId || "");
+      const monthKey = parseMonthKey(req.query.month) || new Date().toISOString().slice(0, 7);
+      if (!(await canAccessDashTeam(teamId, userId, role, dashTeamId))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      const [items, cells] = await Promise.all([
+        dbListWorkloadItems(teamId, dashTeamId),
+        dbListWorkloadCells(teamId, dashTeamId, monthKey),
+      ]);
+      res.json({ items, cells, monthKey });
+    } catch (e) {
+      console.error("dashboard /workload error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.post("/api/dashboard/workload/items", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder } = req.body || {};
+      if (!title?.trim() || !dashTeamId || !ownerUserId) {
+        return res.status(400).json({ error: "invalid_params" });
+      }
+      if (!(await canAccessDashTeam(teamId, userId, role, dashTeamId))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      const item = await dbCreateWorkloadItem(teamId, {
+        id: randomUUID(),
+        dashTeamId,
+        ownerUserId,
+        title: title.trim(),
+        category: category?.trim() || null,
+        notes: notes?.trim() || null,
+        sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
+        createdBy: userId,
+      });
+      res.json({ item });
+    } catch (e) {
+      console.error("dashboard POST /workload/items error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.patch("/api/dashboard/workload/items/:id", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const existing = await dbGetWorkloadItem(teamId, req.params.id);
+      if (!existing) return res.status(404).json({ error: "not_found" });
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder } = req.body || {};
+      const targetDashTeamId = String(dashTeamId || existing.dash_team_id || "");
+      if (!(await canAccessDashTeam(teamId, userId, role, targetDashTeamId))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      const item = await dbUpdateWorkloadItem(teamId, req.params.id, {
+        dash_team_id: targetDashTeamId,
+        owner_user_id: ownerUserId || existing.owner_user_id,
+        title: typeof title === "string" ? title.trim() : existing.title,
+        category: typeof category === "string" ? category.trim() : existing.category,
+        notes: typeof notes === "string" ? notes.trim() : existing.notes,
+        sort_order: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : existing.sort_order,
+      });
+      res.json({ item });
+    } catch (e) {
+      console.error("dashboard PATCH /workload/items/:id error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.delete("/api/dashboard/workload/items/:id", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const item = await dbGetWorkloadItem(teamId, req.params.id);
+      if (!item) return res.status(404).json({ error: "not_found" });
+      if (!(await canAccessDashTeam(teamId, userId, role, item.dash_team_id))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      await dbDeleteWorkloadItem(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("dashboard DELETE /workload/items/:id error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.put("/api/dashboard/workload/cells", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const { itemId, monthKey, cells } = req.body || {};
+      const parsedMonth = parseMonthKey(monthKey);
+      if (!itemId || !parsedMonth || !Array.isArray(cells)) {
+        return res.status(400).json({ error: "invalid_params" });
+      }
+      const item = await dbGetWorkloadItem(teamId, itemId);
+      if (!item) return res.status(404).json({ error: "not_found" });
+      if (!(await canAccessDashTeam(teamId, userId, role, item.dash_team_id))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      await dbSetWorkloadCells(teamId, itemId, parsedMonth, cells);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("dashboard PUT /workload/cells error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.post("/api/dashboard/workload/copy-prev", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      const { dashTeamId, monthKey } = req.body || {};
+      const parsedMonth = parseMonthKey(monthKey);
+      if (!dashTeamId || !parsedMonth) {
+        return res.status(400).json({ error: "invalid_params" });
+      }
+      if (!(await canAccessDashTeam(teamId, userId, role, dashTeamId))) {
+        return res.status(403).json({ error: "team_forbidden" });
+      }
+      const [year, month] = parsedMonth.split("-").map(Number);
+      const prev = new Date(Date.UTC(year, month - 2, 1));
+      const prevMonthKey = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
+      await dbCopyWorkloadMonth(teamId, dashTeamId, prevMonthKey, parsedMonth);
+      res.json({ ok: true, fromMonthKey: prevMonthKey, monthKey: parsedMonth });
+    } catch (e) {
+      console.error("dashboard POST /workload/copy-prev error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

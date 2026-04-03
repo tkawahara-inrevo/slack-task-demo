@@ -9,8 +9,10 @@ import ProjectsAdmin from './pages/admin/ProjectsAdmin'
 import RolesAdmin from './pages/admin/RolesAdmin'
 import IntegrationsAdmin from './pages/admin/IntegrationsAdmin'
 import FormulasAdmin from './pages/admin/FormulasAdmin'
+import UserMappingAdmin from './pages/admin/UserMappingAdmin'
 import ProjectView from './pages/ProjectView'
 import Analytics from './pages/Analytics'
+import WorkloadGantt from './pages/WorkloadGantt'
 import ClientList from './pages/crm/ClientList'
 import ClientDetail from './pages/crm/ClientDetail'
 import DealList from './pages/crm/DealList'
@@ -25,6 +27,7 @@ function App() {
       <Route path="/tasks/:id" element={<TaskDetail />} />
       <Route path="/projects/:id" element={<ProjectView />} />
       <Route path="/analytics" element={<Analytics />} />
+      <Route path="/workload" element={<WorkloadGantt />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
       <Route path="/crm/clients" element={<ClientList />} />
       <Route path="/crm/clients/:id" element={<ClientDetail />} />
@@ -35,6 +38,7 @@ function App() {
         <Route path="teams" element={<TeamsAdmin />} />
         <Route path="projects" element={<ProjectsAdmin />} />
         <Route path="roles" element={<RolesAdmin />} />
+        <Route path="user-mapping" element={<UserMappingAdmin />} />
         <Route path="integrations" element={<IntegrationsAdmin />} />
         <Route path="formulas" element={<FormulasAdmin />} />
       </Route>

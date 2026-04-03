@@ -122,6 +122,19 @@ async function dbEnsureSettingsSchema() {
       );
     `),
     dbQuery(`
+      CREATE TABLE IF NOT EXISTS dashboard_user_directory (
+        team_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        display_name TEXT,
+        real_name TEXT,
+        normalized_name TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        profile_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        last_synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (team_id, user_id)
+      );
+    `),
+    dbQuery(`
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         team_id TEXT NOT NULL,
@@ -155,6 +168,33 @@ async function dbEnsureSettingsSchema() {
         team_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         PRIMARY KEY (filter_id, user_id)
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS workload_items (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        dash_team_id TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        category TEXT,
+        notes TEXT,
+        sort_order INT NOT NULL DEFAULT 0,
+        is_archived BOOLEAN NOT NULL DEFAULT false,
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS workload_cells (
+        item_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        month_key TEXT NOT NULL,
+        day_num INT NOT NULL,
+        intensity INT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (item_id, month_key, day_num)
       );
     `),
     dbQuery(`
@@ -1116,6 +1156,224 @@ async function dbGetUserDashTeams(teamId, userId) {
 }
 
 // ================================
+// Dashboard user directory
+// ================================
+function normalizeDirectoryName(...parts) {
+  return parts
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function dbUpsertDashboardUserDirectoryMember(teamId, user) {
+  const profile = user?.profile || {};
+  const displayName = profile.display_name_normalized || profile.display_name || user?.name || null;
+  const realName = profile.real_name_normalized || profile.real_name || user?.real_name || null;
+  const normalizedName = normalizeDirectoryName(displayName, realName, user?.id);
+  const q = `
+    INSERT INTO dashboard_user_directory
+      (team_id, user_id, display_name, real_name, normalized_name, is_active, profile_json, last_synced_at)
+    VALUES
+      ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
+    ON CONFLICT (team_id, user_id)
+    DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      real_name = EXCLUDED.real_name,
+      normalized_name = EXCLUDED.normalized_name,
+      is_active = EXCLUDED.is_active,
+      profile_json = EXCLUDED.profile_json,
+      last_synced_at = now()
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [
+    teamId,
+    user?.id,
+    displayName,
+    realName,
+    normalizedName,
+    !user?.deleted,
+    JSON.stringify(profile || {}),
+  ]);
+  return res.rows[0] || null;
+}
+
+async function dbListDashboardUserDirectory(teamId, { query = "", limit = 200 } = {}) {
+  const trimmed = String(query || "").trim().toLowerCase();
+  const params = [teamId];
+  let where = `WHERE team_id = $1`;
+  if (trimmed) {
+    params.push(`%${trimmed}%`);
+    where += ` AND (
+      lower(coalesce(display_name, '')) LIKE $2
+      OR lower(coalesce(real_name, '')) LIKE $2
+      OR lower(coalesce(user_id, '')) LIKE $2
+      OR lower(coalesce(normalized_name, '')) LIKE $2
+    )`;
+  }
+  params.push(limit);
+  const q = `
+    SELECT team_id, user_id, display_name, real_name, normalized_name, is_active, profile_json, last_synced_at
+    FROM dashboard_user_directory
+    ${where}
+    ORDER BY is_active DESC, coalesce(display_name, real_name, user_id) ASC
+    LIMIT $${params.length};
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+async function dbGetDashboardDirectoryMember(teamId, userId) {
+  const q = `
+    SELECT team_id, user_id, display_name, real_name, normalized_name, is_active, profile_json, last_synced_at
+    FROM dashboard_user_directory
+    WHERE team_id=$1 AND user_id=$2
+    LIMIT 1;
+  `;
+  const res = await dbQuery(q, [teamId, userId]);
+  return res.rows[0] || null;
+}
+
+// ================================
+// Workload gantt
+// ================================
+async function dbListWorkloadItems(teamId, dashTeamId, ownerUserId = null) {
+  const params = [teamId, dashTeamId];
+  let where = `WHERE team_id=$1 AND dash_team_id=$2 AND is_archived=false`;
+  if (ownerUserId) {
+    params.push(ownerUserId);
+    where += ` AND owner_user_id=$3`;
+  }
+  const q = `
+    SELECT *
+    FROM workload_items
+    ${where}
+    ORDER BY owner_user_id ASC, sort_order ASC, created_at ASC;
+  `;
+  const res = await dbQuery(q, params);
+  return res.rows;
+}
+
+async function dbGetWorkloadItem(teamId, itemId) {
+  const res = await dbQuery(
+    `SELECT * FROM workload_items WHERE team_id=$1 AND id=$2 LIMIT 1`,
+    [teamId, itemId],
+  );
+  return res.rows[0] || null;
+}
+
+async function dbCreateWorkloadItem(teamId, {
+  id,
+  dashTeamId,
+  ownerUserId,
+  title,
+  category = null,
+  notes = null,
+  sortOrder = 0,
+  createdBy = null,
+}) {
+  const q = `
+    INSERT INTO workload_items
+      (id, team_id, dash_team_id, owner_user_id, title, category, notes, sort_order, created_by, created_at, updated_at)
+    VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), now())
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [
+    id,
+    teamId,
+    dashTeamId,
+    ownerUserId,
+    title,
+    category,
+    notes,
+    sortOrder,
+    createdBy,
+  ]);
+  return res.rows[0] || null;
+}
+
+async function dbUpdateWorkloadItem(teamId, itemId, patch) {
+  const allowed = ["owner_user_id", "title", "category", "notes", "sort_order", "dash_team_id", "is_archived"];
+  const sets = [];
+  const vals = [];
+  let i = 3;
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (!allowed.includes(key)) continue;
+    sets.push(`${key}=$${i++}`);
+    vals.push(value);
+  }
+  if (!sets.length) {
+    const existing = await dbQuery(`SELECT * FROM workload_items WHERE team_id=$1 AND id=$2 LIMIT 1`, [teamId, itemId]);
+    return existing.rows[0] || null;
+  }
+  sets.push(`updated_at=now()`);
+  const q = `
+    UPDATE workload_items
+    SET ${sets.join(", ")}
+    WHERE team_id=$1 AND id=$2
+    RETURNING *;
+  `;
+  const res = await dbQuery(q, [teamId, itemId, ...vals]);
+  return res.rows[0] || null;
+}
+
+async function dbDeleteWorkloadItem(teamId, itemId) {
+  await dbQuery(`DELETE FROM workload_cells WHERE team_id=$1 AND item_id=$2`, [teamId, itemId]);
+  await dbQuery(`DELETE FROM workload_items WHERE team_id=$1 AND id=$2`, [teamId, itemId]);
+}
+
+async function dbListWorkloadCells(teamId, dashTeamId, monthKey) {
+  const q = `
+    SELECT wc.item_id, wc.month_key, wc.day_num, wc.intensity
+    FROM workload_cells wc
+    JOIN workload_items wi ON wi.id = wc.item_id AND wi.team_id = wc.team_id
+    WHERE wc.team_id=$1 AND wi.dash_team_id=$2 AND wc.month_key=$3 AND wi.is_archived=false
+    ORDER BY wc.item_id ASC, wc.day_num ASC;
+  `;
+  const res = await dbQuery(q, [teamId, dashTeamId, monthKey]);
+  return res.rows;
+}
+
+async function dbSetWorkloadCells(teamId, itemId, monthKey, cells) {
+  await dbQuery(`DELETE FROM workload_cells WHERE team_id=$1 AND item_id=$2 AND month_key=$3`, [teamId, itemId, monthKey]);
+  const normalized = Array.isArray(cells)
+    ? cells
+      .map((cell) => ({
+        dayNum: Number(cell?.dayNum),
+        intensity: Number(cell?.intensity),
+      }))
+      .filter((cell) => Number.isInteger(cell.dayNum) && cell.dayNum >= 1 && cell.dayNum <= 31 && [1, 2].includes(cell.intensity))
+    : [];
+  if (!normalized.length) return;
+  const values = [];
+  const params = [];
+  let i = 1;
+  for (const cell of normalized) {
+    values.push(`($${i++},$${i++},$${i++},$${i++},$${i++}, now())`);
+    params.push(itemId, teamId, monthKey, cell.dayNum, cell.intensity);
+  }
+  await dbQuery(`
+    INSERT INTO workload_cells (item_id, team_id, month_key, day_num, intensity, updated_at)
+    VALUES ${values.join(", ")}
+  `, params);
+}
+
+async function dbCopyWorkloadMonth(teamId, dashTeamId, fromMonthKey, toMonthKey) {
+  const q = `
+    INSERT INTO workload_cells (item_id, team_id, month_key, day_num, intensity, updated_at)
+    SELECT wc.item_id, wc.team_id, $4 AS month_key, wc.day_num, wc.intensity, now()
+    FROM workload_cells wc
+    JOIN workload_items wi ON wi.id = wc.item_id AND wi.team_id = wc.team_id
+    WHERE wc.team_id=$1 AND wi.dash_team_id=$2 AND wc.month_key=$3 AND wi.is_archived=false
+    ON CONFLICT (item_id, month_key, day_num)
+    DO UPDATE SET intensity = EXCLUDED.intensity, updated_at = now();
+  `;
+  await dbQuery(q, [teamId, dashTeamId, fromMonthKey, toMonthKey]);
+}
+
+// ================================
 // Projects
 // ================================
 async function dbCreateProject(id, teamId, name, dashTeamId, createdBy) {
@@ -1838,6 +2096,17 @@ module.exports = {
   dbRemoveDashTeamMember,
   dbListDashTeamMembers,
   dbGetUserDashTeams,
+  dbUpsertDashboardUserDirectoryMember,
+  dbListDashboardUserDirectory,
+  dbGetDashboardDirectoryMember,
+  dbListWorkloadItems,
+  dbGetWorkloadItem,
+  dbCreateWorkloadItem,
+  dbUpdateWorkloadItem,
+  dbDeleteWorkloadItem,
+  dbListWorkloadCells,
+  dbSetWorkloadCells,
+  dbCopyWorkloadMonth,
   dbCreateProject,
   dbListProjects,
   dbGetProject,

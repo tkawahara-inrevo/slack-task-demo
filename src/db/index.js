@@ -135,6 +135,15 @@ async function dbEnsureSettingsSchema() {
       );
     `),
     dbQuery(`
+      CREATE TABLE IF NOT EXISTS dashboard_user_visibility (
+        team_id TEXT NOT NULL,
+        viewer_user_id TEXT NOT NULL,
+        visible_user_id TEXT NOT NULL,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (team_id, viewer_user_id, visible_user_id)
+      );
+    `),
+    dbQuery(`
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         team_id TEXT NOT NULL,
@@ -1155,6 +1164,51 @@ async function dbGetUserDashTeams(teamId, userId) {
   return res.rows;
 }
 
+async function dbListDashboardVisibleUsers(teamId, viewerUserId) {
+  const q = `
+    SELECT visible_user_id, added_at
+    FROM dashboard_user_visibility
+    WHERE team_id=$1 AND viewer_user_id=$2
+    ORDER BY added_at ASC;
+  `;
+  const res = await dbQuery(q, [teamId, viewerUserId]);
+  return res.rows;
+}
+
+async function dbReplaceDashboardVisibleUsers(teamId, viewerUserId, visibleUserIds) {
+  await dbQuery(
+    `DELETE FROM dashboard_user_visibility WHERE team_id=$1 AND viewer_user_id=$2`,
+    [teamId, viewerUserId],
+  );
+
+  const uniqueIds = Array.from(
+    new Set(
+      (Array.isArray(visibleUserIds) ? visibleUserIds : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .filter((visibleUserId) => visibleUserId !== viewerUserId),
+    ),
+  );
+
+  if (!uniqueIds.length) return;
+
+  const values = [];
+  const params = [];
+  let i = 1;
+  for (const visibleUserId of uniqueIds) {
+    values.push(`($${i++}, $${i++}, $${i++}, now())`);
+    params.push(teamId, viewerUserId, visibleUserId);
+  }
+
+  await dbQuery(
+    `
+      INSERT INTO dashboard_user_visibility (team_id, viewer_user_id, visible_user_id, added_at)
+      VALUES ${values.join(", ")}
+    `,
+    params,
+  );
+}
+
 // ================================
 // Dashboard user directory
 // ================================
@@ -2096,6 +2150,8 @@ module.exports = {
   dbRemoveDashTeamMember,
   dbListDashTeamMembers,
   dbGetUserDashTeams,
+  dbListDashboardVisibleUsers,
+  dbReplaceDashboardVisibleUsers,
   dbUpsertDashboardUserDirectoryMember,
   dbListDashboardUserDirectory,
   dbGetDashboardDirectoryMember,

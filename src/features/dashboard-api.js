@@ -100,6 +100,7 @@ function registerDashboardApi(deps) {
     dbRemoveDashTeamMember,
     dbListDashTeamMembers,
     dbGetUserDashTeams,
+    dbListDashboardVisibleUsers,
     dbUpsertDashboardUserDirectoryMember,
     dbListDashboardUserDirectory,
     dbGetDashboardDirectoryMember,
@@ -218,6 +219,11 @@ function registerDashboardApi(deps) {
 
   // Helper: get visible user_ids for non-admin
   async function getVisibleUserIds(teamId, userId) {
+    const explicitVisible = await dbListDashboardVisibleUsers(teamId, userId);
+    if (explicitVisible.length) {
+      return Array.from(new Set([userId, ...explicitVisible.map((row) => row.visible_user_id)]));
+    }
+
     const teams = await dbGetUserDashTeams(teamId, userId);
     if (!teams.length) return [userId];
     const allMembers = new Set();

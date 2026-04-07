@@ -1,7 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 
-function monthToLabel(monthKey) {
+const CATEGORY_PALETTE = [
+  { bg: '#fff1f2', fg: '#be123c', border: '#fda4af' },
+  { bg: '#fff7ed', fg: '#c2410c', border: '#fdba74' },
+  { bg: '#fffbeb', fg: '#a16207', border: '#fcd34d' },
+  { bg: '#f0fdf4', fg: '#15803d', border: '#86efac' },
+  { bg: '#ecfeff', fg: '#0f766e', border: '#67e8f9' },
+  { bg: '#eff6ff', fg: '#1d4ed8', border: '#93c5fd' },
+  { bg: '#f5f3ff', fg: '#6d28d9', border: '#c4b5fd' },
+  { bg: '#fdf2f8', fg: '#be185d', border: '#f9a8d4' },
+];
+
+function formatMonthLabel(monthKey) {
   const [year, month] = monthKey.split('-').map(Number);
   return `${year}年${month}月`;
 }
@@ -12,25 +23,87 @@ function shiftMonth(monthKey, delta) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-function daysInMonth(monthKey) {
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function monthKeyFromDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getMonthDates(monthKey) {
   const [year, month] = monthKey.split('-').map(Number);
-  return new Date(year, month, 0).getDate();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  return Array.from({ length: daysInMonth }, (_, index) => new Date(year, month - 1, index + 1));
+}
+
+function getRollingDates(baseDate = new Date(), length = 31) {
+  const start = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  return Array.from({ length }, (_, index) => {
+    const next = new Date(start);
+    next.setDate(start.getDate() + index);
+    return next;
+  });
+}
+
+function getRangeLabel(viewMode, monthKey, dates) {
+  if (viewMode === 'month') return formatMonthLabel(monthKey);
+  if (!dates.length) return '直近31日';
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  return `${first.getMonth() + 1}/${first.getDate()} - ${last.getMonth() + 1}/${last.getDate()}`;
+}
+
+function getRequiredMonthKeys(dates) {
+  return Array.from(new Set(dates.map((date) => monthKeyFromDate(date))));
 }
 
 function buildCellsByItem(cells) {
   const map = {};
   for (const cell of cells || []) {
+    const key = `${cell.month_key}-${String(cell.day_num).padStart(2, '0')}`;
     if (!map[cell.item_id]) map[cell.item_id] = {};
-    map[cell.item_id][Number(cell.day_num)] = Number(cell.intensity);
+    map[cell.item_id][key] = Number(cell.intensity);
   }
   return map;
 }
 
-function serializeCells(cellMap = {}) {
+function mergeCellMaps(maps) {
+  const merged = {};
+  for (const current of maps) {
+    for (const [itemId, cellMap] of Object.entries(current || {})) {
+      if (!merged[itemId]) merged[itemId] = {};
+      Object.assign(merged[itemId], cellMap);
+    }
+  }
+  return merged;
+}
+
+function serializeCellsForMonth(cellMap = {}, monthKey) {
   return Object.entries(cellMap)
-    .map(([dayNum, intensity]) => ({ dayNum: Number(dayNum), intensity: Number(intensity) }))
-    .filter((cell) => [1, 2].includes(cell.intensity))
+    .filter(([fullDateKey, intensity]) => fullDateKey.startsWith(`${monthKey}-`) && [1, 2].includes(Number(intensity)))
+    .map(([fullDateKey, intensity]) => ({
+      dayNum: Number(fullDateKey.slice(-2)),
+      intensity: Number(intensity),
+    }))
     .sort((a, b) => a.dayNum - b.dayNum);
+}
+
+function uniqueItems(items = []) {
+  const seen = new Map();
+  for (const item of items) {
+    if (!seen.has(item.id)) seen.set(item.id, item);
+  }
+  return Array.from(seen.values());
+}
+
+function categoryStyle(category = '') {
+  if (!category) return null;
+  let hash = 0;
+  for (let i = 0; i < category.length; i += 1) {
+    hash = (hash * 31 + category.charCodeAt(i)) % CATEGORY_PALETTE.length;
+  }
+  return CATEGORY_PALETTE[Math.abs(hash) % CATEGORY_PALETTE.length];
 }
 
 export default function WorkloadGantt() {
@@ -38,6 +111,7 @@ export default function WorkloadGantt() {
   const [teams, setTeams] = useState([]);
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [monthKey, setMonthKey] = useState(initialMonth);
+  const [viewMode, setViewMode] = useState('month');
   const [members, setMembers] = useState([]);
   const [items, setItems] = useState([]);
   const [cellsByItem, setCellsByItem] = useState({});
@@ -50,6 +124,7 @@ export default function WorkloadGantt() {
   const [editorOwnerUserId, setEditorOwnerUserId] = useState('');
   const [editingItemId, setEditingItemId] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
+  const [draftCategory, setDraftCategory] = useState('');
   const [draftNotes, setDraftNotes] = useState('');
   const dragStateRef = useRef({ active: false, dirty: new Set() });
   const cellsRef = useRef({});
@@ -57,6 +132,14 @@ export default function WorkloadGantt() {
   useEffect(() => {
     cellsRef.current = cellsByItem;
   }, [cellsByItem]);
+
+  const displayDates = useMemo(
+    () => (viewMode === 'month' ? getMonthDates(monthKey) : getRollingDates(new Date(), 31)),
+    [monthKey, viewMode],
+  );
+  const requiredMonthKeys = useMemo(() => getRequiredMonthKeys(displayDates), [displayDates]);
+  const rangeLabel = useMemo(() => getRangeLabel(viewMode, monthKey, displayDates), [displayDates, monthKey, viewMode]);
+  const todayKey = dateKey(new Date());
 
   const loadTeams = useCallback(async () => {
     const res = await api.workloadTeams();
@@ -73,23 +156,23 @@ export default function WorkloadGantt() {
     }
   }, [selectedTeamId]);
 
-  const loadBoard = useCallback(async (dashTeamId, nextMonthKey = monthKey) => {
+  const loadBoard = useCallback(async (dashTeamId) => {
     if (!dashTeamId) return;
     setLoading(true);
     try {
-      const [memberRes, dataRes] = await Promise.all([
+      const [memberRes, ...dataResponses] = await Promise.all([
         api.workloadUsers(dashTeamId),
-        api.workloadData(dashTeamId, nextMonthKey),
+        ...requiredMonthKeys.map((requiredMonth) => api.workloadData(dashTeamId, requiredMonth)),
       ]);
       setMembers(memberRes.members || []);
-      setItems(dataRes.items || []);
-      setCellsByItem(buildCellsByItem(dataRes.cells || []));
+      setItems(uniqueItems(dataResponses.flatMap((response) => response.items || [])));
+      setCellsByItem(mergeCellMaps(dataResponses.map((response) => buildCellsByItem(response.cells || []))));
     } catch (error) {
       console.error(error);
     } finally {
       setLoading(false);
     }
-  }, [monthKey]);
+  }, [requiredMonthKeys]);
 
   useEffect(() => {
     loadTeams().catch(console.error);
@@ -97,8 +180,8 @@ export default function WorkloadGantt() {
 
   useEffect(() => {
     if (!selectedTeamId) return;
-    loadBoard(selectedTeamId, monthKey).catch(console.error);
-  }, [selectedTeamId, monthKey, loadBoard]);
+    loadBoard(selectedTeamId).catch(console.error);
+  }, [selectedTeamId, loadBoard]);
 
   useEffect(() => {
     const onMouseUp = async () => {
@@ -108,16 +191,16 @@ export default function WorkloadGantt() {
       dragStateRef.current.dirty = new Set();
       if (!dirtyIds.length) return;
       await Promise.all(
-        dirtyIds.map((itemId) => api.setWorkloadCells({
+        dirtyIds.flatMap((itemId) => requiredMonthKeys.map((requiredMonth) => api.setWorkloadCells({
           itemId,
-          monthKey,
-          cells: serializeCells(cellsRef.current[itemId] || {}),
-        }).catch(console.error)),
+          monthKey: requiredMonth,
+          cells: serializeCellsForMonth(cellsRef.current[itemId] || {}, requiredMonth),
+        }).catch(console.error))),
       );
     };
     window.addEventListener('mouseup', onMouseUp);
     return () => window.removeEventListener('mouseup', onMouseUp);
-  }, [monthKey]);
+  }, [requiredMonthKeys]);
 
   const itemsByOwner = useMemo(() => {
     const grouped = {};
@@ -128,15 +211,12 @@ export default function WorkloadGantt() {
     return grouped;
   }, [items]);
 
-  const dayCount = daysInMonth(monthKey);
-  const days = Array.from({ length: dayCount }, (_, index) => index + 1);
-
-  const applyPaint = (itemId, dayNum) => {
+  const applyPaint = (itemId, fullDateKey) => {
     const intensity = Number(paintMode);
     setCellsByItem((current) => {
       const nextItemCells = { ...(current[itemId] || {}) };
-      if (intensity === 0) delete nextItemCells[dayNum];
-      else nextItemCells[dayNum] = intensity;
+      if (intensity === 0) delete nextItemCells[fullDateKey];
+      else nextItemCells[fullDateKey] = intensity;
       const next = { ...current, [itemId]: nextItemCells };
       cellsRef.current = next;
       return next;
@@ -144,14 +224,14 @@ export default function WorkloadGantt() {
     dragStateRef.current.dirty.add(itemId);
   };
 
-  const handleCellMouseDown = (itemId, dayNum) => {
+  const handleCellMouseDown = (itemId, fullDateKey) => {
     dragStateRef.current.active = true;
-    applyPaint(itemId, dayNum);
+    applyPaint(itemId, fullDateKey);
   };
 
-  const handleCellMouseEnter = (itemId, dayNum) => {
+  const handleCellMouseEnter = (itemId, fullDateKey) => {
     if (!dragStateRef.current.active) return;
-    applyPaint(itemId, dayNum);
+    applyPaint(itemId, fullDateKey);
   };
 
   const openCreateModal = (ownerUserId) => {
@@ -159,6 +239,7 @@ export default function WorkloadGantt() {
     setEditorOwnerUserId(ownerUserId);
     setEditingItemId('');
     setDraftTitle('');
+    setDraftCategory('');
     setDraftNotes('');
     setEditorOpen(true);
   };
@@ -168,6 +249,7 @@ export default function WorkloadGantt() {
     setEditorOwnerUserId(item.owner_user_id);
     setEditingItemId(item.id);
     setDraftTitle(item.title || '');
+    setDraftCategory(item.category || '');
     setDraftNotes(item.notes || '');
     setEditorOpen(true);
   };
@@ -178,6 +260,7 @@ export default function WorkloadGantt() {
     setEditorOwnerUserId('');
     setEditingItemId('');
     setDraftTitle('');
+    setDraftCategory('');
     setDraftNotes('');
   };
 
@@ -190,7 +273,7 @@ export default function WorkloadGantt() {
         dashTeamId: selectedTeamId,
         ownerUserId: editorOwnerUserId,
         title,
-        category: null,
+        category: draftCategory.trim() || null,
         notes: draftNotes.trim() || null,
       });
     } else {
@@ -200,20 +283,20 @@ export default function WorkloadGantt() {
         dashTeamId: selectedTeamId,
         ownerUserId: editorOwnerUserId,
         title,
-        category: currentItem.category,
-        notes: draftNotes.trim(),
+        category: draftCategory.trim() || null,
+        notes: draftNotes.trim() || null,
         sortOrder: currentItem.sort_order,
       });
     }
 
     closeEditor();
-    await loadBoard(selectedTeamId, monthKey);
+    await loadBoard(selectedTeamId);
   };
 
   const handleDeleteItem = async (itemId) => {
     if (!window.confirm('この業務を削除しますか？')) return;
     await api.deleteWorkloadItem(itemId);
-    await loadBoard(selectedTeamId, monthKey);
+    await loadBoard(selectedTeamId);
   };
 
   const handleMoveItem = async (itemId, ownerUserId) => {
@@ -227,7 +310,7 @@ export default function WorkloadGantt() {
       notes: item.notes,
       sortOrder: item.sort_order,
     });
-    await loadBoard(selectedTeamId, monthKey);
+    await loadBoard(selectedTeamId);
   };
 
   const persistOwnerItems = async (ownerUserId, ownerItems) => {
@@ -252,7 +335,7 @@ export default function WorkloadGantt() {
     const reordered = [...ownerItems];
     [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
     await persistOwnerItems(ownerUserId, reordered);
-    await loadBoard(selectedTeamId, monthKey);
+    await loadBoard(selectedTeamId);
   };
 
   const handleDropOnItem = async (targetOwnerUserId, targetItemId) => {
@@ -289,13 +372,13 @@ export default function WorkloadGantt() {
 
     setDraggingItemId('');
     setDraggingOwnerUserId('');
-    await loadBoard(selectedTeamId, monthKey);
+    await loadBoard(selectedTeamId);
   };
 
   const handleCopyPrevious = async () => {
-    if (!selectedTeamId) return;
+    if (!selectedTeamId || viewMode !== 'month') return;
     await api.copyPreviousWorkloadMonth(selectedTeamId, monthKey);
-    await loadBoard(selectedTeamId, monthKey);
+    await loadBoard(selectedTeamId);
   };
 
   return (
@@ -318,11 +401,34 @@ export default function WorkloadGantt() {
           ))}
         </select>
 
-        <div className="month-switcher">
-          <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, -1))}>前月</button>
-          <strong>{monthToLabel(monthKey)}</strong>
-          <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, 1))}>次月</button>
+        <div className="workload-view-toggle">
+          <button
+            type="button"
+            className={viewMode === 'month' ? 'is-active' : ''}
+            onClick={() => setViewMode('month')}
+          >
+            月表示
+          </button>
+          <button
+            type="button"
+            className={viewMode === 'rolling' ? 'is-active' : ''}
+            onClick={() => setViewMode('rolling')}
+          >
+            直近31日
+          </button>
         </div>
+
+        {viewMode === 'month' ? (
+          <div className="month-switcher">
+            <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, -1))}>前月</button>
+            <strong>{rangeLabel}</strong>
+            <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, 1))}>次月</button>
+          </div>
+        ) : (
+          <div className="month-switcher">
+            <strong>{rangeLabel}</strong>
+          </div>
+        )}
 
         <div className="paint-mode-group">
           <label><input type="radio" name="paint-mode" value="0" checked={paintMode === '0'} onChange={(event) => setPaintMode(event.target.value)} />消す</label>
@@ -330,7 +436,7 @@ export default function WorkloadGantt() {
           <label><input type="radio" name="paint-mode" value="2" checked={paintMode === '2'} onChange={(event) => setPaintMode(event.target.value)} />濃い</label>
         </div>
 
-        <button className="btn-primary" onClick={handleCopyPrevious}>前月をコピー</button>
+        <button className="btn-primary" onClick={handleCopyPrevious} disabled={viewMode !== 'month'}>前月をコピー</button>
       </div>
 
       {!teams.length ? (
@@ -359,59 +465,77 @@ export default function WorkloadGantt() {
                 <button className="btn-primary" onClick={() => openCreateModal(member.user_id)}>＋ 業務追加</button>
               </div>
 
-              <div className="workload-grid">
+              <div className="workload-grid" style={{ ['--workload-days']: displayDates.length }}>
                 <div className="workload-grid-header workload-grid-row">
                   <div className="workload-item-label header">業務</div>
-                  {days.map((day) => (
-                    <div key={`${member.user_id}-${day}`} className="workload-day-cell header">{day}</div>
-                  ))}
+                  {displayDates.map((currentDate) => {
+                    const key = dateKey(currentDate);
+                    const isToday = key === todayKey;
+                    return (
+                      <div key={`${member.user_id}-${key}`} className={`workload-day-cell header${isToday ? ' today' : ''}`}>
+                        <span className="workload-day-number">{currentDate.getDate()}</span>
+                        <span className="workload-day-meta">{currentDate.getMonth() + 1}/{currentDate.getDate()}</span>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {(itemsByOwner[member.user_id] || []).map((item, index, ownerItems) => (
-                  <div
-                    key={item.id}
-                    className="workload-grid-row"
-                    draggable
-                    onDragStart={() => {
-                      setDraggingItemId(item.id);
-                      setDraggingOwnerUserId(member.user_id);
-                    }}
-                    onDragEnd={() => {
-                      setDraggingItemId('');
-                      setDraggingOwnerUserId('');
-                    }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={async (event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      await handleDropOnItem(member.user_id, item.id);
-                    }}
-                  >
-                    <div className="workload-item-label">
-                      <div className="workload-item-texts">
-                        <strong>{item.title}</strong>
-                        <span>{item.notes || item.category || '補足未設定'}</span>
+                {(itemsByOwner[member.user_id] || []).map((item, index, ownerItems) => {
+                  const chip = categoryStyle(item.category || '');
+                  return (
+                    <div
+                      key={item.id}
+                      className="workload-grid-row"
+                      draggable
+                      onDragStart={() => {
+                        setDraggingItemId(item.id);
+                        setDraggingOwnerUserId(member.user_id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingItemId('');
+                        setDraggingOwnerUserId('');
+                      }}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={async (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        await handleDropOnItem(member.user_id, item.id);
+                      }}
+                    >
+                      <div className="workload-item-label">
+                        <div className="workload-item-texts">
+                          <div className="workload-item-title-line">
+                            <strong>{item.title}</strong>
+                            {item.category && (
+                              <span className="workload-category-chip" style={{ background: chip.bg, color: chip.fg, borderColor: chip.border }}>
+                                {item.category}
+                              </span>
+                            )}
+                          </div>
+                          <span>{item.notes || '補足未設定'}</span>
+                        </div>
+                        <div className="workload-item-actions">
+                          <button className="btn-sm" onClick={() => openEditModal(item)}>編集</button>
+                          <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'up')} disabled={index === 0}>↑</button>
+                          <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'down')} disabled={index === ownerItems.length - 1}>↓</button>
+                          <button className="btn-sm btn-danger" onClick={() => handleDeleteItem(item.id)}>削除</button>
+                        </div>
                       </div>
-                      <div className="workload-item-actions">
-                        <button className="btn-sm" onClick={() => openEditModal(item)}>編集</button>
-                        <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'up')} disabled={index === 0}>↑</button>
-                        <button className="btn-sm" onClick={() => handleReorder(member.user_id, item.id, 'down')} disabled={index === ownerItems.length - 1}>↓</button>
-                        <button className="btn-sm btn-danger" onClick={() => handleDeleteItem(item.id)}>削除</button>
-                      </div>
+                      {displayDates.map((currentDate) => {
+                        const fullDateKey = dateKey(currentDate);
+                        const intensity = cellsByItem[item.id]?.[fullDateKey] || 0;
+                        return (
+                          <div
+                            key={`${item.id}-${fullDateKey}`}
+                            className={`workload-day-cell intensity-${intensity}${fullDateKey === todayKey ? ' today' : ''}`}
+                            onMouseDown={() => handleCellMouseDown(item.id, fullDateKey)}
+                            onMouseEnter={() => handleCellMouseEnter(item.id, fullDateKey)}
+                          />
+                        );
+                      })}
                     </div>
-                    {days.map((day) => {
-                      const intensity = cellsByItem[item.id]?.[day] || 0;
-                      return (
-                        <div
-                          key={`${item.id}-${day}`}
-                          className={`workload-day-cell intensity-${intensity}`}
-                          onMouseDown={() => handleCellMouseDown(item.id, day)}
-                          onMouseEnter={() => handleCellMouseEnter(item.id, day)}
-                        />
-                      );
-                    })}
-                  </div>
-                ))}
+                  );
+                })}
 
                 {(itemsByOwner[member.user_id] || []).length === 0 && (
                   <div className="empty-text">まだ業務がありません</div>
@@ -434,6 +558,16 @@ export default function WorkloadGantt() {
                 value={draftTitle}
                 onChange={(event) => setDraftTitle(event.target.value)}
                 placeholder="業務タイトルを入力"
+              />
+            </div>
+            <div className="admin-form-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginTop: 12 }}>
+              <label htmlFor="workload-category">カテゴリ</label>
+              <input
+                id="workload-category"
+                type="text"
+                value={draftCategory}
+                onChange={(event) => setDraftCategory(event.target.value)}
+                placeholder="カテゴリを入力"
               />
             </div>
             <div className="admin-form-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginTop: 12 }}>

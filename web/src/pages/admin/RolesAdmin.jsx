@@ -1,58 +1,93 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 
 export default function RolesAdmin() {
   const [admins, setAdmins] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [query, setQuery] = useState('');
   const [newUserId, setNewUserId] = useState('');
 
-  const load = () => api.adminRoles().then((r) => setAdmins(r.admins)).catch(console.error);
-  useEffect(() => { load(); }, []);
+  const load = async () => {
+    const [adminRes, memberRes] = await Promise.all([
+      api.adminRoles(),
+      api.adminUserMapping(''),
+    ]);
+    setAdmins(adminRes.admins || []);
+    setMembers(memberRes.members || []);
+  };
+
+  useEffect(() => {
+    load().catch(console.error);
+  }, []);
+
+  const candidateMembers = useMemo(() => {
+    const adminIds = new Set(admins.map((item) => item.user_id));
+    const normalizedQuery = query.trim().toLowerCase();
+    return members.filter((member) => {
+      if (adminIds.has(member.user_id)) return false;
+      if (!normalizedQuery) return true;
+      return [member.display_name, member.real_name, member.user_id]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+    });
+  }, [admins, members, query]);
 
   const handleAdd = async () => {
-    if (!newUserId.trim()) return;
-    await api.adminSetRole(newUserId.trim(), 'admin');
+    if (!newUserId) return;
+    await api.adminSetRole(newUserId, 'admin');
     setNewUserId('');
-    load();
+    await load();
   };
 
   const handleRemove = async (userId) => {
-    if (!confirm('この管理者を解除しますか？')) return;
+    if (!window.confirm('この管理者権限を解除しますか？')) return;
     await api.adminSetRole(userId, 'member');
-    load();
+    await load();
   };
 
   return (
     <div>
-      <h2>権限管理</h2>
-      <p className="hint-text">admin権限を持つユーザーは、全チームのタスクを閲覧でき、チーム・プロジェクト管理ができます。</p>
+      <div className="page-header">
+        <div>
+          <h2>管理者権限</h2>
+          <p className="page-subtitle">管理者は全チームの設定変更と閲覧権限の管理ができます。</p>
+        </div>
+      </div>
 
       <div className="admin-form-row">
         <input
           type="text"
-          placeholder="Slack User ID (例: U0A6JPMKVRR)"
-          value={newUserId}
-          onChange={(e) => setNewUserId(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          placeholder="ユーザーを検索"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
         />
-        <button className="btn-primary" onClick={handleAdd}>admin追加</button>
+        <select value={newUserId} onChange={(event) => setNewUserId(event.target.value)}>
+          <option value="">管理者にするユーザーを選択</option>
+          {candidateMembers.map((member) => (
+            <option key={member.user_id} value={member.user_id}>
+              {member.display_name || member.real_name || member.user_id} ({member.user_id})
+            </option>
+          ))}
+        </select>
+        <button className="btn-primary" onClick={handleAdd} disabled={!newUserId}>追加</button>
       </div>
 
       <div className="admin-list">
-        {admins.map((a) => (
-          <div key={a.user_id} className="admin-card">
+        {admins.map((admin) => (
+          <div key={admin.user_id} className="admin-card">
             <div className="admin-card-header">
               <span className="admin-card-title">
-                {a.displayName}
+                {admin.displayName}
                 <span className="badge">admin</span>
-                <span className="user-id-hint">{a.user_id}</span>
+                <span className="user-id-hint">{admin.user_id}</span>
               </span>
               <div className="admin-card-actions">
-                <button className="btn-sm btn-danger" onClick={() => handleRemove(a.user_id)}>解除</button>
+                <button className="btn-sm btn-danger" onClick={() => handleRemove(admin.user_id)}>解除</button>
               </div>
             </div>
           </div>
         ))}
-        {admins.length === 0 && <p className="empty-text">管理者がいません</p>}
+        {admins.length === 0 && <p className="empty-text">管理者はまだいません</p>}
       </div>
     </div>
   );

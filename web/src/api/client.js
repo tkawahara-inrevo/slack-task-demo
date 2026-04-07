@@ -81,6 +81,11 @@ export const api = {
   // Admin: roles
   adminRoles: () => apiFetch('/admin/roles'),
   adminSetRole: (userId, role) => jsonPost('/admin/roles', { userId, role }),
+  adminVisibility: (userId) => apiFetch(`/admin/visibility/${encodeURIComponent(userId)}`),
+  adminSetVisibility: (userId, visibleDashTeamIds, visibleUserIds) => jsonPut(`/admin/visibility/${encodeURIComponent(userId)}`, {
+    visibleDashTeamIds,
+    visibleUserIds,
+  }),
 
   // Admin: teams
   adminTeams: () => apiFetch('/admin/teams'),

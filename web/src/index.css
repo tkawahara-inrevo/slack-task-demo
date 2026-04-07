@@ -635,12 +635,120 @@ section h2 {
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
 }
 
+.permissions-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+}
+
+.permissions-panel {
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.permissions-panel h3 {
+  margin: 0 0 12px;
+}
+
+.permissions-panel-wide {
+  min-width: 0;
+}
+
+.permissions-search {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.permissions-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.permissions-user-row {
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.permissions-user-row.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.permissions-user-row span {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.permissions-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--gray-50);
+}
+
+.permissions-summary span {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.permissions-section + .permissions-section {
+  margin-top: 20px;
+}
+
+.permissions-section h4 {
+  margin-bottom: 8px;
+}
+
+.permissions-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.permissions-checkbox-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.permissions-checkbox-card input {
+  margin-top: 2px;
+}
+
 @media (max-width: 900px) {
   .page-header,
   .workload-member-header,
   .workload-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .permissions-layout {
+    grid-template-columns: 1fr;
   }
 }
 

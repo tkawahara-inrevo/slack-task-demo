@@ -16,17 +16,15 @@ export default function UserMappingAdmin() {
   const load = useCallback(async (nextQuery = query) => {
     setLoading(true);
     try {
-      const res = await api.adminUserMapping(nextQuery);
-      setMembers(res.members || []);
-    } catch (error) {
-      console.error(error);
+      const response = await api.adminUserMapping(nextQuery);
+      setMembers(response.members || []);
     } finally {
       setLoading(false);
     }
   }, [query]);
 
   useEffect(() => {
-    load('');
+    load('').catch(console.error);
   }, [load]);
 
   const handleSearch = async (event) => {
@@ -39,8 +37,6 @@ export default function UserMappingAdmin() {
     try {
       await api.adminSyncUserMapping();
       await load(query);
-    } catch (error) {
-      console.error(error);
     } finally {
       setSyncing(false);
     }
@@ -51,7 +47,7 @@ export default function UserMappingAdmin() {
       <div className="page-header">
         <div>
           <h2>ユーザーマッピング</h2>
-          <p className="page-subtitle">Slack の表示名と user ID を確認するための管理者専用一覧です。</p>
+          <p className="page-subtitle">Slack の表示名と user ID を確認するための管理者向け一覧です。</p>
         </div>
         <button className="btn-primary" onClick={handleSync} disabled={syncing}>
           {syncing ? '同期中...' : 'Slack から同期'}

@@ -101,6 +101,9 @@ function registerDashboardApi(deps) {
     dbListDashTeamMembers,
     dbGetUserDashTeams,
     dbListDashboardVisibleUsers,
+    dbListDashboardVisibleTeams,
+    dbReplaceDashboardVisibleUsers,
+    dbReplaceDashboardVisibleTeams,
     dbUpsertDashboardUserDirectoryMember,
     dbListDashboardUserDirectory,
     dbGetDashboardDirectoryMember,
@@ -219,9 +222,17 @@ function registerDashboardApi(deps) {
 
   // Helper: get visible user_ids for non-admin
   async function getVisibleUserIds(teamId, userId) {
-    const explicitVisible = await dbListDashboardVisibleUsers(teamId, userId);
-    if (explicitVisible.length) {
-      return Array.from(new Set([userId, ...explicitVisible.map((row) => row.visible_user_id)]));
+    const [explicitUsers, explicitTeams] = await Promise.all([
+      dbListDashboardVisibleUsers(teamId, userId),
+      dbListDashboardVisibleTeams(teamId, userId),
+    ]);
+    if (explicitUsers.length || explicitTeams.length) {
+      const visible = new Set([userId, ...explicitUsers.map((row) => row.visible_user_id)]);
+      for (const row of explicitTeams) {
+        const members = await dbListDashTeamMembers(teamId, row.visible_dash_team_id);
+        for (const member of members) visible.add(member.user_id);
+      }
+      return Array.from(visible);
     }
 
     const teams = await dbGetUserDashTeams(teamId, userId);
@@ -233,6 +244,17 @@ function registerDashboardApi(deps) {
     }
     allMembers.add(userId);
     return Array.from(allMembers);
+  }
+
+  async function getVisibilityConfig(teamId, userId) {
+    const [visibleUsers, visibleTeams] = await Promise.all([
+      dbListDashboardVisibleUsers(teamId, userId),
+      dbListDashboardVisibleTeams(teamId, userId),
+    ]);
+    return {
+      visibleUserIds: visibleUsers.map((row) => row.visible_user_id),
+      visibleDashTeamIds: visibleTeams.map((row) => row.visible_dash_team_id),
+    };
   }
 
   function parseMonthKey(input) {
@@ -554,6 +576,38 @@ function registerDashboardApi(deps) {
       res.json({ ok: true });
     } catch (e) {
       console.error("dashboard POST /admin/roles error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.get("/api/dashboard/admin/visibility/:userId", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const viewerUserId = String(req.params.userId || "").trim();
+      if (!viewerUserId) return res.status(400).json({ error: "userId_required" });
+      const config = await getVisibilityConfig(teamId, viewerUserId);
+      res.json(config);
+    } catch (e) {
+      console.error("dashboard GET /admin/visibility error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.put("/api/dashboard/admin/visibility/:userId", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const viewerUserId = String(req.params.userId || "").trim();
+      const visibleUserIds = Array.isArray(req.body?.visibleUserIds) ? req.body.visibleUserIds : [];
+      const visibleDashTeamIds = Array.isArray(req.body?.visibleDashTeamIds) ? req.body.visibleDashTeamIds : [];
+      if (!viewerUserId) return res.status(400).json({ error: "userId_required" });
+      await Promise.all([
+        dbReplaceDashboardVisibleUsers(teamId, viewerUserId, visibleUserIds),
+        dbReplaceDashboardVisibleTeams(teamId, viewerUserId, visibleDashTeamIds),
+      ]);
+      const config = await getVisibilityConfig(teamId, viewerUserId);
+      res.json({ ok: true, ...config });
+    } catch (e) {
+      console.error("dashboard PUT /admin/visibility error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

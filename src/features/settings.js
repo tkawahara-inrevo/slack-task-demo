@@ -6,7 +6,7 @@ function registerSettingsFeature(deps) {
     dbUpsertTeamSettings,
     dbUpsertUserSettings,
     dbListProjects = async () => [],
-    dbListDashTeams = async () => [],
+    dbListDashTeams: _dbListDashTeams = async () => [],
     getTeamIdFromBody,
     getUserIdFromBody,
     publishHome,
@@ -35,6 +35,7 @@ function registerSettingsFeature(deps) {
     homeRange: "inherit",
     homeState: "inherit",
     dueDmNotificationsEnabled: "inherit",
+    dueRequesterDmNotificationsEnabled: "inherit",
     dueNotificationSchedule: "morning_only", // "morning_only" = 朝9時のみ, "morning_and_afternoon" = 朝9時＋16時
     completionDmNotificationsEnabled: "inherit",
     commentDmNotificationsEnabled: "inherit",
@@ -121,6 +122,11 @@ function registerSettingsFeature(deps) {
         src.dueDmNotificationsEnabled,
         ["inherit", "true"],
         src.dueDmNotificationsEnabled === "false" ? "inherit" : DEFAULT_USER_SETTINGS.dueDmNotificationsEnabled,
+      ),
+      dueRequesterDmNotificationsEnabled: pickChoice(
+        src.dueRequesterDmNotificationsEnabled,
+        ["inherit", "true", "false"],
+        DEFAULT_USER_SETTINGS.dueRequesterDmNotificationsEnabled,
       ),
       dueNotificationSchedule: pickChoice(
         src.dueNotificationSchedule,
@@ -215,6 +221,7 @@ function registerSettingsFeature(deps) {
     };
     const userMap = {
       due: userSettings.dueDmNotificationsEnabled,
+      due_requester: userSettings.dueRequesterDmNotificationsEnabled,
       completion: userSettings.completionDmNotificationsEnabled,
       comment: userSettings.commentDmNotificationsEnabled,
     };
@@ -253,12 +260,14 @@ function registerSettingsFeature(deps) {
     const { projects = [] } = opts;
     const dueScheduleOptions = [
       { text: { type: "plain_text", text: "朝 9:00 のみ" }, value: "morning_only" },
-      { text: { type: "plain_text", text: "朝 9:00 ＋ 16:00" }, value: "morning_and_afternoon" },
+      { text: { type: "plain_text", text: "朝 9:00 + 16:00" }, value: "morning_and_afternoon" },
     ];
     const dmOnOffOptions = [
       { text: { type: "plain_text", text: "受け取る" }, value: "true" },
       { text: { type: "plain_text", text: "受け取らない" }, value: "false" },
     ];
+
+    const currentProject = projects.find((p) => p.id === settings.homeProjectFilter);
 
     return {
       type: "modal",
@@ -300,7 +309,28 @@ function registerSettingsFeature(deps) {
             initial_option:
               dmOnOffOptions.find(
                 (option) =>
-                  option.value === (settings.completionDmNotificationsEnabled === "inherit" ? "true" : settings.completionDmNotificationsEnabled),
+                  option.value ===
+                  (settings.completionDmNotificationsEnabled === "inherit"
+                    ? "true"
+                    : settings.completionDmNotificationsEnabled),
+              ) || dmOnOffOptions[0],
+          },
+        },
+        {
+          type: "input",
+          block_id: "due_requester_dm_notifications",
+          label: { type: "plain_text", text: "依頼者としての今日期限通知 DM" },
+          element: {
+            type: "static_select",
+            action_id: "value",
+            options: dmOnOffOptions,
+            initial_option:
+              dmOnOffOptions.find(
+                (option) =>
+                  option.value ===
+                  (settings.dueRequesterDmNotificationsEnabled === "inherit"
+                    ? "true"
+                    : settings.dueRequesterDmNotificationsEnabled),
               ) || dmOnOffOptions[0],
           },
         },
@@ -315,11 +345,13 @@ function registerSettingsFeature(deps) {
             initial_option:
               dmOnOffOptions.find(
                 (option) =>
-                  option.value === (settings.commentDmNotificationsEnabled === "inherit" ? "true" : settings.commentDmNotificationsEnabled),
+                  option.value ===
+                  (settings.commentDmNotificationsEnabled === "inherit"
+                    ? "true"
+                    : settings.commentDmNotificationsEnabled),
               ) || dmOnOffOptions[0],
           },
         },
-        // --- Home フィルター ---
         ...(projects.length > 0
           ? [
               { type: "divider" },
@@ -327,7 +359,8 @@ function registerSettingsFeature(deps) {
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: "*Homeタブ フィルター設定*\nダッシュボードのプロジェクト・チームでホームタブの表示を絞り込めます。",
+                  text:
+                    "*Homeタブ フィルター設定*\nダッシュボードのプロジェクト・チームでホームタブの表示を絞り込めます。",
                 },
               },
               {
@@ -340,7 +373,10 @@ function registerSettingsFeature(deps) {
                   action_id: "value",
                   placeholder: { type: "plain_text", text: "フィルターなし" },
                   options: [
-                    { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
+                    {
+                      text: { type: "plain_text", text: "フィルターなし" },
+                      value: "__none__",
+                    },
                     ...projects.map((p) => ({
                       text: { type: "plain_text", text: p.name },
                       value: p.id,
@@ -348,12 +384,15 @@ function registerSettingsFeature(deps) {
                   ],
                   ...(settings.homeProjectFilter
                     ? {
-                        initial_option: projects.find((p) => p.id === settings.homeProjectFilter)
+                        initial_option: currentProject
                           ? {
-                              text: { type: "plain_text", text: projects.find((p) => p.id === settings.homeProjectFilter).name },
+                              text: { type: "plain_text", text: currentProject.name },
                               value: settings.homeProjectFilter,
                             }
-                          : { text: { type: "plain_text", text: "フィルターなし" }, value: "__none__" },
+                          : {
+                              text: { type: "plain_text", text: "フィルターなし" },
+                              value: "__none__",
+                            },
                       }
                     : {}),
                 },
@@ -363,7 +402,8 @@ function registerSettingsFeature(deps) {
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: "*パーソナルフィルター*\nメンバーを選んで「チーム」として保存し、部署フィルターで使えます。",
+                  text:
+                    "*パーソナルフィルター*\nメンバーを選んで「チーム」として保存し、部署フィルターで使えます。",
                 },
                 accessory: {
                   type: "button",
@@ -379,7 +419,8 @@ function registerSettingsFeature(deps) {
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: "*パーソナルフィルター*\nメンバーを選んで「チーム」として保存し、部署フィルターで使えます。",
+                  text:
+                    "*パーソナルフィルター*\nメンバーを選んで「チーム」として保存し、部署フィルターで使えます。",
                 },
                 accessory: {
                   type: "button",
@@ -614,6 +655,9 @@ function registerSettingsFeature(deps) {
       homeRange: "inherit",
       homeState: "inherit",
       dueDmNotificationsEnabled: "true",
+      dueRequesterDmNotificationsEnabled:
+        view.state.values.due_requester_dm_notifications?.value?.selected_option
+          ?.value || "true",
       dueNotificationSchedule:
         view.state.values.due_notification_schedule?.value?.selected_option?.value || "morning_only",
       completionDmNotificationsEnabled:

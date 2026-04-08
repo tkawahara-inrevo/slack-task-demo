@@ -794,6 +794,7 @@ async function notifyTaskSimpleDM(
     if (!channel) return;
 
     const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
+    const hasSourceLink = !!task?.source_permalink;
 
     await app.client.chat.postMessage({
       channel,
@@ -813,6 +814,15 @@ async function notifyTaskSimpleDM(
               action_id: "open_detail_modal",
               value: payload,
             },
+            ...(hasSourceLink
+              ? [
+                  {
+                    type: "button",
+                    text: { type: "plain_text", text: "元メッセージへ" },
+                    url: task.source_permalink,
+                  },
+                ]
+              : []),
           ],
         },
       ],

@@ -24,21 +24,20 @@ function registerNotificationJobs(deps) {
     todayJstYmd,
   } = deps;
 
-async function notifyUserDM(userId, task, roleLabel) {
+async function notifyUserDM(userId, task, roleLabel, kind = "due") {
   if (!userId) return;
-  if (!(await canUserReceiveDm(task?.team_id, userId, "due"))) return;
+  if (!(await canUserReceiveDm(task?.team_id, userId, kind))) return;
 
   const dm = await app.client.conversations.open({ users: userId });
   const channel = dm.channel?.id;
   if (!channel) return;
 
-  // 期限表示：JST基準で「今日」を優先。DB/pgの型差（Date/文字列）にも耐える。
   const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
-  const hasLink = !!(task?.source_permalink && task?.message_ts);
+  const hasLink = !!task?.source_permalink;
 
   await app.client.chat.postMessage({
     channel,
-    text: `⏰ 今日が期限です（${roleLabel}）: ${noMention(task.title)}`,
+    text: `今日が期限です（${roleLabel}）: ${noMention(task.title)}`,
     blocks: [
       {
         type: "section",
@@ -86,7 +85,6 @@ async function runDueNotifyJob() {
   `;
   const tasks = (await dbQuery(q, [today])).rows;
 
-  // レート制限を考慮して5件ずつバッチ並列処理
   const BATCH_SIZE = 5;
   for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
     const batch = tasks.slice(i, i + BATCH_SIZE);
@@ -94,8 +92,8 @@ async function runDueNotifyJob() {
       batch.map(async (t) => {
         try {
           await Promise.all([
-            notifyUserDM(t.requester_user_id, t, "依頼者"),
-            notifyUserDM(t.assignee_id, t, "対応者"),
+            notifyUserDM(t.requester_user_id, t, "依頼者", "due_requester"),
+            notifyUserDM(t.assignee_id, t, "対応者", "due"),
           ]);
           await dbQuery(
             `UPDATE tasks SET notified_at = now() WHERE team_id=$1 AND id=$2`,
@@ -121,13 +119,9 @@ cron.schedule(
   { timezone: "Asia/Tokyo" },
 );
 
-// ================================
-// 16:00 午後リマインド（設定ユーザーのみ）
-// ================================
 async function runAfternoonDueNotifyJob() {
   const today = todayJstYmd();
 
-  // 今日が期限でまだ未完了のタスク（朝に通知済みかどうかは問わない）
   const q = `
     SELECT *
     FROM tasks
@@ -145,16 +139,15 @@ async function runAfternoonDueNotifyJob() {
     await Promise.allSettled(
       batch.map(async (t) => {
         try {
-          // 各ユーザーの午後通知設定をチェック
           const users = [
-            { id: t.requester_user_id, role: "依頼者" },
-            { id: t.assignee_id, role: "対応者" },
+            { id: t.requester_user_id, role: "依頼者", kind: "due_requester" },
+            { id: t.assignee_id, role: "対応者", kind: "due" },
           ];
           for (const u of users) {
             if (!u.id) continue;
             const schedule = await getUserDueSchedule(t.team_id, u.id);
             if (schedule === "morning_and_afternoon") {
-              await notifyUserDM(u.id, t, `${u.role}・午後リマインド`);
+              await notifyUserDM(u.id, t, `${u.role}・午後リマインド`, u.kind);
             }
           }
         } catch (e) {
@@ -176,7 +169,6 @@ cron.schedule(
   },
   { timezone: "Asia/Tokyo" },
 );
-
 if (process.env.RUN_NOTIFY_NOW === "true") {
   runDueNotifyJob().catch(console.error);
 }

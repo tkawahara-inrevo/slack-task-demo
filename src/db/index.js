@@ -501,7 +501,7 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_config JSONB`);
 
   // 親子チーム構造
-  await dbQuery(`ALTER TABLE dash_teams ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES dash_teams(id) ON DELETE SET NULL`);
+  await dbQuery(`ALTER TABLE dash_teams ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES dash_teams(id) ON DELETE SET NULL`).catch(() => {});
 
   // チーム共有カテゴリ
   await dbQuery(`

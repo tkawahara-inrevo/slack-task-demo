@@ -495,6 +495,11 @@ async function dbEnsureSettingsSchema() {
     )
   `);
 
+  // workload_items: 色・繰り返し設定カラムを追加（既存環境向け）
+  await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS color TEXT`);
+  await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_type TEXT NOT NULL DEFAULT 'other'`);
+  await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_config JSONB`);
+
   // dashboard sessions (永続化セッション)
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS dashboard_sessions (
@@ -1390,30 +1395,26 @@ async function dbCreateWorkloadItem(teamId, {
   notes = null,
   sortOrder = 0,
   createdBy = null,
+  color = null,
+  recurrenceType = 'other',
+  recurrenceConfig = null,
 }) {
   const q = `
     INSERT INTO workload_items
-      (id, team_id, dash_team_id, owner_user_id, title, category, notes, sort_order, created_by, created_at, updated_at)
+      (id, team_id, dash_team_id, owner_user_id, title, category, notes, sort_order, created_by, color, recurrence_type, recurrence_config, created_at, updated_at)
     VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), now())
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), now())
     RETURNING *;
   `;
   const res = await dbQuery(q, [
-    id,
-    teamId,
-    dashTeamId,
-    ownerUserId,
-    title,
-    category,
-    notes,
-    sortOrder,
-    createdBy,
+    id, teamId, dashTeamId, ownerUserId, title, category, notes, sortOrder, createdBy,
+    color, recurrenceType, recurrenceConfig ? JSON.stringify(recurrenceConfig) : null,
   ]);
   return res.rows[0] || null;
 }
 
 async function dbUpdateWorkloadItem(teamId, itemId, patch) {
-  const allowed = ["owner_user_id", "title", "category", "notes", "sort_order", "dash_team_id", "is_archived"];
+  const allowed = ["owner_user_id", "title", "category", "notes", "sort_order", "dash_team_id", "is_archived", "color", "recurrence_type", "recurrence_config"];
   const sets = [];
   const vals = [];
   let i = 3;

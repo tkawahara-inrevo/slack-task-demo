@@ -904,7 +904,7 @@ function registerDashboardApi(deps) {
   expressApp.post("/api/dashboard/workload/items", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
-      const { dashTeamId, ownerUserId, title, category, notes, sortOrder } = req.body || {};
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig } = req.body || {};
       if (!title?.trim() || !dashTeamId || !ownerUserId) {
         return res.status(400).json({ error: "invalid_params" });
       }
@@ -920,6 +920,9 @@ function registerDashboardApi(deps) {
         notes: notes?.trim() || null,
         sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
         createdBy: userId,
+        color: color || null,
+        recurrenceType: recurrenceType || 'other',
+        recurrenceConfig: recurrenceConfig || null,
       });
       res.json({ item });
     } catch (e) {
@@ -933,7 +936,7 @@ function registerDashboardApi(deps) {
       const { teamId, userId, role } = req.dashboardUser;
       const existing = await dbGetWorkloadItem(teamId, req.params.id);
       if (!existing) return res.status(404).json({ error: "not_found" });
-      const { dashTeamId, ownerUserId, title, category, notes, sortOrder } = req.body || {};
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig } = req.body || {};
       const targetDashTeamId = String(dashTeamId || existing.dash_team_id || "");
       if (!(await canAccessDashTeam(teamId, userId, role, targetDashTeamId))) {
         return res.status(403).json({ error: "team_forbidden" });
@@ -945,6 +948,9 @@ function registerDashboardApi(deps) {
         category: typeof category === "string" ? category.trim() : existing.category,
         notes: typeof notes === "string" ? notes.trim() : existing.notes,
         sort_order: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : existing.sort_order,
+        color: color !== undefined ? (color || null) : existing.color,
+        recurrence_type: recurrenceType !== undefined ? recurrenceType : (existing.recurrence_type || 'other'),
+        recurrence_config: recurrenceConfig !== undefined ? recurrenceConfig : existing.recurrence_config,
       });
       res.json({ item });
     } catch (e) {

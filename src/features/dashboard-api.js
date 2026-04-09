@@ -18,10 +18,8 @@ const STAGE_LABELS = {
 
 const authTokens = new Map();
 
-const TOKEN_TTL_MS = 60 * 60 * 1000;        // 1時間（マジックリンク・使い捨て）
-const SESSION_TTL_DAYS = 30;                 // 30日間（スライディング）
-const SESSION_COOKIE_MAX_AGE = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
-const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000; // last_seen_at 更新の最小間隔
+const TOKEN_TTL_MS = 60 * 60 * 1000;                  // 1時間（マジックリンク・使い捨て）
+const SESSION_COOKIE_MAX_AGE = 10 * 365 * 24 * 60 * 60 * 1000; // 10年（事実上永続）
 
 // トークン期限切れチェック（マジックリンクのみ）
 function cleanupExpiredTokens() {
@@ -173,8 +171,6 @@ function registerDashboardApi(deps) {
   // ================================
   // セッション管理（DB永続化）
   // ================================
-  const sessionTouchCache = new Map(); // sessionId -> last DB touch timestamp
-
   async function dbCreateSession(sessionId, teamId, userId) {
     await dbQuery(
       `INSERT INTO dashboard_sessions (session_id, team_id, user_id, created_at, last_seen_at)
@@ -187,24 +183,11 @@ function registerDashboardApi(deps) {
   async function validateSessionFromDb(sessionId) {
     if (!sessionId) return null;
     const res = await dbQuery(
-      `SELECT team_id, user_id FROM dashboard_sessions
-       WHERE session_id = $1
-         AND last_seen_at > NOW() - INTERVAL '${SESSION_TTL_DAYS} days'`,
+      `SELECT team_id, user_id FROM dashboard_sessions WHERE session_id = $1`,
       [sessionId],
     ).catch(() => null);
     const row = res?.rows?.[0];
     if (!row) return null;
-
-    // last_seen_at を最大5分に1回だけ更新（スライディングTTL）
-    const lastTouch = sessionTouchCache.get(sessionId) || 0;
-    if (Date.now() - lastTouch > SESSION_TOUCH_INTERVAL_MS) {
-      sessionTouchCache.set(sessionId, Date.now());
-      dbQuery(
-        `UPDATE dashboard_sessions SET last_seen_at = NOW() WHERE session_id = $1`,
-        [sessionId],
-      ).catch(() => {});
-    }
-
     return { teamId: row.team_id, userId: row.user_id };
   }
 

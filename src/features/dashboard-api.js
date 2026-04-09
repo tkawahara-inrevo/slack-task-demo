@@ -649,9 +649,9 @@ function registerDashboardApi(deps) {
   expressApp.post("/api/dashboard/admin/teams", authWithRole, adminOnly, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
-      const { name } = req.body || {};
+      const { name, parentId } = req.body || {};
       if (!name?.trim()) return res.status(400).json({ error: "name_required" });
-      const team = await dbCreateDashTeam(randomUUID(), teamId, name.trim(), userId);
+      const team = await dbCreateDashTeam(randomUUID(), teamId, name.trim(), userId, parentId || null);
       res.json({ team });
     } catch (e) {
       console.error("dashboard POST /admin/teams error:", e);

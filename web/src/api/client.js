@@ -97,7 +97,7 @@ export const api = {
 
   // Admin: teams
   adminTeams: () => apiFetch('/admin/teams'),
-  adminCreateTeam: (name) => jsonPost('/admin/teams', { name }),
+  adminCreateTeam: (name, parentId = null) => jsonPost('/admin/teams', { name, parentId }),
   adminUpdateTeam: (id, name) => jsonPut(`/admin/teams/${id}`, { name }),
   adminDeleteTeam: (id) => apiDelete(`/admin/teams/${id}`),
 

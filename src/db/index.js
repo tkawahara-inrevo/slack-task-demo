@@ -500,6 +500,9 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_type TEXT NOT NULL DEFAULT 'other'`);
   await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_config JSONB`);
 
+  // 親子チーム構造
+  await dbQuery(`ALTER TABLE dash_teams ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES dash_teams(id) ON DELETE SET NULL`);
+
   // チーム共有カテゴリ
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS workload_categories (
@@ -1131,18 +1134,18 @@ async function dbListDashboardAdmins(teamId) {
 // ================================
 // Dash teams
 // ================================
-async function dbCreateDashTeam(id, teamId, name, createdBy) {
+async function dbCreateDashTeam(id, teamId, name, createdBy, parentId = null) {
   const q = `
-    INSERT INTO dash_teams (id, team_id, name, created_by, created_at)
-    VALUES ($1, $2, $3, $4, now())
+    INSERT INTO dash_teams (id, team_id, name, created_by, parent_id, created_at)
+    VALUES ($1, $2, $3, $4, $5, now())
     RETURNING *;
   `;
-  const res = await dbQuery(q, [id, teamId, name, createdBy]);
+  const res = await dbQuery(q, [id, teamId, name, createdBy, parentId || null]);
   return res.rows[0];
 }
 
 async function dbListDashTeams(teamId) {
-  const q = `SELECT * FROM dash_teams WHERE team_id=$1 ORDER BY created_at ASC;`;
+  const q = `SELECT *, (SELECT COUNT(*) FROM dash_team_members m WHERE m.dash_team_id=dt.id AND m.team_id=dt.team_id) AS member_count FROM dash_teams dt WHERE team_id=$1 ORDER BY parent_id NULLS FIRST, created_at ASC;`;
   const res = await dbQuery(q, [teamId]);
   return res.rows;
 }
@@ -1192,11 +1195,23 @@ async function dbListDashTeamMembers(teamId, dashTeamId) {
 }
 
 async function dbGetUserDashTeams(teamId, userId) {
+  // Returns teams where user is a direct member, OR where user is member of parent team
   const q = `
     SELECT dt.*
     FROM dash_teams dt
-    JOIN dash_team_members dtm ON dtm.dash_team_id = dt.id AND dtm.team_id = dt.team_id
-    WHERE dt.team_id = $1 AND dtm.user_id = $2
+    WHERE dt.team_id = $1
+      AND (
+        EXISTS (
+          SELECT 1 FROM dash_team_members dtm
+          WHERE dtm.dash_team_id = dt.id AND dtm.team_id = dt.team_id AND dtm.user_id = $2
+        )
+        OR (
+          dt.parent_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM dash_team_members dtm
+            WHERE dtm.dash_team_id = dt.parent_id AND dtm.team_id = dt.team_id AND dtm.user_id = $2
+          )
+        )
+      )
     ORDER BY dt.name ASC;
   `;
   const res = await dbQuery(q, [teamId, userId]);

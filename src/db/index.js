@@ -495,6 +495,17 @@ async function dbEnsureSettingsSchema() {
     )
   `);
 
+  // dashboard sessions (永続化セッション)
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS dashboard_sessions (
+      session_id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
   if (INITIAL_ADMIN_ID) {

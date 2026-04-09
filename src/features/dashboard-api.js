@@ -17,31 +17,31 @@ const STAGE_LABELS = {
 };
 
 const authTokens = new Map();
-const sessions = new Map();
 
-const TOKEN_TTL_MS = 60 * 60 * 1000;       // 1時間（マジックリンク）
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24時間（セッション）
+const TOKEN_TTL_MS = 60 * 60 * 1000;        // 1時間（マジックリンク・使い捨て）
+const SESSION_TTL_DAYS = 30;                 // 30日間（スライディング）
+const SESSION_COOKIE_MAX_AGE = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000; // last_seen_at 更新の最小間隔
 
-function cleanupExpired() {
+// トークン期限切れチェック（マジックリンクのみ）
+function cleanupExpiredTokens() {
   const now = Date.now();
   for (const [k, v] of authTokens) {
     if (now - v.createdAt > TOKEN_TTL_MS) authTokens.delete(k);
   }
-  for (const [k, v] of sessions) {
-    if (now - v.createdAt > SESSION_TTL_MS) sessions.delete(k);
-  }
 }
-setInterval(cleanupExpired, 30 * 60 * 1000);
+setInterval(cleanupExpiredTokens, 30 * 60 * 1000);
 
 function generateToken(teamId, userId) {
   const token = crypto.randomBytes(32).toString("hex");
-  const sessionId = crypto.randomBytes(16).toString("hex");
+  const sessionId = crypto.randomBytes(32).toString("hex");
   authTokens.set(token, { teamId, userId, createdAt: Date.now(), sessionId });
   return token;
 }
 
-function exchangeToken(token) {
-  cleanupExpired();
+// token を消費して { teamId, userId, sessionId } を返す（まだDBには書かない）
+function consumeToken(token) {
+  cleanupExpiredTokens();
   const entry = authTokens.get(token);
   if (!entry) return null;
   if (Date.now() - entry.createdAt > TOKEN_TTL_MS) {
@@ -49,34 +49,7 @@ function exchangeToken(token) {
     return null;
   }
   authTokens.delete(token);
-  const { teamId, userId, sessionId } = entry;
-  sessions.set(sessionId, { teamId, userId, createdAt: Date.now() });
-  return { teamId, userId, sessionId };
-}
-
-function validateSession(sessionId) {
-  if (!sessionId) return null;
-  cleanupExpired();
-  const s = sessions.get(sessionId);
-  if (!s) return null;
-  if (Date.now() - s.createdAt > SESSION_TTL_MS) {
-    sessions.delete(sessionId);
-    return null;
-  }
-  return { teamId: s.teamId, userId: s.userId };
-}
-
-// ================================
-// Middleware
-// ================================
-function authMiddleware(req, res, next) {
-  const sessionId =
-    req.cookies?.dashboard_session ||
-    (req.headers.authorization || "").replace("Bearer ", "");
-  const user = validateSession(sessionId);
-  if (!user) return res.status(401).json({ error: "unauthorized" });
-  req.dashboardUser = user;
-  next();
+  return { teamId: entry.teamId, userId: entry.userId, sessionId: entry.sessionId };
 }
 
 // ================================
@@ -197,6 +170,60 @@ function registerDashboardApi(deps) {
 
   const kintone = require("./kintone-connector");
 
+  // ================================
+  // セッション管理（DB永続化）
+  // ================================
+  const sessionTouchCache = new Map(); // sessionId -> last DB touch timestamp
+
+  async function dbCreateSession(sessionId, teamId, userId) {
+    await dbQuery(
+      `INSERT INTO dashboard_sessions (session_id, team_id, user_id, created_at, last_seen_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       ON CONFLICT (session_id) DO NOTHING`,
+      [sessionId, teamId, userId],
+    );
+  }
+
+  async function validateSessionFromDb(sessionId) {
+    if (!sessionId) return null;
+    const res = await dbQuery(
+      `SELECT team_id, user_id FROM dashboard_sessions
+       WHERE session_id = $1
+         AND last_seen_at > NOW() - INTERVAL '${SESSION_TTL_DAYS} days'`,
+      [sessionId],
+    ).catch(() => null);
+    const row = res?.rows?.[0];
+    if (!row) return null;
+
+    // last_seen_at を最大5分に1回だけ更新（スライディングTTL）
+    const lastTouch = sessionTouchCache.get(sessionId) || 0;
+    if (Date.now() - lastTouch > SESSION_TOUCH_INTERVAL_MS) {
+      sessionTouchCache.set(sessionId, Date.now());
+      dbQuery(
+        `UPDATE dashboard_sessions SET last_seen_at = NOW() WHERE session_id = $1`,
+        [sessionId],
+      ).catch(() => {});
+    }
+
+    return { teamId: row.team_id, userId: row.user_id };
+  }
+
+  // ================================
+  // Middleware
+  // ================================
+  function authMiddleware(req, res, next) {
+    const sessionId =
+      req.cookies?.dashboard_session ||
+      (req.headers.authorization || "").replace("Bearer ", "");
+    validateSessionFromDb(sessionId)
+      .then((user) => {
+        if (!user) { res.status(401).json({ error: "unauthorized" }); return; }
+        req.dashboardUser = user;
+        next();
+      })
+      .catch(() => res.status(401).json({ error: "unauthorized" }));
+  }
+
   // admin check middleware
   function adminOnly(req, res, next) {
     if (req.dashboardUser?.role !== "admin") {
@@ -293,20 +320,21 @@ function registerDashboardApi(deps) {
   }
 
   // --- Token exchange ---
-  expressApp.get("/dashboard/auth", (req, res) => {
+  expressApp.get("/dashboard/auth", async (req, res) => {
     const { token } = req.query;
     if (!token) return res.status(400).send("Missing token");
-    const result = exchangeToken(token);
+    const result = consumeToken(token);
     if (!result) {
       return res.status(401).send(
         "<html><body><h2>リンクの有効期限が切れています</h2>" +
         "<p>Slackで <code>/dashboard</code> を再度実行してください。</p></body></html>"
       );
     }
+    await dbCreateSession(result.sessionId, result.teamId, result.userId);
     res.cookie("dashboard_session", result.sessionId, {
       httpOnly: true,
       sameSite: "lax",
-      maxAge: SESSION_TTL_MS,
+      maxAge: SESSION_COOKIE_MAX_AGE,
       secure: process.env.NODE_ENV === "production",
     });
     res.redirect("/dashboard");

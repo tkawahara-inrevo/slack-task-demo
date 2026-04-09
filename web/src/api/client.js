@@ -77,6 +77,14 @@ export const api = {
   deleteWorkloadItem: (id) => apiDelete(`/workload/items/${id}`),
   setWorkloadCells: (body) => jsonPut('/workload/cells', body),
   copyPreviousWorkloadMonth: (dashTeamId, monthKey) => jsonPost('/workload/copy-prev', { dashTeamId, monthKey }),
+  workloadCategories: (dashTeamId) => apiFetch(`/workload/categories?dashTeamId=${encodeURIComponent(dashTeamId)}`),
+  createWorkloadCategory: (body) => jsonPost('/workload/categories', body),
+  updateWorkloadCategory: (id, body) => apiFetch(`/workload/categories/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  deleteWorkloadCategory: (id) => apiDelete(`/workload/categories/${id}`),
 
   // Admin: roles
   adminRoles: () => apiFetch('/admin/roles'),

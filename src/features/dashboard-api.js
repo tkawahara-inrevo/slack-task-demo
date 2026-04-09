@@ -86,6 +86,10 @@ function registerDashboardApi(deps) {
     dbListWorkloadCells,
     dbSetWorkloadCells,
     dbCopyWorkloadMonth,
+    dbListWorkloadCategories,
+    dbUpsertWorkloadCategory,
+    dbUpdateWorkloadCategory,
+    dbDeleteWorkloadCategory,
     dbCreateProject,
     dbListProjects,
     dbGetProject,
@@ -1014,6 +1018,57 @@ function registerDashboardApi(deps) {
       res.json({ ok: true, fromMonthKey: prevMonthKey, monthKey: parsedMonth });
     } catch (e) {
       console.error("dashboard POST /workload/copy-prev error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- /workload/categories ---
+  expressApp.get("/api/dashboard/workload/categories", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { dashTeamId } = req.query;
+      if (!dashTeamId) return res.status(400).json({ error: "dashTeamId required" });
+      const categories = await dbListWorkloadCategories(teamId, dashTeamId);
+      res.json({ categories });
+    } catch (e) {
+      console.error("dashboard GET /workload/categories error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.post("/api/dashboard/workload/categories", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { dashTeamId, name, color } = req.body;
+      if (!dashTeamId || !name) return res.status(400).json({ error: "dashTeamId and name required" });
+      const category = await dbUpsertWorkloadCategory(teamId, { id: randomUUID(), dashTeamId, name, color: color || "#6366f1" });
+      res.json({ category });
+    } catch (e) {
+      console.error("dashboard POST /workload/categories error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.patch("/api/dashboard/workload/categories/:id", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { name, color } = req.body;
+      const category = await dbUpdateWorkloadCategory(teamId, req.params.id, { name, color });
+      if (!category) return res.status(404).json({ error: "not_found" });
+      res.json({ category });
+    } catch (e) {
+      console.error("dashboard PATCH /workload/categories/:id error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.delete("/api/dashboard/workload/categories/:id", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      await dbDeleteWorkloadCategory(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("dashboard DELETE /workload/categories/:id error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

@@ -3,6 +3,8 @@ import { api } from '../api/client';
 
 const DEFAULT_ITEM_COLOR = '#f97316';
 const DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+// Weekly recurrence only Mon-Fri (indices 1-5)
+const WEEKDAY_DOWS = [1, 2, 3, 4, 5];
 
 function hexToRgba(hex, alpha) {
   const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -10,8 +12,63 @@ function hexToRgba(hex, alpha) {
   return `rgba(${parseInt(r[1], 16)},${parseInt(r[2], 16)},${parseInt(r[3], 16)},${alpha})`;
 }
 
+function _dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+const _holidayCache = {};
+function getJapaneseHolidays(year) {
+  if (_holidayCache[year]) return _holidayCache[year];
+  const set = new Set();
+  const add = (m, d) => { if (d >= 1) set.add(`${year}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`); };
+  const nthWd = (m, n, dow) => {
+    const d = new Date(year, m - 1, 1);
+    let c = 0;
+    while (d.getMonth() === m - 1) { if (d.getDay() === dow && ++c === n) return d.getDate(); d.setDate(d.getDate() + 1); }
+    return -1;
+  };
+  const vernal = Math.floor(20.8431 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+  const autumn = Math.floor(23.2488 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+  // Fixed
+  add(1,1); add(2,11); add(2,23); add(3,vernal); add(4,29);
+  add(5,3); add(5,4); add(5,5); add(8,11); add(9,autumn);
+  add(11,3); add(11,23);
+  // Floating
+  add(1, nthWd(1,2,1)); add(7, nthWd(7,3,1)); add(9, nthWd(9,3,1)); add(10, nthWd(10,2,1));
+  // Substitute holidays (振替休日): holiday on Sunday → next non-holiday Mon
+  const base = new Set(set);
+  for (const h of base) {
+    const d = new Date(h);
+    if (d.getDay() === 0) {
+      const next = new Date(d);
+      next.setDate(next.getDate() + 1);
+      while (base.has(_dateKey(next))) next.setDate(next.getDate() + 1);
+      set.add(_dateKey(next));
+    }
+  }
+  // Sandwich holidays (国民の休日)
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const days = 365 + (isLeap ? 1 : 0);
+  for (let i = 0; i < days; i++) {
+    const d = new Date(year, 0, i + 1);
+    const k = _dateKey(d);
+    if (set.has(k) || d.getDay() === 0 || d.getDay() === 6) continue;
+    const prev = new Date(d); prev.setDate(prev.getDate() - 1);
+    const next = new Date(d); next.setDate(next.getDate() + 1);
+    if (set.has(_dateKey(prev)) && set.has(_dateKey(next))) set.add(k);
+  }
+  _holidayCache[year] = set;
+  return set;
+}
+
+function isWorkday(date) {
+  const dow = date.getDay();
+  if (dow === 0 || dow === 6) return false;
+  return !getJapaneseHolidays(date.getFullYear()).has(_dateKey(date));
+}
+
 function matchesRecurrence(type, config, date) {
-  if (type === 'daily') return true;
+  if (type === 'daily') return isWorkday(date);
   if (type === 'weekly') return (config?.days || []).includes(date.getDay());
   if (type === 'monthly') return (config?.days || []).includes(date.getDate());
   return false;
@@ -119,6 +176,11 @@ export default function WorkloadGantt() {
   const [hoverCell, setHoverCell] = useState(null);    // { itemId, dateKey } | null
   const [draggingItemId, setDraggingItemId] = useState('');
   const [draggingOwnerUserId, setDraggingOwnerUserId] = useState('');
+  const [categories, setCategories] = useState([]);
+  const [catMgrOpen, setCatMgrOpen] = useState(false);
+  const [catDraftName, setCatDraftName] = useState('');
+  const [catDraftColor, setCatDraftColor] = useState('#6366f1');
+  const [editingCatId, setEditingCatId] = useState('');
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -159,6 +221,12 @@ export default function WorkloadGantt() {
     if (!next.length) { setMembers([]); setItems([]); setCellsByItem({}); setLoading(false); }
   }, [selectedTeamId]);
 
+  const loadCategories = useCallback(async (dashTeamId) => {
+    if (!dashTeamId) return;
+    const res = await api.workloadCategories(dashTeamId).catch(() => ({ categories: [] }));
+    setCategories(res.categories || []);
+  }, []);
+
   const loadBoard = useCallback(async (dashTeamId) => {
     if (!dashTeamId) return;
     setLoading(true);
@@ -178,7 +246,12 @@ export default function WorkloadGantt() {
   }, [requiredMonthKeys]);
 
   useEffect(() => { loadTeams().catch(console.error); }, [loadTeams]);
-  useEffect(() => { if (selectedTeamId) loadBoard(selectedTeamId).catch(console.error); }, [selectedTeamId, loadBoard]);
+  useEffect(() => {
+    if (selectedTeamId) {
+      loadBoard(selectedTeamId).catch(console.error);
+      loadCategories(selectedTeamId).catch(console.error);
+    }
+  }, [selectedTeamId, loadBoard, loadCategories]);
 
   // Escape cancels pending select
   useEffect(() => {
@@ -362,6 +435,24 @@ export default function WorkloadGantt() {
     await loadBoard(selectedTeamId);
   };
 
+  const handleSaveCategory = async () => {
+    const name = catDraftName.trim();
+    if (!name || !selectedTeamId) return;
+    if (editingCatId) {
+      await api.updateWorkloadCategory(editingCatId, { name, color: catDraftColor });
+    } else {
+      await api.createWorkloadCategory({ dashTeamId: selectedTeamId, name, color: catDraftColor });
+    }
+    setCatDraftName(''); setCatDraftColor('#6366f1'); setEditingCatId('');
+    await loadCategories(selectedTeamId);
+  };
+
+  const handleDeleteCategory = async (id) => {
+    if (!window.confirm('このカテゴリを削除しますか？')) return;
+    await api.deleteWorkloadCategory(id);
+    await loadCategories(selectedTeamId);
+  };
+
   const toggleWeekday = (dow) => {
     const days = draftRecurrenceConfig.days || [];
     setDraftRecurrenceConfig({
@@ -418,6 +509,7 @@ export default function WorkloadGantt() {
         )}
 
         <button className="btn-primary" onClick={handleCopyPrevious} disabled={viewMode !== 'month'}>前月をコピー</button>
+        <button className="btn-secondary" onClick={() => setCatMgrOpen(true)}>カテゴリ管理</button>
       </div>
 
       {!teams.length ? (
@@ -467,6 +559,8 @@ export default function WorkloadGantt() {
                 {(itemsByOwner[member.user_id] || []).map((item) => {
                   const itemColor = item.color || DEFAULT_ITEM_COLOR;
                   const isRecurrence = item.recurrence_type && item.recurrence_type !== 'other';
+                  const catObj = item.category ? categories.find((c) => c.name === item.category) : null;
+                  const chipColor = catObj?.color || itemColor;
                   return (
                     <div key={item.id} className="workload-grid-row">
                       {/* Label: draggable for row reorder */}
@@ -486,7 +580,7 @@ export default function WorkloadGantt() {
                             {item.category && (
                               <span
                                 className="workload-category-chip"
-                                style={{ borderColor: itemColor, background: hexToRgba(itemColor, 0.12), color: itemColor }}
+                                style={{ borderColor: chipColor, background: hexToRgba(chipColor, 0.12), color: chipColor }}
                               >
                                 {item.category}
                               </span>
@@ -554,6 +648,77 @@ export default function WorkloadGantt() {
         </div>
       )}
 
+      {/* Category manager modal */}
+      {catMgrOpen && (
+        <div className="modal-overlay" onClick={() => setCatMgrOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <h3>カテゴリ管理</h3>
+
+            <div style={{ marginBottom: 12 }}>
+              {categories.length === 0 ? (
+                <p style={{ color: 'var(--gray-400)', fontSize: 13 }}>カテゴリがまだありません</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {categories.map((cat) => (
+                    <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {editingCatId === cat.id ? (
+                        <>
+                          <input
+                            type="text"
+                            value={catDraftName}
+                            onChange={(e) => setCatDraftName(e.target.value)}
+                            style={{ flex: 1 }}
+                          />
+                          <input
+                            type="color"
+                            value={catDraftColor}
+                            onChange={(e) => setCatDraftColor(e.target.value)}
+                            style={{ width: 36, height: 30, cursor: 'pointer', border: '1px solid var(--gray-200)', borderRadius: 4, padding: 2 }}
+                          />
+                          <button className="btn-sm" onClick={handleSaveCategory}>保存</button>
+                          <button className="btn-sm" onClick={() => { setEditingCatId(''); setCatDraftName(''); setCatDraftColor('#6366f1'); }}>キャンセル</button>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ width: 16, height: 16, borderRadius: '50%', background: cat.color, flexShrink: 0 }} />
+                          <span style={{ flex: 1 }}>{cat.name}</span>
+                          <button className="btn-sm" onClick={() => { setEditingCatId(cat.id); setCatDraftName(cat.name); setCatDraftColor(cat.color || '#6366f1'); }}>編集</button>
+                          <button className="btn-sm btn-danger" onClick={() => handleDeleteCategory(cat.id)}>削除</button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!editingCatId && (
+              <div style={{ borderTop: '1px solid var(--gray-100)', paddingTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={catDraftName}
+                  onChange={(e) => setCatDraftName(e.target.value)}
+                  placeholder="新しいカテゴリ名"
+                  style={{ flex: 1 }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCategory(); }}
+                />
+                <input
+                  type="color"
+                  value={catDraftColor}
+                  onChange={(e) => setCatDraftColor(e.target.value)}
+                  style={{ width: 36, height: 30, cursor: 'pointer', border: '1px solid var(--gray-200)', borderRadius: 4, padding: 2 }}
+                />
+                <button className="btn-primary" onClick={handleSaveCategory} disabled={!catDraftName.trim()}>追加</button>
+              </div>
+            )}
+
+            <div className="crm-modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn-secondary" onClick={() => { setCatMgrOpen(false); setCatDraftName(''); setCatDraftColor('#6366f1'); setEditingCatId(''); }}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Editor modal */}
       {editorOpen && (
         <div className="modal-overlay" onClick={closeEditor}>
@@ -568,7 +733,12 @@ export default function WorkloadGantt() {
             <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'flex-end' }}>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label htmlFor="wl-category">カテゴリ</label>
-                <input id="wl-category" type="text" value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)} placeholder="カテゴリを入力" />
+                <select id="wl-category" value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)}>
+                  <option value="">なし</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label htmlFor="wl-color">色</label>
@@ -604,14 +774,14 @@ export default function WorkloadGantt() {
 
               {draftRecurrenceType === 'weekly' && (
                 <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
-                  {DOW_LABELS.map((label, dow) => (
+                  {WEEKDAY_DOWS.map((dow) => (
                     <button
                       key={dow}
                       type="button"
                       className={`workload-dow-btn${(draftRecurrenceConfig.days || []).includes(dow) ? ' is-active' : ''}`}
                       onClick={() => toggleWeekday(dow)}
                     >
-                      {label}
+                      {DOW_LABELS[dow]}
                     </button>
                   ))}
                 </div>

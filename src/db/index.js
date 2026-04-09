@@ -500,6 +500,20 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_type TEXT NOT NULL DEFAULT 'other'`);
   await dbQuery(`ALTER TABLE workload_items ADD COLUMN IF NOT EXISTS recurrence_config JSONB`);
 
+  // チーム共有カテゴリ
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS workload_categories (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL,
+      dash_team_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#f97316',
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(team_id, dash_team_id, name)
+    )
+  `);
+
   // dashboard sessions (永続化セッション)
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS dashboard_sessions (
@@ -1493,6 +1507,42 @@ async function dbCopyWorkloadMonth(teamId, dashTeamId, fromMonthKey, toMonthKey)
 }
 
 // ================================
+// ================================
+// Workload categories
+// ================================
+async function dbListWorkloadCategories(teamId, dashTeamId) {
+  const res = await dbQuery(
+    `SELECT * FROM workload_categories WHERE team_id=$1 AND dash_team_id=$2 ORDER BY sort_order ASC, created_at ASC`,
+    [teamId, dashTeamId],
+  );
+  return res.rows;
+}
+
+async function dbUpsertWorkloadCategory(teamId, { id, dashTeamId, name, color, sortOrder = 0 }) {
+  const res = await dbQuery(
+    `INSERT INTO workload_categories (id, team_id, dash_team_id, name, color, sort_order, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,now())
+     ON CONFLICT (team_id, dash_team_id, name) DO UPDATE
+       SET color=$5, sort_order=$6
+     RETURNING *`,
+    [id, teamId, dashTeamId, name, color, sortOrder],
+  );
+  return res.rows[0] || null;
+}
+
+async function dbUpdateWorkloadCategory(teamId, id, { name, color }) {
+  const res = await dbQuery(
+    `UPDATE workload_categories SET name=$3, color=$4 WHERE team_id=$1 AND id=$2 RETURNING *`,
+    [teamId, id, name, color],
+  );
+  return res.rows[0] || null;
+}
+
+async function dbDeleteWorkloadCategory(teamId, id) {
+  await dbQuery(`DELETE FROM workload_categories WHERE team_id=$1 AND id=$2`, [teamId, id]);
+}
+
+// ================================
 // Projects
 // ================================
 async function dbCreateProject(id, teamId, name, dashTeamId, createdBy) {
@@ -2229,6 +2279,10 @@ module.exports = {
   dbDeleteWorkloadItem,
   dbListWorkloadCells,
   dbSetWorkloadCells,
+  dbListWorkloadCategories,
+  dbUpsertWorkloadCategory,
+  dbUpdateWorkloadCategory,
+  dbDeleteWorkloadCategory,
   dbCopyWorkloadMonth,
   dbCreateProject,
   dbListProjects,

@@ -164,7 +164,8 @@ function getDateRange(displayDates, keyA, keyB) {
 export default function WorkloadGantt() {
   const initialMonth = new Date().toISOString().slice(0, 7);
   const [teams, setTeams] = useState([]);
-  const [selectedTeamId, setSelectedTeamId] = useState('');
+  const [selectedParentId, setSelectedParentId] = useState(''); // 大チーム選択
+  const [selectedTeamId, setSelectedTeamId] = useState('');     // 実際にデータを読む子/単独チーム
   const [monthKey, setMonthKey] = useState(initialMonth);
   const [viewMode, setViewMode] = useState('month');
   const [members, setMembers] = useState([]);
@@ -213,13 +214,40 @@ export default function WorkloadGantt() {
     );
   }, [clickSelect, hoverCell, displayDates]);
 
+  // 親チームリスト（parent_id=null）と、親ごとの子チームマップ
+  const parentTeams = useMemo(() => teams.filter((t) => !t.parent_id), [teams]);
+  const childrenOf = useMemo(() => {
+    const map = {};
+    for (const t of teams) {
+      if (t.parent_id) {
+        if (!map[t.parent_id]) map[t.parent_id] = [];
+        map[t.parent_id].push(t);
+      }
+    }
+    return map;
+  }, [teams]);
+
   const loadTeams = useCallback(async () => {
     const res = await api.workloadTeams();
     const next = res.teams || [];
     setTeams(next);
-    if (!selectedTeamId && next[0]?.id) setSelectedTeamId(next[0].id);
-    if (!next.length) { setMembers([]); setItems([]); setCellsByItem({}); setLoading(false); }
+    if (!next.length) { setMembers([]); setItems([]); setCellsByItem({}); setLoading(false); return; }
+    if (!selectedTeamId) {
+      // 最初の親チームを選択、子がいれば最初の子をアクティブに
+      const parents = next.filter((t) => !t.parent_id);
+      const first = parents[0] || next[0];
+      const children = next.filter((t) => t.parent_id === first.id);
+      setSelectedParentId(first.id);
+      setSelectedTeamId(children[0]?.id || first.id);
+    }
   }, [selectedTeamId]);
+
+  // 親チーム変更時: 子があれば最初の子をアクティブに
+  const handleParentChange = useCallback((parentId) => {
+    setSelectedParentId(parentId);
+    const children = childrenOf[parentId] || [];
+    setSelectedTeamId(children[0]?.id || parentId);
+  }, [childrenOf]);
 
   const loadCategories = useCallback(async (dashTeamId) => {
     if (!dashTeamId) return;
@@ -477,9 +505,17 @@ export default function WorkloadGantt() {
       </div>
 
       <div className="workload-toolbar">
-        <select className="filter-select" value={selectedTeamId} onChange={(e) => setSelectedTeamId(e.target.value)}>
-          {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+        {/* 親チーム選択 */}
+        <select className="filter-select" value={selectedParentId} onChange={(e) => handleParentChange(e.target.value)}>
+          {parentTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
+
+        {/* 子チーム選択（子がある親のみ表示） */}
+        {(childrenOf[selectedParentId]?.length > 0) && (
+          <select className="filter-select" value={selectedTeamId} onChange={(e) => setSelectedTeamId(e.target.value)}>
+            {childrenOf[selectedParentId].map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
 
         <div className="workload-view-toggle">
           <button type="button" className={viewMode === 'month' ? 'is-active' : ''} onClick={() => setViewMode('month')}>月表示</button>

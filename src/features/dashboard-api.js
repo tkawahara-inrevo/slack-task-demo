@@ -70,6 +70,7 @@ function registerDashboardApi(deps) {
     dbAddDashTeamMember,
     dbRemoveDashTeamMember,
     dbListDashTeamMembers,
+    dbListDashTeamMembersWithProfile,
     dbGetUserDashTeams,
     dbListDashboardVisibleUsers,
     dbListDashboardVisibleTeams,
@@ -721,6 +722,24 @@ function registerDashboardApi(deps) {
       res.json({ ok: true });
     } catch (e) {
       console.error("dashboard DELETE team member error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- Org chart (accessible to all logged-in users) ---
+  expressApp.get("/api/dashboard/org-chart", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const teams = await dbListDashTeams(teamId);
+      const membersMap = {};
+      await Promise.all(
+        teams.map(async (t) => {
+          membersMap[t.id] = await dbListDashTeamMembersWithProfile(teamId, t.id);
+        }),
+      );
+      res.json({ teams, membersMap });
+    } catch (e) {
+      console.error("dashboard /org-chart error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

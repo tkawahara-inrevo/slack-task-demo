@@ -14,6 +14,7 @@ import UserMappingAdmin from './pages/admin/UserMappingAdmin'
 import ProjectView from './pages/ProjectView'
 import Analytics from './pages/Analytics'
 import WorkloadGantt from './pages/WorkloadGantt'
+import OrgChart from './pages/OrgChart'
 import ClientList from './pages/crm/ClientList'
 import ClientDetail from './pages/crm/ClientDetail'
 import DealList from './pages/crm/DealList'
@@ -29,6 +30,7 @@ function App() {
       <Route path="/projects/:id" element={<ProjectView />} />
       <Route path="/analytics" element={<Analytics />} />
       <Route path="/workload" element={<WorkloadGantt />} />
+      <Route path="/org-chart" element={<OrgChart />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
       <Route path="/crm/clients" element={<ClientList />} />
       <Route path="/crm/clients/:id" element={<ClientDetail />} />

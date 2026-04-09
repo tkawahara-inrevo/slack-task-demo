@@ -1194,6 +1194,21 @@ async function dbListDashTeamMembers(teamId, dashTeamId) {
   return res.rows;
 }
 
+async function dbListDashTeamMembersWithProfile(teamId, dashTeamId) {
+  const q = `
+    SELECT m.user_id, m.added_at,
+      d.display_name, d.real_name,
+      d.profile_json->>'title' AS title,
+      d.profile_json->>'image_72' AS avatar_url
+    FROM dash_team_members m
+    LEFT JOIN dashboard_user_directory d ON d.team_id = m.team_id AND d.user_id = m.user_id
+    WHERE m.team_id=$1 AND m.dash_team_id=$2
+    ORDER BY m.added_at ASC;
+  `;
+  const res = await dbQuery(q, [teamId, dashTeamId]);
+  return res.rows;
+}
+
 async function dbGetUserDashTeams(teamId, userId) {
   // Returns teams where user is a direct member, OR where user is member of parent team
   const q = `
@@ -2279,6 +2294,7 @@ module.exports = {
   dbAddDashTeamMember,
   dbRemoveDashTeamMember,
   dbListDashTeamMembers,
+  dbListDashTeamMembersWithProfile,
   dbGetUserDashTeams,
   dbListDashboardVisibleUsers,
   dbReplaceDashboardVisibleUsers,

@@ -63,6 +63,7 @@ export default function Dashboard() {
         <h1>タスク管理ダッシュボード</h1>
         <div className="header-right">
           <Link to="/workload" className="analytics-link">業務ガント</Link>
+          <Link to="/org-chart" className="analytics-link">組織図</Link>
           <Link to="/crm/clients" className="analytics-link">顧客</Link>
           <Link to="/crm/deals" className="analytics-link">案件</Link>
           <Link to="/analytics" className="analytics-link">分析</Link>

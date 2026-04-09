@@ -86,6 +86,8 @@ export const api = {
   }),
   deleteWorkloadCategory: (id) => apiDelete(`/workload/categories/${id}`),
 
+  orgChart: () => apiFetch('/org-chart'),
+
   // Admin: roles
   adminRoles: () => apiFetch('/admin/roles'),
   adminSetRole: (userId, role) => jsonPost('/admin/roles', { userId, role }),

@@ -153,13 +153,15 @@ async function getBroadcastEditSelectionFromView(teamId, task, values) {
 
   const prevGroupIds = task?.broadcast_group_id ? [task.broadcast_group_id] : [];
   const prevTargets = uniqIds(await dbListTargetUserIds(teamId, task.id));
+  // Only treat as "changed" when the user's explicit selection changed.
+  // Do NOT compare nextTargets vs prevTargets: that comparison would fire
+  // whenever a user was manually excluded via "対象から外す", causing
+  // dbReplaceTaskTargets to re-add the excluded person on the next edit save.
   const changed =
     JSON.stringify([...selectedUsers].sort()) !==
       JSON.stringify([...(task?.assignee_id ? [task.assignee_id] : [])].sort()) ||
     JSON.stringify([...selectedGroupIds].sort()) !==
-      JSON.stringify([...prevGroupIds].sort()) ||
-    JSON.stringify([...nextTargets].sort()) !==
-      JSON.stringify([...prevTargets].sort());
+      JSON.stringify([...prevGroupIds].sort());
 
   return {
     changed,

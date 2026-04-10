@@ -1397,15 +1397,24 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
   try {
     const p = safeJsonParse(action?.value || "{}") || {};
     const { teamId, taskId, userId: targetUserId } = p;
-    if (!teamId || !taskId || !targetUserId) return;
+    console.log("[remove_target_user] parsed:", { teamId, taskId, targetUserId });
+    if (!teamId || !taskId || !targetUserId) {
+      console.log("[remove_target_user] missing params, abort");
+      return;
+    }
 
     const task = await dbGetTaskById(teamId, taskId);
-    if (!task || task.task_type !== "broadcast") return;
+    console.log("[remove_target_user] task_type:", task?.task_type);
+    if (!task || task.task_type !== "broadcast") {
+      console.log("[remove_target_user] not broadcast, abort");
+      return;
+    }
 
-    await dbQuery(
+    const deleteRes = await dbQuery(
       `DELETE FROM task_targets WHERE team_id=$1 AND task_id=$2 AND user_id=$3`,
       [teamId, taskId, targetUserId],
     );
+    console.log("[remove_target_user] deleted rows:", deleteRes.rowCount);
 
     const countRes = await dbQuery(
       `SELECT COUNT(*) as cnt FROM task_targets WHERE team_id=$1 AND task_id=$2`,
@@ -1422,11 +1431,16 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
       await dbUpdateStatus(teamId, taskId, "done");
     }
 
-    // 現在のページを維持してモーダルを再描画
+    // 現在のページを維持してモーダルを再描画（hash不一致時もhashなしでリトライ）
     const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
     const currentPage = meta.page || 0;
     const view = await buildProgressView({ teamId, taskId, page: currentPage });
-    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+    try {
+      await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+    } catch (hashErr) {
+      console.log("[remove_target_user] hash mismatch, retrying without hash");
+      await client.views.update({ view_id: body.view.id, view });
+    }
 
     await publishHomeBurst(client, teamId, [body.user.id, task.requester_user_id].filter(Boolean), 200);
   } catch (e) {

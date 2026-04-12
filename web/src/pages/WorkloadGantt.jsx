@@ -180,8 +180,6 @@ function getDateRange(displayDates, keyA, keyB) {
 const STATUS_DEF = {
   in_progress: { bar: '#3b82f6', text: '#1d4ed8', bg: '#dbeafe', label: '進行中' },
   done:        { bar: '#22c55e', text: '#15803d', bg: '#dcfce7', label: '完了' },
-  pending:     { bar: '#f97316', text: '#c2410c', bg: '#ffedd5', label: '保留' },
-  cancelled:   { bar: '#9ca3af', text: '#6b7280', bg: '#f3f4f6', label: 'キャンセル' },
 };
 const statusDef = (s) => STATUS_DEF[s] || { bar: '#93c5fd', text: '#3b82f6', bg: '#eff6ff', label: s || '不明' };
 
@@ -233,8 +231,11 @@ export default function WorkloadGantt() {
   const [allTasks, setAllTasks] = useState([]);
   const [filterStatus, setFilterStatus] = useState('in_progress');
   const [selectedTask, setSelectedTask] = useState(null);
-  const [dragTaskId, setDragTaskId] = useState(null);
-  const [dragDayDelta, setDragDayDelta] = useState(0);
+  // Bar drag state: { id, delta, mode: 'resize'|'move', kind: 'task'|'item' }
+  const [barDrag, setBarDrag] = useState(null);
+  // Row reorder state
+  const [rowDragId, setRowDragId] = useState(null);
+  const [rowDragOverId, setRowDragOverId] = useState(null);
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -392,33 +393,105 @@ export default function WorkloadGantt() {
     return groupConsecutiveIndices(indices, ganttDayW);
   }
 
-  // Drag right edge of task bar to extend/shorten due_date
-  function startDueDateDrag(e, task) {
-    e.preventDefault();
-    e.stopPropagation();
+  // ── Bar drag (resize / move) ──────────────────────────────────────────────
+  function startBarDrag(e, kind, id, mode) {
+    e.preventDefault(); e.stopPropagation();
     const startX = e.clientX;
     let lastDelta = 0;
-    setDragTaskId(task.id);
-    setDragDayDelta(0);
+    setBarDrag({ id, kind, mode, delta: 0 });
     const onMouseMove = (me) => {
       const delta = Math.round((me.clientX - startX) / ganttDayW);
-      if (delta !== lastDelta) { lastDelta = delta; setDragDayDelta(delta); }
+      if (delta !== lastDelta) { lastDelta = delta; setBarDrag({ id, kind, mode, delta }); }
     };
     const onMouseUp = async () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      setDragTaskId(null);
-      setDragDayDelta(0);
-      if (lastDelta !== 0 && task.due_date) {
-        const d = new Date(task.due_date);
-        d.setDate(d.getDate() + lastDelta);
-        await api.taskUpdate(task.id, { due_date: dateKey(d) }).catch(console.error);
-        api.tasks({ limit: 500 }).then(r => setAllTasks(r.tasks || [])).catch(console.error);
+      setBarDrag(null);
+      if (lastDelta === 0) return;
+      if (kind === 'task') {
+        await applyTaskBarDrag(id, mode, lastDelta);
+      } else {
+        await applyItemBarDrag(id, mode, lastDelta);
       }
     };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }
+
+  async function applyTaskBarDrag(taskId, mode, delta) {
+    const task = allTasks.find(t => t.id === taskId);
+    if (!task || !task.due_date) return;
+    const newDue = new Date(task.due_date);
+    newDue.setDate(newDue.getDate() + delta);
+    // 'resize' extends only due_date; 'move' also shifts due_date (created_at is immutable)
+    await api.taskUpdate(taskId, { due_date: dateKey(newDue) }).catch(console.error);
+    api.tasks({ limit: 500 }).then(r => setAllTasks(r.tasks || [])).catch(console.error);
+  }
+
+  async function applyItemBarDrag(itemId, mode, delta) {
+    const cells = cellsByItem[itemId] || {};
+    const activeDays = Object.keys(cells).filter(k => cells[k] > 0).sort();
+    if (!activeDays.length) return;
+    let newCellMap;
+    if (mode === 'move') {
+      newCellMap = {};
+      for (const k of activeDays) {
+        const d = new Date(k); d.setDate(d.getDate() + delta);
+        newCellMap[dateKey(d)] = cells[k];
+      }
+    } else { // resize: extend/shrink end
+      newCellMap = { ...cells };
+      const lastDay = new Date(activeDays[activeDays.length - 1]);
+      if (delta > 0) {
+        for (let i = 1; i <= delta; i++) {
+          const d = new Date(lastDay); d.setDate(lastDay.getDate() + i);
+          newCellMap[dateKey(d)] = 2;
+        }
+      } else {
+        for (let i = 0; i < -delta; i++) {
+          const d = new Date(lastDay); d.setDate(lastDay.getDate() - i);
+          delete newCellMap[dateKey(d)];
+        }
+      }
+    }
+    // Save per month; clear months that disappeared
+    const monthCells = {};
+    for (const [k, v] of Object.entries(newCellMap)) {
+      const mk = k.slice(0, 7);
+      if (!monthCells[mk]) monthCells[mk] = [];
+      monthCells[mk].push({ dayNum: parseInt(k.slice(8, 10)), intensity: v });
+    }
+    const oldMonths = [...new Set(activeDays.map(k => k.slice(0, 7)))];
+    const cleared = oldMonths.filter(m => !monthCells[m]);
+    await Promise.all([
+      ...Object.entries(monthCells).map(([mk, c]) => api.setWorkloadCells({ itemId, monthKey: mk, cells: c })),
+      ...cleared.map(mk => api.setWorkloadCells({ itemId, monthKey: mk, cells: [] })),
+    ]);
+    await loadBoard(selectedTeamId);
+  }
+
+  // ── Row reorder ──────────────────────────────────────────────────────────
+  const persistOwnerItems = async (ownerUserId, ownerItems) => {
+    await Promise.all(
+      ownerItems.map((item, i) => api.updateWorkloadItem(item.id, {
+        ...itemPayload(item), ownerUserId, sortOrder: i + 1,
+      }))
+    );
+  };
+
+  const handleRowDrop = async (targetOwnerUserId, targetItemId) => {
+    if (!rowDragId || rowDragId === targetItemId) return;
+    const ownerItems = [...(itemsByOwner[targetOwnerUserId] || [])];
+    const fromIdx = ownerItems.findIndex(it => it.id === rowDragId);
+    const toIdx   = ownerItems.findIndex(it => it.id === targetItemId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const reordered = [...ownerItems];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    setRowDragId(null); setRowDragOverId(null);
+    await persistOwnerItems(targetOwnerUserId, reordered);
+    await loadBoard(selectedTeamId);
+  };
 
   const itemPayload = (item) => ({
     dashTeamId: selectedTeamId,
@@ -590,9 +663,7 @@ export default function WorkloadGantt() {
         <select className="filter-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="in_progress">進行中のみ</option>
           <option value="">すべて表示</option>
-          <option value="done">完了</option>
-          <option value="pending">保留</option>
-          <option value="cancelled">キャンセル</option>
+          <option value="done">完了のみ</option>
         </select>
         <button type="button" className="filter-clear-btn" style={{ marginLeft: 'auto' }} onClick={() => setCatMgrOpen(v => !v)}>
           カテゴリ管理
@@ -630,14 +701,27 @@ export default function WorkloadGantt() {
                     {workItems.map((item) => {
                       const isRecurrence = item.recurrence_type && item.recurrence_type !== 'other';
                       const catObj = item.category ? categories.find((c) => c.name === item.category) : null;
+                      const isDragOver = rowDragOverId === item.id && rowDragId !== item.id;
                       return (
                         <div key={item.id}
                           title={item.title + (item.notes ? ' — ' + item.notes : '')}
+                          draggable
+                          onDragStart={() => setRowDragId(item.id)}
+                          onDragEnd={() => { setRowDragId(null); setRowDragOverId(null); }}
+                          onDragOver={(e) => { e.preventDefault(); setRowDragOverId(item.id); }}
+                          onDragLeave={() => setRowDragOverId(null)}
+                          onDrop={(e) => { e.preventDefault(); handleRowDrop(member.user_id, item.id); }}
                           onClick={() => openEditModal(item)}
-                          onMouseEnter={e => e.currentTarget.style.background = '#fafafa'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}
-                          style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12, cursor: 'pointer' }}
+                          style={{
+                            height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6,
+                            borderTop: isDragOver ? '2px solid var(--primary)' : '1px solid transparent',
+                            borderBottom: '1px solid var(--gray-100)',
+                            fontSize: 12, cursor: 'grab',
+                            opacity: rowDragId === item.id ? 0.4 : 1,
+                            background: rowDragId === item.id ? '#f0f0f0' : '',
+                          }}
                         >
+                          <span style={{ color: 'var(--gray-300)', fontSize: 13, flexShrink: 0, cursor: 'grab' }}>⠿</span>
                           <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: item.color || DEFAULT_ITEM_COLOR, flexShrink: 0 }} />
                           <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0 }}>{isRecurrence ? '↺' : '▬'}</span>
                           {catObj && <span style={{ fontSize: 9, fontWeight: 600, flexShrink: 0, color: catObj.color, background: catObj.color + '22', padding: '1px 5px', borderRadius: 6 }}>{catObj.name}</span>}
@@ -710,25 +794,57 @@ export default function WorkloadGantt() {
                         {todayIdx >= 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * ganttDayW + ganttDayW / 2, width: 2, background: '#3b82f6', opacity: 0.3 }} />}
                       </div>
                       {workItems.map((item) => {
-                        const bars = getWorkloadBars(item);
+                        const isOther = !item.recurrence_type || item.recurrence_type === 'other';
+                        const isDragging = barDrag?.kind === 'item' && barDrag.id === item.id;
+                        let bars = getWorkloadBars(item);
+                        if (isDragging) {
+                          bars = bars.map((bar, i) => {
+                            if (barDrag.mode === 'move') return { ...bar, left: bar.left + barDrag.delta * ganttDayW };
+                            if (barDrag.mode === 'resize' && i === bars.length - 1) return { ...bar, width: Math.max(bar.width + barDrag.delta * ganttDayW, ganttDayW) };
+                            return bar;
+                          });
+                        }
                         return (
                           <div key={item.id} style={{ height: ROW_H, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
                             {displayDates.map((_, i) => weekendBg(i))}
                             {todayLine}
                             {bars.map((bar, bi) => (
-                              <div key={bi} title={item.title} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: item.color || DEFAULT_ITEM_COLOR, opacity: 0.85 }} />
+                              <div key={bi} style={{
+                                position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+                                left: bar.left, width: bar.width, height: 18, borderRadius: 4,
+                                background: item.color || DEFAULT_ITEM_COLOR, opacity: 0.85,
+                                display: 'flex', alignItems: 'center', overflow: 'visible',
+                                cursor: isOther ? 'grab' : 'default', userSelect: 'none',
+                              }}
+                                onMouseDown={isOther ? (e) => { if (e.target === e.currentTarget) startBarDrag(e, 'item', item.id, 'move'); } : undefined}
+                              >
+                                {/* Move handle: inner area */}
+                                {isOther && (
+                                  <div title={item.title} style={{ flex: 1, height: '100%', cursor: 'grab' }}
+                                    onMouseDown={(e) => startBarDrag(e, 'item', item.id, 'move')} />
+                                )}
+                                {/* Resize handle: right edge */}
+                                {isOther && (
+                                  <div
+                                    onMouseDown={(e) => startBarDrag(e, 'item', item.id, 'resize')}
+                                    style={{ position: 'absolute', right: -3, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                  >
+                                    <div style={{ width: 3, height: 10, borderRadius: 2, background: 'rgba(255,255,255,0.7)' }} />
+                                  </div>
+                                )}
+                              </div>
                             ))}
                           </div>
                         );
                       })}
                       {slackTasks.map((task) => {
-                        const isDragging = dragTaskId === task.id;
+                        const isDragging = barDrag?.kind === 'task' && barDrag.id === task.id;
                         const dueDateOverride = isDragging && task.due_date
-                          ? (() => { const d = new Date(task.due_date); d.setDate(d.getDate() + dragDayDelta); return d; })()
+                          ? (() => { const d = new Date(task.due_date); d.setDate(d.getDate() + barDrag.delta); return d; })()
                           : undefined;
                         const bar = getTaskBar(task, dueDateOverride);
                         const sc = statusDef(task.status);
-                        const opacity = task.status === 'cancelled' ? 0.35 : task.status === 'done' ? 0.65 : 1;
+                        const opacity = task.status === 'done' ? 0.65 : 1;
                         return (
                           <div key={task.id} style={{ height: ROW_H, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
                             {displayDates.map((_, i) => weekendBg(i))}
@@ -736,20 +852,23 @@ export default function WorkloadGantt() {
                             {bar && (
                               <div
                                 title={stripSlack(task.title || '')}
-                                onClick={() => setSelectedTask(task)}
-                                style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: sc.bar, opacity, display: 'flex', alignItems: 'center', overflow: 'visible', cursor: 'pointer', userSelect: 'none' }}
+                                onClick={() => !isDragging && setSelectedTask(task)}
+                                style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: sc.bar, opacity, display: 'flex', alignItems: 'center', overflow: 'visible', cursor: 'grab', userSelect: 'none' }}
                               >
-                                {bar.clippedLeft && <div style={{ width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderRight: '6px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
-                                {/* Drag handle: right edge */}
+                                {bar.clippedLeft && <div style={{ width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderRight: '6px solid rgba(0,0,0,0.3)', flexShrink: 0, pointerEvents: 'none' }} />}
+                                {/* Middle drag: move whole bar (shifts due_date) */}
+                                <div style={{ flex: 1, height: '100%' }}
+                                  onMouseDown={(e) => startBarDrag(e, 'task', task.id, 'move')} />
+                                {/* Right edge drag: resize (extend/shorten due_date) */}
                                 {task.due_date && (
                                   <div
-                                    onMouseDown={(e) => startDueDateDrag(e, task)}
+                                    onMouseDown={(e) => startBarDrag(e, 'task', task.id, 'resize')}
                                     style={{ position: 'absolute', right: -3, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                   >
-                                    <div style={{ width: 3, height: 10, borderRadius: 2, background: 'rgba(255,255,255,0.7)' }} />
+                                    <div style={{ width: 3, height: 10, borderRadius: 2, background: 'rgba(255,255,255,0.7)', pointerEvents: 'none' }} />
                                   </div>
                                 )}
-                                {bar.clippedRight && <div style={{ marginLeft: 'auto', width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderLeft: '6px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
+                                {bar.clippedRight && <div style={{ marginLeft: 'auto', width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderLeft: '6px solid rgba(0,0,0,0.3)', flexShrink: 0, pointerEvents: 'none' }} />}
                               </div>
                             )}
                           </div>

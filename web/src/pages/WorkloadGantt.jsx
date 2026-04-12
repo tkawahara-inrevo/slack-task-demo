@@ -161,6 +161,279 @@ function getDateRange(displayDates, keyA, keyB) {
   return keys.slice(lo, hi + 1);
 }
 
+// ─── Task Gantt (BackLog / Redmine style) ────────────────────────────────────
+
+const STATUS_DEF = {
+  in_progress: { bar: '#3b82f6', text: '#1d4ed8', bg: '#dbeafe', label: '進行中' },
+  done:        { bar: '#22c55e', text: '#15803d', bg: '#dcfce7', label: '完了' },
+  pending:     { bar: '#f97316', text: '#c2410c', bg: '#ffedd5', label: '保留' },
+  cancelled:   { bar: '#9ca3af', text: '#6b7280', bg: '#f3f4f6', label: 'キャンセル' },
+};
+const statusDef = (s) => STATUS_DEF[s] || { bar: '#93c5fd', text: '#3b82f6', bg: '#eff6ff', label: s || '不明' };
+
+const TASK_DAY_W = 28; // px per day
+const DOW_JP = ['日', '月', '火', '水', '木', '金', '土'];
+
+function stripSlack(text) {
+  return (text || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function TaskGanttView() {
+  const [allTasks, setAllTasks] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [monthKey, setMonthKey] = useState(() => new Date().toISOString().slice(0, 7));
+  const [filterAssignee, setFilterAssignee] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  useEffect(() => {
+    Promise.all([api.tasks({ limit: 500 }), api.members()])
+      .then(([tr, mr]) => {
+        setAllTasks(tr.tasks || []);
+        setMembers(mr.members || []);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const [yr, mo] = monthKey.split('-').map(Number);
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const days = useMemo(
+    () => Array.from({ length: daysInMonth }, (_, i) => new Date(yr, mo - 1, i + 1)),
+    [yr, mo, daysInMonth],
+  );
+  const monthStart = days[0];
+  const monthEnd = days[days.length - 1];
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayIdx = days.findIndex((d) => dateKey(d) === todayStr);
+  const totalWidth = daysInMonth * TASK_DAY_W;
+
+  const memberMap = useMemo(() => {
+    const m = {};
+    for (const mb of members) m[mb.assignee_id] = mb;
+    return m;
+  }, [members]);
+
+  const filtered = useMemo(
+    () => allTasks.filter((t) => {
+      if (filterAssignee && t.assignee_id !== filterAssignee) return false;
+      if (filterStatus && t.status !== filterStatus) return false;
+      return true;
+    }),
+    [allTasks, filterAssignee, filterStatus],
+  );
+
+  const assigneeOrder = useMemo(() => {
+    const seen = new Set();
+    const order = [];
+    for (const t of filtered) {
+      const k = t.assignee_id || '__unassigned__';
+      if (!seen.has(k)) { seen.add(k); order.push(k); }
+    }
+    return order;
+  }, [filtered]);
+
+  const byAssignee = useMemo(() => {
+    const g = {};
+    for (const t of filtered) {
+      const k = t.assignee_id || '__unassigned__';
+      if (!g[k]) g[k] = [];
+      g[k].push(t);
+    }
+    return g;
+  }, [filtered]);
+
+  function getBar(task) {
+    const s = task.created_at ? new Date(task.created_at) : null;
+    const e = task.due_date ? new Date(task.due_date) : null;
+    if (!s && !e) return null;
+    const eff_s = s || e;
+    const eff_e = e || s;
+    if (eff_s > monthEnd || eff_e < monthStart) return null;
+    const cS = eff_s < monthStart ? monthStart : eff_s;
+    const cE = eff_e > monthEnd ? monthEnd : eff_e;
+    const si = Math.max(0, Math.round((cS - monthStart) / 86400000));
+    const ei = Math.min(daysInMonth - 1, Math.round((cE - monthStart) / 86400000));
+    return {
+      left: si * TASK_DAY_W,
+      width: Math.max((ei - si + 1) * TASK_DAY_W - 2, 4),
+      clippedLeft: s < monthStart,
+      clippedRight: e > monthEnd,
+    };
+  }
+
+  if (loading) return <p className="empty-text">読み込み中…</p>;
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="filter-select" value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)}>
+          <option value="">担当者: 全員</option>
+          {members.map((m) => (
+            <option key={m.assignee_id} value={m.assignee_id}>
+              {(m.displayName || m.assignee_id || '').split('/')[0].trim()}
+            </option>
+          ))}
+        </select>
+        <select className="filter-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">ステータス: すべて</option>
+          {Object.entries(STATUS_DEF).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, -1))}>← 前月</button>
+          <span style={{ fontSize: 14, fontWeight: 600, minWidth: 90, textAlign: 'center' }}>{yr}年{mo}月</span>
+          <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, 1))}>次月 →</button>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="empty-text">タスクがありません</p>
+      ) : (
+        <div style={{ border: '1px solid var(--gray-200)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+          <div style={{ display: 'flex' }}>
+
+            {/* ── Left: sticky label column ── */}
+            <div style={{ flexShrink: 0, width: 300, borderRight: '2px solid var(--gray-200)' }}>
+              <div style={{
+                height: 52, borderBottom: '2px solid var(--gray-200)',
+                display: 'flex', alignItems: 'center', padding: '0 16px',
+                background: '#f8fafc', fontWeight: 600, fontSize: 12, color: 'var(--gray-500)',
+              }}>
+                担当者 / タスク
+              </div>
+              {assigneeOrder.map((aId) => {
+                const mb = memberMap[aId];
+                const aName = aId === '__unassigned__' ? '未割り当て'
+                  : ((mb?.displayName || mb?.assignee_id || aId).split('/')[0].trim());
+                const aTasks = byAssignee[aId] || [];
+                return (
+                  <div key={aId}>
+                    <div style={{
+                      height: 36, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8,
+                      background: '#f1f5f9', borderBottom: '1px solid var(--gray-200)',
+                      fontWeight: 700, fontSize: 13, color: 'var(--gray-700)',
+                    }}>
+                      {mb?.avatar_url
+                        ? <img src={mb.avatar_url} alt="" style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0 }} />
+                        : <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--primary-light)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{aName[0]?.toUpperCase()}</div>
+                      }
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{aName}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--gray-400)', flexShrink: 0 }}>{aTasks.length}件</span>
+                    </div>
+                    {aTasks.map((task) => {
+                      const sc = statusDef(task.status);
+                      const title = stripSlack(task.title || '（タイトルなし）');
+                      return (
+                        <div key={task.id} style={{
+                          height: 36, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8,
+                          borderBottom: '1px solid var(--gray-100)', fontSize: 12,
+                        }}>
+                          <span style={{
+                            flexShrink: 0, fontSize: 10, fontWeight: 600,
+                            color: sc.text, background: sc.bg,
+                            padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap',
+                          }}>{sc.label}</span>
+                          <span style={{
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                            color: task.status === 'done' || task.status === 'cancelled' ? 'var(--gray-400)' : 'var(--gray-900)',
+                            textDecoration: task.status === 'cancelled' ? 'line-through' : 'none',
+                          }}>
+                            {title.length > 30 ? title.slice(0, 30) + '…' : title}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Right: scrollable Gantt ── */}
+            <div style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
+              <div style={{ width: totalWidth, minWidth: '100%', position: 'relative' }}>
+                {/* Date header */}
+                <div style={{ display: 'flex', height: 52, borderBottom: '2px solid var(--gray-200)', background: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
+                  {days.map((d, i) => {
+                    const isToday = i === todayIdx;
+                    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                    return (
+                      <div key={i} style={{
+                        width: TASK_DAY_W, flexShrink: 0,
+                        borderRight: '1px solid var(--gray-100)',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        background: isToday ? '#dbeafe' : 'transparent',
+                        fontSize: 11,
+                      }}>
+                        <span style={{ fontWeight: isToday ? 700 : 400, color: isWeekend ? 'var(--gray-400)' : 'var(--gray-700)' }}>{d.getDate()}</span>
+                        <span style={{ fontSize: 10, color: d.getDay() === 0 ? '#ef4444' : d.getDay() === 6 ? '#3b82f6' : 'var(--gray-400)' }}>
+                          {DOW_JP[d.getDay()]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Gantt rows */}
+                {assigneeOrder.map((aId) => {
+                  const aTasks = byAssignee[aId] || [];
+                  return (
+                    <div key={aId}>
+                      {/* Person row */}
+                      <div style={{ height: 36, borderBottom: '1px solid var(--gray-200)', background: '#f1f5f9', position: 'relative' }}>
+                        {todayIdx >= 0 && (
+                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * TASK_DAY_W + TASK_DAY_W / 2, width: 2, background: '#3b82f6', opacity: 0.3 }} />
+                        )}
+                      </div>
+                      {/* Task rows */}
+                      {aTasks.map((task) => {
+                        const bar = getBar(task);
+                        const sc = statusDef(task.status);
+                        return (
+                          <div key={task.id} style={{ height: 36, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
+                            {/* Weekend shading */}
+                            {days.map((d, i) => (d.getDay() === 0 || d.getDay() === 6)
+                              ? <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: i * TASK_DAY_W, width: TASK_DAY_W, background: 'rgba(0,0,0,0.025)' }} />
+                              : null
+                            )}
+                            {/* Today line */}
+                            {todayIdx >= 0 && (
+                              <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * TASK_DAY_W + TASK_DAY_W / 2, width: 1, background: '#3b82f6', opacity: 0.3 }} />
+                            )}
+                            {/* Gantt bar */}
+                            {bar && (
+                              <div title={stripSlack(task.title || '')} style={{
+                                position: 'absolute',
+                                top: '50%', transform: 'translateY(-50%)',
+                                left: bar.left, width: bar.width,
+                                height: 20, borderRadius: 4,
+                                background: sc.bar,
+                                opacity: task.status === 'cancelled' ? 0.35 : task.status === 'done' ? 0.65 : 1,
+                                display: 'flex', alignItems: 'center', overflow: 'hidden',
+                              }}>
+                                {bar.clippedLeft && <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderRight: '7px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
+                                {bar.clippedRight && <div style={{ marginLeft: 'auto', width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '7px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function WorkloadGantt() {
   const initialMonth = new Date().toISOString().slice(0, 7);
   const [teams, setTeams] = useState([]);
@@ -495,16 +768,25 @@ export default function WorkloadGantt() {
     });
   };
 
+  const [ganttTab, setGanttTab] = useState('tasks');
+
   return (
     <div className="workload-page">
       <div className="page-header">
         <div>
           <h1>業務ガント</h1>
-          <p className="page-subtitle">チームごとの月次業務と繁忙時期を可視化します。</p>
+          <p className="page-subtitle">タスクガント: Slackタスクをガント表示 ／ 業務負荷: チームの月次負荷管理</p>
+        </div>
+        <div className="workload-view-toggle" style={{ alignSelf: 'center' }}>
+          <button type="button" className={ganttTab === 'tasks' ? 'is-active' : ''} onClick={() => setGanttTab('tasks')}>タスクガント</button>
+          <button type="button" className={ganttTab === 'workload' ? 'is-active' : ''} onClick={() => setGanttTab('workload')}>業務負荷</button>
         </div>
       </div>
 
-      <div className="workload-toolbar">
+      {ganttTab === 'tasks' ? (
+        <TaskGanttView />
+      ) : (
+      <><div className="workload-toolbar">
         {/* 親チーム選択 */}
         <select className="filter-select" value={selectedParentId} onChange={(e) => handleParentChange(e.target.value)}>
           {parentTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -853,6 +1135,7 @@ export default function WorkloadGantt() {
           </div>
         </div>
       )}
+    </> )}
     </div>
   );
 }

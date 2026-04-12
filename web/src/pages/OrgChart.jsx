@@ -655,32 +655,36 @@ export default function OrgChart() {
     [teams],
   );
 
-  const [buildSearch, setBuildSearch] = useState('');
+  const [buildSearch1, setBuildSearch1] = useState('');
+  const [buildSearch2, setBuildSearch2] = useState('');
 
-  // Teams shown in build mode grid — filter by team name or member name
+  // Teams shown in build mode grid — OR filter: matches search1 OR search2
   const filteredBuildTeams = useMemo(() => {
-    const q = buildSearch.trim().toLowerCase();
-    if (!q) return teams;
-    return teams.filter(t => {
+    const q1 = buildSearch1.trim().toLowerCase();
+    const q2 = buildSearch2.trim().toLowerCase();
+    if (!q1 && !q2) return teams;
+    const matchesQuery = (t, q) => {
+      if (!q) return false;
       if (t.name.toLowerCase().includes(q)) return true;
       return (membersMap[t.id] || []).some(m =>
         [m.display_name, m.real_name, m.title].filter(Boolean).some(v => v.toLowerCase().includes(q))
       );
-    });
-  }, [teams, membersMap, buildSearch]);
+    };
+    return teams.filter(t => matchesQuery(t, q1) || matchesQuery(t, q2));
+  }, [teams, membersMap, buildSearch1, buildSearch2]);
 
   return (
     <div className="workload-page">
       {/* ── Header ── */}
       <div className="page-header" style={{ marginBottom: 16 }}>
         <div>
-          <h1>組織図</h1>
+          <h1>チーム設定</h1>
           <p className="page-subtitle">チームと部署のメンバー構成を表示・編集できます。</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {saving && <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>保存中…</span>}
           <button
-            onClick={() => { setBuildMode(v => !v); setSearch(''); setBuildSearch(''); }}
+            onClick={() => { setBuildMode(v => !v); setSearch(''); setBuildSearch1(''); setBuildSearch2(''); }}
             className={buildMode ? 'btn btn-primary' : 'btn btn-secondary'}
           >
             {buildMode ? '✓ 編集完了' : '✏️ チームを組む'}
@@ -714,17 +718,30 @@ export default function OrgChart() {
           )}
 
           {/* Team grid */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <input
-              type="text"
-              placeholder="チーム名・メンバー名で絞り込み…"
-              value={buildSearch}
-              onChange={e => setBuildSearch(e.target.value)}
-              style={{
-                flex: 1, maxWidth: 300, fontSize: 13, padding: '7px 12px',
-                border: '1px solid var(--gray-300)', borderRadius: 8, outline: 'none',
-              }}
-            />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', maxWidth: 560 }}>
+              <input
+                type="text"
+                placeholder="移動元のチーム・メンバー名…"
+                value={buildSearch1}
+                onChange={e => setBuildSearch1(e.target.value)}
+                style={{
+                  flex: 1, fontSize: 13, padding: '7px 12px',
+                  border: '2px solid #3b82f6', borderRadius: 8, outline: 'none',
+                }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--gray-400)', fontWeight: 600, flexShrink: 0 }}>OR</span>
+              <input
+                type="text"
+                placeholder="移動先のチーム・メンバー名…"
+                value={buildSearch2}
+                onChange={e => setBuildSearch2(e.target.value)}
+                style={{
+                  flex: 1, fontSize: 13, padding: '7px 12px',
+                  border: '2px solid #10b981', borderRadius: 8, outline: 'none',
+                }}
+              />
+            </div>
             <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>
               {filteredBuildTeams.length} / {teams.length}チーム
             </span>

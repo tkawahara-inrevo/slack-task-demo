@@ -4,16 +4,11 @@ export default function AdminLayout() {
   return (
     <div className="admin-layout">
       <nav className="admin-nav">
-        <h2>管理メニュー</h2>
-        <NavLink to="/admin/teams" className={({ isActive }) => (isActive ? 'active' : '')}>チーム管理</NavLink>
-        <NavLink to="/admin/projects" className={({ isActive }) => (isActive ? 'active' : '')}>プロジェクト管理</NavLink>
+        <h2>管理設定</h2>
         <NavLink to="/admin/roles" className={({ isActive }) => (isActive ? 'active' : '')}>管理者権限</NavLink>
-        <NavLink to="/admin/permissions" className={({ isActive }) => (isActive ? 'active' : '')}>閲覧権限</NavLink>
         <NavLink to="/admin/user-mapping" className={({ isActive }) => (isActive ? 'active' : '')}>ユーザーマッピング</NavLink>
         <NavLink to="/admin/integrations" className={({ isActive }) => (isActive ? 'active' : '')}>外部連携</NavLink>
         <NavLink to="/admin/formulas" className={({ isActive }) => (isActive ? 'active' : '')}>計算式</NavLink>
-        <NavLink to="/workload" className={({ isActive }) => (isActive ? 'active' : '')}>業務ガント</NavLink>
-        <NavLink to="/" className="back-link">ダッシュボードへ戻る</NavLink>
       </nav>
       <div className="admin-content">
         <Outlet />

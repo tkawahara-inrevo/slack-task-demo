@@ -108,11 +108,25 @@ function getRollingDates(base = new Date(), length = 31) {
   });
 }
 
+function getWeekDates(base = new Date()) {
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const dow = d.getDay();
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return Array.from({ length: 7 }, (_, i) => {
+    const r = new Date(monday);
+    r.setDate(monday.getDate() + i);
+    return r;
+  });
+}
+
 function getRangeLabel(viewMode, monthKey, dates) {
   if (viewMode === 'month') return formatMonthLabel(monthKey);
-  if (!dates.length) return '直近31日';
+  if (!dates.length) return '';
   const f = dates[0], l = dates[dates.length - 1];
-  return `${f.getMonth() + 1}/${f.getDate()} - ${l.getMonth() + 1}/${l.getDate()}`;
+  const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+  if (viewMode === 'week') return `今週 ${fmt(f)}〜${fmt(l)}`;
+  return `${fmt(f)}〜${fmt(l)}`;
 }
 
 function getRequiredMonthKeys(dates) {
@@ -171,11 +185,21 @@ const STATUS_DEF = {
 };
 const statusDef = (s) => STATUS_DEF[s] || { bar: '#93c5fd', text: '#3b82f6', bg: '#eff6ff', label: s || '不明' };
 
-const GANTT_DAY_W = 28;
 const DOW_JP = ['日', '月', '火', '水', '木', '金', '土'];
 
+const VIEW_CONFIG = {
+  month:    { dayW: 28, leftW: 300 },
+  rolling:  { dayW: 28, leftW: 300 },
+  '2weeks': { dayW: 36, leftW: 270 },
+  week:     { dayW: 64, leftW: 240 },
+};
+
 function stripSlack(text) {
-  return (text || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  return (text || '')
+    .replace(/<[^>]+>/g, '')          // <@UXXX|name> etc.
+    .replace(/^\s*(@\S+\s*)+/, '')    // leading @mentions in plain text
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function groupConsecutiveIndices(indices, dayW) {
@@ -207,7 +231,10 @@ export default function WorkloadGantt() {
   const [catDraftColor, setCatDraftColor] = useState('#6366f1');
   const [editingCatId, setEditingCatId] = useState('');
   const [allTasks, setAllTasks] = useState([]);
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState('in_progress');
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [dragTaskId, setDragTaskId] = useState(null);
+  const [dragDayDelta, setDragDayDelta] = useState(0);
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -223,15 +250,19 @@ export default function WorkloadGantt() {
   const [draftStartDate, setDraftStartDate] = useState('');
   const [draftEndDate, setDraftEndDate] = useState('');
 
-  const displayDates = useMemo(
-    () => (viewMode === 'month' ? getMonthDates(monthKey) : getRollingDates(new Date(), 31)),
-    [monthKey, viewMode],
-  );
+  const displayDates = useMemo(() => {
+    if (viewMode === 'month')   return getMonthDates(monthKey);
+    if (viewMode === 'week')    return getWeekDates();
+    if (viewMode === '2weeks')  return getRollingDates(new Date(), 14);
+    return getRollingDates(new Date(), 31); // 'rolling'
+  }, [monthKey, viewMode]);
   const requiredMonthKeys = useMemo(() => getRequiredMonthKeys(displayDates), [displayDates]);
   const rangeLabel = useMemo(() => getRangeLabel(viewMode, monthKey, displayDates), [displayDates, monthKey, viewMode]);
   const todayKey = dateKey(new Date());
   const todayIdx = useMemo(() => displayDates.findIndex(d => dateKey(d) === todayKey), [displayDates, todayKey]);
-  const totalWidth = displayDates.length * GANTT_DAY_W;
+  const ganttDayW = VIEW_CONFIG[viewMode]?.dayW ?? 28;
+  const leftPanelW = VIEW_CONFIG[viewMode]?.leftW ?? 300;
+  const totalWidth = displayDates.length * ganttDayW;
 
   // Load Slack tasks once
   useEffect(() => {
@@ -328,11 +359,11 @@ export default function WorkloadGantt() {
   }, [items]);
 
   // Gantt bar helpers
-  function getTaskBar(task) {
+  function getTaskBar(task, dueDateOverride) {
     const s = task.created_at ? new Date(task.created_at) : null;
-    const e = task.due_date ? new Date(task.due_date) : null;
-    if (!s && !e) return null;
-    const effS = s || e, effE = e || s;
+    const rawE = dueDateOverride || (task.due_date ? new Date(task.due_date) : null);
+    if (!s && !rawE) return null;
+    const effS = s || rawE, effE = rawE || s;
     const mStart = displayDates[0], mEnd = displayDates[displayDates.length - 1];
     if (effS > mEnd || effE < mStart) return null;
     const cS = effS < mStart ? mStart : effS;
@@ -340,10 +371,10 @@ export default function WorkloadGantt() {
     const si = Math.max(0, Math.round((cS - mStart) / 86400000));
     const ei = Math.min(displayDates.length - 1, Math.round((cE - mStart) / 86400000));
     return {
-      left: si * GANTT_DAY_W,
-      width: Math.max((ei - si + 1) * GANTT_DAY_W - 2, 4),
+      left: si * ganttDayW,
+      width: Math.max((ei - si + 1) * ganttDayW - 2, 4),
       clippedLeft: effS < mStart,
-      clippedRight: effE > mEnd,
+      clippedRight: effE > mEnd && !dueDateOverride,
     };
   }
 
@@ -358,7 +389,35 @@ export default function WorkloadGantt() {
       const cells = cellsByItem[item.id] || {};
       displayDates.forEach((d, i) => { if (cells[dateKey(d)]) indices.push(i); });
     }
-    return groupConsecutiveIndices(indices, GANTT_DAY_W);
+    return groupConsecutiveIndices(indices, ganttDayW);
+  }
+
+  // Drag right edge of task bar to extend/shorten due_date
+  function startDueDateDrag(e, task) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    let lastDelta = 0;
+    setDragTaskId(task.id);
+    setDragDayDelta(0);
+    const onMouseMove = (me) => {
+      const delta = Math.round((me.clientX - startX) / ganttDayW);
+      if (delta !== lastDelta) { lastDelta = delta; setDragDayDelta(delta); }
+    };
+    const onMouseUp = async () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      setDragTaskId(null);
+      setDragDayDelta(0);
+      if (lastDelta !== 0 && task.due_date) {
+        const d = new Date(task.due_date);
+        d.setDate(d.getDate() + lastDelta);
+        await api.taskUpdate(task.id, { due_date: dateKey(d) }).catch(console.error);
+        api.tasks({ limit: 500 }).then(r => setAllTasks(r.tasks || [])).catch(console.error);
+      }
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 
   const itemPayload = (item) => ({
@@ -514,8 +573,10 @@ export default function WorkloadGantt() {
           </select>
         )}
         <div className="workload-view-toggle">
-          <button type="button" className={viewMode === 'month' ? 'is-active' : ''} onClick={() => setViewMode('month')}>月表示</button>
-          <button type="button" className={viewMode === 'rolling' ? 'is-active' : ''} onClick={() => setViewMode('rolling')}>直近31日</button>
+          <button type="button" className={viewMode === 'week'    ? 'is-active' : ''} onClick={() => setViewMode('week')}>今週</button>
+          <button type="button" className={viewMode === '2weeks'  ? 'is-active' : ''} onClick={() => setViewMode('2weeks')}>14日</button>
+          <button type="button" className={viewMode === 'rolling' ? 'is-active' : ''} onClick={() => setViewMode('rolling')}>31日</button>
+          <button type="button" className={viewMode === 'month'   ? 'is-active' : ''} onClick={() => setViewMode('month')}>月</button>
         </div>
         {viewMode === 'month' ? (
           <div className="month-switcher">
@@ -527,10 +588,11 @@ export default function WorkloadGantt() {
           <div className="month-switcher"><span>{rangeLabel}</span></div>
         )}
         <select className="filter-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="">ステータス: すべて</option>
-          {Object.entries(STATUS_DEF).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
+          <option value="in_progress">進行中のみ</option>
+          <option value="">すべて表示</option>
+          <option value="done">完了</option>
+          <option value="pending">保留</option>
+          <option value="cancelled">キャンセル</option>
         </select>
         <button type="button" className="filter-clear-btn" style={{ marginLeft: 'auto' }} onClick={() => setCatMgrOpen(v => !v)}>
           カテゴリ管理
@@ -546,7 +608,7 @@ export default function WorkloadGantt() {
           <div style={{ display: 'flex' }}>
 
             {/* ── Left: fixed label column ── */}
-            <div style={{ flexShrink: 0, width: 300, borderRight: '2px solid var(--gray-200)' }}>
+            <div style={{ flexShrink: 0, width: leftPanelW, borderRight: '2px solid var(--gray-200)' }}>
               <div style={{ height: HEADER_H, borderBottom: '2px solid var(--gray-200)', display: 'flex', alignItems: 'center', padding: '0 16px', background: '#f8fafc', fontWeight: 600, fontSize: 12, color: 'var(--gray-500)' }}>
                 担当者 / Slackタスク・業務
               </div>
@@ -588,11 +650,19 @@ export default function WorkloadGantt() {
                     {slackTasks.map((task) => {
                       const sc = statusDef(task.status);
                       const title = stripSlack(task.title || '（タイトルなし）');
+                      const maxLen = Math.floor(leftPanelW / 7);
                       return (
-                        <div key={task.id} style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12 }}>
-                          <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: sc.text, background: sc.bg, padding: '2px 5px', borderRadius: 7, whiteSpace: 'nowrap' }}>{sc.label}</span>
+                        <div key={task.id}
+                          onClick={() => setSelectedTask(task)}
+                          onMouseEnter={e => e.currentTarget.style.background = '#f0f7ff'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                          style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12, cursor: 'pointer' }}
+                        >
+                          {task.status !== 'in_progress' && (
+                            <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: sc.text, background: sc.bg, padding: '2px 5px', borderRadius: 7, whiteSpace: 'nowrap' }}>{sc.label}</span>
+                          )}
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: task.status === 'done' || task.status === 'cancelled' ? 'var(--gray-400)' : 'var(--gray-800)', textDecoration: task.status === 'cancelled' ? 'line-through' : 'none' }}>
-                            {title.length > 28 ? title.slice(0, 28) + '…' : title}
+                            {title.length > maxLen ? title.slice(0, maxLen) + '…' : title}
                           </span>
                         </div>
                       );
@@ -617,7 +687,7 @@ export default function WorkloadGantt() {
                     const isToday = i === todayIdx;
                     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                     return (
-                      <div key={i} style={{ width: GANTT_DAY_W, flexShrink: 0, borderRight: '1px solid var(--gray-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: isToday ? '#dbeafe' : 'transparent', fontSize: 11 }}>
+                      <div key={i} style={{ width: ganttDayW, flexShrink: 0, borderRight: '1px solid var(--gray-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: isToday ? '#dbeafe' : 'transparent', fontSize: 11 }}>
                         <span style={{ fontWeight: isToday ? 700 : 400, color: isWeekend ? 'var(--gray-400)' : 'var(--gray-700)' }}>{d.getDate()}</span>
                         <span style={{ fontSize: 10, color: d.getDay() === 0 ? '#ef4444' : d.getDay() === 6 ? '#3b82f6' : 'var(--gray-400)' }}>{DOW_JP[d.getDay()]}</span>
                       </div>
@@ -629,15 +699,15 @@ export default function WorkloadGantt() {
                   const workItems = itemsByOwner[member.user_id] || [];
                   const slackTasks = tasksByAssignee[member.user_id] || [];
                   const weekendBg = (i) => (displayDates[i]?.getDay() === 0 || displayDates[i]?.getDay() === 6)
-                    ? <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: i * GANTT_DAY_W, width: GANTT_DAY_W, background: 'rgba(0,0,0,0.025)', pointerEvents: 'none' }} />
+                    ? <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: i * ganttDayW, width: ganttDayW, background: 'rgba(0,0,0,0.025)', pointerEvents: 'none' }} />
                     : null;
                   const todayLine = todayIdx >= 0
-                    ? <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * GANTT_DAY_W + GANTT_DAY_W / 2, width: 1, background: '#3b82f6', opacity: 0.25 }} />
+                    ? <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * ganttDayW + ganttDayW / 2, width: 1, background: '#3b82f6', opacity: 0.25 }} />
                     : null;
                   return (
                     <div key={member.user_id}>
                       <div style={{ height: ROW_H, borderBottom: '1px solid var(--gray-200)', background: '#f1f5f9', position: 'relative' }}>
-                        {todayIdx >= 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * GANTT_DAY_W + GANTT_DAY_W / 2, width: 2, background: '#3b82f6', opacity: 0.3 }} />}
+                        {todayIdx >= 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * ganttDayW + ganttDayW / 2, width: 2, background: '#3b82f6', opacity: 0.3 }} />}
                       </div>
                       {workItems.map((item) => {
                         const bars = getWorkloadBars(item);
@@ -652,15 +722,33 @@ export default function WorkloadGantt() {
                         );
                       })}
                       {slackTasks.map((task) => {
-                        const bar = getTaskBar(task);
+                        const isDragging = dragTaskId === task.id;
+                        const dueDateOverride = isDragging && task.due_date
+                          ? (() => { const d = new Date(task.due_date); d.setDate(d.getDate() + dragDayDelta); return d; })()
+                          : undefined;
+                        const bar = getTaskBar(task, dueDateOverride);
                         const sc = statusDef(task.status);
+                        const opacity = task.status === 'cancelled' ? 0.35 : task.status === 'done' ? 0.65 : 1;
                         return (
                           <div key={task.id} style={{ height: ROW_H, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
                             {displayDates.map((_, i) => weekendBg(i))}
                             {todayLine}
                             {bar && (
-                              <div title={stripSlack(task.title || '')} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: sc.bar, opacity: task.status === 'cancelled' ? 0.35 : task.status === 'done' ? 0.65 : 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                              <div
+                                title={stripSlack(task.title || '')}
+                                onClick={() => setSelectedTask(task)}
+                                style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: sc.bar, opacity, display: 'flex', alignItems: 'center', overflow: 'visible', cursor: 'pointer', userSelect: 'none' }}
+                              >
                                 {bar.clippedLeft && <div style={{ width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderRight: '6px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
+                                {/* Drag handle: right edge */}
+                                {task.due_date && (
+                                  <div
+                                    onMouseDown={(e) => startDueDateDrag(e, task)}
+                                    style={{ position: 'absolute', right: -3, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                  >
+                                    <div style={{ width: 3, height: 10, borderRadius: 2, background: 'rgba(255,255,255,0.7)' }} />
+                                  </div>
+                                )}
                                 {bar.clippedRight && <div style={{ marginLeft: 'auto', width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderLeft: '6px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
                               </div>
                             )}
@@ -680,6 +768,58 @@ export default function WorkloadGantt() {
         </div>
       )}
 
+
+      {/* Task detail modal */}
+      {selectedTask && (() => {
+        const t = selectedTask;
+        const sc = statusDef(t.status);
+        const title = stripSlack(t.title || '（タイトルなし）');
+        const rawTitle = t.title || '';
+        return (
+          <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+              <h3 style={{ marginBottom: 12, fontSize: 16, lineHeight: 1.4 }}>{title}</h3>
+              {rawTitle !== title && (
+                <p style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 12, wordBreak: 'break-all' }}>{rawTitle}</p>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ color: 'var(--gray-500)', width: 64, flexShrink: 0 }}>ステータス</span>
+                  <span style={{ fontWeight: 600, color: sc.text, background: sc.bg, padding: '2px 8px', borderRadius: 8 }}>{sc.label}</span>
+                </div>
+                {t.due_date && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--gray-500)', width: 64, flexShrink: 0 }}>期限</span>
+                    <span>{new Date(t.due_date).toLocaleDateString('ja-JP')}</span>
+                  </div>
+                )}
+                {t.created_at && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--gray-500)', width: 64, flexShrink: 0 }}>起票日</span>
+                    <span>{new Date(t.created_at).toLocaleDateString('ja-JP')}</span>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                {Object.entries(STATUS_DEF).map(([k, v]) => (
+                  <button key={k}
+                    className={t.status === k ? 'btn-primary' : 'btn-secondary'}
+                    style={{ fontSize: 12 }}
+                    onClick={async () => {
+                      await api.taskSetStatus(t.id, k).catch(console.error);
+                      api.tasks({ limit: 500 }).then(r => setAllTasks(r.tasks || [])).catch(console.error);
+                      setSelectedTask({ ...t, status: k });
+                    }}
+                  >{v.label}</button>
+                ))}
+              </div>
+              <div className="crm-modal-actions" style={{ marginTop: 12 }}>
+                <button className="btn-secondary" onClick={() => setSelectedTask(null)}>閉じる</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Category manager modal */}
       {catMgrOpen && (

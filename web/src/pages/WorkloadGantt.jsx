@@ -190,8 +190,8 @@ const DOW_JP = ['日', '月', '火', '水', '木', '金', '土'];
 const VIEW_CONFIG = {
   month:    { dayW: 28, leftW: 300 },
   rolling:  { dayW: 28, leftW: 300 },
-  '2weeks': { dayW: 36, leftW: 270 },
-  week:     { dayW: 64, leftW: 240 },
+  '2weeks': { dayW: 36, leftW: 400 },
+  week:     { dayW: 64, leftW: 500 },
 };
 
 function stripSlack(text) {

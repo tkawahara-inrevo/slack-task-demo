@@ -161,7 +161,7 @@ function getDateRange(displayDates, keyA, keyB) {
   return keys.slice(lo, hi + 1);
 }
 
-// ─── Task Gantt (BackLog / Redmine style) ────────────────────────────────────
+// ─── Unified Gantt (Slack tasks + workload items) ────────────────────────────
 
 const STATUS_DEF = {
   in_progress: { bar: '#3b82f6', text: '#1d4ed8', bg: '#dbeafe', label: '進行中' },
@@ -171,290 +171,42 @@ const STATUS_DEF = {
 };
 const statusDef = (s) => STATUS_DEF[s] || { bar: '#93c5fd', text: '#3b82f6', bg: '#eff6ff', label: s || '不明' };
 
-const TASK_DAY_W = 28; // px per day
+const GANTT_DAY_W = 28;
 const DOW_JP = ['日', '月', '火', '水', '木', '金', '土'];
 
 function stripSlack(text) {
   return (text || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function TaskGanttView() {
-  const [allTasks, setAllTasks] = useState([]);
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [monthKey, setMonthKey] = useState(() => new Date().toISOString().slice(0, 7));
-  const [filterAssignee, setFilterAssignee] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-
-  useEffect(() => {
-    Promise.all([api.tasks({ limit: 500 }), api.members()])
-      .then(([tr, mr]) => {
-        setAllTasks(tr.tasks || []);
-        setMembers(mr.members || []);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
-
-  const [yr, mo] = monthKey.split('-').map(Number);
-  const daysInMonth = new Date(yr, mo, 0).getDate();
-  const days = useMemo(
-    () => Array.from({ length: daysInMonth }, (_, i) => new Date(yr, mo - 1, i + 1)),
-    [yr, mo, daysInMonth],
-  );
-  const monthStart = days[0];
-  const monthEnd = days[days.length - 1];
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayIdx = days.findIndex((d) => dateKey(d) === todayStr);
-  const totalWidth = daysInMonth * TASK_DAY_W;
-
-  const memberMap = useMemo(() => {
-    const m = {};
-    for (const mb of members) m[mb.assignee_id] = mb;
-    return m;
-  }, [members]);
-
-  const filtered = useMemo(
-    () => allTasks.filter((t) => {
-      if (filterAssignee && t.assignee_id !== filterAssignee) return false;
-      if (filterStatus && t.status !== filterStatus) return false;
-      return true;
-    }),
-    [allTasks, filterAssignee, filterStatus],
-  );
-
-  const assigneeOrder = useMemo(() => {
-    const seen = new Set();
-    const order = [];
-    for (const t of filtered) {
-      const k = t.assignee_id || '__unassigned__';
-      if (!seen.has(k)) { seen.add(k); order.push(k); }
-    }
-    return order;
-  }, [filtered]);
-
-  const byAssignee = useMemo(() => {
-    const g = {};
-    for (const t of filtered) {
-      const k = t.assignee_id || '__unassigned__';
-      if (!g[k]) g[k] = [];
-      g[k].push(t);
-    }
-    return g;
-  }, [filtered]);
-
-  function getBar(task) {
-    const s = task.created_at ? new Date(task.created_at) : null;
-    const e = task.due_date ? new Date(task.due_date) : null;
-    if (!s && !e) return null;
-    const eff_s = s || e;
-    const eff_e = e || s;
-    if (eff_s > monthEnd || eff_e < monthStart) return null;
-    const cS = eff_s < monthStart ? monthStart : eff_s;
-    const cE = eff_e > monthEnd ? monthEnd : eff_e;
-    const si = Math.max(0, Math.round((cS - monthStart) / 86400000));
-    const ei = Math.min(daysInMonth - 1, Math.round((cE - monthStart) / 86400000));
-    return {
-      left: si * TASK_DAY_W,
-      width: Math.max((ei - si + 1) * TASK_DAY_W - 2, 4),
-      clippedLeft: s < monthStart,
-      clippedRight: e > monthEnd,
-    };
+function groupConsecutiveIndices(indices, dayW) {
+  const bars = [];
+  let rs = null, re = null;
+  for (const i of indices) {
+    if (rs === null) { rs = i; re = i; }
+    else if (i === re + 1) { re = i; }
+    else { bars.push({ left: rs * dayW, width: Math.max((re - rs + 1) * dayW - 2, 4) }); rs = i; re = i; }
   }
-
-  if (loading) return <p className="empty-text">読み込み中…</p>;
-
-  return (
-    <div>
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="filter-select" value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)}>
-          <option value="">担当者: 全員</option>
-          {members.map((m) => (
-            <option key={m.assignee_id} value={m.assignee_id}>
-              {(m.displayName || m.assignee_id || '').split('/')[0].trim()}
-            </option>
-          ))}
-        </select>
-        <select className="filter-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="">ステータス: すべて</option>
-          {Object.entries(STATUS_DEF).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
-        </select>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, -1))}>← 前月</button>
-          <span style={{ fontSize: 14, fontWeight: 600, minWidth: 90, textAlign: 'center' }}>{yr}年{mo}月</span>
-          <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, 1))}>次月 →</button>
-        </div>
-      </div>
-
-      {filtered.length === 0 ? (
-        <p className="empty-text">タスクがありません</p>
-      ) : (
-        <div style={{ border: '1px solid var(--gray-200)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-          <div style={{ display: 'flex' }}>
-
-            {/* ── Left: sticky label column ── */}
-            <div style={{ flexShrink: 0, width: 300, borderRight: '2px solid var(--gray-200)' }}>
-              <div style={{
-                height: 52, borderBottom: '2px solid var(--gray-200)',
-                display: 'flex', alignItems: 'center', padding: '0 16px',
-                background: '#f8fafc', fontWeight: 600, fontSize: 12, color: 'var(--gray-500)',
-              }}>
-                担当者 / タスク
-              </div>
-              {assigneeOrder.map((aId) => {
-                const mb = memberMap[aId];
-                const aName = aId === '__unassigned__' ? '未割り当て'
-                  : ((mb?.displayName || mb?.assignee_id || aId).split('/')[0].trim());
-                const aTasks = byAssignee[aId] || [];
-                return (
-                  <div key={aId}>
-                    <div style={{
-                      height: 36, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8,
-                      background: '#f1f5f9', borderBottom: '1px solid var(--gray-200)',
-                      fontWeight: 700, fontSize: 13, color: 'var(--gray-700)',
-                    }}>
-                      {mb?.avatar_url
-                        ? <img src={mb.avatar_url} alt="" style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0 }} />
-                        : <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--primary-light)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{aName[0]?.toUpperCase()}</div>
-                      }
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{aName}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--gray-400)', flexShrink: 0 }}>{aTasks.length}件</span>
-                    </div>
-                    {aTasks.map((task) => {
-                      const sc = statusDef(task.status);
-                      const title = stripSlack(task.title || '（タイトルなし）');
-                      return (
-                        <div key={task.id} style={{
-                          height: 36, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8,
-                          borderBottom: '1px solid var(--gray-100)', fontSize: 12,
-                        }}>
-                          <span style={{
-                            flexShrink: 0, fontSize: 10, fontWeight: 600,
-                            color: sc.text, background: sc.bg,
-                            padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap',
-                          }}>{sc.label}</span>
-                          <span style={{
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-                            color: task.status === 'done' || task.status === 'cancelled' ? 'var(--gray-400)' : 'var(--gray-900)',
-                            textDecoration: task.status === 'cancelled' ? 'line-through' : 'none',
-                          }}>
-                            {title.length > 30 ? title.slice(0, 30) + '…' : title}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* ── Right: scrollable Gantt ── */}
-            <div style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
-              <div style={{ width: totalWidth, minWidth: '100%', position: 'relative' }}>
-                {/* Date header */}
-                <div style={{ display: 'flex', height: 52, borderBottom: '2px solid var(--gray-200)', background: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
-                  {days.map((d, i) => {
-                    const isToday = i === todayIdx;
-                    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                    return (
-                      <div key={i} style={{
-                        width: TASK_DAY_W, flexShrink: 0,
-                        borderRight: '1px solid var(--gray-100)',
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        background: isToday ? '#dbeafe' : 'transparent',
-                        fontSize: 11,
-                      }}>
-                        <span style={{ fontWeight: isToday ? 700 : 400, color: isWeekend ? 'var(--gray-400)' : 'var(--gray-700)' }}>{d.getDate()}</span>
-                        <span style={{ fontSize: 10, color: d.getDay() === 0 ? '#ef4444' : d.getDay() === 6 ? '#3b82f6' : 'var(--gray-400)' }}>
-                          {DOW_JP[d.getDay()]}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Gantt rows */}
-                {assigneeOrder.map((aId) => {
-                  const aTasks = byAssignee[aId] || [];
-                  return (
-                    <div key={aId}>
-                      {/* Person row */}
-                      <div style={{ height: 36, borderBottom: '1px solid var(--gray-200)', background: '#f1f5f9', position: 'relative' }}>
-                        {todayIdx >= 0 && (
-                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * TASK_DAY_W + TASK_DAY_W / 2, width: 2, background: '#3b82f6', opacity: 0.3 }} />
-                        )}
-                      </div>
-                      {/* Task rows */}
-                      {aTasks.map((task) => {
-                        const bar = getBar(task);
-                        const sc = statusDef(task.status);
-                        return (
-                          <div key={task.id} style={{ height: 36, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
-                            {/* Weekend shading */}
-                            {days.map((d, i) => (d.getDay() === 0 || d.getDay() === 6)
-                              ? <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: i * TASK_DAY_W, width: TASK_DAY_W, background: 'rgba(0,0,0,0.025)' }} />
-                              : null
-                            )}
-                            {/* Today line */}
-                            {todayIdx >= 0 && (
-                              <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * TASK_DAY_W + TASK_DAY_W / 2, width: 1, background: '#3b82f6', opacity: 0.3 }} />
-                            )}
-                            {/* Gantt bar */}
-                            {bar && (
-                              <div title={stripSlack(task.title || '')} style={{
-                                position: 'absolute',
-                                top: '50%', transform: 'translateY(-50%)',
-                                left: bar.left, width: bar.width,
-                                height: 20, borderRadius: 4,
-                                background: sc.bar,
-                                opacity: task.status === 'cancelled' ? 0.35 : task.status === 'done' ? 0.65 : 1,
-                                display: 'flex', alignItems: 'center', overflow: 'hidden',
-                              }}>
-                                {bar.clippedLeft && <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderRight: '7px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
-                                {bar.clippedRight && <div style={{ marginLeft: 'auto', width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '7px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  if (rs !== null) bars.push({ left: rs * dayW, width: Math.max((re - rs + 1) * dayW - 2, 4) });
+  return bars;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 export default function WorkloadGantt() {
   const initialMonth = new Date().toISOString().slice(0, 7);
   const [teams, setTeams] = useState([]);
-  const [selectedParentId, setSelectedParentId] = useState(''); // 大チーム選択
-  const [selectedTeamId, setSelectedTeamId] = useState('');     // 実際にデータを読む子/単独チーム
+  const [selectedParentId, setSelectedParentId] = useState('');
+  const [selectedTeamId, setSelectedTeamId] = useState('');
   const [monthKey, setMonthKey] = useState(initialMonth);
   const [viewMode, setViewMode] = useState('month');
   const [members, setMembers] = useState([]);
   const [items, setItems] = useState([]);
   const [cellsByItem, setCellsByItem] = useState({});
   const [loading, setLoading] = useState(false);
-  const [eraseMode, setEraseMode] = useState(false);
-  const [clickSelect, setClickSelect] = useState(null); // { itemId, startKey } | null
-  const [hoverCell, setHoverCell] = useState(null);    // { itemId, dateKey } | null
-  const [draggingItemId, setDraggingItemId] = useState('');
-  const [draggingOwnerUserId, setDraggingOwnerUserId] = useState('');
   const [categories, setCategories] = useState([]);
   const [catMgrOpen, setCatMgrOpen] = useState(false);
   const [catDraftName, setCatDraftName] = useState('');
   const [catDraftColor, setCatDraftColor] = useState('#6366f1');
   const [editingCatId, setEditingCatId] = useState('');
+  const [allTasks, setAllTasks] = useState([]);
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -467,9 +219,8 @@ export default function WorkloadGantt() {
   const [draftColor, setDraftColor] = useState(DEFAULT_ITEM_COLOR);
   const [draftRecurrenceType, setDraftRecurrenceType] = useState('other');
   const [draftRecurrenceConfig, setDraftRecurrenceConfig] = useState({});
-
-  const cellsRef = useRef({});
-  useEffect(() => { cellsRef.current = cellsByItem; }, [cellsByItem]);
+  const [draftStartDate, setDraftStartDate] = useState('');
+  const [draftEndDate, setDraftEndDate] = useState('');
 
   const displayDates = useMemo(
     () => (viewMode === 'month' ? getMonthDates(monthKey) : getRollingDates(new Date(), 31)),
@@ -478,16 +229,14 @@ export default function WorkloadGantt() {
   const requiredMonthKeys = useMemo(() => getRequiredMonthKeys(displayDates), [displayDates]);
   const rangeLabel = useMemo(() => getRangeLabel(viewMode, monthKey, displayDates), [displayDates, monthKey, viewMode]);
   const todayKey = dateKey(new Date());
+  const todayIdx = useMemo(() => displayDates.findIndex(d => dateKey(d) === todayKey), [displayDates, todayKey]);
+  const totalWidth = displayDates.length * GANTT_DAY_W;
 
-  const pendingRangeSet = useMemo(() => {
-    if (!clickSelect || !hoverCell || clickSelect.itemId !== hoverCell.itemId) return new Set();
-    return new Set(
-      getDateRange(displayDates, clickSelect.startKey, hoverCell.dateKey)
-        .map((k) => `${clickSelect.itemId}:${k}`),
-    );
-  }, [clickSelect, hoverCell, displayDates]);
+  // Load Slack tasks once
+  useEffect(() => {
+    api.tasks({ limit: 500 }).then(r => setAllTasks(r.tasks || [])).catch(console.error);
+  }, []);
 
-  // 親チームリスト（parent_id=null）と、親ごとの子チームマップ
   const parentTeams = useMemo(() => teams.filter((t) => !t.parent_id), [teams]);
   const childrenOf = useMemo(() => {
     const map = {};
@@ -554,12 +303,18 @@ export default function WorkloadGantt() {
     }
   }, [selectedTeamId, loadBoard, loadCategories]);
 
-  // Escape cancels pending select
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { setClickSelect(null); setHoverCell(null); } };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // Team member IDs for filtering Slack tasks to selected team
+  const teamMemberIds = useMemo(() => new Set(members.map(m => m.user_id)), [members]);
+  const tasksByAssignee = useMemo(() => {
+    const g = {};
+    for (const t of allTasks) {
+      if (teamMemberIds.size > 0 && t.assignee_id && !teamMemberIds.has(t.assignee_id)) continue;
+      const k = t.assignee_id || '__unassigned__';
+      if (!g[k]) g[k] = [];
+      g[k].push(t);
+    }
+    return g;
+  }, [allTasks, teamMemberIds]);
 
   const itemsByOwner = useMemo(() => {
     const grouped = {};
@@ -570,47 +325,39 @@ export default function WorkloadGantt() {
     return grouped;
   }, [items]);
 
-  const saveCells = useCallback(async (itemId) => {
-    await Promise.all(
-      requiredMonthKeys.map((m) => api.setWorkloadCells({
-        itemId,
-        monthKey: m,
-        cells: serializeCellsForMonth(cellsRef.current[itemId] || {}, m),
-      }).catch(console.error)),
-    );
-  }, [requiredMonthKeys]);
+  // Gantt bar helpers
+  function getTaskBar(task) {
+    const s = task.created_at ? new Date(task.created_at) : null;
+    const e = task.due_date ? new Date(task.due_date) : null;
+    if (!s && !e) return null;
+    const effS = s || e, effE = e || s;
+    const mStart = displayDates[0], mEnd = displayDates[displayDates.length - 1];
+    if (effS > mEnd || effE < mStart) return null;
+    const cS = effS < mStart ? mStart : effS;
+    const cE = effE > mEnd ? mEnd : effE;
+    const si = Math.max(0, Math.round((cS - mStart) / 86400000));
+    const ei = Math.min(displayDates.length - 1, Math.round((cE - mStart) / 86400000));
+    return {
+      left: si * GANTT_DAY_W,
+      width: Math.max((ei - si + 1) * GANTT_DAY_W - 2, 4),
+      clippedLeft: effS < mStart,
+      clippedRight: effE > mEnd,
+    };
+  }
 
-  const handleCellClick = useCallback(async (item, fullDateKey) => {
-    if (item.recurrence_type && item.recurrence_type !== 'other') return;
-
-    if (!clickSelect) {
-      setClickSelect({ itemId: item.id, startKey: fullDateKey });
-      return;
+  function getWorkloadBars(item) {
+    const isRecurrence = item.recurrence_type && item.recurrence_type !== 'other';
+    const indices = [];
+    if (isRecurrence) {
+      displayDates.forEach((d, i) => {
+        if (matchesRecurrence(item.recurrence_type, item.recurrence_config, d)) indices.push(i);
+      });
+    } else {
+      const cells = cellsByItem[item.id] || {};
+      displayDates.forEach((d, i) => { if (cells[dateKey(d)]) indices.push(i); });
     }
-
-    if (clickSelect.itemId !== item.id) {
-      setClickSelect({ itemId: item.id, startKey: fullDateKey });
-      setHoverCell(null);
-      return;
-    }
-
-    // Complete range
-    const range = getDateRange(displayDates, clickSelect.startKey, fullDateKey);
-    const intensity = eraseMode ? 0 : 2;
-    setCellsByItem((cur) => {
-      const next = { ...(cur[item.id] || {}) };
-      for (const k of range) {
-        if (intensity === 0) delete next[k];
-        else next[k] = intensity;
-      }
-      const updated = { ...cur, [item.id]: next };
-      cellsRef.current = updated;
-      return updated;
-    });
-    setClickSelect(null);
-    setHoverCell(null);
-    setTimeout(() => saveCells(item.id), 0);
-  }, [clickSelect, eraseMode, displayDates, saveCells]);
+    return groupConsecutiveIndices(indices, GANTT_DAY_W);
+  }
 
   const itemPayload = (item) => ({
     dashTeamId: selectedTeamId,
@@ -628,12 +375,10 @@ export default function WorkloadGantt() {
     setEditorMode('create');
     setEditorOwnerUserId(ownerUserId);
     setEditingItemId('');
-    setDraftTitle('');
-    setDraftCategory('');
-    setDraftNotes('');
+    setDraftTitle(''); setDraftCategory(''); setDraftNotes('');
     setDraftColor(DEFAULT_ITEM_COLOR);
-    setDraftRecurrenceType('other');
-    setDraftRecurrenceConfig({});
+    setDraftRecurrenceType('other'); setDraftRecurrenceConfig({});
+    setDraftStartDate(''); setDraftEndDate('');
     setEditorOpen(true);
   };
 
@@ -647,6 +392,7 @@ export default function WorkloadGantt() {
     setDraftColor(item.color || DEFAULT_ITEM_COLOR);
     setDraftRecurrenceType(item.recurrence_type || 'other');
     setDraftRecurrenceConfig(item.recurrence_config || {});
+    setDraftStartDate(''); setDraftEndDate('');
     setEditorOpen(true);
   };
 
@@ -655,6 +401,7 @@ export default function WorkloadGantt() {
     setDraftTitle(''); setDraftCategory(''); setDraftNotes('');
     setDraftColor(DEFAULT_ITEM_COLOR);
     setDraftRecurrenceType('other'); setDraftRecurrenceConfig({});
+    setDraftStartDate(''); setDraftEndDate('');
   };
 
   const handleSubmitEditor = async () => {
@@ -670,12 +417,29 @@ export default function WorkloadGantt() {
       recurrenceType: draftRecurrenceType,
       recurrenceConfig: draftRecurrenceType !== 'other' ? draftRecurrenceConfig : null,
     };
+    let savedId = editingItemId;
     if (editorMode === 'create') {
-      await api.createWorkloadItem(payload);
+      const res = await api.createWorkloadItem(payload);
+      savedId = res.item?.id;
     } else {
       const cur = items.find((it) => it.id === editingItemId);
       if (!cur) return;
       await api.updateWorkloadItem(editingItemId, { ...payload, sortOrder: cur.sort_order });
+    }
+    // For "期間指定" type with date range: auto-generate cells
+    if (draftRecurrenceType === 'other' && draftStartDate && draftEndDate && savedId) {
+      const monthCells = {};
+      const s = new Date(draftStartDate), e = new Date(draftEndDate);
+      for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+        const mk = monthKeyFromDate(d);
+        if (!monthCells[mk]) monthCells[mk] = [];
+        monthCells[mk].push({ dayNum: d.getDate(), intensity: 2 });
+      }
+      await Promise.all(
+        Object.entries(monthCells).map(([mk, cells]) =>
+          api.setWorkloadCells({ itemId: savedId, monthKey: mk, cells })
+        )
+      );
     }
     closeEditor();
     await loadBoard(selectedTeamId);
@@ -684,49 +448,6 @@ export default function WorkloadGantt() {
   const handleDeleteItem = async (itemId) => {
     if (!window.confirm('この業務を削除しますか？')) return;
     await api.deleteWorkloadItem(itemId);
-    await loadBoard(selectedTeamId);
-  };
-
-  const handleMoveItem = async (itemId, ownerUserId) => {
-    const item = items.find((it) => it.id === itemId);
-    if (!item || item.owner_user_id === ownerUserId) return;
-    await api.updateWorkloadItem(itemId, { ...itemPayload(item), ownerUserId });
-    await loadBoard(selectedTeamId);
-  };
-
-  const persistOwnerItems = async (ownerUserId, ownerItems) => {
-    await Promise.all(
-      ownerItems.map((item, i) => api.updateWorkloadItem(item.id, {
-        ...itemPayload(item),
-        ownerUserId,
-        sortOrder: i + 1,
-      })),
-    );
-  };
-
-  const handleDropOnItem = async (targetOwnerUserId, targetItemId) => {
-    if (!draggingItemId) return;
-    const dragged = items.find((it) => it.id === draggingItemId);
-    if (!dragged || dragged.id === targetItemId) return;
-
-    const srcOwner = draggingOwnerUserId || dragged.owner_user_id;
-    const srcItems = [...(itemsByOwner[srcOwner] || [])];
-    const tgtItems = srcOwner === targetOwnerUserId ? srcItems : [...(itemsByOwner[targetOwnerUserId] || [])];
-    const si = srcItems.findIndex((it) => it.id === dragged.id);
-    const ti = tgtItems.findIndex((it) => it.id === targetItemId);
-    if (si === -1 || ti === -1) return;
-
-    if (srcOwner === targetOwnerUserId) {
-      const reordered = [...srcItems];
-      const [moved] = reordered.splice(si, 1);
-      reordered.splice(si < ti ? ti - 1 : ti, 0, moved);
-      await persistOwnerItems(targetOwnerUserId, reordered);
-    } else {
-      const nextSrc = [...srcItems]; const [moved] = nextSrc.splice(si, 1);
-      const nextTgt = [...tgtItems]; nextTgt.splice(ti, 0, moved);
-      await Promise.all([persistOwnerItems(srcOwner, nextSrc), persistOwnerItems(targetOwnerUserId, nextTgt)]);
-    }
-    setDraggingItemId(''); setDraggingOwnerUserId('');
     await loadBoard(selectedTeamId);
   };
 
@@ -768,42 +489,32 @@ export default function WorkloadGantt() {
     });
   };
 
-  const [ganttTab, setGanttTab] = useState('tasks');
+  const ROW_H = 36;
+  const HEADER_H = 52;
 
   return (
     <div className="workload-page">
       <div className="page-header">
         <div>
           <h1>業務ガント</h1>
-          <p className="page-subtitle">タスクガント: Slackタスクをガント表示 ／ 業務負荷: チームの月次負荷管理</p>
-        </div>
-        <div className="workload-view-toggle" style={{ alignSelf: 'center' }}>
-          <button type="button" className={ganttTab === 'tasks' ? 'is-active' : ''} onClick={() => setGanttTab('tasks')}>タスクガント</button>
-          <button type="button" className={ganttTab === 'workload' ? 'is-active' : ''} onClick={() => setGanttTab('workload')}>業務負荷</button>
+          <p className="page-subtitle">Slackタスクと繰り返し業務を一画面で管理</p>
         </div>
       </div>
 
-      {ganttTab === 'tasks' ? (
-        <TaskGanttView />
-      ) : (
-      <><div className="workload-toolbar">
-        {/* 親チーム選択 */}
+      {/* ── Toolbar ── */}
+      <div className="workload-toolbar">
         <select className="filter-select" value={selectedParentId} onChange={(e) => handleParentChange(e.target.value)}>
           {parentTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
-
-        {/* 子チーム選択（子がある親のみ表示） */}
         {(childrenOf[selectedParentId]?.length > 0) && (
           <select className="filter-select" value={selectedTeamId} onChange={(e) => setSelectedTeamId(e.target.value)}>
             {childrenOf[selectedParentId].map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
-
         <div className="workload-view-toggle">
           <button type="button" className={viewMode === 'month' ? 'is-active' : ''} onClick={() => setViewMode('month')}>月表示</button>
           <button type="button" className={viewMode === 'rolling' ? 'is-active' : ''} onClick={() => setViewMode('rolling')}>直近31日</button>
         </div>
-
         {viewMode === 'month' ? (
           <div className="month-switcher">
             <button className="filter-clear-btn" onClick={() => setMonthKey(shiftMonth(monthKey, -1))}>前月</button>
@@ -813,158 +524,154 @@ export default function WorkloadGantt() {
         ) : (
           <div className="month-switcher"><span>{rangeLabel}</span></div>
         )}
-
-        <button
-          type="button"
-          className={`workload-erase-toggle${eraseMode ? ' is-active' : ''}`}
-          onClick={() => setEraseMode((v) => !v)}
-        >
-          ✕ 消去{eraseMode ? 'モード中' : ''}
+        <button type="button" className="filter-clear-btn" style={{ marginLeft: 'auto' }} onClick={() => setCatMgrOpen(v => !v)}>
+          カテゴリ管理
         </button>
-
-        {clickSelect && (
-          <span className="workload-pending-hint">開始日選択済み — 終了日をクリック（Escでキャンセル）</span>
-        )}
-
-        <button className="btn-primary" onClick={handleCopyPrevious} disabled={viewMode !== 'month'}>前月をコピー</button>
-        <button className="btn-secondary" onClick={() => setCatMgrOpen(true)}>カテゴリ管理</button>
       </div>
 
-      {!teams.length ? (
-        <p className="empty-text">利用可能なチームがまだありません</p>
-      ) : loading ? (
-        <p className="empty-text">読み込み中...</p>
+      {loading ? (
+        <p className="empty-text">読み込み中…</p>
+      ) : members.length === 0 ? (
+        <p className="empty-text">チームを選択してください</p>
       ) : (
-        <div className="workload-board">
-          {members.map((member) => (
-            <section
-              key={member.user_id}
-              className="workload-member-section"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={async () => {
-                if (!draggingItemId) return;
-                await handleMoveItem(draggingItemId, member.user_id);
-                setDraggingItemId(''); setDraggingOwnerUserId('');
-              }}
-            >
-              <div className="workload-member-header">
-                <div>
-                  <h2>{member.display_name || member.real_name || member.user_id}</h2>
-                  <p>{member.real_name && member.real_name !== member.display_name ? member.real_name : member.user_id}</p>
-                </div>
-                <button className="btn-primary" onClick={() => openCreateModal(member.user_id)}>＋ 業務追加</button>
-              </div>
+        <div style={{ border: '1px solid var(--gray-200)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+          <div style={{ display: 'flex' }}>
 
-              <div className="workload-grid" style={{ '--workload-days': displayDates.length }}>
-                {/* Header row */}
-                <div className="workload-grid-header workload-grid-row">
-                  <div className="workload-item-label header">業務</div>
-                  {displayDates.map((d) => {
-                    const key = dateKey(d);
+            {/* ── Left: fixed label column ── */}
+            <div style={{ flexShrink: 0, width: 300, borderRight: '2px solid var(--gray-200)' }}>
+              <div style={{ height: HEADER_H, borderBottom: '2px solid var(--gray-200)', display: 'flex', alignItems: 'center', padding: '0 16px', background: '#f8fafc', fontWeight: 600, fontSize: 12, color: 'var(--gray-500)' }}>
+                担当者 / Slackタスク・業務
+              </div>
+              {members.map((member) => {
+                const workItems = itemsByOwner[member.user_id] || [];
+                const slackTasks = tasksByAssignee[member.user_id] || [];
+                const name = (member.display_name || member.real_name || member.user_id).split('/')[0].trim();
+                return (
+                  <div key={member.user_id}>
+                    <div style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8, background: '#f1f5f9', borderBottom: '1px solid var(--gray-200)', fontWeight: 700, fontSize: 13, color: 'var(--gray-700)' }}>
+                      {member.avatar_url
+                        ? <img src={member.avatar_url} alt="" style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0 }} />
+                        : <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--primary-light)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{name[0]?.toUpperCase()}</div>
+                      }
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--gray-400)', flexShrink: 0 }}>{workItems.length + slackTasks.length}件</span>
+                    </div>
+                    {/* Workload item rows */}
+                    {workItems.map((item) => {
+                      const isRecurrence = item.recurrence_type && item.recurrence_type !== 'other';
+                      const catObj = item.category ? categories.find((c) => c.name === item.category) : null;
+                      return (
+                        <div key={item.id}
+                          title={item.title + (item.notes ? ' — ' + item.notes : '')}
+                          onClick={() => openEditModal(item)}
+                          onMouseEnter={e => e.currentTarget.style.background = '#fafafa'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                          style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12, cursor: 'pointer' }}
+                        >
+                          <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: item.color || DEFAULT_ITEM_COLOR, flexShrink: 0 }} />
+                          <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0 }}>{isRecurrence ? '↺' : '▬'}</span>
+                          {catObj && <span style={{ fontSize: 9, fontWeight: 600, flexShrink: 0, color: catObj.color, background: catObj.color + '22', padding: '1px 5px', borderRadius: 6 }}>{catObj.name}</span>}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: 'var(--gray-800)' }}>{item.title}</span>
+                          <button onClick={e => { e.stopPropagation(); handleDeleteItem(item.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-300)', fontSize: 14, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
+                        </div>
+                      );
+                    })}
+                    {/* Slack task rows */}
+                    {slackTasks.map((task) => {
+                      const sc = statusDef(task.status);
+                      const title = stripSlack(task.title || '（タイトルなし）');
+                      return (
+                        <div key={task.id} style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12 }}>
+                          <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: sc.text, background: sc.bg, padding: '2px 5px', borderRadius: 7, whiteSpace: 'nowrap' }}>{sc.label}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: task.status === 'done' || task.status === 'cancelled' ? 'var(--gray-400)' : 'var(--gray-800)', textDecoration: task.status === 'cancelled' ? 'line-through' : 'none' }}>
+                            {title.length > 28 ? title.slice(0, 28) + '…' : title}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {/* Add button row */}
+                    <div style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', borderBottom: '2px solid var(--gray-200)', background: '#fafafa' }}>
+                      <button onClick={() => openCreateModal(member.user_id)} style={{ background: 'none', border: '1px dashed var(--gray-300)', borderRadius: 6, fontSize: 11, color: 'var(--gray-400)', cursor: 'pointer', padding: '3px 10px', width: '100%', textAlign: 'left' }}>
+                        ＋ 業務を追加
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Right: scrollable Gantt ── */}
+            <div style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
+              <div style={{ width: totalWidth, minWidth: '100%', position: 'relative' }}>
+                {/* Date header */}
+                <div style={{ display: 'flex', height: HEADER_H, position: 'sticky', top: 0, zIndex: 2, background: '#f8fafc', borderBottom: '2px solid var(--gray-200)' }}>
+                  {displayDates.map((d, i) => {
+                    const isToday = i === todayIdx;
                     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                     return (
-                      <div
-                        key={`${member.user_id}-${key}`}
-                        className={`workload-day-cell header${key === todayKey ? ' today' : ''}${isWeekend ? ' weekend' : ''}`}
-                      >
-                        <span className="workload-day-number">{d.getDate()}</span>
+                      <div key={i} style={{ width: GANTT_DAY_W, flexShrink: 0, borderRight: '1px solid var(--gray-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: isToday ? '#dbeafe' : 'transparent', fontSize: 11 }}>
+                        <span style={{ fontWeight: isToday ? 700 : 400, color: isWeekend ? 'var(--gray-400)' : 'var(--gray-700)' }}>{d.getDate()}</span>
+                        <span style={{ fontSize: 10, color: d.getDay() === 0 ? '#ef4444' : d.getDay() === 6 ? '#3b82f6' : 'var(--gray-400)' }}>{DOW_JP[d.getDay()]}</span>
                       </div>
                     );
                   })}
                 </div>
-
-                {/* Item rows */}
-                {(itemsByOwner[member.user_id] || []).map((item) => {
-                  const itemColor = item.color || DEFAULT_ITEM_COLOR;
-                  const isRecurrence = item.recurrence_type && item.recurrence_type !== 'other';
-                  const catObj = item.category ? categories.find((c) => c.name === item.category) : null;
-                  const chipColor = catObj?.color || itemColor;
+                {/* Per-member Gantt rows */}
+                {members.map((member) => {
+                  const workItems = itemsByOwner[member.user_id] || [];
+                  const slackTasks = tasksByAssignee[member.user_id] || [];
+                  const weekendBg = (i) => (displayDates[i]?.getDay() === 0 || displayDates[i]?.getDay() === 6)
+                    ? <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: i * GANTT_DAY_W, width: GANTT_DAY_W, background: 'rgba(0,0,0,0.025)', pointerEvents: 'none' }} />
+                    : null;
+                  const todayLine = todayIdx >= 0
+                    ? <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * GANTT_DAY_W + GANTT_DAY_W / 2, width: 1, background: '#3b82f6', opacity: 0.25 }} />
+                    : null;
                   return (
-                    <div key={item.id} className="workload-grid-row">
-                      {/* Label: draggable for row reorder */}
-                      <div
-                        className="workload-item-label"
-                        draggable
-                        onDragStart={() => { setDraggingItemId(item.id); setDraggingOwnerUserId(member.user_id); }}
-                        onDragEnd={() => { setDraggingItemId(''); setDraggingOwnerUserId(''); }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={async (e) => { e.preventDefault(); e.stopPropagation(); await handleDropOnItem(member.user_id, item.id); }}
-                      >
-                        <div className="workload-drag-handle">⠿</div>
-                        <div className="workload-color-dot" style={{ background: itemColor }} />
-                        <div className="workload-item-texts">
-                          <div className="workload-item-title-line">
-                            <span className="workload-item-title">{item.title}</span>
-                            {item.category && (
-                              <span
-                                className="workload-category-chip"
-                                style={{ borderColor: chipColor, background: hexToRgba(chipColor, 0.12), color: chipColor }}
-                              >
-                                {item.category}
-                              </span>
-                            )}
-                          </div>
-                          {item.notes && <span className="workload-item-notes">{item.notes}</span>}
-                        </div>
-                        <div className="workload-item-actions">
-                          <button className="btn-sm" onClick={() => openEditModal(item)}>編集</button>
-                          <button className="btn-sm btn-danger" onClick={() => handleDeleteItem(item.id)}>削除</button>
-                        </div>
+                    <div key={member.user_id}>
+                      <div style={{ height: ROW_H, borderBottom: '1px solid var(--gray-200)', background: '#f1f5f9', position: 'relative' }}>
+                        {todayIdx >= 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: todayIdx * GANTT_DAY_W + GANTT_DAY_W / 2, width: 2, background: '#3b82f6', opacity: 0.3 }} />}
                       </div>
-
-                      {/* Cells */}
-                      {displayDates.map((d) => {
-                        const fk = dateKey(d);
-                        const isToday = fk === todayKey;
-                        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                        const isPendingStart = clickSelect?.itemId === item.id && clickSelect.startKey === fk;
-                        const isPendingRange = pendingRangeSet.has(`${item.id}:${fk}`);
-
-                        let intensity = 0;
-                        if (isRecurrence) {
-                          intensity = matchesRecurrence(item.recurrence_type, item.recurrence_config, d) ? 2 : 0;
-                        } else {
-                          intensity = cellsByItem[item.id]?.[fk] || 0;
-                        }
-
-                        let bgColor = intensity > 0
-                          ? (intensity === 1 ? hexToRgba(itemColor, 0.4) : itemColor)
-                          : undefined;
-
-                        // Preview overlay for pending range
-                        if (!isRecurrence && isPendingRange && intensity === 0) {
-                          bgColor = eraseMode ? hexToRgba('#ef4444', 0.2) : hexToRgba(itemColor, 0.35);
-                        }
-
+                      {workItems.map((item) => {
+                        const bars = getWorkloadBars(item);
                         return (
-                          <div
-                            key={`${item.id}-${fk}`}
-                            className={[
-                              'workload-day-cell',
-                              isToday ? 'today' : '',
-                              isWeekend ? 'weekend' : '',
-                              isPendingStart ? 'pending-start' : '',
-                              !isRecurrence ? 'clickable' : '',
-                            ].filter(Boolean).join(' ')}
-                            style={bgColor ? { background: bgColor } : undefined}
-                            onClick={() => handleCellClick(item, fk)}
-                            onMouseEnter={() => { if (clickSelect) setHoverCell({ itemId: item.id, dateKey: fk }); }}
-                            onMouseLeave={() => { if (hoverCell) setHoverCell(null); }}
-                          />
+                          <div key={item.id} style={{ height: ROW_H, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
+                            {displayDates.map((_, i) => weekendBg(i))}
+                            {todayLine}
+                            {bars.map((bar, bi) => (
+                              <div key={bi} title={item.title} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: item.color || DEFAULT_ITEM_COLOR, opacity: 0.85 }} />
+                            ))}
+                          </div>
                         );
                       })}
+                      {slackTasks.map((task) => {
+                        const bar = getTaskBar(task);
+                        const sc = statusDef(task.status);
+                        return (
+                          <div key={task.id} style={{ height: ROW_H, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
+                            {displayDates.map((_, i) => weekendBg(i))}
+                            {todayLine}
+                            {bar && (
+                              <div title={stripSlack(task.title || '')} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: bar.left, width: bar.width, height: 18, borderRadius: 4, background: sc.bar, opacity: task.status === 'cancelled' ? 0.35 : task.status === 'done' ? 0.65 : 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                                {bar.clippedLeft && <div style={{ width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderRight: '6px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
+                                {bar.clippedRight && <div style={{ marginLeft: 'auto', width: 0, height: 0, borderTop: '9px solid transparent', borderBottom: '9px solid transparent', borderLeft: '6px solid rgba(0,0,0,0.3)', flexShrink: 0 }} />}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div style={{ height: ROW_H, borderBottom: '2px solid var(--gray-200)', position: 'relative', background: '#fafafa' }}>
+                        {todayLine}
+                      </div>
                     </div>
                   );
                 })}
-
-                {!(itemsByOwner[member.user_id] || []).length && (
-                  <div className="empty-text">まだ業務がありません</div>
-                )}
               </div>
-            </section>
-          ))}
+            </div>
+
+          </div>
         </div>
       )}
+
 
       {/* Category manager modal */}
       {catMgrOpen && (
@@ -1124,7 +831,17 @@ export default function WorkloadGantt() {
                 <p style={{ marginTop: 8, fontSize: 12, color: 'var(--gray-500)' }}>毎日この色で塗りつぶされます。</p>
               )}
               {draftRecurrenceType === 'other' && (
-                <p style={{ marginTop: 8, fontSize: 12, color: 'var(--gray-500)' }}>ガント上でクリックして期間を手動で塗ってください。</p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <label style={{ fontSize: 11, color: 'var(--gray-500)' }}>開始日</label>
+                    <input type="date" value={draftStartDate} onChange={(e) => setDraftStartDate(e.target.value)} style={{ fontSize: 13 }} />
+                  </div>
+                  <span style={{ marginTop: 16, color: 'var(--gray-400)' }}>〜</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <label style={{ fontSize: 11, color: 'var(--gray-500)' }}>終了日</label>
+                    <input type="date" value={draftEndDate} onChange={(e) => setDraftEndDate(e.target.value)} style={{ fontSize: 13 }} />
+                  </div>
+                </div>
               )}
             </div>
 
@@ -1135,7 +852,6 @@ export default function WorkloadGantt() {
           </div>
         </div>
       )}
-    </> )}
     </div>
   );
 }

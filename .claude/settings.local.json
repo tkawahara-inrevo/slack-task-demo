@@ -18,7 +18,19 @@
       "Bash(npm create:*)",
       "Bash(npm run:*)",
       "Bash(node -e \"try { require\\(''./src/features/dashboard-api''\\); require\\(''./src/features/settings''\\); require\\(''./src/db''\\); console.log\\(''OK''\\); } catch\\(e\\) { console.error\\(e.message\\); }\")",
-      "Bash(node -e \"try { require\\(''./src/features/dashboard-api''\\); require\\(''./src/db''\\); console.log\\(''OK''\\); } catch\\(e\\) { console.error\\(e.message\\); }\")"
+      "Bash(node -e \"try { require\\(''./src/features/dashboard-api''\\); require\\(''./src/db''\\); console.log\\(''OK''\\); } catch\\(e\\) { console.error\\(e.message\\); }\")",
+      "Bash(node --check src/features/dashboard-api.js)",
+      "Bash(node --check src/db/index.js)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(ssh slack-task:*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"workload\\\\|gantt\" /c/Users/kawah/slack-home-demo/web/src/*.css)",
+      "Bash(grep -r \"workload-\" /c/Users/kawah/slack-home-demo/web/src/*.html)",
+      "Bash(node --check index.js)",
+      "Read(//c/Users/kawah/.ssh/**)",
+      "Bash(bash /c/Users/kawah/slack-home-demo/deploy.sh)"
     ]
   }
 }

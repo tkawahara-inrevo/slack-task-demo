@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 
+// ─── Role definitions ────────────────────────────────────────────────────────
+const ROLES = [
+  { value: 'dept_leader',  label: '部署リーダー',       color: '#6d28d9', bg: '#ede9fe' },
+  { value: 'team_leader',  label: 'チームリーダー',     color: '#1d4ed8', bg: '#dbeafe' },
+  { value: 'sub_leader',   label: 'サブリーダー',       color: '#0369a1', bg: '#e0f2fe' },
+  { value: 'member',       label: 'メンバー',           color: '#374151', bg: '#f3f4f6' },
+];
+const ROLE_MAP = Object.fromEntries(ROLES.map(r => [r.value, r]));
+const roleOf = (v) => ROLE_MAP[v] || ROLE_MAP['member'];
+
 // ─── Avatar ──────────────────────────────────────────────────────────────────
 function Avatar({ member, size = 48 }) {
   const name = member.display_name || member.real_name || member.user_id;
@@ -26,6 +36,8 @@ function Avatar({ member, size = 48 }) {
 function MemberCardView({ member }) {
   const name = member.display_name || member.real_name || member.user_id;
   const title = member.title || '';
+  const role = roleOf(member.role);
+  const showRoleBadge = member.role && member.role !== 'member';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 90, flexShrink: 0 }}>
       <Avatar member={member} size={54} />
@@ -36,15 +48,34 @@ function MemberCardView({ member }) {
       }}>
         <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, wordBreak: 'break-all' }}>{name}</div>
         {title && <div style={{ fontSize: 10, color: 'var(--gray-500)', marginTop: 1 }}>{title}</div>}
+        {showRoleBadge && (
+          <div style={{
+            marginTop: 4, fontSize: 9, fontWeight: 700,
+            color: role.color, background: role.bg,
+            borderRadius: 8, padding: '1px 5px', display: 'inline-block',
+          }}>{role.label}</div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Member chip: build mode (compact row, draggable) ────────────────────────
-function MemberChip({ member, isDragging, onDragStart, onRemove, showRemove = false, isLeader = false }) {
+// ─── Member chip: build mode (compact row, draggable + role selector) ────────
+function MemberChip({ member, isDragging, onDragStart, onRemove, onRoleChange, showRemove = false }) {
   const name = member.display_name || member.real_name || member.user_id;
   const title = member.title || '';
+  const role = roleOf(member.role);
+  const [roleOpen, setRoleOpen] = useState(false);
+  const dropRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!roleOpen) return;
+    const handler = (e) => { if (!dropRef.current?.contains(e.target)) setRoleOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [roleOpen]);
+
   return (
     <div
       draggable
@@ -52,12 +83,13 @@ function MemberChip({ member, isDragging, onDragStart, onRemove, showRemove = fa
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '6px 8px', borderRadius: 8,
-        background: isLeader ? '#fffbeb' : 'var(--gray-50)',
-        border: `1px solid ${isLeader ? '#fde68a' : 'var(--gray-200)'}`,
+        background: role.bg,
+        border: `1px solid ${role.color}30`,
         cursor: 'grab',
         opacity: isDragging ? 0.4 : 1,
         userSelect: 'none',
         transition: 'opacity 0.1s',
+        position: 'relative',
       }}
     >
       <Avatar member={member} size={30} />
@@ -71,22 +103,69 @@ function MemberChip({ member, isDragging, onDragStart, onRemove, showRemove = fa
           </div>
         )}
       </div>
-      {isLeader && (
-        <span style={{ fontSize: 10, color: '#92400e', background: '#fde68a', padding: '2px 6px', borderRadius: 10, flexShrink: 0, whiteSpace: 'nowrap' }}>
-          リーダー
-        </span>
-      )}
-      {showRemove && (
-        <button onClick={onRemove} title="チームから外す"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-400)', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>
-          ×
+
+      {/* Role badge — click to open dropdown */}
+      <div ref={dropRef} style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          onMouseDown={e => { e.stopPropagation(); e.preventDefault(); }}
+          onClick={e => { e.stopPropagation(); if (onRoleChange) setRoleOpen(v => !v); }}
+          title="役割を変更"
+          style={{
+            fontSize: 10, fontWeight: 600,
+            color: role.color, background: role.bg,
+            border: `1px solid ${role.color}60`,
+            borderRadius: 10, padding: '2px 7px',
+            cursor: onRoleChange ? 'pointer' : 'default',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {role.label} {onRoleChange ? '▾' : ''}
         </button>
+
+        {roleOpen && (
+          <div style={{
+            position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 100,
+            background: '#fff', border: '1px solid var(--gray-200)',
+            borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            minWidth: 140, overflow: 'hidden',
+          }}>
+            {ROLES.map(r => (
+              <button
+                key={r.value}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation();
+                  setRoleOpen(false);
+                  if (r.value !== member.role) onRoleChange(r.value);
+                }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '8px 12px', fontSize: 13, border: 'none', cursor: 'pointer',
+                  background: r.value === member.role ? r.bg : '#fff',
+                  color: r.value === member.role ? r.color : 'var(--gray-700)',
+                  fontWeight: r.value === member.role ? 700 : 400,
+                }}
+              >
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: r.color, marginRight: 6 }} />
+                {r.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showRemove && (
+        <button
+          onClick={e => { e.stopPropagation(); onRemove(); }}
+          title="チームから外す"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-400)', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
+        >×</button>
       )}
     </div>
   );
 }
 
-// ─── View mode: team box ─────────────────────────────────────────────────────
+// ─── View mode: member card (with role badge) ────────────────────────────────
 function OrgTeamBox({ team, members, style }) {
   const [collapsed, setCollapsed] = useState(false);
   const isChild = !!team.parent_id;
@@ -156,7 +235,7 @@ function OrgParentSection({ parent, children, membersMap }) {
 }
 
 // ─── Build mode: droppable team card ─────────────────────────────────────────
-function EditableTeamCard({ team, members, dragState, onDragStart, onDrop, onRemoveMember, onDelete, onRename }) {
+function EditableTeamCard({ team, members, dragState, onDragStart, onDrop, onRemoveMember, onRoleChange, onDelete, onRename }) {
   const [dragOver, setDragOver] = useState(false);
   const [editing, setEditing] = useState(false);
   const [nameVal, setNameVal] = useState(team.name);
@@ -238,15 +317,15 @@ function EditableTeamCard({ team, members, dragState, onDragStart, onDrop, onRem
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {members.map((m, i) => (
+              {members.map((m) => (
                 <MemberChip
                   key={m.user_id}
                   member={m}
                   isDragging={dragState?.userId === m.user_id}
                   onDragStart={(e) => onDragStart(e, m)}
                   onRemove={() => onRemoveMember(team.id, m.user_id)}
+                  onRoleChange={(role) => onRoleChange(team.id, m.user_id, role)}
                   showRemove
-                  isLeader={i === 0}
                 />
               ))}
               {dragOver && (
@@ -486,6 +565,28 @@ export default function OrgChart() {
     }
   };
 
+  const handleRoleChange = async (teamId, userId, role) => {
+    // Optimistic update
+    setMembersMap(prev => {
+      const members = (prev[teamId] || []).map(m =>
+        m.user_id === userId ? { ...m, role } : m
+      );
+      // Re-sort by role order then added_at
+      const ORDER = { dept_leader: 1, team_leader: 2, sub_leader: 3, member: 4 };
+      members.sort((a, b) => (ORDER[a.role] ?? 4) - (ORDER[b.role] ?? 4));
+      return { ...prev, [teamId]: members };
+    });
+    setSaving(true);
+    try {
+      await api.adminUpdateTeamMemberRole(teamId, userId, role);
+    } catch (e) {
+      console.error(e);
+      load(); // rollback via reload
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const [buildSearch, setBuildSearch] = useState('');
 
   // Teams shown in build mode grid — filter by team name or member name
@@ -577,6 +678,7 @@ export default function OrgChart() {
                 onDragStart={handleDragStart}
                 onDrop={handleDrop}
                 onRemoveMember={handleRemoveMember}
+                onRoleChange={handleRoleChange}
                 onDelete={handleDeleteTeam}
                 onRename={handleRenameTeam}
               />

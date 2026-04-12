@@ -502,6 +502,7 @@ async function dbEnsureSettingsSchema() {
 
   // 親子チーム構造
   await dbQuery(`ALTER TABLE dash_teams ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES dash_teams(id) ON DELETE SET NULL`).catch(() => {});
+  await dbQuery(`ALTER TABLE dash_team_members ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member'`).catch(() => {});
 
   // チーム共有カテゴリ
   await dbQuery(`
@@ -1195,18 +1196,32 @@ async function dbListDashTeamMembers(teamId, dashTeamId) {
 }
 
 async function dbListDashTeamMembersWithProfile(teamId, dashTeamId) {
+  const ROLE_ORDER = `CASE m.role
+    WHEN 'dept_leader' THEN 1
+    WHEN 'team_leader' THEN 2
+    WHEN 'sub_leader'  THEN 3
+    ELSE 4 END`;
   const q = `
-    SELECT m.user_id, m.added_at,
+    SELECT m.user_id, m.added_at, m.role,
       d.display_name, d.real_name,
       d.profile_json->>'title' AS title,
       d.profile_json->>'image_72' AS avatar_url
     FROM dash_team_members m
     LEFT JOIN dashboard_user_directory d ON d.team_id = m.team_id AND d.user_id = m.user_id
     WHERE m.team_id=$1 AND m.dash_team_id=$2
-    ORDER BY m.added_at ASC;
+    ORDER BY ${ROLE_ORDER} ASC, m.added_at ASC;
   `;
   const res = await dbQuery(q, [teamId, dashTeamId]);
   return res.rows;
+}
+
+async function dbUpdateDashTeamMemberRole(teamId, dashTeamId, userId, role) {
+  const valid = ['dept_leader', 'team_leader', 'sub_leader', 'member'];
+  if (!valid.includes(role)) throw new Error(`Invalid role: ${role}`);
+  await dbQuery(
+    `UPDATE dash_team_members SET role=$4 WHERE team_id=$1 AND dash_team_id=$2 AND user_id=$3`,
+    [teamId, dashTeamId, userId, role],
+  );
 }
 
 async function dbGetUserDashTeams(teamId, userId) {
@@ -2295,6 +2310,7 @@ module.exports = {
   dbRemoveDashTeamMember,
   dbListDashTeamMembers,
   dbListDashTeamMembersWithProfile,
+  dbUpdateDashTeamMemberRole,
   dbGetUserDashTeams,
   dbListDashboardVisibleUsers,
   dbReplaceDashboardVisibleUsers,

@@ -68,6 +68,7 @@ function registerDashboardApi(deps) {
     dbDeleteDashTeam,
     dbUpdateDashTeam,
     dbAddDashTeamMember,
+    dbUpdateDashTeamMemberRole,
     dbRemoveDashTeamMember,
     dbListDashTeamMembers,
     dbListDashTeamMembersWithProfile,
@@ -711,6 +712,19 @@ function registerDashboardApi(deps) {
       res.json({ ok: true });
     } catch (e) {
       console.error("dashboard POST /admin/teams/:id/members error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  expressApp.patch("/api/dashboard/admin/teams/:id/members/:userId", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { role } = req.body || {};
+      if (!role) return res.status(400).json({ error: "role_required" });
+      await dbUpdateDashTeamMemberRole(teamId, req.params.id, req.params.userId, role);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("dashboard PATCH team member role error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

@@ -106,6 +106,11 @@ export const api = {
   // Admin: team members
   adminTeamMembers: (id) => apiFetch(`/admin/teams/${id}/members`),
   adminAddTeamMember: (id, userId) => jsonPost(`/admin/teams/${id}/members`, { userId }),
+  adminUpdateTeamMemberRole: (id, userId, role) => apiFetch(`/admin/teams/${id}/members/${userId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  }),
   adminRemoveTeamMember: (id, userId) => apiDelete(`/admin/teams/${id}/members/${userId}`),
   adminUserMapping: (query = '') => apiFetch(`/admin/user-mapping${query ? `?q=${encodeURIComponent(query)}` : ''}`),
   adminSyncUserMapping: () => jsonPost('/admin/user-mapping/sync', {}),

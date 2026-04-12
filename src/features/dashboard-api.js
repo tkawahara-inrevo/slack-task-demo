@@ -737,7 +737,21 @@ function registerDashboardApi(deps) {
           membersMap[t.id] = await dbListDashTeamMembersWithProfile(teamId, t.id);
         }),
       );
-      res.json({ teams, membersMap });
+      // Users in the Slack workspace who are not in any dash_team
+      const allUsers = await dbListDashboardUserDirectory(teamId, { limit: 1000 });
+      const assignedIds = new Set(
+        Object.values(membersMap).flatMap((ms) => ms.map((m) => m.user_id)),
+      );
+      const unassigned = allUsers
+        .filter((u) => u.is_active && !assignedIds.has(u.user_id))
+        .map((u) => ({
+          user_id: u.user_id,
+          display_name: u.display_name,
+          real_name: u.real_name,
+          title: u.profile_json?.title || null,
+          avatar_url: u.profile_json?.image_72 || null,
+        }));
+      res.json({ teams, membersMap, unassigned });
     } catch (e) {
       console.error("dashboard /org-chart error:", e);
       res.status(500).json({ error: "internal" });

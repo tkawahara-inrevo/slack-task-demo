@@ -486,8 +486,19 @@ export default function OrgChart() {
     }
   };
 
-  // All teams as flat editable cards for build mode
-  const allTeams = useMemo(() => teams, [teams]);
+  const [buildSearch, setBuildSearch] = useState('');
+
+  // Teams shown in build mode grid — filter by team name or member name
+  const filteredBuildTeams = useMemo(() => {
+    const q = buildSearch.trim().toLowerCase();
+    if (!q) return teams;
+    return teams.filter(t => {
+      if (t.name.toLowerCase().includes(q)) return true;
+      return (membersMap[t.id] || []).some(m =>
+        [m.display_name, m.real_name, m.title].filter(Boolean).some(v => v.toLowerCase().includes(q))
+      );
+    });
+  }, [teams, membersMap, buildSearch]);
 
   return (
     <div className="workload-page">
@@ -500,7 +511,7 @@ export default function OrgChart() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {saving && <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>保存中…</span>}
           <button
-            onClick={() => { setBuildMode(v => !v); setSearch(''); }}
+            onClick={() => { setBuildMode(v => !v); setSearch(''); setBuildSearch(''); }}
             className={buildMode ? 'btn btn-primary' : 'btn btn-secondary'}
           >
             {buildMode ? '✓ 編集完了' : '✏️ チームを組む'}
@@ -533,11 +544,21 @@ export default function OrgChart() {
           )}
 
           {/* Team grid */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-600)' }}>
-              全チーム（{allTeams.length}チーム）
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <input
+              type="text"
+              placeholder="チーム名・メンバー名で絞り込み…"
+              value={buildSearch}
+              onChange={e => setBuildSearch(e.target.value)}
+              style={{
+                flex: 1, maxWidth: 300, fontSize: 13, padding: '7px 12px',
+                border: '1px solid var(--gray-300)', borderRadius: 8, outline: 'none',
+              }}
+            />
+            <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>
+              {filteredBuildTeams.length} / {teams.length}チーム
             </span>
-            <button onClick={handleCreateTeam} className="btn btn-secondary" style={{ fontSize: 13, padding: '6px 14px' }}>
+            <button onClick={handleCreateTeam} className="btn btn-secondary" style={{ fontSize: 13, padding: '6px 14px', marginLeft: 'auto' }}>
               ＋ チームを追加
             </button>
           </div>
@@ -547,7 +568,7 @@ export default function OrgChart() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
             gap: 16,
           }}>
-            {allTeams.map(team => (
+            {filteredBuildTeams.map(team => (
               <EditableTeamCard
                 key={team.id}
                 team={team}

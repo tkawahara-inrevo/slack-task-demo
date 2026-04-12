@@ -69,6 +69,7 @@ function registerDashboardApi(deps) {
     dbUpdateDashTeam,
     dbAddDashTeamMember,
     dbUpdateDashTeamMemberRole,
+    dbSetUserDirectoryActive,
     dbRemoveDashTeamMember,
     dbListDashTeamMembers,
     dbListDashTeamMembersWithProfile,
@@ -725,6 +726,18 @@ function registerDashboardApi(deps) {
       res.json({ ok: true });
     } catch (e) {
       console.error("dashboard PATCH team member role error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // Hide a user from org chart (set is_active=false in directory)
+  expressApp.delete("/api/dashboard/admin/directory/:userId", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      await dbSetUserDirectoryActive(teamId, req.params.userId, false);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("dashboard DELETE directory user error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

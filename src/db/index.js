@@ -1417,6 +1417,13 @@ async function dbGetDashboardDirectoryMember(teamId, userId) {
   return res.rows[0] || null;
 }
 
+async function dbSetUserDirectoryActive(teamId, userId, isActive) {
+  await dbQuery(
+    `UPDATE dashboard_user_directory SET is_active=$3 WHERE team_id=$1 AND user_id=$2`,
+    [teamId, userId, isActive],
+  );
+}
+
 // ================================
 // Workload gantt
 // ================================
@@ -2317,6 +2324,7 @@ module.exports = {
   dbListDashboardVisibleTeams,
   dbReplaceDashboardVisibleTeams,
   dbUpsertDashboardUserDirectoryMember,
+  dbSetUserDirectoryActive,
   dbListDashboardUserDirectory,
   dbGetDashboardDirectoryMember,
   dbListWorkloadItems,

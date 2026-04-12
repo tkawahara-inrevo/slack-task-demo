@@ -342,7 +342,7 @@ function EditableTeamCard({ team, members, dragState, onDragStart, onDrop, onRem
 }
 
 // ─── Build mode: unassigned members source panel ─────────────────────────────
-function UnassignedPanel({ members, dragState, onDragStart }) {
+function UnassignedPanel({ members, dragState, onDragStart, onHide }) {
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
@@ -386,15 +386,31 @@ function UnassignedPanel({ members, dragState, onDragStart }) {
           <p style={{ fontSize: 12, color: 'var(--gray-400)', margin: 0 }}>全員いずれかのチームに所属しています</p>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {filtered.map(m => (
-              <MemberChip
-                key={m.user_id}
-                member={m}
-                isDragging={dragState?.userId === m.user_id}
-                onDragStart={(e) => onDragStart(e, m)}
-                showRemove={false}
-              />
-            ))}
+            {filtered.map(m => {
+              const name = m.display_name || m.real_name || m.user_id;
+              return (
+                <div key={m.user_id} style={{ position: 'relative' }}>
+                  <MemberChip
+                    member={m}
+                    isDragging={dragState?.userId === m.user_id}
+                    onDragStart={(e) => onDragStart(e, m)}
+                    showRemove={false}
+                  />
+                  <button
+                    onClick={() => onHide(m.user_id)}
+                    title={`${name}を組織図から非表示にする`}
+                    style={{
+                      position: 'absolute', top: -6, right: -6,
+                      width: 18, height: 18, borderRadius: '50%',
+                      background: 'var(--gray-500)', color: '#fff',
+                      border: 'none', cursor: 'pointer',
+                      fontSize: 11, lineHeight: '18px', textAlign: 'center',
+                      padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >×</button>
+                </div>
+              );
+            })}
           </div>
         )
       )}
@@ -587,6 +603,17 @@ export default function OrgChart() {
     }
   };
 
+  const handleHideUser = async (userId) => {
+    // Optimistic: remove from unassigned list
+    setUnassigned(prev => prev.filter(u => u.user_id !== userId));
+    try {
+      await api.adminHideDirectoryUser(userId);
+    } catch (e) {
+      console.error(e);
+      load(); // rollback
+    }
+  };
+
   const [buildSearch, setBuildSearch] = useState('');
 
   // Teams shown in build mode grid — filter by team name or member name
@@ -641,6 +668,7 @@ export default function OrgChart() {
               members={liveUnassigned}
               dragState={dragState}
               onDragStart={handleDragStart}
+              onHide={handleHideUser}
             />
           )}
 

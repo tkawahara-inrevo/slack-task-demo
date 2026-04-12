@@ -112,6 +112,7 @@ export const api = {
     body: JSON.stringify({ role }),
   }),
   adminRemoveTeamMember: (id, userId) => apiDelete(`/admin/teams/${id}/members/${userId}`),
+  adminHideDirectoryUser: (userId) => apiDelete(`/admin/directory/${userId}`),
   adminUserMapping: (query = '') => apiFetch(`/admin/user-mapping${query ? `?q=${encodeURIComponent(query)}` : ''}`),
   adminSyncUserMapping: () => jsonPost('/admin/user-mapping/sync', {}),
 

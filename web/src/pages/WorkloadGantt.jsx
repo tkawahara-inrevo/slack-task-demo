@@ -207,6 +207,7 @@ export default function WorkloadGantt() {
   const [catDraftColor, setCatDraftColor] = useState('#6366f1');
   const [editingCatId, setEditingCatId] = useState('');
   const [allTasks, setAllTasks] = useState([]);
+  const [filterStatus, setFilterStatus] = useState('');
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -309,12 +310,13 @@ export default function WorkloadGantt() {
     const g = {};
     for (const t of allTasks) {
       if (teamMemberIds.size > 0 && t.assignee_id && !teamMemberIds.has(t.assignee_id)) continue;
+      if (filterStatus && t.status !== filterStatus) continue;
       const k = t.assignee_id || '__unassigned__';
       if (!g[k]) g[k] = [];
       g[k].push(t);
     }
     return g;
-  }, [allTasks, teamMemberIds]);
+  }, [allTasks, teamMemberIds, filterStatus]);
 
   const itemsByOwner = useMemo(() => {
     const grouped = {};
@@ -524,6 +526,12 @@ export default function WorkloadGantt() {
         ) : (
           <div className="month-switcher"><span>{rangeLabel}</span></div>
         )}
+        <select className="filter-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">ステータス: すべて</option>
+          {Object.entries(STATUS_DEF).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
         <button type="button" className="filter-clear-btn" style={{ marginLeft: 'auto' }} onClick={() => setCatMgrOpen(v => !v)}>
           カテゴリ管理
         </button>

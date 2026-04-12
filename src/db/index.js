@@ -1216,11 +1216,62 @@ async function dbListDashTeamMembersWithProfile(teamId, dashTeamId) {
 }
 
 async function dbUpdateDashTeamMemberRole(teamId, dashTeamId, userId, role) {
-  const valid = ['dept_leader', 'team_leader', 'sub_leader', 'member'];
+  const valid = ['admin', 'dept_leader', 'team_leader', 'sub_leader', 'member'];
   if (!valid.includes(role)) throw new Error(`Invalid role: ${role}`);
   await dbQuery(
     `UPDATE dash_team_members SET role=$4 WHERE team_id=$1 AND dash_team_id=$2 AND user_id=$3`,
     [teamId, dashTeamId, userId, role],
+  );
+}
+
+// Returns true if user has 'admin' role in any dash_team
+async function dbUserHasAdminTeamRole(teamId, userId) {
+  const res = await dbQuery(
+    `SELECT 1 FROM dash_team_members WHERE team_id=$1 AND user_id=$2 AND role='admin' LIMIT 1`,
+    [teamId, userId],
+  );
+  return res.rows.length > 0;
+}
+
+// Returns the user's team memberships with their role in each team
+async function dbGetUserDashTeamRoles(teamId, userId) {
+  const q = `
+    SELECT dt.id, dt.name, dt.parent_id, m.role
+    FROM dash_team_members m
+    JOIN dash_teams dt ON dt.id = m.dash_team_id AND dt.team_id = m.team_id
+    WHERE m.team_id = $1 AND m.user_id = $2;
+  `;
+  const res = await dbQuery(q, [teamId, userId]);
+  return res.rows;
+}
+
+// Returns a team + all its descendant teams (for dept_leader scope)
+async function dbGetDashTeamSubtree(teamId, rootId) {
+  const q = `
+    WITH RECURSIVE subtree AS (
+      SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 AND id=$2
+      UNION ALL
+      SELECT dt.id, dt.name, dt.parent_id
+      FROM dash_teams dt
+      JOIN subtree s ON dt.parent_id = s.id AND dt.team_id = $1
+    )
+    SELECT id FROM subtree;
+  `;
+  const res = await dbQuery(q, [teamId, rootId]);
+  return res.rows.map(r => r.id);
+}
+
+// Update dash team (name and/or parent_id)
+async function dbUpdateDashTeamFull(teamId, dashTeamId, { name, parentId }) {
+  const sets = [];
+  const params = [teamId, dashTeamId];
+  let idx = 3;
+  if (name !== undefined) { sets.push(`name=$${idx++}`); params.push(name); }
+  if (parentId !== undefined) { sets.push(`parent_id=$${idx++}`); params.push(parentId || null); }
+  if (!sets.length) return;
+  await dbQuery(
+    `UPDATE dash_teams SET ${sets.join(', ')} WHERE team_id=$1 AND id=$2`,
+    params,
   );
 }
 
@@ -2318,6 +2369,10 @@ module.exports = {
   dbListDashTeamMembers,
   dbListDashTeamMembersWithProfile,
   dbUpdateDashTeamMemberRole,
+  dbUserHasAdminTeamRole,
+  dbGetUserDashTeamRoles,
+  dbGetDashTeamSubtree,
+  dbUpdateDashTeamFull,
   dbGetUserDashTeams,
   dbListDashboardVisibleUsers,
   dbReplaceDashboardVisibleUsers,

@@ -67,8 +67,12 @@ function registerDashboardApi(deps) {
     dbGetDashTeam,
     dbDeleteDashTeam,
     dbUpdateDashTeam,
+    dbUpdateDashTeamFull,
     dbAddDashTeamMember,
     dbUpdateDashTeamMemberRole,
+    dbUserHasAdminTeamRole,
+    dbGetUserDashTeamRoles,
+    dbGetDashTeamSubtree,
     dbSetUserDirectoryActive,
     dbRemoveDashTeamMember,
     dbListDashTeamMembers,
@@ -222,13 +226,17 @@ function registerDashboardApi(deps) {
     next();
   }
 
-  // Enhance authMiddleware to attach role
+  // Enhance authMiddleware to attach role.
+  // If the user has 'admin' in any dash_team_members, treat them as dashboard admin.
   async function authWithRole(req, res, next) {
     authMiddleware(req, res, async () => {
       try {
         const { teamId, userId } = req.dashboardUser;
-        const role = await dbGetDashboardRole(teamId, userId);
-        req.dashboardUser.role = role;
+        const [dbRole, hasTeamAdmin] = await Promise.all([
+          dbGetDashboardRole(teamId, userId),
+          dbUserHasAdminTeamRole(teamId, userId),
+        ]);
+        req.dashboardUser.role = (dbRole === "admin" || hasTeamAdmin) ? "admin" : dbRole;
         next();
       } catch (e) {
         console.error("authWithRole error:", e);
@@ -237,8 +245,14 @@ function registerDashboardApi(deps) {
     });
   }
 
-  // Helper: get visible user_ids for non-admin
+  // Helper: get visible user_ids for non-admin.
+  // Role-based visibility:
+  //   dept_leader  → all users in their team's full subtree (team + all descendants)
+  //   team_leader  → all users in their direct team(s)
+  //   sub_leader   → same as team_leader
+  //   member       → all users in their team(s) (same as current default)
   async function getVisibleUserIds(teamId, userId) {
+    // Explicit visibility overrides (manually set by admin)
     const [explicitUsers, explicitTeams] = await Promise.all([
       dbListDashboardVisibleUsers(teamId, userId),
       dbListDashboardVisibleTeams(teamId, userId),
@@ -252,14 +266,30 @@ function registerDashboardApi(deps) {
       return Array.from(visible);
     }
 
-    const teams = await dbGetUserDashTeams(teamId, userId);
-    if (!teams.length) return [userId];
-    const allMembers = new Set();
-    for (const t of teams) {
-      const members = await dbListDashTeamMembers(teamId, t.id);
+    // Role-based: collect all team IDs the user should see based on their role
+    const teamRoles = await dbGetUserDashTeamRoles(teamId, userId);
+    if (!teamRoles.length) return [userId];
+
+    const teamIdsToShow = new Set();
+    for (const { id: tId, role } of teamRoles) {
+      if (role === 'dept_leader') {
+        // See all teams in the subtree rooted at this team
+        const subtree = await dbGetDashTeamSubtree(teamId, tId);
+        for (const sid of subtree) teamIdsToShow.add(sid);
+      } else {
+        // team_leader / sub_leader / member: just their direct team
+        teamIdsToShow.add(tId);
+        // Also include child teams (existing inherited membership behaviour)
+        const allAccessible = await dbGetUserDashTeams(teamId, userId);
+        for (const t of allAccessible) teamIdsToShow.add(t.id);
+      }
+    }
+
+    const allMembers = new Set([userId]);
+    for (const tid of teamIdsToShow) {
+      const members = await dbListDashTeamMembers(teamId, tid);
       for (const m of members) allMembers.add(m.user_id);
     }
-    allMembers.add(userId);
     return Array.from(allMembers);
   }
 
@@ -665,10 +695,13 @@ function registerDashboardApi(deps) {
   expressApp.put("/api/dashboard/admin/teams/:id", authWithRole, adminOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { name } = req.body || {};
-      if (!name?.trim()) return res.status(400).json({ error: "name_required" });
-      const team = await dbUpdateDashTeam(teamId, req.params.id, name.trim());
-      res.json({ team });
+      const { name, parentId } = req.body || {};
+      if (name !== undefined && !name?.trim()) return res.status(400).json({ error: "name_required" });
+      await dbUpdateDashTeamFull(teamId, req.params.id, {
+        ...(name !== undefined ? { name: name.trim() } : {}),
+        ...(parentId !== undefined ? { parentId } : {}),
+      });
+      res.json({ ok: true });
     } catch (e) {
       console.error("dashboard PUT /admin/teams error:", e);
       res.status(500).json({ error: "internal" });

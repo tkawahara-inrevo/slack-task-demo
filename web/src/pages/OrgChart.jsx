@@ -3,6 +3,7 @@ import { api } from '../api/client';
 
 // ─── Role definitions ────────────────────────────────────────────────────────
 const ROLES = [
+  { value: 'admin',        label: 'アドミン',           color: '#991b1b', bg: '#fee2e2' },
   { value: 'dept_leader',  label: '部署リーダー',       color: '#6d28d9', bg: '#ede9fe' },
   { value: 'team_leader',  label: 'チームリーダー',     color: '#1d4ed8', bg: '#dbeafe' },
   { value: 'sub_leader',   label: 'サブリーダー',       color: '#0369a1', bg: '#e0f2fe' },
@@ -235,7 +236,7 @@ function OrgParentSection({ parent, children, membersMap }) {
 }
 
 // ─── Build mode: droppable team card ─────────────────────────────────────────
-function EditableTeamCard({ team, members, dragState, onDragStart, onDrop, onRemoveMember, onRoleChange, onDelete, onRename }) {
+function EditableTeamCard({ team, members, parentTeams, dragState, onDragStart, onDrop, onRemoveMember, onRoleChange, onDelete, onRename, onSetParent }) {
   const [dragOver, setDragOver] = useState(false);
   const [editing, setEditing] = useState(false);
   const [nameVal, setNameVal] = useState(team.name);
@@ -336,6 +337,27 @@ function EditableTeamCard({ team, members, dragState, onDragStart, onDrop, onRem
             </div>
           )}
         </>
+      )}
+
+      {/* Parent team selector */}
+      {parentTeams && onSetParent && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gray-100)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--gray-500)', whiteSpace: 'nowrap' }}>所属部署</span>
+          <select
+            value={team.parent_id || ''}
+            onChange={e => onSetParent(team.id, e.target.value || null)}
+            style={{
+              flex: 1, fontSize: 12, padding: '3px 6px',
+              border: '1px solid var(--gray-300)', borderRadius: 6,
+              background: '#fff', color: 'var(--gray-700)', cursor: 'pointer',
+            }}
+          >
+            <option value="">なし（独立チーム）</option>
+            {parentTeams.filter(p => p.id !== team.id).map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
       )}
     </div>
   );
@@ -614,6 +636,25 @@ export default function OrgChart() {
     }
   };
 
+  const handleSetParent = async (teamId, parentId) => {
+    setTeams(prev => prev.map(t => t.id === teamId ? { ...t, parent_id: parentId } : t));
+    setSaving(true);
+    try {
+      await api.adminUpdateTeamParent(teamId, parentId);
+    } catch (e) {
+      console.error(e);
+      load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Parent teams = teams that have (or could have) children — used in dropdown
+  const parentCandidates = useMemo(
+    () => teams.filter(t => !t.parent_id),
+    [teams],
+  );
+
   const [buildSearch, setBuildSearch] = useState('');
 
   // Teams shown in build mode grid — filter by team name or member name
@@ -702,6 +743,7 @@ export default function OrgChart() {
                 key={team.id}
                 team={team}
                 members={membersMap[team.id] || []}
+                parentTeams={parentCandidates}
                 dragState={dragState}
                 onDragStart={handleDragStart}
                 onDrop={handleDrop}
@@ -709,6 +751,7 @@ export default function OrgChart() {
                 onRoleChange={handleRoleChange}
                 onDelete={handleDeleteTeam}
                 onRename={handleRenameTeam}
+                onSetParent={handleSetParent}
               />
             ))}
           </div>

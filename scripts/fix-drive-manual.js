@@ -1,42 +1,27 @@
 const { Pool } = require('pg');
-const { google } = require('googleapis');
-const path = require('path');
+const { findClientFolder, parseFolderId } = require('../src/features/drive-api');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const KEY_PATH = path.join(__dirname, '../drive-service-account.json');
-const auth = new google.auth.GoogleAuth({ keyFile: KEY_PATH, scopes: ['https://www.googleapis.com/auth/drive.readonly'] });
-const drive = google.drive({ version: 'v3', auth });
 
+const PARENT_FOLDER_URL = 'https://drive.google.com/drive/folders/1jKvYSVwWKHsXyaMIE9sf245yw6zfwGGU';
+
+// dbName: name in DB, driveName: actual folder name in Drive
 const CORRECTIONS = [
   { dbName: 'Zilch hair',               driveName: 'zilch hair様' },
   { dbName: '三ッ輪ホールディングス株式会社', driveName: '三ッ輪産業株式会社様' },
   { dbName: '株式会社PORTEHOMME',        driveName: '株式会社PORTE HOMME様' },
 ];
 
-async function findByName(name, driveId) {
-  const escaped = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  const r = await drive.files.list({
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-    corpora: 'drive',
-    driveId,
-    q: `mimeType='application/vnd.google-apps.folder' and name = '${escaped}' and trashed=false`,
-    fields: 'files(id,name,webViewLink)',
-    pageSize: 5,
-  });
-  return r.data.files || [];
-}
-
 async function run() {
-  const driveId = '0AKMkvQUfWu5dUk9PVA';
+  const parentId = parseFolderId(PARENT_FOLDER_URL);
 
   for (const c of CORRECTIONS) {
-    const matches = await findByName(c.driveName, driveId);
-    if (!matches.length) {
+    // findClientFolder uses two-level traversal, no drive membership needed
+    const url = await findClientFolder(parentId, c.driveName);
+    if (!url) {
       console.log('Drive folder not found:', c.driveName);
       continue;
     }
-    const url = matches[0].webViewLink;
     console.log('Drive match:', c.driveName, '->', url);
 
     const { rows } = await pool.query(`SELECT id, data FROM rpo_clients WHERE name = $1`, [c.dbName]);

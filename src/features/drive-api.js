@@ -53,21 +53,64 @@ async function listFolderChildren(drive, folderId, driveId) {
   return files;
 }
 
+// 共有ドライブのメタ情報とrowフォルダ一覧を取得（内部キャッシュなし、呼び出し元でキャッシュ推奨）
+async function getDriveMeta(drive, parentFolderId) {
+  const meta = await drive.files.get({
+    fileId: parentFolderId,
+    fields: 'id,name,driveId',
+    supportsAllDrives: true,
+  });
+  const driveId = meta.data.driveId;
+  const rowFolders = await listFolderChildren(drive, parentFolderId, driveId);
+  return { driveId, rowFolders };
+}
+
+// 全rowフォルダを横断してクエリに一致する会社フォルダを最大 limit 件返す
+async function searchClientFolders(parentFolderId, query, limit = 8) {
+  try {
+    const drive = getDriveClient();
+    const { driveId, rowFolders } = await getDriveMeta(drive, parentFolderId);
+
+    const escaped = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const results = [];
+
+    await Promise.all(rowFolders.map(async (rowFolder) => {
+      const params = {
+        ...SHARED_DRIVE_OPTS,
+        q: `'${rowFolder.id}' in parents and mimeType='application/vnd.google-apps.folder' and name contains '${escaped}' and trashed=false`,
+        fields: 'files(id,name,webViewLink)',
+        pageSize: 20,
+      };
+      if (driveId) { params.corpora = 'drive'; params.driveId = driveId; }
+      const r = await drive.files.list(params);
+      for (const f of (r.data.files || [])) {
+        results.push({ name: f.name, webViewLink: f.webViewLink });
+      }
+    }));
+
+    // 完全一致・前方一致・部分一致の順でソート
+    results.sort((a, b) => {
+      const scoreOf = (name) => {
+        if (name === query) return 0;
+        if (name.startsWith(query) || query.startsWith(name)) return 1;
+        return 2;
+      };
+      return scoreOf(a.name) - scoreOf(b.name);
+    });
+
+    return results.slice(0, limit);
+  } catch (e) {
+    console.error('[Drive] searchClientFolders error:', e.message);
+    return [];
+  }
+}
+
 // 親フォルダ(共有ドライブ)内から企業名に一致するフォルダを検索して webViewLink を返す
 // 会社フォルダは行別サブフォルダ(_あ行など)の2階層目に格納されている
 async function findClientFolder(parentFolderId, clientName) {
   try {
     const drive = getDriveClient();
-
-    const meta = await drive.files.get({
-      fileId: parentFolderId,
-      fields: 'id,name,driveId',
-      supportsAllDrives: true,
-    });
-    const driveId = meta.data.driveId;
-
-    // Level 1: list row-subfolders directly under parentFolderId
-    const rowFolders = await listFolderChildren(drive, parentFolderId, driveId);
+    const { driveId, rowFolders } = await getDriveMeta(drive, parentFolderId);
 
     // Level 2: search each row-subfolder's children for matching company name
     for (const rowFolder of rowFolders) {
@@ -140,4 +183,4 @@ function registerDriveApi({ expressApp, authWithRole }) {
   });
 }
 
-module.exports = { registerDriveApi, findClientFolder, parseFolderId };
+module.exports = { registerDriveApi, findClientFolder, searchClientFolders, parseFolderId };

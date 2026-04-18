@@ -1,5 +1,7 @@
 const BASE = '/api/dashboard';
 const CRM = '/api/crm';
+const RPO = '/api/rpo';
+const KINTONE = '/api/kintone';
 
 async function apiFetch(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -35,6 +37,23 @@ function apiDelete(path) {
   return apiFetch(path, { method: 'DELETE' });
 }
 
+async function kintoneFetch(path, opts = {}) {
+  const res = await fetch(`${KINTONE}${path}`, { credentials: 'include', ...opts });
+  if (res.status === 401) { window.location.href = '/dashboard/unauthorized'; throw new Error('Unauthorized'); }
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+async function rpoFetch(path, opts = {}) {
+  const res = await fetch(`${RPO}${path}`, { credentials: 'include', ...opts });
+  if (res.status === 401) { window.location.href = '/dashboard/unauthorized'; throw new Error('Unauthorized'); }
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+function rpoPost(path, body) {
+  return rpoFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
 async function crmFetch(path, opts = {}) {
   const res = await fetch(`${CRM}${path}`, { credentials: 'include', ...opts });
   if (res.status === 401) { window.location.href = '/dashboard/unauthorized'; throw new Error('Unauthorized'); }
@@ -60,6 +79,7 @@ export const api = {
     return apiFetch(`/tasks?${qs}`);
   },
   members: () => apiFetch('/members'),
+  personalFilters: () => apiFetch('/personal-filters'),
   usergroups: () => apiFetch('/usergroups'),
   overdue: () => apiFetch('/overdue'),
   myTeams: () => apiFetch('/my-teams'),
@@ -247,4 +267,111 @@ export const api = {
     return apiFetch(`/analytics/due-compliance${qs ? '?' + qs : ''}`);
   },
   analyticsProjectProgress: () => apiFetch('/analytics/project-progress'),
+
+  // kintone連携
+  kintoneSearch:    (q)  => kintoneFetch(`/search?q=${encodeURIComponent(q)}`),
+  kintoneRecord:    (id) => kintoneFetch(`/record/${encodeURIComponent(id)}`),
+
+  // RPO案件管理
+  rpoAccess:       ()        => rpoFetch('/access'),
+  rpoClients:      (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return rpoFetch(`/clients${qs ? '?' + qs : ''}`);
+  },
+  rpoClient:       (id)      => rpoFetch(`/clients/${id}`),
+  rpoCreateClient: (body)    => rpoPost('/clients', body),
+  rpoUpdateClient: (id, body) => rpoFetch(`/clients/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  rpoDeleteClient: (id)      => rpoFetch(`/clients/${id}`, { method: 'DELETE' }),
+  rpoTeams:        ()        => rpoFetch('/teams'),
+  rpoToggleHrTeam: (id, isHrDept) => rpoFetch(`/teams/${id}/hr`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isHrDept }),
+  }),
+
+  // RPO: 案件タスク（workload items連携）
+  rpoWorkloadItems:       (clientId)           => rpoFetch(`/clients/${clientId}/workload-items`),
+  rpoCreateWorkloadItem:  (clientId, body)     => rpoPost(`/clients/${clientId}/workload-items`, body),
+  rpoDeleteWorkloadItem:  (clientId, itemId)   => rpoFetch(`/clients/${clientId}/workload-items/${itemId}`, { method: 'DELETE' }),
+
+  // RPO: タスクテンプレート
+  rpoTemplates:          ()              => rpoFetch('/task-templates'),
+  rpoCreateTemplate:     (body)          => rpoPost('/task-templates', body),
+  rpoUpdateTemplate:     (id, body)      => rpoFetch(`/task-templates/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  rpoDeleteTemplate:     (id)            => rpoFetch(`/task-templates/${id}`, { method: 'DELETE' }),
+  rpoApplyTemplates:     (clientId)      => rpoPost(`/clients/${clientId}/apply-templates`, {}),
+
+  // RPO: 応募者
+  rpoApplicants:         (clientId, params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return rpoFetch(`/clients/${clientId}/applicants${qs ? '?' + qs : ''}`);
+  },
+  rpoCreateApplicant:    (clientId, body)  => rpoPost(`/clients/${clientId}/applicants`, body),
+  rpoUpdateApplicant:    (apId, body)      => rpoFetch(`/applicants/${apId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  rpoDeleteApplicant:    (apId)            => rpoFetch(`/applicants/${apId}`, { method: 'DELETE' }),
+
+  // RPO: 応募者アクション履歴
+  rpoApplicantActions:   (apId)           => rpoFetch(`/applicants/${apId}/actions`),
+  rpoAddApplicantAction: (apId, body)     => rpoPost(`/applicants/${apId}/actions`, body),
+
+  // RPO: 求人媒体連携
+  rpoMediaSources:       ()              => rpoFetch('/media-sources'),
+  rpoCreateMediaSource:  (body)          => rpoPost('/media-sources', body),
+  rpoUpdateMediaSource:  (id, body)      => rpoFetch(`/media-sources/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  rpoDeleteMediaSource:  (id)            => rpoFetch(`/media-sources/${id}`, { method: 'DELETE' }),
+
+  // RPO: CSV一括インポート
+  rpoImportCsv: (clientId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return rpoFetch(`/clients/${clientId}/import-csv`, { method: 'POST', body: form });
+  },
+
+  // RPO: 媒体マスタ
+  rpoMediaMasters:       ()       => rpoFetch('/media-masters'),
+  rpoCreateMediaMaster:  (name)   => rpoPost('/media-masters', { name }),
+  rpoDeleteMediaMaster:  (id)     => rpoFetch(`/media-masters/${id}`, { method: 'DELETE' }),
+
+  // RPO: 月次タスク生成
+  rpoGenerateMonthlyTasks:       (yearMonth)           => rpoPost('/monthly-tasks/generate', { yearMonth }),
+  rpoGenerateMonthlyTasksClient: (clientId, yearMonth) => rpoPost(`/clients/${clientId}/monthly-tasks/generate`, { yearMonth }),
+
+  // RPO: 全案件サマリー
+  rpoSummary: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return rpoFetch(`/summary${qs ? '?' + qs : ''}`);
+  },
+
+  // RPO: 設定
+  rpoSettings:      ()       => rpoFetch('/settings'),
+  rpoSaveSettings:  (body)   => rpoFetch('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+
+  // RPO: スプシURL保存
+  rpsSaveSheetUrl: (clientId, sheetsUrl) => rpoFetch(`/clients/${clientId}/sheets-url`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sheetsUrl }),
+  }),
+
+  // RPO: スプシ同期
+  rpsSheetsSync: (clientId, sheetsUrl) => rpoFetch(`/clients/${clientId}/sheets-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sheetsUrl }),
+  }),
+
+  // Google Drive
+  driveFiles: (folderId) => apiFetch(`/drive/files?folderId=${encodeURIComponent(folderId)}`),
+  driveCandidates: (name) => rpoFetch(`/drive/candidates?name=${encodeURIComponent(name)}`),
+
+  // RPO: 工数管理
+  rpoUpdateWorkloadHours: (clientId, body) => rpoFetch(`/clients/${clientId}/workload-hours`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
 };

@@ -3,14 +3,28 @@ import { api } from '../api/client';
 
 // ─── Role definitions ────────────────────────────────────────────────────────
 const ROLES = [
-  { value: 'admin',        label: 'アドミン',           color: '#991b1b', bg: '#fee2e2' },
-  { value: 'dept_leader',  label: '部署リーダー',       color: '#6d28d9', bg: '#ede9fe' },
-  { value: 'team_leader',  label: 'チームリーダー',     color: '#1d4ed8', bg: '#dbeafe' },
-  { value: 'sub_leader',   label: 'サブリーダー',       color: '#0369a1', bg: '#e0f2fe' },
-  { value: 'member',       label: 'メンバー',           color: '#374151', bg: '#f3f4f6' },
+  { value: 'admin',     label: 'アドミン',       color: '#991b1b', bg: '#fee2e2' },
+  { value: 'manager',   label: 'マネージャー',   color: '#6d28d9', bg: '#ede9fe' },
+  { value: 'chief',     label: 'チーフ',         color: '#1d4ed8', bg: '#dbeafe' },
+  { value: 'sub_chief', label: 'サブチーフ',     color: '#0369a1', bg: '#e0f2fe' },
+  { value: 'lead',      label: 'リード',         color: '#047857', bg: '#d1fae5' },
+  { value: 'member',    label: 'メンバー',       color: '#374151', bg: '#f3f4f6' },
 ];
 const ROLE_MAP = Object.fromEntries(ROLES.map(r => [r.value, r]));
 const roleOf = (v) => ROLE_MAP[v] || ROLE_MAP['member'];
+
+// Slackプロフィールtitleからロールを自動導出（サーバーサイドと同じロジック）
+function roleTitleFromSlack(title) {
+  if (!title) return 'member';
+  if (/sub\s+(manager|expert)/i.test(title)) return 'manager';
+  if (/\bmanager\b/i.test(title)) return 'manager';
+  if (/sub\s*chief/i.test(title)) return 'sub_chief';
+  if (/\bchief\b/i.test(title)) return 'chief';
+  if (/\blead\b/i.test(title)) return 'lead';
+  return 'member';
+}
+// memberのロールをtitleから導出（titleがなければDBのroleを使用）
+const derivedRole = (member) => roleOf(member.title ? roleTitleFromSlack(member.title) : (member.role || 'member'));
 
 // ─── Avatar ──────────────────────────────────────────────────────────────────
 function Avatar({ member, size = 48 }) {
@@ -37,8 +51,8 @@ function Avatar({ member, size = 48 }) {
 function MemberCardView({ member }) {
   const name = member.display_name || member.real_name || member.user_id;
   const title = member.title || '';
-  const role = roleOf(member.role);
-  const showRoleBadge = member.role && member.role !== 'member';
+  const role = derivedRole(member);
+  const showRoleBadge = role.value !== 'member';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 90, flexShrink: 0 }}>
       <Avatar member={member} size={54} />
@@ -65,7 +79,7 @@ function MemberCardView({ member }) {
 function MemberChip({ member, isDragging, onDragStart, onRemove, onRoleChange, showRemove = false }) {
   const name = member.display_name || member.real_name || member.user_id;
   const title = member.title || '';
-  const role = roleOf(member.role);
+  const role = derivedRole(member);
   const [roleOpen, setRoleOpen] = useState(false);
   const dropRef = useRef(null);
 
@@ -363,6 +377,52 @@ function EditableTeamCard({ team, members, parentTeams, dragState, onDragStart, 
   );
 }
 
+// ─── Build mode: department section header (replaces parent EditableTeamCard) ─
+function DeptSectionHeader({ team, onRename, onDelete, onCreateChild }) {
+  const [editing, setEditing] = useState(false);
+  const [nameVal, setNameVal] = useState(team.name);
+
+  const commit = () => {
+    setEditing(false);
+    const v = nameVal.trim();
+    if (v && v !== team.name) onRename(team.id, v);
+    else setNameVal(team.name);
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {editing ? (
+        <input
+          value={nameVal}
+          onChange={e => setNameVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setEditing(false); setNameVal(team.name); } }}
+          autoFocus
+          style={{ flex: 1, fontSize: 15, fontWeight: 800, border: 'none', borderBottom: '2px solid #c8b96e', outline: 'none', background: 'transparent', color: '#3d3520', padding: '2px 0' }}
+        />
+      ) : (
+        <span
+          onClick={() => setEditing(true)}
+          title="クリックで名前を編集"
+          style={{ flex: 1, fontWeight: 800, fontSize: 15, color: '#3d3520', cursor: 'text' }}
+        >
+          {team.name}
+        </span>
+      )}
+      <button
+        onClick={() => onCreateChild(team.id)}
+        title="この部署にチームを追加"
+        style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: '1px solid #c8b96e', background: '#fff8e1', color: '#7a6a30', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+      >＋ チームを追加</button>
+      <button
+        onClick={() => onDelete(team.id)}
+        title="部署を削除"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c8b96e', fontSize: 20, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
+      >×</button>
+    </div>
+  );
+}
+
 // ─── Build mode: unassigned members source panel ─────────────────────────────
 function UnassignedPanel({ members, dragState, onDragStart, onHide }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -570,6 +630,22 @@ export default function OrgChart() {
     }
   };
 
+  // ── Create child team inside a department ─────────────────────────────────
+  const handleCreateChildTeam = async (parentId) => {
+    const name = `新しいチーム ${teams.length + 1}`;
+    setSaving(true);
+    try {
+      const res = await api.adminCreateTeam(name, parentId);
+      const newTeam = { id: res.team.id, name: res.team.name, parent_id: parentId };
+      setTeams(prev => [...prev, newTeam]);
+      setMembersMap(prev => ({ ...prev, [res.team.id]: [] }));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Delete team ────────────────────────────────────────────────────────────
   const handleDeleteTeam = async (teamId) => {
     if (!window.confirm('このチームを削除しますか？')) return;
@@ -658,7 +734,7 @@ export default function OrgChart() {
   const [buildSearch1, setBuildSearch1] = useState('');
   const [buildSearch2, setBuildSearch2] = useState('');
 
-  // Teams shown in build mode grid — OR filter: matches search1 OR search2
+  // Teams shown in build mode — OR filter: matches search1 OR search2
   const filteredBuildTeams = useMemo(() => {
     const q1 = buildSearch1.trim().toLowerCase();
     const q2 = buildSearch2.trim().toLowerCase();
@@ -672,6 +748,25 @@ export default function OrgChart() {
     };
     return teams.filter(t => matchesQuery(t, q1) || matchesQuery(t, q2));
   }, [teams, membersMap, buildSearch1, buildSearch2]);
+
+  // Build mode: group filtered teams by parent-child structure
+  const buildGroups = useMemo(() => {
+    const filteredIds = new Set(filteredBuildTeams.map(t => t.id));
+    const childrenOf = {};
+    for (const t of filteredBuildTeams) {
+      if (t.parent_id) {
+        if (!childrenOf[t.parent_id]) childrenOf[t.parent_id] = [];
+        childrenOf[t.parent_id].push(t);
+      }
+    }
+    // Parents in filtered set
+    const parentSections = filteredBuildTeams
+      .filter(t => !t.parent_id)
+      .map(parent => ({ parent, children: childrenOf[parent.id] || [] }));
+    // Child teams whose parent isn't in the filtered set (show as loose cards)
+    const orphans = filteredBuildTeams.filter(t => t.parent_id && !filteredIds.has(t.parent_id));
+    return { parentSections, orphans };
+  }, [filteredBuildTeams]);
 
   return (
     <div className="workload-page">
@@ -750,27 +845,86 @@ export default function OrgChart() {
             </button>
           </div>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 16,
-          }}>
-            {filteredBuildTeams.map(team => (
-              <EditableTeamCard
-                key={team.id}
-                team={team}
-                members={membersMap[team.id] || []}
-                parentTeams={parentCandidates}
-                dragState={dragState}
-                onDragStart={handleDragStart}
-                onDrop={handleDrop}
-                onRemoveMember={handleRemoveMember}
-                onRoleChange={handleRoleChange}
-                onDelete={handleDeleteTeam}
-                onRename={handleRenameTeam}
-                onSetParent={handleSetParent}
-              />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* 部署セクション（親レベルのチームはすべて黄枠で表示） */}
+            {buildGroups.parentSections.map(({ parent, children }) => (
+              <div key={parent.id} style={{
+                border: '2px solid #c8b96e',
+                borderRadius: 12,
+                background: '#fdf9ee',
+                padding: '14px 16px',
+              }}>
+                {/* 部署名ヘッダー（カードなし） */}
+                <DeptSectionHeader team={parent} onRename={handleRenameTeam} onDelete={handleDeleteTeam} onCreateChild={handleCreateChildTeam} />
+
+                {/* 親チームに直接所属しているメンバー（New Business等） */}
+                {(membersMap[parent.id] || []).length > 0 && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e8dfa8' }}>
+                    <div style={{ fontSize: 11, color: '#9a8c5a', fontWeight: 600, marginBottom: 6 }}>直接メンバー</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {(membersMap[parent.id] || []).map(m => (
+                        <MemberChip
+                          key={m.user_id}
+                          member={m}
+                          isDragging={dragState?.userId === m.user_id}
+                          onDragStart={(e) => handleDragStart(e, m)}
+                          onRemove={() => handleRemoveMember(parent.id, m.user_id)}
+                          onRoleChange={(role) => handleRoleChange(parent.id, m.user_id, role)}
+                          showRemove
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {children.length === 0 ? (
+                  <div style={{ marginTop: 12, border: '1.5px dashed #e8dfa8', borderRadius: 8, padding: '20px 16px', textAlign: 'center', fontSize: 12, color: '#9a8c5a' }}>
+                    「＋ チームを追加」でこの部署にチームを作成できます
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 12 }}>
+                    {children.map(child => (
+                      <EditableTeamCard
+                        key={child.id}
+                        team={child}
+                        members={membersMap[child.id] || []}
+                        parentTeams={parentCandidates}
+                        dragState={dragState}
+                        onDragStart={handleDragStart}
+                        onDrop={handleDrop}
+                        onRemoveMember={handleRemoveMember}
+                        onRoleChange={handleRoleChange}
+                        onDelete={handleDeleteTeam}
+                        onRename={handleRenameTeam}
+                        onSetParent={null}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             ))}
+
+            {/* 検索で親が非表示になった孤立チーム */}
+            {buildGroups.orphans.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+                {buildGroups.orphans.map(team => (
+                  <EditableTeamCard
+                    key={team.id}
+                    team={team}
+                    members={membersMap[team.id] || []}
+                    parentTeams={parentCandidates}
+                    dragState={dragState}
+                    onDragStart={handleDragStart}
+                    onDrop={handleDrop}
+                    onRemoveMember={handleRemoveMember}
+                    onRoleChange={handleRoleChange}
+                    onDelete={handleDeleteTeam}
+                    onRename={handleRenameTeam}
+                    onSetParent={handleSetParent}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

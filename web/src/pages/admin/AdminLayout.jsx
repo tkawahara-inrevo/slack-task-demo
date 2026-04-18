@@ -9,6 +9,7 @@ export default function AdminLayout() {
         <NavLink to="/admin/user-mapping" className={({ isActive }) => (isActive ? 'active' : '')}>ユーザーマッピング</NavLink>
         <NavLink to="/admin/integrations" className={({ isActive }) => (isActive ? 'active' : '')}>外部連携</NavLink>
         <NavLink to="/admin/formulas" className={({ isActive }) => (isActive ? 'active' : '')}>計算式</NavLink>
+        <NavLink to="/admin/rpo" className={({ isActive }) => (isActive ? 'active' : '')}>案件管理権限</NavLink>
       </nav>
       <div className="admin-content">
         <Outlet />

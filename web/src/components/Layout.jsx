@@ -3,10 +3,14 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 
 export default function Layout({ children }) {
-  const [user, setUser] = useState(null);
+  const [user,      setUser]      = useState(null);
+  const [rpoAccess, setRpoAccess] = useState(false);
 
   useEffect(() => {
     api.me().then(setUser).catch(() => {});
+    api.rpoAccess()
+      .then(r => setRpoAccess(!!r.canAccess))
+      .catch(() => setRpoAccess(false));
   }, []);
 
   return (
@@ -24,12 +28,11 @@ export default function Layout({ children }) {
             <NavLink to="/org-chart" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               チーム設定
             </NavLink>
-            <NavLink to="/crm/clients" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-              顧客
-            </NavLink>
-            <NavLink to="/crm/deals" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-              案件
-            </NavLink>
+            {rpoAccess && (
+              <NavLink to="/rpo" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                案件管理
+              </NavLink>
+            )}
             <NavLink to="/analytics" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               分析
             </NavLink>

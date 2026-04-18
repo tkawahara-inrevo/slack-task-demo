@@ -40,6 +40,8 @@ function registerHomeFeature(deps) {
     dbDeletePersonalFilter = async () => {},
     dbSetPersonalFilterMembers = async () => {},
     dbGetPersonalFilterMemberIds = async () => [],
+    dbGetDashTeamSubtree = async () => [],
+    dbGetDashboardRole = async () => "member",
     randomUUID = () => require("crypto").randomUUID(),
   } = deps;
 
@@ -197,29 +199,95 @@ function taskLineForHome(task) {
   return preview;
 }
 
-function buildHomeFiltersModalView({ teamId, userId, st, deptText: _deptText, groups = [], personalFilters = [] }) {
+function buildHomeFiltersModalView({ teamId, userId, st, deptText: _deptText, groups = [], personalFilters = [], dashTeams = [], selectedDeptId = null, myDeptIds = new Set(), isAdmin = false }) {
   const rangeKey = st.broadcastScopeKey || "to_me";
   const scopeKey = st.scopeKey || "active";
-  const deptKey = st.deptKey || "all";
-  const deptOptions = [
-    { text: { type: "plain_text", text: "すべて" }, value: "all" },
-    { text: { type: "plain_text", text: "未設定" }, value: "__none__" },
-    ...groups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
-  ];
+
+  // Build dash dept/team options
+  const deptRows = dashTeams.filter(t => !t.parent_id);
+  const childMap = {};
+  for (const t of dashTeams) {
+    if (t.parent_id) { if (!childMap[t.parent_id]) childMap[t.parent_id] = []; childMap[t.parent_id].push(t); }
+  }
+  const visibleDepts = isAdmin
+    ? [...deptRows.filter(d => myDeptIds.has(d.id)), ...deptRows.filter(d => !myDeptIds.has(d.id))]
+    : deptRows.filter(d => myDeptIds.has(d.id));
 
   const rangeOptions = [
     { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
-    {
-      text: { type: "plain_text", text: "範囲：自分が発行" },
-      value: "requested_by_me",
-    },
-    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
+    { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
     ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
+    ...visibleDepts.map((d) => ({ text: { type: "plain_text", text: `🏢 ${d.name}` }, value: `dash_dept:${d.id}` })),
+    ...(isAdmin ? [{ text: { type: "plain_text", text: "範囲：すべて" }, value: "all" }] : []),
   ];
+
   const stateOptions = [
     { text: { type: "plain_text", text: "状態：未完了" }, value: "active" },
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
   ];
+
+  // Determine which dept is "active" for showing team sub-selector
+  // rangeKey may be dash_dept:X or dash_team:X; selectedDeptId overrides (from block_actions update)
+  let activeDeptId = selectedDeptId;
+  if (!activeDeptId) {
+    if (rangeKey.startsWith("dash_dept:")) activeDeptId = rangeKey.slice(10);
+    else if (rangeKey.startsWith("dash_team:")) {
+      const tid = rangeKey.slice(10);
+      const t = dashTeams.find(dt => dt.id === tid);
+      if (t && t.parent_id) activeDeptId = t.parent_id;
+      else if (t) activeDeptId = t.id;
+    }
+  }
+
+  const activeChildren = activeDeptId ? (childMap[activeDeptId] || []) : [];
+
+  const blocks = [
+    {
+      type: "input",
+      block_id: "range",
+      label: { type: "plain_text", text: "範囲" },
+      dispatch_action: true,
+      element: {
+        type: "static_select",
+        action_id: "home_filters_range",
+        options: rangeOptions,
+        initial_option: rangeOptions.find((o) => o.value === rangeKey) || rangeOptions[0],
+      },
+    },
+    {
+      type: "input",
+      block_id: "state",
+      label: { type: "plain_text", text: "状態" },
+      element: {
+        type: "static_select",
+        action_id: "home_filters_state",
+        options: stateOptions,
+        initial_option: stateOptions.find((o) => o.value === scopeKey) || stateOptions[0],
+      },
+    },
+  ];
+
+  // Show team sub-selector only when a dept is selected and has children
+  if (activeChildren.length > 0) {
+    const teamOptions = [
+      { text: { type: "plain_text", text: "チーム：すべて" }, value: `dash_dept:${activeDeptId}` },
+      ...activeChildren.map(c => ({ text: { type: "plain_text", text: c.name }, value: `dash_team:${c.id}` })),
+    ];
+    // initial: current rangeKey if it matches a child, else "すべて"
+    const initialTeam = teamOptions.find(o => o.value === rangeKey) || teamOptions[0];
+    blocks.push({
+      type: "input",
+      block_id: "team_sub",
+      optional: true,
+      label: { type: "plain_text", text: "チーム" },
+      element: {
+        type: "static_select",
+        action_id: "home_filters_team_sub",
+        options: teamOptions,
+        initial_option: initialTeam,
+      },
+    });
+  }
 
   return {
     type: "modal",
@@ -228,48 +296,7 @@ function buildHomeFiltersModalView({ teamId, userId, st, deptText: _deptText, gr
     title: { type: "plain_text", text: "絞り込み" },
     submit: { type: "plain_text", text: "適用" },
     close: { type: "plain_text", text: "閉じる" },
-    blocks: [
-      {
-        type: "input",
-        block_id: "range",
-        label: { type: "plain_text", text: "範囲" },
-        element: {
-          type: "static_select",
-          action_id: "home_filters_range",
-          options: rangeOptions,
-          initial_option:
-            rangeOptions.find((o) => o.value === rangeKey) || rangeOptions[0],
-        },
-      },
-      {
-        type: "input",
-        block_id: "state",
-        label: { type: "plain_text", text: "状態" },
-        element: {
-          type: "static_select",
-          action_id: "home_filters_state",
-          options: stateOptions,
-          initial_option:
-            stateOptions.find((o) => o.value === scopeKey) || stateOptions[0],
-        },
-      },
-      {
-        type: "input",
-        block_id: "dept",
-        optional: true,
-        label: {
-          type: "plain_text",
-          text: "部署（範囲=すべて のときのみ有効）",
-        },
-        element: {
-          type: "static_select",
-          action_id: "home_dept_select",
-          placeholder: { type: "plain_text", text: "部署（@グループ）を選択" },
-          options: deptOptions,
-          initial_option: deptOptions.find((o) => o.value === deptKey) || deptOptions[0],
-        },
-      },
-    ],
+    blocks,
   };
 }
 
@@ -283,15 +310,76 @@ app.action("open_home_filters_modal", async ({ ack, body, client }) => {
   await ensureHomeStateLoaded(teamId, userId);
   const st = getHomeState(teamId, userId);
 
+  const [groups, personalFilters, dashTeamsRes, myTeamResModal, dashboardRoleModal] = await Promise.all([
+    searchUsergroups(""),
+    dbListPersonalFilters(teamId, userId).catch(() => []),
+    dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
+    dbQuery(
+      `SELECT DISTINCT dt.id, dt.parent_id FROM dash_team_members dtm
+       JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
+       WHERE dtm.team_id=$1 AND dtm.user_id=$2`,
+      [teamId, userId]
+    ).catch(() => ({ rows: [] })),
+    dbGetDashboardRole(teamId, userId).catch(() => "member"),
+  ]);
+  const dashTeams = dashTeamsRes.rows || [];
+  const isAdminModal = dashboardRoleModal === "admin";
+  const myDeptIds = new Set();
+  for (const r of (myTeamResModal.rows || [])) {
+    if (!r.parent_id) myDeptIds.add(r.id);
+    else myDeptIds.add(r.parent_id);
+  }
+
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: buildHomeFiltersModalView({ teamId, userId, st, groups, personalFilters, dashTeams, myDeptIds, isAdmin: isAdminModal }),
+  });
+});
+
+app.action("home_filters_range", async ({ ack, body, client }) => {
+  await ack();
+  // Only handle if inside the modal (view present)
+  if (!body.view) return;
+  const view = body.view;
+  const meta = safeJsonParse(view.private_metadata) || {};
+  const teamId = meta.teamId;
+  const userId = meta.userId;
+  if (!teamId || !userId) return;
+
+  await ensureHomeStateLoaded(teamId, userId);
+  const st = getHomeState(teamId, userId);
+  const selectedRange = body.actions?.[0]?.selected_option?.value || "to_me";
+
+  // Only need dash teams if a dept was selected
+  let dashTeams = [];
+  if (selectedRange.startsWith("dash_dept:") || selectedRange.startsWith("dash_team:")) {
+    const res = await dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] }));
+    dashTeams = res.rows || [];
+  }
+
+  // Determine selectedDeptId from newly chosen range
+  let selectedDeptId = null;
+  if (selectedRange.startsWith("dash_dept:")) selectedDeptId = selectedRange.slice(10);
+  else if (selectedRange.startsWith("dash_team:")) {
+    const tid = selectedRange.slice(10);
+    const t = dashTeams.find(dt => dt.id === tid);
+    if (t && t.parent_id) selectedDeptId = t.parent_id;
+    else if (t) selectedDeptId = t.id;
+  }
+
   const [groups, personalFilters] = await Promise.all([
     searchUsergroups(""),
     dbListPersonalFilters(teamId, userId).catch(() => []),
   ]);
 
-  await client.views.open({
-    trigger_id: body.trigger_id,
-    view: buildHomeFiltersModalView({ teamId, userId, st, groups, personalFilters }),
-  });
+  // Temporarily set the broadcastScopeKey so the modal reflects the new selection
+  const stOverride = { ...st, broadcastScopeKey: selectedRange };
+
+  await client.views.update({
+    view_id: view.id,
+    hash: view.hash,
+    view: buildHomeFiltersModalView({ teamId, userId, st: stOverride, groups, personalFilters, dashTeams, selectedDeptId }),
+  }).catch(() => {});
 });
 
 app.view("home_filters_modal", async ({ ack, body, view, client }) => {
@@ -303,18 +391,21 @@ app.view("home_filters_modal", async ({ ack, body, view, client }) => {
   if (!teamId || !userId) return;
 
   await ensureHomeStateLoaded(teamId, userId);
-  const range =
+  const rangeRaw =
     view?.state?.values?.range?.home_filters_range?.selected_option?.value ||
     "to_me";
   const scope =
     view?.state?.values?.state?.home_filters_state?.selected_option?.value ||
     "active";
 
+  // If a team_sub block is present, its value takes precedence over the dept range
+  const teamSubOpt = view?.state?.values?.team_sub?.home_filters_team_sub?.selected_option || null;
+  const range = teamSubOpt ? teamSubOpt.value : rangeRaw;
+
   const deptOpt =
     view?.state?.values?.dept?.home_dept_select?.selected_option || null;
   const dept = deptOpt?.value || "all";
 
-  // ✅ 部署は「範囲=すべて」のときだけ反映（それ以外は保持しても使わない）
   setHomeState(teamId, userId, {
     broadcastScopeKey: range,
     scopeKey: scope,
@@ -341,16 +432,41 @@ async function publishHome({ client, teamId, userId }) {
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
   ];
 
-  // パーソナルフィルターは常に取得（範囲選択肢に使う）。部署グループは rangeKey=all のときだけ取得
-  const [deptGroups, personalFilters] = await Promise.all([
+  // パーソナルフィルターと dash_teams は常に取得（範囲選択肢に使う）。部署グループは rangeKey=all のときだけ取得
+  const [deptGroups, personalFilters, dashTeamsRes, myTeamRes, dashboardRole] = await Promise.all([
     rangeKey0 === "all" ? searchUsergroups("") : Promise.resolve([]),
     dbListPersonalFilters(teamId, userId).catch(() => []),
+    dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
+    dbQuery(
+      `SELECT DISTINCT dt.id, dt.parent_id FROM dash_team_members dtm
+       JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
+       WHERE dtm.team_id=$1 AND dtm.user_id=$2`,
+      [teamId, userId]
+    ).catch(() => ({ rows: [] })),
+    dbGetDashboardRole(teamId, userId).catch(() => "member"),
   ]);
+  const isAdmin = dashboardRole === "admin";
+  const dashTeams0 = dashTeamsRes.rows || [];
+  const deptRows0 = dashTeams0.filter(t => !t.parent_id);
+
+  // 自分が所属する部署IDセット（直接所属 or 子チーム経由）
+  const myDeptIds = new Set();
+  for (const r of (myTeamRes.rows || [])) {
+    if (!r.parent_id) myDeptIds.add(r.id);
+    else myDeptIds.add(r.parent_id);
+  }
+
+  // 非adminは自分の所属部署のみ、adminは全部署（自分の所属優先）
+  const visibleDepts = isAdmin
+    ? [...deptRows0.filter(d => myDeptIds.has(d.id)), ...deptRows0.filter(d => !myDeptIds.has(d.id))]
+    : deptRows0.filter(d => myDeptIds.has(d.id));
+
   const rangeOptions0 = [
     { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
     { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
-    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
     ...personalFilters.map((f) => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
+    ...visibleDepts.map((d) => ({ text: { type: "plain_text", text: `🏢 ${d.name}` }, value: `dash_dept:${d.id}` })),
+    ...(isAdmin ? [{ text: { type: "plain_text", text: "範囲：すべて" }, value: "all" }] : []),
   ];
   const deptOptions = [
     { text: { type: "plain_text", text: "部署：すべて" }, value: "all" },
@@ -358,13 +474,22 @@ async function publishHome({ client, teamId, userId }) {
     ...deptGroups.map((g) => ({ text: { type: "plain_text", text: `@${g.handle}` }, value: g.id })),
   ];
 
+  // dash_team:X は range ドロップダウンにない → 親部署の dash_dept:X を選択状態にする
+  let rangeInitialOption0 = rangeOptions0.find((o) => o.value === rangeKey0);
+  if (!rangeInitialOption0 && rangeKey0.startsWith("dash_team:")) {
+    const tid = rangeKey0.slice(10);
+    const t = dashTeams0.find(dt => dt.id === tid);
+    const parentId = t?.parent_id || t?.id;
+    rangeInitialOption0 = rangeOptions0.find(o => o.value === `dash_dept:${parentId}`);
+  }
+  rangeInitialOption0 = rangeInitialOption0 || rangeOptions0[0];
+
   const actionElements = [
     {
       type: "static_select",
       action_id: "home_broadcast_scope_select",
       options: rangeOptions0,
-      initial_option:
-        rangeOptions0.find((o) => o.value === rangeKey0) || rangeOptions0[0],
+      initial_option: rangeInitialOption0,
     },
   ];
 
@@ -377,7 +502,39 @@ async function publishHome({ client, teamId, userId }) {
     });
   }
 
-  if (rangeKey0 !== "all") {
+  // When dept selected: show child team sub-selector inline
+  if (rangeKey0.startsWith("dash_dept:") || rangeKey0.startsWith("dash_team:")) {
+    const childMap0 = {};
+    for (const t of dashTeams0) {
+      if (t.parent_id) { if (!childMap0[t.parent_id]) childMap0[t.parent_id] = []; childMap0[t.parent_id].push(t); }
+    }
+    let activeDeptId0 = rangeKey0.startsWith("dash_dept:") ? rangeKey0.slice(10) : null;
+    if (!activeDeptId0 && rangeKey0.startsWith("dash_team:")) {
+      const tid = rangeKey0.slice(10);
+      const t = dashTeams0.find(dt => dt.id === tid);
+      activeDeptId0 = (t && t.parent_id) ? t.parent_id : (t ? t.id : null);
+    }
+    const children0 = activeDeptId0 ? (childMap0[activeDeptId0] || []) : [];
+    if (children0.length > 0) {
+      const teamOptions0 = [
+        { text: { type: "plain_text", text: "チーム：すべて" }, value: `dash_dept:${activeDeptId0}` },
+        ...children0.map(c => ({ text: { type: "plain_text", text: c.name }, value: `dash_team:${c.id}` })),
+      ];
+      actionElements.push({
+        type: "static_select",
+        action_id: "home_team_sub_select",
+        options: teamOptions0,
+        initial_option: teamOptions0.find(o => o.value === rangeKey0) || teamOptions0[0],
+      });
+    }
+    // State selector for dept mode
+    actionElements.push({
+      type: "static_select",
+      action_id: "home_scope_select",
+      options: stateOptions0,
+      initial_option: stateOptions0.find((o) => o.value === stateKey0) || stateOptions0[0],
+    });
+  } else if (rangeKey0 !== "all") {
     actionElements.push({
       type: "static_select",
       action_id: "home_scope_select",
@@ -530,21 +687,60 @@ async function publishHome({ client, teamId, userId }) {
   }
 
   // ★パーソナルフィルター範囲：フィルターメンバーで絞り込む（依頼者=対応者も除外しない）
+  let pfMemberSet = null;
   if (rangeKey.startsWith("pf:")) {
     const pfId = rangeKey.slice(3);
     const members = await dbGetPersonalFilterMemberIds(teamId, pfId).catch(() => []);
-    const memberSet = new Set((members || []).filter(Boolean));
+    pfMemberSet = new Set((members || []).filter(Boolean));
 
     personalTasks = (personalTasks || []).filter((t) => {
       const a = t?.assignee_id;
       const r = t?.requester_user_id;
-      return (a && memberSet.has(a)) || (r && memberSet.has(r));
+      return (a && pfMemberSet.has(a)) || (r && pfMemberSet.has(r));
     });
 
+    // broadcast: 依頼者 OR task_targets に対象メンバーが含まれる
+    const bcastIds = (broadcastTasks || []).map(t => t.id);
+    let targetTaskIds = new Set();
+    if (bcastIds.length > 0 && pfMemberSet.size > 0) {
+      const ttRes = await dbQuery(
+        `SELECT DISTINCT task_id::text FROM task_targets WHERE team_id=$1 AND task_id::text = ANY($2) AND user_id = ANY($3)`,
+        [teamId, bcastIds, Array.from(pfMemberSet)]
+      ).catch(() => ({ rows: [] }));
+      targetTaskIds = new Set(ttRes.rows.map(r => String(r.task_id)));
+    }
+
     broadcastTasks = (broadcastTasks || []).filter((t) => {
-      const r = t?.requester_user_id;
-      return r && memberSet.has(r);
+      if (pfMemberSet.has(t?.requester_user_id)) return true;
+      return targetTaskIds.has(String(t.id));
     });
+  }
+
+  // ★dash_dept:X / dash_team:X 範囲：チームメンバーで絞り込む
+  if (rangeKey.startsWith("dash_dept:") || rangeKey.startsWith("dash_team:")) {
+    const rootId = rangeKey.startsWith("dash_dept:") ? rangeKey.slice(10) : rangeKey.slice(10);
+    const subtreeIds = await dbGetDashTeamSubtree(teamId, rootId).catch(() => []);
+    const memberRes = await dbQuery(
+      `SELECT DISTINCT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id = ANY($2)`,
+      [teamId, subtreeIds]
+    ).catch(() => ({ rows: [] }));
+    const memberSet = new Set(memberRes.rows.map(r => r.user_id).filter(Boolean));
+
+    // 対応者（assignee）がチームメンバーのものだけ表示
+    personalTasks = (personalTasks || []).filter((t) => memberSet.has(t?.assignee_id));
+
+    const bcastIds = (broadcastTasks || []).map(t => t.id);
+    let targetTaskIds = new Set();
+    if (bcastIds.length > 0 && memberSet.size > 0) {
+      const ttRes = await dbQuery(
+        `SELECT DISTINCT task_id::text FROM task_targets WHERE team_id=$1 AND task_id::text = ANY($2) AND user_id = ANY($3)`,
+        [teamId, bcastIds, Array.from(memberSet)]
+      ).catch(() => ({ rows: [] }));
+      targetTaskIds = new Set(ttRes.rows.map(r => String(r.task_id)));
+    }
+
+    // broadcast も対応者（task_targets）がチームメンバーのものだけ
+    broadcastTasks = (broadcastTasks || []).filter((t) => targetTaskIds.has(String(t.id)));
   }
 
   const merged = [...personalTasks, ...broadcastTasks].sort(cmp);
@@ -596,7 +792,6 @@ async function publishHome({ client, teamId, userId }) {
       if (!ch) return true;
 
       // ✅ DM起点タスクは Home の範囲絞り込み結果をそのまま通す
-      //    （ここでは追加の可視性制限をかけない）
       if (ch.startsWith("D")) {
         return true;
       }
@@ -606,6 +801,12 @@ async function publishHome({ client, teamId, userId }) {
         requesterVisibleIds.has(String(t.id))
       ) {
         return true;
+      }
+
+      // ✅ 自分あて(to_me)または pf: の personal タスクは、チャンネルを離れていても表示
+      if (t.task_type === "personal" || !t.task_type) {
+        if (rangeKey === "to_me" && String(t.assignee_id) === String(userId)) return true;
+        if (pfMemberSet && pfMemberSet.has(String(t.assignee_id))) return true;
       }
 
       // 通常ルール：publicのみOK（private/その他はNG）
@@ -1654,6 +1855,20 @@ app.action("home_broadcast_scope_select", async ({ ack, body, client }) => {
     await publishHome({ client, teamId, userId });
   } catch (e) {
     console.error("home_broadcast_scope_select error:", e?.data || e);
+  }
+});
+
+app.action("home_team_sub_select", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const scopeKey = body.actions?.[0]?.selected_option?.value;
+    if (!teamId || !userId || !scopeKey) return;
+    setHomeState(teamId, userId, { broadcastScopeKey: scopeKey });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_team_sub_select error:", e?.data || e);
   }
 });
 

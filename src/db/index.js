@@ -1197,10 +1197,11 @@ async function dbListDashTeamMembers(teamId, dashTeamId) {
 
 async function dbListDashTeamMembersWithProfile(teamId, dashTeamId) {
   const ROLE_ORDER = `CASE m.role
-    WHEN 'dept_leader' THEN 1
-    WHEN 'team_leader' THEN 2
-    WHEN 'sub_leader'  THEN 3
-    ELSE 4 END`;
+    WHEN 'manager'   THEN 1
+    WHEN 'chief'     THEN 2
+    WHEN 'sub_chief' THEN 3
+    WHEN 'lead'      THEN 4
+    ELSE 5 END`;
   const q = `
     SELECT m.user_id, m.added_at, m.role,
       d.display_name, d.real_name,
@@ -1216,12 +1217,21 @@ async function dbListDashTeamMembersWithProfile(teamId, dashTeamId) {
 }
 
 async function dbUpdateDashTeamMemberRole(teamId, dashTeamId, userId, role) {
-  const valid = ['admin', 'dept_leader', 'team_leader', 'sub_leader', 'member'];
+  const valid = ['admin', 'manager', 'chief', 'sub_chief', 'lead', 'member'];
   if (!valid.includes(role)) throw new Error(`Invalid role: ${role}`);
   await dbQuery(
     `UPDATE dash_team_members SET role=$4 WHERE team_id=$1 AND dash_team_id=$2 AND user_id=$3`,
     [teamId, dashTeamId, userId, role],
   );
+}
+
+// Returns the user's Slack profile title (from dashboard_user_directory)
+async function dbGetUserSlackTitle(teamId, userId) {
+  const res = await dbQuery(
+    `SELECT profile_json->>'title' AS title FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2 LIMIT 1`,
+    [teamId, userId],
+  );
+  return res.rows[0]?.title || '';
 }
 
 // Returns true if user has 'admin' role in any dash_team
@@ -1480,16 +1490,17 @@ async function dbSetUserDirectoryActive(teamId, userId, isActive) {
 // ================================
 async function dbListWorkloadItems(teamId, dashTeamId, ownerUserId = null) {
   const params = [teamId, dashTeamId];
-  let where = `WHERE team_id=$1 AND dash_team_id=$2 AND is_archived=false`;
+  let where = `WHERE wi.team_id=$1 AND wi.dash_team_id=$2 AND wi.is_archived=false`;
   if (ownerUserId) {
     params.push(ownerUserId);
-    where += ` AND owner_user_id=$3`;
+    where += ` AND wi.owner_user_id=$3`;
   }
   const q = `
-    SELECT *
-    FROM workload_items
+    SELECT wi.*, rc.name AS rpo_client_name
+    FROM workload_items wi
+    LEFT JOIN rpo_clients rc ON rc.id = wi.rpo_client_id AND rc.team_id = wi.team_id
     ${where}
-    ORDER BY owner_user_id ASC, sort_order ASC, created_at ASC;
+    ORDER BY wi.owner_user_id ASC, wi.sort_order ASC, wi.created_at ASC;
   `;
   const res = await dbQuery(q, params);
   return res.rows;
@@ -1531,7 +1542,7 @@ async function dbCreateWorkloadItem(teamId, {
 }
 
 async function dbUpdateWorkloadItem(teamId, itemId, patch) {
-  const allowed = ["owner_user_id", "title", "category", "notes", "sort_order", "dash_team_id", "is_archived", "color", "recurrence_type", "recurrence_config"];
+  const allowed = ["owner_user_id", "title", "category", "notes", "sort_order", "dash_team_id", "is_archived", "color", "recurrence_type", "recurrence_config", "due_date", "status_memo", "is_done"];
   const sets = [];
   const vals = [];
   let i = 3;
@@ -2369,6 +2380,7 @@ module.exports = {
   dbListDashTeamMembers,
   dbListDashTeamMembersWithProfile,
   dbUpdateDashTeamMemberRole,
+  dbGetUserSlackTitle,
   dbUserHasAdminTeamRole,
   dbGetUserDashTeamRoles,
   dbGetDashTeamSubtree,

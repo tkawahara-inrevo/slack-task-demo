@@ -1,11 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 
-// <@U123> や <#C123|channel> などのSlackメンションを除去
+// <@U123> や <#C123|channel> などのSlackメンション、および先頭の @名前 を除去
 function stripMentions(text) {
   return (text || '')
-    .replace(/<@[A-Z0-9]+>/g, '')
-    .replace(/<#[A-Z0-9]+\|[^>]*>/g, '')
     .replace(/<[^>]+>/g, '')
+    .replace(/^(\s*@\S+(\s+\S*\/\S+)?(\s+[A-Za-z]\S*)?)+\s*/u, '')
     .replace(/\s+/g, ' ')
     .trim();
 }

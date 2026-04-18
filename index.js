@@ -98,6 +98,7 @@ const {
   dbListDashTeamMembers,
   dbListDashTeamMembersWithProfile,
   dbUpdateDashTeamMemberRole,
+  dbGetUserSlackTitle,
   dbUserHasAdminTeamRole,
   dbGetUserDashTeamRoles,
   dbGetDashTeamSubtree,
@@ -239,6 +240,8 @@ const {
   dbDeletePersonalFilter,
   dbSetPersonalFilterMembers,
   dbGetPersonalFilterMemberIds,
+  dbGetDashTeamSubtree,
+  dbGetDashboardRole,
   randomUUID,
 });
 
@@ -1436,7 +1439,7 @@ async function buildDetailModalView({
         ],
       });
     }
-    if (task.status !== "done" && task.status !== "cancelled") {
+    if (task.status !== "done" && task.status !== "cancelled" && task.broadcast_group_id) {
       const elems = [
         {
           type: "button",
@@ -1479,12 +1482,74 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
   const personalScope = (rangeKey === "to_me" || rangeKey === "requested_by_me") ? rangeKey : "all";
   const fetchLimit = 300;
 
-  const [personalTasks, broadcastTasks] = await Promise.all([
+  // rangeOptions 構築に必要なデータを並列取得
+  const [personalTasksRaw, broadcastTasksRaw, personalFilters, dashTeamsRes, myTeamRes, dashboardRole] = await Promise.all([
     dbListPersonalTasksByStatusesWithScope(teamId, statuses, personalScope, userId, fetchLimit),
     (rangeKey === "to_me" || rangeKey === "requested_by_me")
       ? dbListBroadcastTasksByStatusesWithScope(teamId, statuses, rangeKey, userId, fetchLimit)
       : dbListBroadcastTasksByStatuses(teamId, statuses, "all", fetchLimit),
+    dbListPersonalFilters(teamId, userId).catch(() => []),
+    dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
+    dbQuery(
+      `SELECT DISTINCT dt.id, dt.parent_id FROM dash_team_members dtm
+       JOIN dash_teams dt ON dt.id=dtm.dash_team_id AND dt.team_id=dtm.team_id
+       WHERE dtm.team_id=$1 AND dtm.user_id=$2`,
+      [teamId, userId]
+    ).catch(() => ({ rows: [] })),
+    dbGetDashboardRole(teamId, userId).catch(() => "member"),
   ]);
+
+  const isAdmin = dashboardRole === "admin";
+  const dashTeams = dashTeamsRes.rows || [];
+  const deptRows = dashTeams.filter(t => !t.parent_id);
+  const myDeptIds = new Set();
+  for (const r of (myTeamRes.rows || [])) {
+    if (!r.parent_id) myDeptIds.add(r.id);
+    else myDeptIds.add(r.parent_id);
+  }
+  const visibleDepts = isAdmin
+    ? [...deptRows.filter(d => myDeptIds.has(d.id)), ...deptRows.filter(d => !myDeptIds.has(d.id))]
+    : deptRows.filter(d => myDeptIds.has(d.id));
+
+  // pf: / dash_dept: / dash_team: のフィルタ処理
+  let personalTasks = personalTasksRaw || [];
+  let broadcastTasks = broadcastTasksRaw || [];
+
+  if (rangeKey.startsWith("pf:")) {
+    const pfId = rangeKey.slice(3);
+    const members = await dbGetPersonalFilterMemberIds(teamId, pfId).catch(() => []);
+    const pfSet = new Set(members.filter(Boolean));
+    personalTasks = personalTasks.filter(t => pfSet.has(t?.assignee_id) || pfSet.has(t?.requester_user_id));
+    const bcastIds = broadcastTasks.map(t => t.id);
+    let targetIds = new Set();
+    if (bcastIds.length > 0 && pfSet.size > 0) {
+      const ttRes = await dbQuery(
+        `SELECT DISTINCT task_id::text FROM task_targets WHERE team_id=$1 AND task_id::text = ANY($2) AND user_id = ANY($3)`,
+        [teamId, bcastIds, Array.from(pfSet)]
+      ).catch(() => ({ rows: [] }));
+      targetIds = new Set(ttRes.rows.map(r => String(r.task_id)));
+    }
+    broadcastTasks = broadcastTasks.filter(t => pfSet.has(t?.requester_user_id) || targetIds.has(String(t.id)));
+  } else if (rangeKey.startsWith("dash_dept:") || rangeKey.startsWith("dash_team:")) {
+    const rootId = rangeKey.startsWith("dash_dept:") ? rangeKey.slice(10) : rangeKey.slice(10);
+    const subtreeIds = await dbGetDashTeamSubtree(teamId, rootId).catch(() => []);
+    const memberRes = await dbQuery(
+      `SELECT DISTINCT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id = ANY($2)`,
+      [teamId, subtreeIds]
+    ).catch(() => ({ rows: [] }));
+    const memberSet = new Set(memberRes.rows.map(r => r.user_id).filter(Boolean));
+    personalTasks = personalTasks.filter(t => memberSet.has(t?.assignee_id));
+    const bcastIds = broadcastTasks.map(t => t.id);
+    let targetIds = new Set();
+    if (bcastIds.length > 0 && memberSet.size > 0) {
+      const ttRes = await dbQuery(
+        `SELECT DISTINCT task_id::text FROM task_targets WHERE team_id=$1 AND task_id::text = ANY($2) AND user_id = ANY($3)`,
+        [teamId, bcastIds, Array.from(memberSet)]
+      ).catch(() => ({ rows: [] }));
+      targetIds = new Set(ttRes.rows.map(r => String(r.task_id)));
+    }
+    broadcastTasks = broadcastTasks.filter(t => targetIds.has(String(t.id)));
+  }
 
   const toTime = (d) => {
     if (!d) return null;
@@ -1503,7 +1568,7 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
 
   const seen = new Set();
   const tasks = [];
-  for (const t of [...(personalTasks || []), ...(broadcastTasks || [])].sort(cmp)) {
+  for (const t of [...personalTasks, ...broadcastTasks].sort(cmp)) {
     const key = `${t.task_type || "personal"}:${t.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1514,11 +1579,24 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
   const start = page * PAGE_SIZE;
   const pageTasks = tasks.slice(start, start + PAGE_SIZE);
 
+  // rangeOptions: Home と同じ順・同じ権限ルール
+  let rangeInitialOption;
   const rangeOptions = [
     { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
     { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
-    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
+    ...personalFilters.map(f => ({ text: { type: "plain_text", text: `★ ${f.name}` }, value: `pf:${f.id}` })),
+    ...visibleDepts.map(d => ({ text: { type: "plain_text", text: `🏢 ${d.name}` }, value: `dash_dept:${d.id}` })),
+    ...(isAdmin ? [{ text: { type: "plain_text", text: "範囲：すべて" }, value: "all" }] : []),
   ];
+  rangeInitialOption = rangeOptions.find(o => o.value === rangeKey);
+  if (!rangeInitialOption && rangeKey.startsWith("dash_team:")) {
+    const tid = rangeKey.slice(10);
+    const t = dashTeams.find(dt => dt.id === tid);
+    const parentId = t?.parent_id || t?.id;
+    rangeInitialOption = rangeOptions.find(o => o.value === `dash_dept:${parentId}`);
+  }
+  rangeInitialOption = rangeInitialOption || rangeOptions[0];
+
   const statusOptions = [
     { text: { type: "plain_text", text: "状態：未完了" }, value: "active" },
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
@@ -1534,7 +1612,7 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
         type: "static_select",
         action_id: "my_tasks_scope_select",
         options: rangeOptions,
-        initial_option: rangeOptions.find((o) => o.value === rangeKey) || rangeOptions[0],
+        initial_option: rangeInitialOption,
       },
       {
         type: "static_select",
@@ -2787,6 +2865,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbListDashTeamMembers,
     dbListDashTeamMembersWithProfile,
     dbUpdateDashTeamMemberRole,
+    dbGetUserSlackTitle,
     dbUserHasAdminTeamRole,
     dbGetUserDashTeamRoles,
     dbGetDashTeamSubtree,
@@ -2890,6 +2969,10 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbUpdateCalcDef,
     dbDeleteCalcDef,
     dbPipelineSummary,
+    upsertThreadCard: (...args) => upsertThreadCard(...args),
+    buildThreadCardBlocks: (...args) => buildThreadCardBlocks(...args),
+    dbListPersonalFilters,
+    dbGetPersonalFilterMemberIds,
   });
 
   // Root redirect

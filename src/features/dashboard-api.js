@@ -1,5 +1,8 @@
 const crypto = require("crypto");
 const { randomUUID } = require("crypto");
+const { registerRpoApi } = require("./rpo-api");
+const { registerKintoneApi } = require("./kintone-api");
+const { registerDriveApi } = require("./drive-api");
 
 // ================================
 // Dashboard API + Token Auth
@@ -70,6 +73,7 @@ function registerDashboardApi(deps) {
     dbUpdateDashTeamFull,
     dbAddDashTeamMember,
     dbUpdateDashTeamMemberRole,
+    dbGetUserSlackTitle,
     dbUserHasAdminTeamRole,
     dbGetUserDashTeamRoles,
     dbGetDashTeamSubtree,
@@ -175,6 +179,10 @@ function registerDashboardApi(deps) {
     dbUpdateCalcDef,
     dbDeleteCalcDef,
     dbPipelineSummary,
+    upsertThreadCard,
+    buildThreadCardBlocks,
+    dbListPersonalFilters,
+    dbGetPersonalFilterMemberIds,
   } = deps;
 
   const kintone = require("./kintone-connector");
@@ -218,7 +226,20 @@ function registerDashboardApi(deps) {
       .catch(() => res.status(401).json({ error: "unauthorized" }));
   }
 
-  // admin check middleware
+  // Slackプロフィールのtitleからシステムロールを決定する
+  // 優先順: Sub Manager/Sub Expert → manager, Manager → manager,
+  //         Sub Chief → sub_chief, Chief → chief, Lead → lead, その他 → member
+  function roleTitleFromSlack(title) {
+    if (!title) return 'member';
+    if (/sub\s+(manager|expert)/i.test(title)) return 'manager';
+    if (/\bmanager\b/i.test(title)) return 'manager';
+    if (/sub\s*chief/i.test(title)) return 'sub_chief';
+    if (/\bchief\b/i.test(title)) return 'chief';
+    if (/\blead\b/i.test(title)) return 'lead';
+    return 'member';
+  }
+
+  // admin check middleware（管理設定・インテグレーション等の高権限操作用）
   function adminOnly(req, res, next) {
     if (req.dashboardUser?.role !== "admin") {
       return res.status(403).json({ error: "admin_required" });
@@ -226,17 +247,29 @@ function registerDashboardApi(deps) {
     next();
   }
 
+  // チーフ以上（admin / manager / chief）向けミドルウェア（チーム設定操作用）
+  function chiefOrAbove(req, res, next) {
+    const role = req.dashboardUser?.role;
+    if (!['admin', 'manager', 'chief'].includes(role)) {
+      return res.status(403).json({ error: "insufficient_role" });
+    }
+    next();
+  }
+
   // Enhance authMiddleware to attach role.
-  // If the user has 'admin' in any dash_team_members, treat them as dashboard admin.
+  // dashboard_roles に admin が明示設定されている場合はそれを優先。
+  // それ以外はSlackプロフィールのtitleから自動判定する。
   async function authWithRole(req, res, next) {
     authMiddleware(req, res, async () => {
       try {
         const { teamId, userId } = req.dashboardUser;
-        const [dbRole, hasTeamAdmin] = await Promise.all([
-          dbGetDashboardRole(teamId, userId),
-          dbUserHasAdminTeamRole(teamId, userId),
-        ]);
-        req.dashboardUser.role = (dbRole === "admin" || hasTeamAdmin) ? "admin" : dbRole;
+        const dbRole = await dbGetDashboardRole(teamId, userId);
+        if (dbRole === 'admin') {
+          req.dashboardUser.role = 'admin';
+        } else {
+          const title = await dbGetUserSlackTitle(teamId, userId);
+          req.dashboardUser.role = roleTitleFromSlack(title);
+        }
         next();
       } catch (e) {
         console.error("authWithRole error:", e);
@@ -247,10 +280,8 @@ function registerDashboardApi(deps) {
 
   // Helper: get visible user_ids for non-admin.
   // Role-based visibility:
-  //   dept_leader  → all users in their team's full subtree (team + all descendants)
-  //   team_leader  → all users in their direct team(s)
-  //   sub_leader   → same as team_leader
-  //   member       → all users in their team(s) (same as current default)
+  //   manager   → all users in their team's full subtree (team + all descendants)
+  //   chief / sub_chief / lead / member → all users in their direct team(s)
   async function getVisibleUserIds(teamId, userId) {
     // Explicit visibility overrides (manually set by admin)
     const [explicitUsers, explicitTeams] = await Promise.all([
@@ -272,12 +303,12 @@ function registerDashboardApi(deps) {
 
     const teamIdsToShow = new Set();
     for (const { id: tId, role } of teamRoles) {
-      if (role === 'dept_leader') {
+      if (role === 'manager') {
         // See all teams in the subtree rooted at this team
         const subtree = await dbGetDashTeamSubtree(teamId, tId);
         for (const sid of subtree) teamIdsToShow.add(sid);
       } else {
-        // team_leader / sub_leader / member: just their direct team
+        // chief / sub_chief / lead / member: just their direct team
         teamIdsToShow.add(tId);
         // Also include child teams (existing inherited membership behaviour)
         const allAccessible = await dbGetUserDashTeams(teamId, userId);
@@ -416,8 +447,11 @@ function registerDashboardApi(deps) {
       const projectId = req.query.project || null;
       const overdue = req.query.overdue === "1" || req.query.overdue === "true";
       const usergroupId = req.query.usergroup || null;
+      const dashTeamParam = req.query.dashTeam || null;
+      const personalFilterId = req.query.personalFilter || null;
+      const sortParam = req.query.sort || '';
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+      const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 50));
       const offset = (page - 1) * limit;
 
       const conditions = ["t.team_id = $1"];
@@ -425,9 +459,21 @@ function registerDashboardApi(deps) {
       let idx = 2;
       let joinClause = "";
 
-      if (role !== "admin") {
+      const assignees = req.query.assignees ? req.query.assignees.split(',').filter(Boolean) : null;
+      if (assignees?.length) {
+        const p = idx++;
+        conditions.push(
+          `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
+          `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
+        );
+        params.push(assignees);
+      } else if (role !== "admin") {
         const visible = await getVisibleUserIds(teamId, userId);
-        conditions.push(`t.assignee_id = ANY($${idx++})`);
+        const p = idx++;
+        conditions.push(
+          `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
+          `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
+        );
         params.push(visible);
       }
       if (status) {
@@ -435,7 +481,11 @@ function registerDashboardApi(deps) {
         params.push(status);
       }
       if (assignee) {
-        conditions.push(`t.assignee_id = $${idx++}`);
+        const p = idx++;
+        conditions.push(
+          `(t.assignee_id = $${p} OR (t.task_type='broadcast' AND EXISTS ` +
+          `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = $${p})))`
+        );
         params.push(assignee);
       }
       if (projectId) {
@@ -450,8 +500,46 @@ function registerDashboardApi(deps) {
       if (usergroupId) {
         const members = await getUsergroupMembers(teamId, usergroupId);
         if (members.length > 0) {
-          conditions.push(`t.assignee_id = ANY($${idx++})`);
+          const p = idx++;
+          conditions.push(
+            `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
+            `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
+          );
           params.push(members);
+        } else {
+          conditions.push("false");
+        }
+      }
+      if (dashTeamParam) {
+        // 部署指定時は子チームも含む全メンバーを対象
+        const subtreeIds = await dbGetDashTeamSubtree(teamId, dashTeamParam);
+        const allTeamIds = [dashTeamParam, ...subtreeIds];
+        const memberRows = await dbQuery(
+          `SELECT DISTINCT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id = ANY($2)`,
+          [teamId, allTeamIds]
+        );
+        const memberIds = memberRows.rows.map(r => r.user_id);
+        if (memberIds.length > 0) {
+          const p = idx++;
+          conditions.push(
+            `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
+            `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
+          );
+          params.push(memberIds);
+        } else {
+          conditions.push("false");
+        }
+      }
+      if (personalFilterId) {
+        const pfMembers = await dbGetPersonalFilterMemberIds(teamId, personalFilterId);
+        if (pfMembers.length > 0) {
+          const p = idx++;
+          conditions.push(
+            `(t.assignee_id = ANY($${p}) OR t.requester_user_id = ANY($${p}) OR ` +
+            `(t.task_type='broadcast' AND EXISTS ` +
+            `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
+          );
+          params.push(pfMembers);
         } else {
           conditions.push("false");
         }
@@ -466,7 +554,11 @@ function registerDashboardApi(deps) {
                   t.requester_user_id, t.task_type, t.created_at, t.completed_count, t.total_count
            FROM tasks t ${joinClause}
            WHERE ${where}
-           ORDER BY t.created_at DESC
+           ORDER BY ${
+             sortParam === 'due_date_asc'  ? '(t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC' :
+             sortParam === 'due_date_desc' ? '(t.due_date IS NULL) DESC, t.due_date DESC, t.created_at DESC' :
+             't.created_at DESC'
+           }
            LIMIT $${idx++} OFFSET $${idx++}`,
           [...params, limit, offset],
         ),
@@ -485,6 +577,25 @@ function registerDashboardApi(deps) {
         }),
       );
 
+      // ガント用: broadcast タスクに対象メンバーの user_id を付与
+      if (assignees?.length) {
+        const broadcastIds = tasksWithNames.filter(t => t.task_type === 'broadcast').map(t => t.id);
+        if (broadcastIds.length > 0) {
+          const ttRes = await dbQuery(
+            `SELECT task_id::text AS task_id, user_id FROM task_targets WHERE team_id=$1 AND task_id::text = ANY($2) AND user_id = ANY($3)`,
+            [teamId, broadcastIds, assignees]
+          );
+          const targetMap = {};
+          for (const row of ttRes.rows) {
+            if (!targetMap[row.task_id]) targetMap[row.task_id] = [];
+            targetMap[row.task_id].push(row.user_id);
+          }
+          for (const t of tasksWithNames) {
+            if (t.task_type === 'broadcast') t.target_user_ids = targetMap[t.id] || [];
+          }
+        }
+      }
+
       res.json({
         tasks: tasksWithNames,
         total: countResult.rows[0]?.total || 0,
@@ -493,6 +604,18 @@ function registerDashboardApi(deps) {
       });
     } catch (e) {
       console.error("dashboard /tasks error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- /personal-filters ---
+  expressApp.get("/api/dashboard/personal-filters", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const filters = await dbListPersonalFilters(teamId, userId);
+      res.json({ filters });
+    } catch (e) {
+      console.error("dashboard /personal-filters error:", e);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -661,7 +784,7 @@ function registerDashboardApi(deps) {
   });
 
   // --- Teams ---
-  expressApp.get("/api/dashboard/admin/teams", authWithRole, adminOnly, async (req, res) => {
+  expressApp.get("/api/dashboard/admin/teams", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const teams = await dbListDashTeams(teamId);
@@ -679,7 +802,7 @@ function registerDashboardApi(deps) {
     }
   });
 
-  expressApp.post("/api/dashboard/admin/teams", authWithRole, adminOnly, async (req, res) => {
+  expressApp.post("/api/dashboard/admin/teams", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
       const { name, parentId } = req.body || {};
@@ -692,7 +815,7 @@ function registerDashboardApi(deps) {
     }
   });
 
-  expressApp.put("/api/dashboard/admin/teams/:id", authWithRole, adminOnly, async (req, res) => {
+  expressApp.put("/api/dashboard/admin/teams/:id", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const { name, parentId } = req.body || {};
@@ -708,7 +831,7 @@ function registerDashboardApi(deps) {
     }
   });
 
-  expressApp.delete("/api/dashboard/admin/teams/:id", authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete("/api/dashboard/admin/teams/:id", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       await dbDeleteDashTeam(teamId, req.params.id);
@@ -720,7 +843,7 @@ function registerDashboardApi(deps) {
   });
 
   // --- Team members ---
-  expressApp.get("/api/dashboard/admin/teams/:id/members", authWithRole, adminOnly, async (req, res) => {
+  expressApp.get("/api/dashboard/admin/teams/:id/members", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const members = await dbListDashTeamMembers(teamId, req.params.id);
@@ -737,7 +860,7 @@ function registerDashboardApi(deps) {
     }
   });
 
-  expressApp.post("/api/dashboard/admin/teams/:id/members", authWithRole, adminOnly, async (req, res) => {
+  expressApp.post("/api/dashboard/admin/teams/:id/members", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const { userId } = req.body || {};
@@ -750,7 +873,7 @@ function registerDashboardApi(deps) {
     }
   });
 
-  expressApp.patch("/api/dashboard/admin/teams/:id/members/:userId", authWithRole, adminOnly, async (req, res) => {
+  expressApp.patch("/api/dashboard/admin/teams/:id/members/:userId", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const { role } = req.body || {};
@@ -764,7 +887,7 @@ function registerDashboardApi(deps) {
   });
 
   // Hide a user from org chart (set is_active=false in directory)
-  expressApp.delete("/api/dashboard/admin/directory/:userId", authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete("/api/dashboard/admin/directory/:userId", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       await dbSetUserDirectoryActive(teamId, req.params.userId, false);
@@ -775,7 +898,7 @@ function registerDashboardApi(deps) {
     }
   });
 
-  expressApp.delete("/api/dashboard/admin/teams/:id/members/:userId", authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete("/api/dashboard/admin/teams/:id/members/:userId", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       await dbRemoveDashTeamMember(teamId, req.params.id, req.params.userId);
@@ -942,10 +1065,42 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/dashboard/workload/teams", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
-      const teams = role === "admin"
-        ? await dbListDashTeams(teamId)
-        : await dbGetUserDashTeams(teamId, userId);
-      res.json({ teams });
+      if (role === "admin") {
+        const teams = await dbListDashTeams(teamId);
+        res.json({ teams: teams.map(t => ({ ...t, is_direct_member: true })) });
+        return;
+      }
+
+      // 非admin: 自分が直接メンバーのチームのみ + その親部署（表示用）を返す
+      // ※ 同じ部署内の他チームは含めない
+      const directRes = await dbQuery(
+        `SELECT DISTINCT dash_team_id FROM dash_team_members WHERE team_id=$1 AND user_id=$2`,
+        [teamId, userId]
+      );
+      const directIds = Array.from(new Set(directRes.rows.map(r => r.dash_team_id)));
+
+      if (!directIds.length) { res.json({ teams: [] }); return; }
+
+      const directTeams = (await dbQuery(
+        `SELECT * FROM dash_teams WHERE team_id=$1 AND id = ANY($2) ORDER BY name ASC`,
+        [teamId, directIds]
+      )).rows;
+
+      // 親部署（parent_id を持つチームの親）を追加
+      const parentIds = [...new Set(
+        directTeams.filter(t => t.parent_id).map(t => t.parent_id)
+          .filter(pid => !directIds.includes(pid))
+      )];
+      const parentRows = parentIds.length > 0
+        ? (await dbQuery(`SELECT * FROM dash_teams WHERE team_id=$1 AND id = ANY($2)`, [teamId, parentIds])).rows
+        : [];
+
+      const allTeams = [
+        ...directTeams.map(t => ({ ...t, is_direct_member: true })),
+        ...parentRows.map(t => ({ ...t, is_direct_member: false })),
+      ];
+
+      res.json({ teams: allTeams });
     } catch (e) {
       console.error("dashboard /workload/teams error:", e);
       res.status(500).json({ error: "internal" });
@@ -1033,21 +1188,24 @@ function registerDashboardApi(deps) {
       const { teamId, userId, role } = req.dashboardUser;
       const existing = await dbGetWorkloadItem(teamId, req.params.id);
       if (!existing) return res.status(404).json({ error: "not_found" });
-      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig } = req.body || {};
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig, dueDate, statusMemo, isDone } = req.body || {};
       const targetDashTeamId = String(dashTeamId || existing.dash_team_id || "");
       if (!(await canAccessDashTeam(teamId, userId, role, targetDashTeamId))) {
         return res.status(403).json({ error: "team_forbidden" });
       }
       const item = await dbUpdateWorkloadItem(teamId, req.params.id, {
         dash_team_id: targetDashTeamId,
-        owner_user_id: ownerUserId || existing.owner_user_id,
+        owner_user_id: ownerUserId !== undefined ? (ownerUserId || null) : existing.owner_user_id,
         title: typeof title === "string" ? title.trim() : existing.title,
         category: typeof category === "string" ? category.trim() : existing.category,
-        notes: typeof notes === "string" ? notes.trim() : existing.notes,
+        notes: notes !== undefined ? (typeof notes === "string" ? notes.trim() || null : null) : existing.notes,
         sort_order: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : existing.sort_order,
         color: color !== undefined ? (color || null) : existing.color,
         recurrence_type: recurrenceType !== undefined ? recurrenceType : (existing.recurrence_type || 'other'),
         recurrence_config: recurrenceConfig !== undefined ? recurrenceConfig : existing.recurrence_config,
+        due_date: dueDate !== undefined ? (dueDate || null) : existing.due_date,
+        status_memo: statusMemo !== undefined ? (statusMemo || null) : existing.status_memo,
+        is_done: isDone !== undefined ? !!isDone : existing.is_done,
       });
       res.json({ item });
     } catch (e) {
@@ -1276,6 +1434,15 @@ function registerDashboardApi(deps) {
       }
 
       const updated = await dbGetTaskById(teamId, req.params.id);
+      // Web → Slack sync
+      if (updated?.channel_id && updated?.message_ts) {
+        try {
+          const blocks = await buildThreadCardBlocks({ teamId, task: updated });
+          await upsertThreadCard(slackClient, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks });
+        } catch (e) {
+          console.error("Slack sync error (PUT /tasks/:id):", e);
+        }
+      }
       res.json({ task: updated });
     } catch (e) {
       console.error("dashboard PUT /tasks/:id error:", e);
@@ -1295,6 +1462,15 @@ function registerDashboardApi(deps) {
       if (!task) return res.status(404).json({ error: "not_found" });
 
       const updated = await dbUpdateStatus(teamId, req.params.id, status);
+      // Web → Slack sync
+      if (updated?.channel_id && updated?.message_ts) {
+        try {
+          const blocks = await buildThreadCardBlocks({ teamId, task: updated });
+          await upsertThreadCard(slackClient, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks });
+        } catch (e) {
+          console.error("Slack sync error (PATCH /tasks/:id/status):", e);
+        }
+      }
       res.json({ task: updated });
     } catch (e) {
       console.error("dashboard PATCH /tasks/:id/status error:", e);
@@ -2414,6 +2590,15 @@ function registerDashboardApi(deps) {
       res.status(500).json({ error: e.message });
     }
   });
+
+  // RPO案件管理API（authWithRole/adminOnlyを共有）
+  registerRpoApi({ expressApp, authWithRole, adminOnly });
+
+  // kintone連携API
+  registerKintoneApi({ expressApp, authWithRole, adminOnly });
+
+  // Google Drive連携API
+  registerDriveApi({ expressApp, authWithRole });
 }
 
 module.exports = {

@@ -367,6 +367,7 @@ export const api = {
   // Google Drive
   driveFiles: (folderId) => apiFetch(`/drive/files?folderId=${encodeURIComponent(folderId)}`),
   driveCandidates: (name) => rpoFetch(`/drive/candidates?name=${encodeURIComponent(name)}`),
+  rpoAutoLinkSheets: (id, driveFolder) => rpoPost(`/clients/${id}/auto-link-sheets`, { driveFolder }),
 
   // RPO: 工数管理
   rpoUpdateWorkloadHours: (clientId, body) => rpoFetch(`/clients/${clientId}/workload-hours`, {

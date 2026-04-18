@@ -183,4 +183,32 @@ function registerDriveApi({ expressApp, authWithRole }) {
   });
 }
 
-module.exports = { registerDriveApi, findClientFolder, searchClientFolders, parseFolderId };
+// 案件フォルダ内の「__管理シート」スプレッドシートを探して webViewLink を返す
+async function findManagementSheet(folderId) {
+  try {
+    const drive = getDriveClient();
+    const meta = await drive.files.get({
+      fileId: folderId, fields: 'id,driveId', supportsAllDrives: true,
+    }).catch(() => ({ data: {} }));
+    const driveId = meta.data.driveId;
+
+    const params = {
+      ...SHARED_DRIVE_OPTS,
+      q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and name contains '管理シート' and trashed=false`,
+      fields: 'files(id,name,webViewLink)',
+      pageSize: 10,
+    };
+    if (driveId) { params.corpora = 'drive'; params.driveId = driveId; }
+
+    const r = await drive.files.list(params);
+    const sheets = r.data.files || [];
+    // 「__管理シート」を優先、なければ「管理シート」を含む最初のファイル
+    const best = sheets.find(f => f.name.includes('__管理シート')) || sheets[0];
+    return best ? best.webViewLink : null;
+  } catch (e) {
+    console.error('[Drive] findManagementSheet error:', e.message);
+    return null;
+  }
+}
+
+module.exports = { registerDriveApi, findClientFolder, searchClientFolders, findManagementSheet, parseFolderId };

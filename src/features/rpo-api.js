@@ -1,5 +1,5 @@
 // RPO案件管理 API
-const { findClientFolder, searchClientFolders, parseFolderId } = require('./drive-api');
+const { findClientFolder, searchClientFolders, findManagementSheet, parseFolderId } = require('./drive-api');
 const {
   dbEnsureRpoSchema,
   dbGetUserRpoAccess,
@@ -211,6 +211,15 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
         if (parentId) {
           const folderUrl = await findClientFolder(parentId, name.trim());
           if (folderUrl) mergedData.driveFolder = folderUrl;
+        }
+      }
+
+      // 管理シートを自動検索してsheetsUrlをセット
+      if (mergedData.driveFolder && !mergedData.sheetsUrl) {
+        const folderId = parseFolderId(mergedData.driveFolder);
+        if (folderId) {
+          const sheetUrl = await findManagementSheet(folderId);
+          if (sheetUrl) mergedData.sheetsUrl = sheetUrl;
         }
       }
 
@@ -757,6 +766,34 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
       res.json({ ok: true });
     } catch (e) {
       console.error('[RPO] sheets-url error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ─────────────────────────────────────────
+  // DriveフォルダからsheetsUrlを自動検出してセット
+  // POST /api/rpo/clients/:id/auto-link-sheets
+  // ─────────────────────────────────────────
+  expressApp.post('/api/rpo/clients/:id/auto-link-sheets', authWithRole, async (req, res) => {
+    try {
+      const access = await withRpoAccess(req, res);
+      if (!access) return;
+      const { teamId } = req.dashboardUser;
+      const client = await dbGetRpoClient(teamId, req.params.id);
+      if (!client) return res.status(404).json({ error: 'not_found' });
+
+      const folderId = parseFolderId(req.body.driveFolder || client.data?.driveFolder);
+      if (!folderId) return res.json({ sheetsUrl: null });
+
+      const sheetUrl = await findManagementSheet(folderId);
+      if (sheetUrl && sheetUrl !== client.data?.sheetsUrl) {
+        await dbUpdateRpoClient(teamId, req.params.id, {
+          data: { ...client.data, sheetsUrl: sheetUrl },
+        });
+      }
+      res.json({ sheetsUrl: sheetUrl });
+    } catch (e) {
+      console.error('[RPO] auto-link-sheets error:', e.message);
       res.status(500).json({ error: 'internal' });
     }
   });

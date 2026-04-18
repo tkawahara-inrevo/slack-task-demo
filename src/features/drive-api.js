@@ -34,7 +34,8 @@ const SHARED_DRIVE_OPTS = {
   includeItemsFromAllDrives: true,
 };
 
-// 親フォルダ内から企業名に一致するフォルダを検索して webViewLink を返す
+// 親フォルダ(共有ドライブ)内から企業名に一致するフォルダを検索して webViewLink を返す
+// 会社フォルダは行別サブフォルダに入っているため、ドライブ全体を検索する
 async function findClientFolder(parentFolderId, clientName) {
   try {
     const drive = getDriveClient();
@@ -50,8 +51,9 @@ async function findClientFolder(parentFolderId, clientName) {
     const escaped = clientName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const listParams = {
       ...SHARED_DRIVE_OPTS,
-      q: `'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and name contains '${escaped}' and trashed=false`,
-      fields: 'files(id,name,webViewLink)',
+      // Search entire drive (not just direct children) since folders are nested in 行-subfolders
+      q: `mimeType='application/vnd.google-apps.folder' and name contains '${escaped}' and trashed=false`,
+      fields: 'files(id,name,webViewLink,parents)',
       pageSize: 20,
     };
     if (driveId) {

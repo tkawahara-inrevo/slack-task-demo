@@ -34,13 +34,31 @@ const SHARED_DRIVE_OPTS = {
   includeItemsFromAllDrives: true,
 };
 
+async function listFolderChildren(drive, folderId, driveId) {
+  const params = {
+    ...SHARED_DRIVE_OPTS,
+    q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: 'nextPageToken,files(id,name,webViewLink)',
+    pageSize: 200,
+  };
+  if (driveId) { params.corpora = 'drive'; params.driveId = driveId; }
+  const files = [];
+  let pageToken;
+  do {
+    if (pageToken) params.pageToken = pageToken;
+    const r = await drive.files.list(params);
+    files.push(...(r.data.files || []));
+    pageToken = r.data.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
 // 親フォルダ(共有ドライブ)内から企業名に一致するフォルダを検索して webViewLink を返す
-// 会社フォルダは行別サブフォルダに入っているため、ドライブ全体を検索する
+// 会社フォルダは行別サブフォルダ(_あ行など)の2階層目に格納されている
 async function findClientFolder(parentFolderId, clientName) {
   try {
     const drive = getDriveClient();
 
-    // Get driveId from parent folder metadata (required for Shared Drive corpora)
     const meta = await drive.files.get({
       fileId: parentFolderId,
       fields: 'id,name,driveId',
@@ -48,25 +66,27 @@ async function findClientFolder(parentFolderId, clientName) {
     });
     const driveId = meta.data.driveId;
 
-    const escaped = clientName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const listParams = {
-      ...SHARED_DRIVE_OPTS,
-      // Search entire drive (not just direct children) since folders are nested in 行-subfolders
-      q: `mimeType='application/vnd.google-apps.folder' and name contains '${escaped}' and trashed=false`,
-      fields: 'files(id,name,webViewLink,parents)',
-      pageSize: 20,
-    };
-    if (driveId) {
-      listParams.corpora = 'drive';
-      listParams.driveId = driveId;
-    }
+    // Level 1: list row-subfolders directly under parentFolderId
+    const rowFolders = await listFolderChildren(drive, parentFolderId, driveId);
 
-    const r = await drive.files.list(listParams);
-    const folders = r.data.files || [];
-    const exact   = folders.find(f => f.name === clientName);
-    const forward = folders.find(f => f.name.startsWith(clientName) || clientName.startsWith(f.name));
-    const match   = exact || forward || folders[0] || null;
-    return match ? match.webViewLink : null;
+    // Level 2: search each row-subfolder's children for matching company name
+    for (const rowFolder of rowFolders) {
+      const escaped = clientName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const params = {
+        ...SHARED_DRIVE_OPTS,
+        q: `'${rowFolder.id}' in parents and mimeType='application/vnd.google-apps.folder' and name contains '${escaped}' and trashed=false`,
+        fields: 'files(id,name,webViewLink)',
+        pageSize: 10,
+      };
+      if (driveId) { params.corpora = 'drive'; params.driveId = driveId; }
+      const r = await drive.files.list(params);
+      const folders = r.data.files || [];
+      const exact   = folders.find(f => f.name === clientName);
+      const forward = folders.find(f => f.name.startsWith(clientName) || clientName.startsWith(f.name));
+      const match   = exact || forward;
+      if (match) return match.webViewLink;
+    }
+    return null;
   } catch (e) {
     console.error('[Drive] findClientFolder error:', e.message);
     return null;

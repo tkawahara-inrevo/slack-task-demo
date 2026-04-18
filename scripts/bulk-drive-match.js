@@ -1,13 +1,15 @@
 const { Pool } = require('pg');
 const { findClientFolder, parseFolderId } = require('../src/features/drive-api');
 
-const pool = new Pool({
-  user: 'rpo_saas_app',
-  host: 'localhost',
-  database: 'rpo_saas',
-  password: 'rpo_saas_app_password',
-  port: 5432,
-});
+const pool = new Pool(process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL }
+  : {
+    user: 'slacktask',
+    host: 'localhost',
+    database: 'slacktask',
+    password: 'slacktask2026',
+    port: 5432,
+  });
 
 async function run() {
   const PARENT_FOLDER_URL = 'https://drive.google.com/drive/folders/1jKvYSVwWKHsXyaMIE9sf245yw6zfwGGU';

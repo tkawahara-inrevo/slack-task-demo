@@ -1,12 +1,6 @@
 const crypto = require("crypto");
 const { randomUUID } = require("crypto");
 const { registerRpoApi } = require("./rpo-api");
-const { registerKintoneApi } = require("./kintone-api");
-const { registerDriveApi } = require("./drive-api");
-const { registerCrmApi, registerDailyReportApi } = require("./crm-api");
-const { registerChannelMappingApi } = require("./channel-mapping");
-const { registerPermissionsApi } = require("./permissions");
-const { registerRankingApi } = require("./ranking");
 
 // ================================
 // Dashboard API + Token Auth
@@ -137,7 +131,6 @@ function registerDashboardApi(deps) {
     dbListSyncLogs,
     getSubteamIdMap,
     getUsergroupMembers,
-    updateUsergroupMembers,
     // CRM
     dbCreateClient,
     dbListClients,
@@ -186,8 +179,6 @@ function registerDashboardApi(deps) {
     dbPipelineSummary,
     upsertThreadCard,
     buildThreadCardBlocks,
-    dbListPersonalFilters,
-    dbGetPersonalFilterMemberIds,
   } = deps;
 
   const kintone = require("./kintone-connector");
@@ -252,24 +243,6 @@ function registerDashboardApi(deps) {
     next();
   }
 
-  // admin または IT チーム向け（管理者権限・チャンネルマッピング・Slackメンション管理）
-  function adminOrITOnly(req, res, next) {
-    const role = req.dashboardUser?.role;
-    if (role !== "admin" && role !== "it") {
-      return res.status(403).json({ error: "admin_or_it_required" });
-    }
-    next();
-  }
-
-  // admin または Personnel チーム向け（採用管理）
-  function adminOrPersonnelOnly(req, res, next) {
-    const role = req.dashboardUser?.role;
-    if (role !== "admin" && role !== "personnel") {
-      return res.status(403).json({ error: "admin_or_personnel_required" });
-    }
-    next();
-  }
-
   // チーフ以上（admin / manager / chief）向けミドルウェア（チーム設定操作用）
   function chiefOrAbove(req, res, next) {
     const role = req.dashboardUser?.role;
@@ -279,15 +252,6 @@ function registerDashboardApi(deps) {
     next();
   }
 
-  // ロールキャッシュ（TTL: 5分）。ロール変更後は最大5分で反映される。
-  const roleCache = new Map(); // `${teamId}:${userId}` → { role, expiresAt }
-  setInterval(() => {
-    const now = Date.now();
-    for (const [k, v] of roleCache) {
-      if (now >= v.expiresAt) roleCache.delete(k);
-    }
-  }, 5 * 60 * 1000).unref();
-
   // Enhance authMiddleware to attach role.
   // dashboard_roles に admin が明示設定されている場合はそれを優先。
   // それ以外はSlackプロフィールのtitleから自動判定する。
@@ -295,61 +259,13 @@ function registerDashboardApi(deps) {
     authMiddleware(req, res, async () => {
       try {
         const { teamId, userId } = req.dashboardUser;
-        const cacheKey = `${teamId}:${userId}`;
-        const cached = roleCache.get(cacheKey);
-        if (cached && Date.now() < cached.expiresAt) {
-          req.dashboardUser.role = cached.role;
-          return next();
-        }
         const dbRole = await dbGetDashboardRole(teamId, userId);
-        let role;
         if (dbRole === 'admin') {
-          role = 'admin';
-        } else if (dbRole === 'corp') {
-          role = 'corp';
+          req.dashboardUser.role = 'admin';
         } else {
-          // Corporateチームに所属していれば corp 扱い
-          const { rows: corpRows } = await dbQuery(`
-            SELECT 1 FROM dash_team_members dtm
-            JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-            JOIN dash_teams parent ON parent.id = dt.parent_id AND parent.team_id = dt.team_id
-            WHERE dtm.team_id = $1 AND dtm.user_id = $2
-              AND parent.name ILIKE '%corporate%'
-            LIMIT 1
-          `, [teamId, userId]);
-          if (corpRows.length > 0) {
-            role = 'corp';
-          } else {
-            // IT チーム所属チェック
-            const { rows: itRows } = await dbQuery(`
-              SELECT 1 FROM dash_team_members dtm
-              JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-              WHERE dtm.team_id = $1 AND dtm.user_id = $2
-                AND (dt.name ILIKE '%IT%' OR dt.name ILIKE '%情シス%')
-              LIMIT 1
-            `, [teamId, userId]);
-            if (itRows.length > 0) {
-              role = 'it';
-            } else {
-              // Personnel（人事）チーム所属チェック
-              const { rows: persRows } = await dbQuery(`
-                SELECT 1 FROM dash_team_members dtm
-                JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-                WHERE dtm.team_id = $1 AND dtm.user_id = $2
-                  AND (dt.name ILIKE '%personnel%' OR dt.name ILIKE '%人事%' OR dt.name ILIKE '%HR%')
-                LIMIT 1
-              `, [teamId, userId]);
-              if (persRows.length > 0) {
-                role = 'personnel';
-              } else {
-                const title = await dbGetUserSlackTitle(teamId, userId);
-                role = roleTitleFromSlack(title);
-              }
-            }
-          }
+          const title = await dbGetUserSlackTitle(teamId, userId);
+          req.dashboardUser.role = roleTitleFromSlack(title);
         }
-        roleCache.set(cacheKey, { role, expiresAt: Date.now() + 5 * 60 * 1000 });
-        req.dashboardUser.role = role;
         next();
       } catch (e) {
         console.error("authWithRole error:", e);
@@ -527,9 +443,6 @@ function registerDashboardApi(deps) {
       const projectId = req.query.project || null;
       const overdue = req.query.overdue === "1" || req.query.overdue === "true";
       const usergroupId = req.query.usergroup || null;
-      const dashTeamParam = req.query.dashTeam || null;
-      const personalFilterId = req.query.personalFilter || null;
-      const sortParam = req.query.sort || '';
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 50));
       const offset = (page - 1) * limit;
@@ -541,19 +454,12 @@ function registerDashboardApi(deps) {
 
       const assignees = req.query.assignees ? req.query.assignees.split(',').filter(Boolean) : null;
       if (assignees?.length) {
-        const p = idx++;
-        conditions.push(
-          `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
-          `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
-        );
+        // ガント等で明示的にメンバーIDを指定した場合はそちらを優先
+        conditions.push(`t.assignee_id = ANY($${idx++})`);
         params.push(assignees);
       } else if (role !== "admin") {
         const visible = await getVisibleUserIds(teamId, userId);
-        const p = idx++;
-        conditions.push(
-          `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
-          `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
-        );
+        conditions.push(`t.assignee_id = ANY($${idx++})`);
         params.push(visible);
       }
       if (status) {
@@ -561,11 +467,7 @@ function registerDashboardApi(deps) {
         params.push(status);
       }
       if (assignee) {
-        const p = idx++;
-        conditions.push(
-          `(t.assignee_id = $${p} OR (t.task_type='broadcast' AND EXISTS ` +
-          `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = $${p})))`
-        );
+        conditions.push(`t.assignee_id = $${idx++}`);
         params.push(assignee);
       }
       if (projectId) {
@@ -580,46 +482,8 @@ function registerDashboardApi(deps) {
       if (usergroupId) {
         const members = await getUsergroupMembers(teamId, usergroupId);
         if (members.length > 0) {
-          const p = idx++;
-          conditions.push(
-            `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
-            `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
-          );
+          conditions.push(`t.assignee_id = ANY($${idx++})`);
           params.push(members);
-        } else {
-          conditions.push("false");
-        }
-      }
-      if (dashTeamParam) {
-        // 部署指定時は子チームも含む全メンバーを対象
-        const subtreeIds = await dbGetDashTeamSubtree(teamId, dashTeamParam);
-        const allTeamIds = [dashTeamParam, ...subtreeIds];
-        const memberRows = await dbQuery(
-          `SELECT DISTINCT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id = ANY($2)`,
-          [teamId, allTeamIds]
-        );
-        const memberIds = memberRows.rows.map(r => r.user_id);
-        if (memberIds.length > 0) {
-          const p = idx++;
-          conditions.push(
-            `(t.assignee_id = ANY($${p}) OR (t.task_type='broadcast' AND EXISTS ` +
-            `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
-          );
-          params.push(memberIds);
-        } else {
-          conditions.push("false");
-        }
-      }
-      if (personalFilterId) {
-        const pfMembers = await dbGetPersonalFilterMemberIds(teamId, personalFilterId);
-        if (pfMembers.length > 0) {
-          const p = idx++;
-          conditions.push(
-            `(t.assignee_id = ANY($${p}) OR t.requester_user_id = ANY($${p}) OR ` +
-            `(t.task_type='broadcast' AND EXISTS ` +
-            `(SELECT 1 FROM task_targets tt WHERE tt.task_id::text=t.id AND tt.team_id=t.team_id AND tt.user_id = ANY($${p}))))`
-          );
-          params.push(pfMembers);
         } else {
           conditions.push("false");
         }
@@ -634,11 +498,7 @@ function registerDashboardApi(deps) {
                   t.requester_user_id, t.task_type, t.created_at, t.completed_count, t.total_count
            FROM tasks t ${joinClause}
            WHERE ${where}
-           ORDER BY ${
-             sortParam === 'due_date_asc'  ? '(t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC' :
-             sortParam === 'due_date_desc' ? '(t.due_date IS NULL) DESC, t.due_date DESC, t.created_at DESC' :
-             't.created_at DESC'
-           }
+           ORDER BY t.created_at DESC
            LIMIT $${idx++} OFFSET $${idx++}`,
           [...params, limit, offset],
         ),
@@ -657,39 +517,6 @@ function registerDashboardApi(deps) {
         }),
       );
 
-      // ガント用: broadcast タスクに対象メンバーの user_id と完了済み user_id を付与
-      if (assignees?.length) {
-        const broadcastIds = tasksWithNames.filter(t => t.task_type === 'broadcast').map(t => t.id);
-        if (broadcastIds.length > 0) {
-          const [ttRes, compRes] = await Promise.all([
-            dbQuery(
-              `SELECT task_id::text AS task_id, user_id FROM task_targets WHERE team_id=$1 AND task_id::text = ANY($2) AND user_id = ANY($3)`,
-              [teamId, broadcastIds, assignees]
-            ),
-            dbQuery(
-              `SELECT task_id::text AS task_id, user_id FROM task_completions WHERE team_id=$1 AND task_id::text = ANY($2)`,
-              [teamId, broadcastIds]
-            ),
-          ]);
-          const targetMap = {};
-          for (const row of ttRes.rows) {
-            if (!targetMap[row.task_id]) targetMap[row.task_id] = [];
-            targetMap[row.task_id].push(row.user_id);
-          }
-          const completedMap = {};
-          for (const row of compRes.rows) {
-            if (!completedMap[row.task_id]) completedMap[row.task_id] = [];
-            completedMap[row.task_id].push(row.user_id);
-          }
-          for (const t of tasksWithNames) {
-            if (t.task_type === 'broadcast') {
-              t.target_user_ids = targetMap[t.id] || [];
-              t.completed_user_ids = completedMap[t.id] || [];
-            }
-          }
-        }
-      }
-
       res.json({
         tasks: tasksWithNames,
         total: countResult.rows[0]?.total || 0,
@@ -698,18 +525,6 @@ function registerDashboardApi(deps) {
       });
     } catch (e) {
       console.error("dashboard /tasks error:", e);
-      res.status(500).json({ error: "internal" });
-    }
-  });
-
-  // --- /personal-filters ---
-  expressApp.get("/api/dashboard/personal-filters", authWithRole, async (req, res) => {
-    try {
-      const { teamId, userId } = req.dashboardUser;
-      const filters = await dbListPersonalFilters(teamId, userId);
-      res.json({ filters });
-    } catch (e) {
-      console.error("dashboard /personal-filters error:", e);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -730,542 +545,6 @@ function registerDashboardApi(deps) {
       console.error("dashboard /usergroups error:", e);
       res.status(500).json({ error: "internal" });
     }
-  });
-
-  // --- Slack グループ管理 (admin) ---
-
-  // 全グループ＋メンバー一覧（プロフィール付き）
-  expressApp.get("/api/dashboard/admin/slack-groups", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const idToHandle = await getSubteamIdMap(teamId);
-
-      // 全ユーザープロフィールをディレクトリから取得
-      const allUsers = await dbListDashboardUserDirectory(teamId, { limit: 2000 });
-      const userMap = Object.fromEntries(allUsers.map(u => [u.user_id, u]));
-
-      const groups = await Promise.all(
-        Array.from(idToHandle.entries()).map(async ([id, handle]) => {
-          const memberIds = await getUsergroupMembers(teamId, id);
-          const members = memberIds.map(uid => {
-            const u = userMap[uid];
-            return {
-              user_id: uid,
-              display_name: u?.display_name || uid,
-              real_name: u?.real_name || uid,
-              avatar_url: u?.profile_json?.image_72 || null,
-              title: u?.profile_json?.title || null,
-            };
-          });
-          return { id, handle, members };
-        })
-      );
-
-      // ユーザーごとのグループ一覧マップも返す
-      const userGroups = {};
-      for (const g of groups) {
-        for (const m of g.members) {
-          if (!userGroups[m.user_id]) userGroups[m.user_id] = [];
-          userGroups[m.user_id].push({ id: g.id, handle: g.handle });
-        }
-      }
-
-      res.json({ groups, userGroups, users: allUsers.filter(u => u.is_active && (u.profile_json?.email || '').endsWith('@inrevo.jp')).map(u => ({
-        user_id: u.user_id,
-        display_name: u.display_name,
-        real_name: u.real_name,
-        avatar_url: u.profile_json?.image_72 || null,
-        title: u.profile_json?.title || null,
-      })) });
-    } catch (e) {
-      console.error("admin /slack-groups error:", e);
-      res.status(500).json({ error: "internal" });
-    }
-  });
-
-  // グループのメンバーを更新（追加 or 削除）
-  expressApp.patch("/api/dashboard/admin/slack-groups/:groupId/members", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { groupId } = req.params;
-      const { action, userId } = req.body; // action: 'add' | 'remove'
-      if (!action || !userId) return res.status(400).json({ error: "action and userId required" });
-
-      const current = await getUsergroupMembers(teamId, groupId);
-      let updated;
-      if (action === 'add') {
-        updated = current.includes(userId) ? current : [...current, userId];
-      } else {
-        updated = current.filter(id => id !== userId);
-      }
-      await updateUsergroupMembers(teamId, groupId, updated);
-      res.json({ ok: true, members: updated });
-    } catch (e) {
-      if (e.code === "cannot_make_group_empty") {
-        return res.status(400).json({ error: "cannot_make_group_empty", message: "グループに最低1名必要なため削除できません" });
-      }
-      console.error("admin /slack-groups/:id/members error:", e);
-      res.status(500).json({ error: "internal" });
-    }
-  });
-
-  // --- Slackグループルール ---
-
-  expressApp.get("/api/dashboard/admin/slack-group-rules", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const r = await dbQuery("SELECT * FROM slack_group_rules WHERE team_id=$1 ORDER BY created_at ASC", [teamId]);
-      res.json({ rules: r.rows });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.post("/api/dashboard/admin/slack-group-rules", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { name, category, groupIds, deptName } = req.body;
-      if (!name?.trim()) return res.status(400).json({ error: "name required" });
-      const id = randomUUID();
-      const r = await dbQuery(
-        "INSERT INTO slack_group_rules (id, team_id, name, title_pattern, category, group_ids, dept_name) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *",
-        [id, teamId, name.trim(), '', category || 'role', JSON.stringify(groupIds || []), deptName || null]
-      );
-      res.json({ rule: r.rows[0] });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.put("/api/dashboard/admin/slack-group-rules/:id", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { name, category, groupIds, deptName } = req.body;
-      const r = await dbQuery(
-        "UPDATE slack_group_rules SET name=$3, category=$4, group_ids=$5, dept_name=$6 WHERE id=$1 AND team_id=$2 RETURNING *",
-        [req.params.id, teamId, name.trim(), category || 'role', JSON.stringify(groupIds || []), deptName || null]
-      );
-      res.json({ rule: r.rows[0] });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.delete("/api/dashboard/admin/slack-group-rules/:id", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      await dbQuery("DELETE FROM slack_group_rules WHERE id=$1 AND team_id=$2", [req.params.id, teamId]);
-      res.json({ ok: true });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // ルール適用プレビュー
-  expressApp.post("/api/dashboard/admin/slack-group-rules/preview", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const rulesRes = await dbQuery("SELECT * FROM slack_group_rules WHERE team_id=$1", [teamId]);
-      const rules = rulesRes.rows;
-      if (rules.length === 0) return res.json({ changes: [] });
-
-      // 全グループ取得
-      const idToHandle = await getSubteamIdMap(teamId);
-      // ルールで管理対象のグループID集合
-      const managedGroupIds = new Set(rules.flatMap(r => r.group_ids || []));
-
-      // 全ユーザー（@inrevo.jp のみ）
-      const allUsers = await dbListDashboardUserDirectory(teamId, { limit: 2000 });
-      const targetUsers = allUsers.filter(u => u.is_active && (u.profile_json?.email || '').endsWith('@inrevo.jp'));
-
-      // 各グループの現メンバー取得
-      const groupMembers = {};
-      for (const gid of managedGroupIds) {
-        groupMembers[gid] = new Set(await getUsergroupMembers(teamId, gid));
-      }
-
-      const changes = [];
-      for (const user of targetUsers) {
-        const title = (user.profile_json?.title || '').toLowerCase();
-        // マッチするルールを探す
-        const matchedRules = rules.filter(r => title.includes(r.title_pattern.toLowerCase()));
-        const shouldBeIn = new Set(matchedRules.flatMap(r => r.group_ids || []));
-
-        const toAdd = [...shouldBeIn].filter(gid => !groupMembers[gid]?.has(user.user_id));
-        const toRemove = [...managedGroupIds].filter(gid => !shouldBeIn.has(gid) && groupMembers[gid]?.has(user.user_id));
-
-        if (toAdd.length > 0 || toRemove.length > 0) {
-          changes.push({
-            user_id: user.user_id,
-            display_name: user.display_name,
-            real_name: user.real_name,
-            avatar_url: user.profile_json?.image_72 || null,
-            title: user.profile_json?.title || '',
-            add: toAdd.map(gid => ({ id: gid, handle: idToHandle.get(gid) || gid })),
-            remove: toRemove.map(gid => ({ id: gid, handle: idToHandle.get(gid) || gid })),
-          });
-        }
-      }
-      res.json({ changes });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // ルール適用実行
-  expressApp.post("/api/dashboard/admin/slack-group-rules/apply", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { changes } = req.body; // previewと同じ形式
-      if (!Array.isArray(changes)) return res.status(400).json({ error: "changes required" });
-
-      // グループIDごとに変更を集約
-      const groupDeltas = {}; // groupId -> { add: Set, remove: Set }
-      for (const c of changes) {
-        for (const g of (c.add || [])) {
-          if (!groupDeltas[g.id]) groupDeltas[g.id] = { add: new Set(), remove: new Set() };
-          groupDeltas[g.id].add.add(c.user_id);
-        }
-        for (const g of (c.remove || [])) {
-          if (!groupDeltas[g.id]) groupDeltas[g.id] = { add: new Set(), remove: new Set() };
-          groupDeltas[g.id].remove.add(c.user_id);
-        }
-      }
-
-      for (const [groupId, delta] of Object.entries(groupDeltas)) {
-        const current = await getUsergroupMembers(teamId, groupId);
-        const updated = [...new Set([
-          ...current.filter(uid => !delta.remove.has(uid)),
-          ...delta.add,
-        ])];
-        await updateUsergroupMembers(teamId, groupId, updated);
-      }
-
-      res.json({ ok: true, applied: Object.keys(groupDeltas).length });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // 変更ウィザード: 1人のユーザーに対して特定ルールを適用する差分を返す
-  // カテゴリ内の他ルールのグループはすべて外す
-  expressApp.post("/api/dashboard/admin/slack-group-rules/change-preview", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { userId, toRuleId } = req.body;
-      if (!userId || !toRuleId) return res.status(400).json({ error: "userId and toRuleId required" });
-
-      const rulesRes = await dbQuery("SELECT * FROM slack_group_rules WHERE team_id=$1", [teamId]);
-      const rules = rulesRes.rows;
-      const toRule = rules.find(r => r.id === toRuleId);
-      if (!toRule) return res.status(404).json({ error: "rule not found" });
-
-      const idToHandle = await getSubteamIdMap(teamId);
-
-      // 同カテゴリの全ルールのグループが管理対象
-      const sameCategory = rules.filter(r => r.category === toRule.category);
-      const managedInCategory = new Set(sameCategory.flatMap(r => r.group_ids || []));
-
-      // 現在の所属グループ（管理対象のみ）
-      const currentInManaged = [];
-      for (const gid of managedInCategory) {
-        const members = await getUsergroupMembers(teamId, gid);
-        if (members.includes(userId)) currentInManaged.push(gid);
-      }
-
-      const toGroupIds = new Set(toRule.group_ids || []);
-      const toAdd = [...toGroupIds].filter(gid => !currentInManaged.includes(gid));
-      const toRemove = currentInManaged.filter(gid => !toGroupIds.has(gid));
-
-      res.json({
-        toRule: { id: toRule.id, name: toRule.name, category: toRule.category },
-        add: toAdd.map(gid => ({ id: gid, handle: idToHandle.get(gid) || gid })),
-        remove: toRemove.map(gid => ({ id: gid, handle: idToHandle.get(gid) || gid })),
-      });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.post("/api/dashboard/admin/slack-group-rules/change-apply", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { userId, add, remove } = req.body;
-      if (!userId) return res.status(400).json({ error: "userId required" });
-
-      for (const g of (remove || [])) {
-        const current = await getUsergroupMembers(teamId, g.id);
-        await updateUsergroupMembers(teamId, g.id, current.filter(id => id !== userId));
-      }
-      for (const g of (add || [])) {
-        const current = await getUsergroupMembers(teamId, g.id);
-        if (!current.includes(userId)) {
-          await updateUsergroupMembers(teamId, g.id, [...current, userId]);
-        }
-      }
-      res.json({ ok: true });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // --- グループタブ表示設定 ---
-  expressApp.get("/api/dashboard/admin/slack-group-visibility", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const r = await dbQuery("SELECT group_id, hidden_tabs FROM slack_group_tab_visibility WHERE team_id=$1", [teamId]);
-      const map = Object.fromEntries(r.rows.map(row => [row.group_id, row.hidden_tabs || []]));
-      res.json({ visibility: map });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.put("/api/dashboard/admin/slack-group-visibility/:groupId", authWithRole, adminOrITOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { groupId } = req.params;
-      const { hiddenTabs } = req.body; // array like ['role','dept','auto']
-      await dbQuery(
-        `INSERT INTO slack_group_tab_visibility (team_id, group_id, hidden_tabs)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (team_id, group_id) DO UPDATE SET hidden_tabs=$3`,
-        [teamId, groupId, JSON.stringify(hiddenTabs || [])]
-      );
-      res.json({ ok: true });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // ═══════════════════════════════════════════════
-  // 採用管理（自社）実技テスト
-  // ═══════════════════════════════════════════════
-
-  // 設定 GET/PUT
-  expressApp.get("/api/dashboard/admin/recruitment/settings", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const r = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]);
-      res.json({ settings: r.rows[0] || {} });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.put("/api/dashboard/admin/recruitment/settings", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { templateSpreadsheetId, gasEndpointUrl, notifyChannelId, notifyMentionUserId, webhookSecret,
-              fromEmail, emailSubject, emailBody, totalScore, importSheetUrl } = req.body;
-      await dbQuery(`
-        INSERT INTO recruitment_settings (team_id, template_spreadsheet_id, gas_endpoint_url, notify_channel_id, notify_mention_user_id, webhook_secret, from_email, email_subject, email_body, total_score, import_sheet_url, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
-        ON CONFLICT (team_id) DO UPDATE SET
-          template_spreadsheet_id=$2, gas_endpoint_url=$3, notify_channel_id=$4,
-          notify_mention_user_id=$5, webhook_secret=$6,
-          from_email=$7, email_subject=$8, email_body=$9, total_score=$10,
-          import_sheet_url=$11, updated_at=now()
-      `, [teamId, templateSpreadsheetId||null, gasEndpointUrl||null, notifyChannelId||null, notifyMentionUserId||null, webhookSecret||null,
-          fromEmail||null, emailSubject||null, emailBody||null, totalScore||null, importSheetUrl||null]);
-      res.json({ ok: true });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // 候補者 一覧/追加/削除
-  expressApp.get("/api/dashboard/admin/recruitment/candidates", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const r = await dbQuery("SELECT * FROM recruitment_candidates WHERE team_id=$1 ORDER BY created_at DESC", [teamId]);
-      res.json({ candidates: r.rows });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.post("/api/dashboard/admin/recruitment/candidates", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { name, email } = req.body;
-      if (!name?.trim() || !email?.trim()) return res.status(400).json({ error: "name and email required" });
-      const id = randomUUID();
-      const r = await dbQuery(
-        "INSERT INTO recruitment_candidates (id, team_id, name, email) VALUES ($1,$2,$3,$4) RETURNING *",
-        [id, teamId, name.trim(), email.trim()]
-      );
-      res.json({ candidate: r.rows[0] });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  expressApp.delete("/api/dashboard/admin/recruitment/candidates/:id", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      await dbQuery("DELETE FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [req.params.id, teamId]);
-      res.json({ ok: true });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // スプレッドシートから候補者取り込み（GAS経由: A列=名前, B列=メアド, C列に取り込み済みフラグ）
-  expressApp.post("/api/dashboard/admin/recruitment/import-sheet", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { spreadsheetUrl } = req.body;
-      if (!spreadsheetUrl) return res.status(400).json({ error: "spreadsheetUrl required" });
-
-      const match = spreadsheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      if (!match) return res.status(400).json({ error: "スプレッドシートのURLが正しくありません" });
-      const spreadsheetId = match[1];
-
-      const settingsRes = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]);
-      const settings = settingsRes.rows[0];
-      if (!settings?.gas_endpoint_url) return res.status(400).json({ error: "GAS URLが設定されていません" });
-
-      // GAS に取り込みを依頼（GAS側でC列にフラグを書き込む）
-      const gasRes = await fetch(settings.gas_endpoint_url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'importFromSheet',
-          spreadsheetId,
-          secret: settings.webhook_secret || '',
-        }),
-      });
-      const gasData = await gasRes.json();
-      if (!gasData.ok) return res.status(400).json({ error: gasData.error || 'GASエラー' });
-
-      const added = [], skipped = [];
-      for (const row of (gasData.rows || [])) {
-        const name = (row.name || '').trim();
-        const email = (row.email || '').trim();
-        if (!name || !email) { skipped.push(row); continue; }
-        const existing = await dbQuery("SELECT id FROM recruitment_candidates WHERE team_id=$1 AND email=$2", [teamId, email]);
-        if (existing.rows.length > 0) { skipped.push(row); continue; }
-        const r = await dbQuery(
-          "INSERT INTO recruitment_candidates (id, team_id, name, email) VALUES ($1,$2,$3,$4) RETURNING *",
-          [randomUUID(), teamId, name, email]
-        );
-        added.push(r.rows[0]);
-      }
-      res.json({ added, skipped: skipped.length });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // 送信処理（名前・メール入力済・URLなし・pending or error の候補者に一括送信）
-  expressApp.post("/api/dashboard/admin/recruitment/send", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const settingsRes = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]);
-      const settings = settingsRes.rows[0];
-      if (!settings?.gas_endpoint_url || !settings?.template_spreadsheet_id) {
-        return res.status(400).json({ error: "GASエンドポイントURLとテンプレートIDを設定してください" });
-      }
-
-      const baseUrl = process.env.APP_BASE_URL || `https://inrevo-task.com`;
-      const webhookUrl = `${baseUrl}/api/dashboard/recruitment/webhook/complete`;
-
-      const candidatesRes = await dbQuery(
-        "SELECT * FROM recruitment_candidates WHERE team_id=$1 AND spreadsheet_url IS NULL AND status IN ('pending','error')",
-        [teamId]
-      );
-      const targets = candidatesRes.rows;
-      if (targets.length === 0) return res.json({ ok: true, sent: 0 });
-
-      const results = [];
-      for (const c of targets) {
-        try {
-          // GAS web app 呼び出し
-          const gasRes = await fetch(settings.gas_endpoint_url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              candidateId: c.id,
-              name: c.name,
-              email: c.email,
-              templateId: settings.template_spreadsheet_id,
-              webhookUrl,
-              secret: settings.webhook_secret || '',
-            }),
-          });
-          const gasData = await gasRes.json();
-          if (gasData.ok && gasData.spreadsheetUrl) {
-            await dbQuery(
-              "UPDATE recruitment_candidates SET spreadsheet_url=$1, spreadsheet_id=$2, status='sent', sent_at=now(), error_message=NULL WHERE id=$3",
-              [gasData.spreadsheetUrl, gasData.spreadsheetId || null, c.id]
-            );
-            results.push({ id: c.id, ok: true });
-          } else {
-            const msg = gasData.error || 'GASエラー';
-            await dbQuery("UPDATE recruitment_candidates SET status='error', error_message=$1 WHERE id=$2", [msg, c.id]);
-            results.push({ id: c.id, ok: false, error: msg });
-          }
-        } catch (err) {
-          await dbQuery("UPDATE recruitment_candidates SET status='error', error_message=$1 WHERE id=$2", [err.message, c.id]);
-          results.push({ id: c.id, ok: false, error: err.message });
-        }
-      }
-      res.json({ ok: true, sent: results.filter(r => r.ok).length, results });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // 1名ずつ送信（フロントがループして呼ぶ用）
-  expressApp.post("/api/dashboard/admin/recruitment/send-one", authWithRole, adminOrPersonnelOnly, async (req, res) => {
-    try {
-      const { teamId } = req.dashboardUser;
-      const { candidateId } = req.body;
-      if (!candidateId) return res.status(400).json({ error: "candidateId required" });
-
-      const settingsRes = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]);
-      const settings = settingsRes.rows[0];
-      if (!settings?.gas_endpoint_url || !settings?.template_spreadsheet_id)
-        return res.status(400).json({ error: "設定が不完全です" });
-
-      const candRes = await dbQuery("SELECT * FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [candidateId, teamId]);
-      const c = candRes.rows[0];
-      if (!c) return res.status(404).json({ error: "not found" });
-
-      const baseUrl = process.env.APP_BASE_URL || 'https://inrevo-task.com';
-      const webhookUrl = `${baseUrl}/api/dashboard/recruitment/webhook/complete`;
-
-      try {
-        const gasRes = await fetch(settings.gas_endpoint_url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            candidateId: c.id, name: c.name, email: c.email,
-            templateId: settings.template_spreadsheet_id,
-            webhookUrl, secret: settings.webhook_secret || '',
-            fromEmail: settings.from_email || null,
-            emailSubject: settings.email_subject || null,
-            emailBody: settings.email_body || null,
-          }),
-        });
-        const gasData = await gasRes.json();
-        if (gasData.ok && gasData.spreadsheetUrl) {
-          await dbQuery(
-            "UPDATE recruitment_candidates SET spreadsheet_url=$1, spreadsheet_id=$2, status='sent', sent_at=now(), error_message=NULL WHERE id=$3",
-            [gasData.spreadsheetUrl, gasData.spreadsheetId || null, c.id]
-          );
-          return res.json({ ok: true, candidateId, spreadsheetUrl: gasData.spreadsheetUrl });
-        } else {
-          const msg = gasData.error || 'GASエラー';
-          await dbQuery("UPDATE recruitment_candidates SET status='error', error_message=$1 WHERE id=$2", [msg, c.id]);
-          return res.json({ ok: false, candidateId, error: msg });
-        }
-      } catch (err) {
-        await dbQuery("UPDATE recruitment_candidates SET status='error', error_message=$1 WHERE id=$2", [err.message, c.id]);
-        return res.json({ ok: false, candidateId, error: err.message });
-      }
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
-  });
-
-  // GASからのwebhook（テスト完了・採点結果受信）
-  expressApp.post("/api/dashboard/recruitment/webhook/complete", async (req, res) => {
-    try {
-      const { candidateId, secret, score, scoreDetail } = req.body;
-      if (!candidateId) return res.status(400).json({ error: "candidateId required" });
-
-      // 候補者を取得してチームIDとシークレット検証
-      const candRes = await dbQuery("SELECT c.*, s.webhook_secret, s.notify_channel_id, s.notify_mention_user_id FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id WHERE c.id=$1", [candidateId]);
-      const cand = candRes.rows[0];
-      if (!cand) return res.status(404).json({ error: "not found" });
-      if (cand.webhook_secret && cand.webhook_secret !== secret) return res.status(403).json({ error: "invalid secret" });
-
-      // スコア更新・完了
-      const typingLevel = scoreDetail?.typing_level || scoreDetail?.q13_level || null;
-      await dbQuery(
-        "UPDATE recruitment_candidates SET status='completed', score=$1, score_detail=$2, typing_level=$3, completed_at=now() WHERE id=$4",
-        [score ?? null, scoreDetail ? JSON.stringify(scoreDetail) : null, typingLevel, candidateId]
-      );
-
-      // Slack 通知
-      if (cand.notify_channel_id) {
-        try {
-          const mention = cand.notify_mention_user_id ? `<@${cand.notify_mention_user_id}> ` : '';
-          const text = `${mention}【採用テスト完了】*${cand.name}* さんが実技テストを完了しました\nスコア: *${score ?? '未採点'}点*\n<${cand.spreadsheet_url}|スプレッドシートを確認>`;
-          const { WebClient } = require("@slack/web-api");
-          const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
-          await slack.chat.postMessage({ channel: cand.notify_channel_id, text });
-        } catch (slackErr) { console.error("Slack通知エラー:", slackErr.message); }
-      }
-
-      res.json({ ok: true });
-    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
   });
 
   // --- /members (team-scoped) ---
@@ -1352,17 +631,14 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/dashboard/admin/roles", authWithRole, adminOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { rows } = await dbQuery(
-        `SELECT user_id, role FROM dashboard_roles WHERE team_id=$1 AND role IN ('admin','corp') ORDER BY role, updated_at`,
-        [teamId]
-      );
+      const admins = await dbListDashboardAdmins(teamId);
       const result = await Promise.all(
-        rows.map(async (a) => ({
+        admins.map(async (a) => ({
           ...a,
           displayName: await getUserDisplayName(teamId, a.user_id),
         })),
       );
-      res.json({ admins: result.filter(r => r.role === 'admin'), corps: result.filter(r => r.role === 'corp') });
+      res.json({ admins: result });
     } catch (e) {
       console.error("dashboard /admin/roles error:", e);
       res.status(500).json({ error: "internal" });
@@ -1373,7 +649,7 @@ function registerDashboardApi(deps) {
     try {
       const { teamId } = req.dashboardUser;
       const { userId, role } = req.body || {};
-      if (!userId || !["admin", "corp", "member"].includes(role)) {
+      if (!userId || !["admin", "member"].includes(role)) {
         return res.status(400).json({ error: "invalid_params" });
       }
       await dbSetDashboardRole(teamId, userId, role);
@@ -1438,10 +714,9 @@ function registerDashboardApi(deps) {
   expressApp.post("/api/dashboard/admin/teams", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
-      const { name, parentId, show_in_orgchart } = req.body || {};
+      const { name, parentId } = req.body || {};
       if (!name?.trim()) return res.status(400).json({ error: "name_required" });
-      const showInOrgchart = show_in_orgchart !== false;
-      const team = await dbCreateDashTeam(randomUUID(), teamId, name.trim(), userId, parentId || null, showInOrgchart);
+      const team = await dbCreateDashTeam(randomUUID(), teamId, name.trim(), userId, parentId || null);
       res.json({ team });
     } catch (e) {
       console.error("dashboard POST /admin/teams error:", e);
@@ -1699,42 +974,10 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/dashboard/workload/teams", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
-      if (role === "admin") {
-        const teams = await dbListDashTeams(teamId);
-        res.json({ teams: teams.map(t => ({ ...t, is_direct_member: true })) });
-        return;
-      }
-
-      // 非admin: 自分が直接メンバーのチームのみ + その親部署（表示用）を返す
-      // ※ 同じ部署内の他チームは含めない
-      const directRes = await dbQuery(
-        `SELECT DISTINCT dash_team_id FROM dash_team_members WHERE team_id=$1 AND user_id=$2`,
-        [teamId, userId]
-      );
-      const directIds = Array.from(new Set(directRes.rows.map(r => r.dash_team_id)));
-
-      if (!directIds.length) { res.json({ teams: [] }); return; }
-
-      const directTeams = (await dbQuery(
-        `SELECT * FROM dash_teams WHERE team_id=$1 AND id = ANY($2) ORDER BY name ASC`,
-        [teamId, directIds]
-      )).rows;
-
-      // 親部署（parent_id を持つチームの親）を追加
-      const parentIds = [...new Set(
-        directTeams.filter(t => t.parent_id).map(t => t.parent_id)
-          .filter(pid => !directIds.includes(pid))
-      )];
-      const parentRows = parentIds.length > 0
-        ? (await dbQuery(`SELECT * FROM dash_teams WHERE team_id=$1 AND id = ANY($2)`, [teamId, parentIds])).rows
-        : [];
-
-      const allTeams = [
-        ...directTeams.map(t => ({ ...t, is_direct_member: true })),
-        ...parentRows.map(t => ({ ...t, is_direct_member: false })),
-      ];
-
-      res.json({ teams: allTeams });
+      const teams = role === "admin"
+        ? await dbListDashTeams(teamId)
+        : await dbGetUserDashTeams(teamId, userId);
+      res.json({ teams });
     } catch (e) {
       console.error("dashboard /workload/teams error:", e);
       res.status(500).json({ error: "internal" });
@@ -1790,7 +1033,7 @@ function registerDashboardApi(deps) {
   expressApp.post("/api/dashboard/workload/items", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
-      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig, estimatedHours } = req.body || {};
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig } = req.body || {};
       if (!title?.trim() || !dashTeamId || !ownerUserId) {
         return res.status(400).json({ error: "invalid_params" });
       }
@@ -1809,7 +1052,6 @@ function registerDashboardApi(deps) {
         color: color || null,
         recurrenceType: recurrenceType || 'other',
         recurrenceConfig: recurrenceConfig || null,
-        estimatedHours: estimatedHours != null ? Number(estimatedHours) : null,
       });
       res.json({ item });
     } catch (e) {
@@ -1823,25 +1065,21 @@ function registerDashboardApi(deps) {
       const { teamId, userId, role } = req.dashboardUser;
       const existing = await dbGetWorkloadItem(teamId, req.params.id);
       if (!existing) return res.status(404).json({ error: "not_found" });
-      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig, dueDate, statusMemo, isDone, estimatedHours } = req.body || {};
+      const { dashTeamId, ownerUserId, title, category, notes, sortOrder, color, recurrenceType, recurrenceConfig } = req.body || {};
       const targetDashTeamId = String(dashTeamId || existing.dash_team_id || "");
       if (!(await canAccessDashTeam(teamId, userId, role, targetDashTeamId))) {
         return res.status(403).json({ error: "team_forbidden" });
       }
       const item = await dbUpdateWorkloadItem(teamId, req.params.id, {
         dash_team_id: targetDashTeamId,
-        owner_user_id: ownerUserId !== undefined ? (ownerUserId || null) : existing.owner_user_id,
+        owner_user_id: ownerUserId || existing.owner_user_id,
         title: typeof title === "string" ? title.trim() : existing.title,
         category: typeof category === "string" ? category.trim() : existing.category,
-        notes: notes !== undefined ? (typeof notes === "string" ? notes.trim() || null : null) : existing.notes,
+        notes: typeof notes === "string" ? notes.trim() : existing.notes,
         sort_order: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : existing.sort_order,
         color: color !== undefined ? (color || null) : existing.color,
         recurrence_type: recurrenceType !== undefined ? recurrenceType : (existing.recurrence_type || 'other'),
         recurrence_config: recurrenceConfig !== undefined ? recurrenceConfig : existing.recurrence_config,
-        due_date: dueDate !== undefined ? (dueDate || null) : existing.due_date,
-        status_memo: statusMemo !== undefined ? (statusMemo || null) : existing.status_memo,
-        is_done: isDone !== undefined ? !!isDone : existing.is_done,
-        estimated_hours: estimatedHours !== undefined ? (estimatedHours != null ? Number(estimatedHours) : null) : existing.estimated_hours,
       });
       res.json({ item });
     } catch (e) {
@@ -1862,56 +1100,6 @@ function registerDashboardApi(deps) {
       res.json({ ok: true });
     } catch (e) {
       console.error("dashboard DELETE /workload/items/:id error:", e);
-      res.status(500).json({ error: "internal" });
-    }
-  });
-
-  // GET /workload/hours — 工数管理集計（人別・業務別）
-  expressApp.get("/api/dashboard/workload/hours", authWithRole, async (req, res) => {
-    try {
-      const { teamId, userId, role } = req.dashboardUser;
-      const dashTeamId = req.query.dashTeamId;
-      const from = req.query.from; // YYYY-MM-DD
-      const to   = req.query.to;   // YYYY-MM-DD
-      if (!dashTeamId) return res.status(400).json({ error: "dashTeamId required" });
-      if (!(await canAccessDashTeam(teamId, userId, role, dashTeamId))) {
-        return res.status(403).json({ error: "team_forbidden" });
-      }
-      // 工数あり業務のみ取得
-      const { rows } = await dbQuery(`
-        SELECT wi.id, wi.title, wi.category, wi.owner_user_id, wi.estimated_hours,
-               wi.recurrence_type, wi.color,
-               COUNT(DISTINCT wc.day_num || '-' || wc.month_key) AS active_days
-        FROM workload_items wi
-        LEFT JOIN workload_cells wc ON wc.item_id = wi.id AND wc.team_id = wi.team_id
-          AND wc.intensity > 0
-          ${from && to ? `AND (wc.month_key || '-' || LPAD(wc.day_num::text,2,'0')) BETWEEN $3 AND $4` : ''}
-        WHERE wi.team_id = $1 AND wi.dash_team_id = $2
-          AND wi.is_archived = false AND wi.estimated_hours IS NOT NULL
-        GROUP BY wi.id
-        ORDER BY wi.owner_user_id, wi.sort_order
-      `, from && to ? [teamId, dashTeamId, from, to] : [teamId, dashTeamId]);
-
-      // オーナー名を解決
-      const userIds = [...new Set(rows.map(r => r.owner_user_id).filter(Boolean))];
-      const nameMap = {};
-      await Promise.all(userIds.map(async uid => {
-        nameMap[uid] = await getUserDisplayName(teamId, uid);
-      }));
-
-      const items = rows.map(r => ({
-        ...r,
-        estimated_hours: r.estimated_hours != null ? Number(r.estimated_hours) : null,
-        active_days: Number(r.active_days) || 0,
-        daily_hours: r.estimated_hours && Number(r.active_days) > 0
-          ? Math.round((Number(r.estimated_hours) / Number(r.active_days)) * 10) / 10
-          : null,
-        owner_name: nameMap[r.owner_user_id] || r.owner_user_id,
-      }));
-
-      res.json({ items });
-    } catch (e) {
-      console.error("dashboard GET /workload/hours error:", e);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -2160,21 +1348,6 @@ function registerDashboardApi(deps) {
       res.json({ task: updated });
     } catch (e) {
       console.error("dashboard PATCH /tasks/:id/status error:", e);
-      res.status(500).json({ error: "internal" });
-    }
-  });
-
-  // --- POST /tasks/:id/complete-self (broadcast タスクを自分のみ完了) ---
-  expressApp.post("/api/dashboard/tasks/:id/complete-self", authWithRole, async (req, res) => {
-    try {
-      const { teamId, userId } = req.dashboardUser;
-      await dbQuery(
-        `INSERT INTO task_completions (task_id, team_id, user_id) VALUES ($1::uuid, $2, $3) ON CONFLICT DO NOTHING`,
-        [req.params.id, teamId, userId]
-      );
-      res.json({ ok: true });
-    } catch (e) {
-      console.error("dashboard POST /tasks/:id/complete-self error:", e);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -2742,29 +1915,558 @@ function registerDashboardApi(deps) {
     }
   }
 
+  // ================================
+  // CRM: Clients
+  // ================================
+  expressApp.get("/api/crm/clients", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    const { search, limit, offset } = req.query;
+    try {
+      const clients = await dbListClients(teamId, {
+        search: search || '',
+        limit: Number(limit) || 50,
+        offset: Number(offset) || 0,
+      });
+      res.json({ clients });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/clients", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { name, contactName, contactEmail, contactPhone, source, notes } = req.body;
+    if (!name) return res.status(400).json({ error: "name required" });
+    try {
+      const id = randomUUID();
+      const client = await dbCreateClient(teamId, id, { name, contactName, contactEmail, contactPhone, source, notes, createdBy: userId });
+      res.json({ client });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/clients/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const client = await dbGetClient(teamId, req.params.id);
+      if (!client) return res.status(404).json({ error: "not found" });
+      const deals = await dbListDeals(teamId, { clientId: client.id });
+      res.json({ client, deals });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.put("/api/crm/clients/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    const { name, contact_name, contact_email, contact_phone, source, notes } = req.body;
+    try {
+      const client = await dbUpdateClient(teamId, req.params.id, { name, contact_name, contact_email, contact_phone, source, notes });
+      res.json({ client });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/clients/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteClient(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deals
+  // ================================
+  expressApp.get("/api/crm/deals", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { clientId, stage } = req.query;
+    try {
+      const role = await dbGetDashboardRole(teamId, userId);
+      // Admins see all deals; regular users only see 'all' visibility or deals they're members of
+      const effectiveUserId = role === 'admin' ? undefined : userId;
+      const deals = await dbListDeals(teamId, { clientId, stage, userId: effectiveUserId });
+      res.json({ deals });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { clientId, name, stage, budget, notes } = req.body;
+    if (!clientId || !name) return res.status(400).json({ error: "clientId and name required" });
+    try {
+      const id = randomUUID();
+      const deal = await dbCreateDeal(teamId, id, { clientId, name, stage, budget, notes, createdBy: userId });
+      await dbAddDealMember(teamId, id, userId, 'admin');
+      res.json({ deal });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/deals/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const deal = await dbGetDeal(teamId, req.params.id);
+      if (!deal) return res.status(404).json({ error: "not found" });
+      const members = await dbListDealMembers(teamId, deal.id);
+      const membersWithNames = await Promise.all(
+        members.map(async (m) => ({ ...m, displayName: await getUserDisplayName(teamId, m.user_id) }))
+      );
+      res.json({ deal, members: membersWithNames });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.put("/api/crm/deals/:id", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { name, stage, budget, notes, client_id, visibility } = req.body;
+    try {
+      const prevDeal = await dbGetDeal(teamId, req.params.id);
+      const deal = await dbUpdateDeal(teamId, req.params.id, { name, stage, budget, notes, client_id, visibility });
+
+      // On stage change: auto-log activity and notify members
+      if (prevDeal && stage && stage !== prevDeal.stage) {
+        const actId = randomUUID();
+        const prevLabel = STAGE_LABELS[prevDeal.stage] || prevDeal.stage;
+        const nextLabel = STAGE_LABELS[stage] || stage;
+        await dbCreateDealActivity(teamId, actId, {
+          dealId: req.params.id,
+          userId,
+          activityType: 'stage_change',
+          content: `${prevLabel} → ${nextLabel}`,
+          metadata: { from: prevDeal.stage, to: stage },
+        });
+
+        if (slackClient) {
+          const members = await dbListDealMembers(teamId, req.params.id);
+          const actorName = await getUserDisplayName(teamId, userId);
+          const dealUrl = `${process.env.DASHBOARD_BASE_URL || ''}/crm/deals/${req.params.id}`;
+          for (const m of members) {
+            if (m.user_id === userId) continue;
+            try {
+              const dm = await slackClient.conversations.open({ users: m.user_id });
+              const ch = dm.channel?.id;
+              if (!ch) continue;
+              await slackClient.chat.postMessage({
+                channel: ch,
+                text: `📋 案件ステージが変更されました: ${deal.name}`,
+                blocks: [
+                  {
+                    type: 'section',
+                    text: {
+                      type: 'mrkdwn',
+                      text: `*📋 案件ステージ変更*\n<${dealUrl}|${deal.name}>\n*${prevLabel}* → *${nextLabel}*\n変更者: ${actorName}`,
+                    },
+                  },
+                ],
+              });
+            } catch (_) { /* ignore per-user DM errors */ }
+          }
+        }
+      }
+
+      res.json({ deal });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDeal(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/members", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    const { userId, role } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId required" });
+    try {
+      await dbAddDealMember(teamId, req.params.id, userId, role || 'member');
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/members/:userId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbRemoveDealMember(teamId, req.params.id, req.params.userId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal Activities
+  // ================================
+  expressApp.get("/api/crm/deals/:id/activities", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const activities = await dbListDealActivities(teamId, req.params.id);
+      res.json({ activities });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/activities", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { activityType, content, metadata } = req.body;
+    if (!activityType) return res.status(400).json({ error: "activityType required" });
+    try {
+      const id = randomUUID();
+      const activity = await dbCreateDealActivity(teamId, id, {
+        dealId: req.params.id, userId, activityType, content, metadata,
+      });
+      res.json({ activity });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/activities/:actId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDealActivity(teamId, req.params.actId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal Payments
+  // ================================
+  expressApp.get("/api/crm/deals/:id/payments", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const payments = await dbListDealPayments(teamId, req.params.id);
+      res.json({ payments });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/payments", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    const { label, amount, dueDate, notes } = req.body;
+    if (!label || !amount) return res.status(400).json({ error: "label and amount required" });
+    try {
+      const id = randomUUID();
+      const payment = await dbCreateDealPayment(teamId, id, {
+        dealId: req.params.id, label, amount: Number(amount), dueDate, notes,
+      });
+      res.json({ payment });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/payments/:payId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbUpdateDealPayment(teamId, req.params.payId, req.body);
+      const payments = await dbListDealPayments(teamId, req.params.id);
+      res.json({ payments });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/payments/:payId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDealPayment(teamId, req.params.payId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal-Task Linkage
+  // ================================
+  expressApp.get("/api/crm/deals/:id/tasks", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const tasks = await dbListDealTasks(teamId, req.params.id);
+      res.json({ tasks });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/tasks", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    const { taskId } = req.body;
+    if (!taskId) return res.status(400).json({ error: "taskId required" });
+    try {
+      await dbAddDealTask(teamId, req.params.id, taskId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/tasks/:taskId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbRemoveDealTask(teamId, req.params.id, req.params.taskId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Deal detail (full)
+  // ================================
+  // ================================
+  // CRM: Deliverables
+  // ================================
+  expressApp.get("/api/crm/deals/:id/deliverables", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const deliverables = await dbListDeliverables(teamId, req.params.id);
+      res.json({ deliverables });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.post("/api/crm/deals/:id/deliverables", authMiddleware, async (req, res) => {
+    const { teamId, userId } = req.dashboardUser;
+    const { title, description, dueDate } = req.body;
+    if (!title) return res.status(400).json({ error: "title required" });
+    try {
+      const id = randomUUID();
+      const deliverable = await dbCreateDeliverable(teamId, id, {
+        dealId: req.params.id, title, description, dueDate, createdBy: userId,
+      });
+      res.json({ deliverable });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/deliverables/:dlvId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const deliverable = await dbUpdateDeliverable(teamId, req.params.dlvId, req.body);
+      res.json({ deliverable });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/deliverables/:dlvId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDeliverable(teamId, req.params.dlvId);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================
+  // CRM: Client Contacts
+  // ================================
+  expressApp.get("/api/crm/clients/:id/contacts", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const contacts = await dbListClientContacts(teamId, req.params.id);
+      res.json({ contacts });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/clients/:id/contacts", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const contact = await dbCreateClientContact(teamId, id, { clientId: req.params.id, ...req.body });
+      res.json({ contact });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/clients/:id/contacts/:cid", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const contact = await dbUpdateClientContact(teamId, req.params.cid, req.body);
+      res.json({ contact });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/clients/:id/contacts/:cid", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteClientContact(teamId, req.params.cid);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ================================
+  // CRM: Deal Positions (募集職種別進捗)
+  // ================================
+  expressApp.get("/api/crm/deals/:id/positions", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const positions = await dbListDealPositions(teamId, req.params.id);
+      res.json({ positions });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/deals/:id/positions", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const position = await dbCreateDealPosition(teamId, id, { dealId: req.params.id, ...req.body });
+      res.json({ position });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/positions/:posId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const position = await dbUpdateDealPosition(teamId, req.params.posId, req.body);
+      res.json({ position });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/positions/:posId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDealPosition(teamId, req.params.posId);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ================================
+  // CRM: Deal Media Plans (媒体選定)
+  // ================================
+  expressApp.get("/api/crm/deals/:id/media-plans", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const plans = await dbListDealMediaPlans(teamId, req.params.id);
+      res.json({ plans });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/deals/:id/media-plans", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const plan = await dbCreateDealMediaPlan(teamId, id, { dealId: req.params.id, ...req.body });
+      res.json({ plan });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/deals/:id/media-plans/:planId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const plan = await dbUpdateDealMediaPlan(teamId, req.params.planId, req.body);
+      res.json({ plan });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/deals/:id/media-plans/:planId", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteDealMediaPlan(teamId, req.params.planId);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ================================
+  // CRM: Calc Defs (管理者が設定する計算フィールド)
+  // ================================
+  expressApp.get("/api/crm/calc-defs", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const defs = await dbListCalcDefs(teamId);
+      res.json({ defs });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/crm/calc-defs", authMiddleware, adminOnly, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const id = randomUUID();
+      const def = await dbCreateCalcDef(teamId, id, req.body);
+      res.json({ def });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.patch("/api/crm/calc-defs/:defId", authMiddleware, adminOnly, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const def = await dbUpdateCalcDef(teamId, req.params.defId, req.body);
+      res.json({ def });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/crm/calc-defs/:defId", authMiddleware, adminOnly, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      await dbDeleteCalcDef(teamId, req.params.defId);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.get("/api/crm/pipeline-summary", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const rows = await dbPipelineSummary(teamId);
+      res.json({ summary: rows });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  expressApp.get("/api/crm/deals/:id/full", authMiddleware, async (req, res) => {
+    const { teamId } = req.dashboardUser;
+    try {
+      const [deal, members, activities, payments, tasks, deliverables, positions, mediaplans, calcDefs] = await Promise.all([
+        dbGetDeal(teamId, req.params.id),
+        dbListDealMembers(teamId, req.params.id),
+        dbListDealActivities(teamId, req.params.id),
+        dbListDealPayments(teamId, req.params.id),
+        dbListDealTasks(teamId, req.params.id),
+        dbListDeliverables(teamId, req.params.id),
+        dbListDealPositions(teamId, req.params.id),
+        dbListDealMediaPlans(teamId, req.params.id),
+        dbListCalcDefs(teamId),
+      ]);
+      if (!deal) return res.status(404).json({ error: "not found" });
+      const membersWithNames = await Promise.all(
+        members.map(async (m) => ({ ...m, displayName: await getUserDisplayName(teamId, m.user_id) }))
+      );
+      const activitiesWithNames = await Promise.all(
+        activities.map(async (a) => ({ ...a, displayName: await getUserDisplayName(teamId, a.user_id) }))
+      );
+      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks, deliverables, positions, mediaplans, calcDefs });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // RPO案件管理API（authWithRole/adminOnlyを共有）
   registerRpoApi({ expressApp, authWithRole, adminOnly });
-
-  // kintone連携API
-  registerKintoneApi({ expressApp, authWithRole, adminOnly });
-
-  // Google Drive連携API
-  registerDriveApi({ expressApp, authWithRole });
-
-  // 顧客・商談管理API
-  registerCrmApi({ expressApp, authWithRole });
-
-  // 日報メンバー管理API
-  registerDailyReportApi({ expressApp, authWithRole, slackClient });
-
-  // 権限管理API
-  registerPermissionsApi({ expressApp, authWithRole, adminOnly });
-
-  // チャンネルマッピングAPI
-  registerChannelMappingApi({ expressApp, authWithRole, adminOnly: adminOrITOnly, slackClient });
-
-  // Slackランキング集計API
-  registerRankingApi({ expressApp, authWithRole, adminOnly, slackClient });
 }
 
 module.exports = {

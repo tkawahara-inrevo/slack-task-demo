@@ -1,5 +1,49 @@
 /* App-level styles - kept minimal, main styles in index.css */
 
+/* ─── 組織図 (Org Chart) ──────────────────────────── */
+.org-tree { display: flex; flex-direction: column; align-items: center; }
+
+/* 横並び（第1階層: 部署） */
+.org-children { display: flex; justify-content: center; align-items: flex-start; }
+.org-child-col {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0 8px; position: relative; padding-top: 20px;
+}
+.org-child-col::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: #c8b96e;
+}
+.org-child-col:first-child::before { left: 50%; }
+.org-child-col:last-child::before { right: 50%; }
+.org-child-col:only-child::before { display: none; }
+.org-child-col::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; margin: 0 auto;
+  width: 1px; height: 20px; background: #c8b96e;
+}
+
+/* 縦積み（第2階層: 部署配下のチーム） */
+.org-child-stack { display: flex; flex-direction: column; align-items: center; }
+.org-stack-item { display: flex; flex-direction: column; align-items: center; padding-top: 20px; position: relative; }
+.org-stack-item::after {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 1px; height: 20px; background: #c8b96e;
+}
+
+.org-chart-node {
+  border: 1.5px solid #c8b96e; border-radius: 4px; padding: 8px 14px;
+  background: #fff; cursor: pointer; text-align: center; min-width: 100px;
+  transition: box-shadow 0.15s, border-color 0.15s; user-select: none;
+  white-space: nowrap; box-sizing: border-box;
+}
+.org-chart-node:hover { box-shadow: 0 2px 8px rgba(200,185,110,0.35); }
+.org-chart-node--root {
+  background: #1e1a10; border-color: #c8b96e; border-width: 2.5px;
+  padding: 0; cursor: default; min-width: 140px;
+}
+.org-chart-node--root:hover { box-shadow: none; }
+.org-chart-node--dept { font-size: 0.85rem; font-weight: 700; }
+.org-chart-node--child { font-size: 0.8rem; font-weight: 600; }
+.org-chart-node--selected { border-color: #b45309 !important; box-shadow: 0 0 0 3px #fde68a !important; }
+
 /* ─── RPO案件管理 ─────────────────────────────────── */
 .rpo-page { padding: 24px; max-width: 1200px; margin: 0 auto; }
 .rpo-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }

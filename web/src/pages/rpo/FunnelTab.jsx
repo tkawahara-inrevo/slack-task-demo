@@ -10,6 +10,7 @@ const FIXED_STAGES = [
   { id: 'accept',  name: '内定承諾', required: true },
 ];
 const FIXED_IDS = new Set(FIXED_STAGES.map(s => s.id));
+const SEATED_EXCLUDED = new Set(['applied', 'offer', 'accept']);
 
 const DEFAULT_TEMPLATES = [
   { id: 'tpl_document',  name: '書類選考' },
@@ -50,6 +51,7 @@ function createEmptyFunnel() {
     stageOrder: FIXED_STAGES.map(s => s.id),
     enabledStages: { applied: true, offer: true, accept: true },
     stageValues: sv,
+    initialSeatedStageId: '',
   };
 }
 
@@ -68,6 +70,7 @@ function mergeWithEmpty(funnel) {
     stageValues:   { ...base.stageValues,   ...(funnel.stageValues   || {}) },
     insertedTemplateStages: funnel.insertedTemplateStages || [],
     stageOrder: funnel.stageOrder?.length ? funnel.stageOrder : base.stageOrder,
+    initialSeatedStageId: funnel.initialSeatedStageId || '',
   };
 }
 
@@ -117,13 +120,24 @@ function computeAnalysis(funnel) {
   const offerCount    = offerRow  ? offerRow.target  : 0;
   const acceptedCount = acceptRow ? acceptRow.target : 0;
 
-  const analysisRows = rows.map(r => ({
+  // 初回着座
+  const seatedCandidates = enabled.filter(s => !SEATED_EXCLUDED.has(s.id));
+  const selectedSeated = seatedCandidates.find(s => s.id === funnel.initialSeatedStageId)
+    || (seatedCandidates.length ? seatedCandidates[0] : null);
+  const initialSeatedId    = selectedSeated?.id || '';
+  const initialSeatedIdx   = rows.findIndex(r => r.stage.id === initialSeatedId);
+  const initialSeatedCount = initialSeatedId ? (targets[initialSeatedId] || 0) : 0;
+
+  const analysisRows = rows.map((r, idx) => ({
     ...r,
-    passRate:    r.stage.id === 'accept' ? '-' : pct(r.pass,    r.target),
-    declineRate: r.stage.id === 'accept' ? '-' : pct(r.decline, r.target),
-    failRate:    r.stage.id === 'accept' ? '-' : pct(r.fail,    r.target),
-    pendingRate: r.stage.id === 'accept' ? '-' : pct(r.pending, r.target),
-    arrivalRate: pct(r.target, appliedCount),
+    passRate:       r.stage.id === 'accept' ? '-' : pct(r.pass,    r.target),
+    declineRate:    r.stage.id === 'accept' ? '-' : pct(r.decline, r.target),
+    failRate:       r.stage.id === 'accept' ? '-' : pct(r.fail,    r.target),
+    pendingRate:    r.stage.id === 'accept' ? '-' : pct(r.pending, r.target),
+    arrivalRate:    pct(r.target, appliedCount),
+    fromSeatedRate: (initialSeatedIdx >= 0 && idx >= initialSeatedIdx)
+      ? (idx === initialSeatedIdx ? '100.0%' : pct(r.target, initialSeatedCount))
+      : '-',
   }));
 
   // ボトルネック
@@ -136,7 +150,7 @@ function computeAnalysis(funnel) {
     maxFailRate:     [...cands].sort((a, b) => (b.fail    / b.target) - (a.fail    / a.target))[0],
   } : null;
 
-  // バリデーション（対象人数との整合チェック）
+  // バリデーション
   const errors = [];
   rows.forEach(r => {
     if (r.stage.id === 'accept') return;
@@ -151,6 +165,13 @@ function computeAnalysis(funnel) {
     offerRate:    pct(offerCount,    appliedCount),
     acceptedRate: pct(acceptedCount, appliedCount),
     bottleneck: bot, errors,
+    seatedCandidates,
+    initialSeatedId,
+    initialSeatedCount,
+    initialSeatedStageName:  selectedSeated?.name || '-',
+    appliedToSeatedRate:     pct(initialSeatedCount, appliedCount),
+    seatedToOfferRate:       pct(offerCount,         initialSeatedCount),
+    seatedToAcceptedRate:    pct(acceptedCount,       initialSeatedCount),
   };
 }
 
@@ -163,12 +184,10 @@ export function FunnelTab({ client, onUpdate }) {
   const [newTplName,  setNewTplName]  = useState('');
   const saveTimer = useRef(null);
 
-  // 案件切り替え時に再初期化
   useEffect(() => {
     setFunnel(mergeWithEmpty(client.data?.funnel));
   }, [client.id]);
 
-  // 800ms デバウンス保存
   const persist = useCallback((f) => {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => onUpdate({ funnel: f }), 800);
@@ -265,19 +284,24 @@ export function FunnelTab({ client, onUpdate }) {
     const rows = [
       [`${client.name} 選考歩留まり分析`],
       [],
-      ['フェーズ', '対象人数', '合格数', '辞退数', '不合格数', '進行中数', '合格率', '辞退率', '不合格率', '応募からの到達率'],
+      ['フェーズ', '対象人数', '合格数', '辞退数', '不合格数', '進行中数', '合格率', '辞退率', '不合格率', '応募からの到達率', `${analysis.initialSeatedStageName}からの到達率`],
       ...analysis.analysisRows.map(r => [
         r.stage.name, r.target, r.pass, r.decline, r.fail, r.pending,
-        r.passRate, r.declineRate, r.failRate, r.arrivalRate,
+        r.passRate, r.declineRate, r.failRate, r.arrivalRate, r.fromSeatedRate,
       ]),
       [],
-      ['応募数',        analysis.appliedCount],
-      ['内定数',        analysis.offerCount],
-      ['内定承諾数',    analysis.acceptedCount],
-      ['応募→内定率',   analysis.offerRate],
-      ['応募→内定承諾率', analysis.acceptedRate],
+      ['応募数',              analysis.appliedCount],
+      ['内定数',              analysis.offerCount],
+      ['内定承諾数',          analysis.acceptedCount],
+      ['応募→内定率',         analysis.offerRate],
+      ['応募→内定承諾率',     analysis.acceptedRate],
+      ['初回着座フロー',      analysis.initialSeatedStageName],
+      ['初回着座数',          analysis.initialSeatedCount],
+      ['応募→着座率',         analysis.appliedToSeatedRate],
+      ['着座→内定率',         analysis.seatedToOfferRate],
+      ['着座→内定承諾率',     analysis.seatedToAcceptedRate],
     ];
-    const csv = '\uFEFF' + rows
+    const csv = '﻿' + rows
       .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
       .join('\r\n');
     const a = Object.assign(document.createElement('a'), {
@@ -286,6 +310,8 @@ export function FunnelTab({ client, onUpdate }) {
     });
     a.click(); URL.revokeObjectURL(a.href);
   };
+
+  const hasSeated = analysis.seatedCandidates.length > 0;
 
   // ─── レンダリング ────────────────────────────────────────────────
   return (
@@ -320,7 +346,7 @@ export function FunnelTab({ client, onUpdate }) {
       )}
 
       <div className="funnel-layout">
-        {/* ─ 左カラム: ステージ管理 + テンプレート管理 ─ */}
+        {/* ─ 左カラム: ステージ管理 + テンプレート管理 + 初回着座 ─ */}
         <div className="funnel-left">
           <div className="funnel-section-title">選考フロー設定</div>
           <div className="funnel-stage-list">
@@ -346,6 +372,29 @@ export function FunnelTab({ client, onUpdate }) {
               </div>
             ))}
           </div>
+
+          {/* 初回着座フロー選択 */}
+          <div className="funnel-section-title" style={{ marginTop: 16 }}>初回着座フロー</div>
+          {hasSeated ? (
+            <>
+              <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: '0 0 6px' }}>
+                ここで指定したフロー以降の「着座からの到達率」を分析テーブルに表示します。
+              </p>
+              <select
+                value={funnel.initialSeatedStageId || analysis.initialSeatedId}
+                onChange={e => update(prev => ({ ...prev, initialSeatedStageId: e.target.value }))}
+                style={{ width: '100%', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.82rem' }}
+              >
+                {analysis.seatedCandidates.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <p style={{ fontSize: '0.78rem', color: '#9ca3af', margin: 0 }}>
+              応募・内定・内定承諾以外のフローを追加すると選択できます。
+            </p>
+          )}
 
           <div className="funnel-section-title" style={{ marginTop: 16 }}>テンプレート管理</div>
           <div className="funnel-tpl-add">
@@ -423,9 +472,15 @@ export function FunnelTab({ client, onUpdate }) {
               { label: '内定承諾数',    value: analysis.acceptedCount + ' 人' },
               { label: '応募→内定率',   value: analysis.offerRate },
               { label: '応募→承諾率',   value: analysis.acceptedRate },
-            ].map(({ label, value }) => (
+              ...(hasSeated ? [
+                { label: '初回着座数',              value: analysis.initialSeatedCount + ' 人', sub: analysis.initialSeatedStageName },
+                { label: '応募→着座率',             value: analysis.appliedToSeatedRate },
+                { label: '着座→内定率',             value: analysis.seatedToOfferRate },
+                { label: '着座→内定承諾率',         value: analysis.seatedToAcceptedRate },
+              ] : []),
+            ].map(({ label, value, sub }) => (
               <div key={label} className="funnel-summary-item">
-                <div className="funnel-summary-label">{label}</div>
+                <div className="funnel-summary-label">{label}{sub && <span style={{ fontSize: '0.7rem', color: '#9ca3af', marginLeft: 4 }}>({sub})</span>}</div>
                 <div className="funnel-summary-value">{value}</div>
               </div>
             ))}
@@ -456,6 +511,7 @@ export function FunnelTab({ client, onUpdate }) {
                   <th>不合格率</th>
                   <th>進行中率</th>
                   <th>応募からの到達率</th>
+                  {hasSeated && <th>{analysis.initialSeatedStageName}からの到達率</th>}
                 </tr>
               </thead>
               <tbody>
@@ -467,6 +523,7 @@ export function FunnelTab({ client, onUpdate }) {
                     <td>{r.failRate}</td>
                     <td>{r.pendingRate}</td>
                     <td>{r.arrivalRate}</td>
+                    {hasSeated && <td style={{ color: r.fromSeatedRate === '-' ? '#d1d5db' : undefined }}>{r.fromSeatedRate}</td>}
                   </tr>
                 ))}
               </tbody>

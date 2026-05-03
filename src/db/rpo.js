@@ -99,11 +99,15 @@ async function dbEnsureRpoSchema() {
 
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_team           ON rpo_clients(team_id);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_dash_team      ON rpo_clients(dash_team_id);`);
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_status         ON rpo_clients(team_id, status);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_workload_items_rpo_client  ON workload_items(rpo_client_id);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_applicants_client      ON rpo_applicants(rpo_client_id);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_applicants_team        ON rpo_applicants(team_id);`);
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_applicants_status      ON rpo_applicants(rpo_client_id, status);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_actions_applicant      ON rpo_applicant_actions(applicant_id);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_media_masters_team     ON rpo_media_masters(team_id);`);
+  // JSONB data フィールド: 全体GINインデックス（任意キー検索を高速化）
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_data_gin       ON rpo_clients USING GIN (data);`);
 
   // RPO設定テーブル（Apps Script URL など）
   await dbQuery(`
@@ -198,6 +202,14 @@ async function dbGetUserRpoAccess(teamId, userId, globalRole) {
 // ─────────────────────────────────────────
 // 案件 CRUD
 // ─────────────────────────────────────────
+async function dbGetUserDashTeamIds(teamId, userId) {
+  const { rows } = await dbQuery(
+    `SELECT dash_team_id FROM dash_team_members WHERE team_id = $1 AND user_id = $2`,
+    [teamId, userId]
+  );
+  return rows.map(r => r.dash_team_id);
+}
+
 async function dbListRpoClients(teamId, { fullAccess = true, myTeamIds = null, filterTeamId = null } = {}) {
   const params = [teamId];
   let extra = '';
@@ -216,7 +228,7 @@ async function dbListRpoClients(teamId, { fullAccess = true, myTeamIds = null, f
             data, created_by, created_at, updated_at
      FROM rpo_clients
      WHERE team_id = $1${extra}
-     ORDER BY updated_at DESC`,
+     ORDER BY data->>'hrAssigneeName' ASC NULLS LAST, updated_at DESC`,
     params
   );
   return rows;
@@ -326,6 +338,42 @@ async function dbCreateRpoWorkloadItem(teamId, { rpoClientId, dashTeamId, ownerU
 async function dbDeleteRpoWorkloadItem(teamId, itemId) {
   await dbQuery(`DELETE FROM workload_cells WHERE team_id=$1 AND item_id=$2`, [teamId, itemId]);
   await dbQuery(`DELETE FROM workload_items WHERE team_id=$1 AND id=$2 AND rpo_client_id IS NOT NULL`, [teamId, itemId]);
+}
+
+async function dbListMyRpoTasks(teamId, userId) {
+  const { rows } = await dbQuery(`
+    SELECT wi.id, wi.rpo_client_id, wi.title, wi.notes, wi.status_memo,
+           wi.due_date, wi.task_status, wi.is_done, wi.is_archived,
+           wi.created_at, wi.updated_at,
+           rc.name AS client_name, rc.color AS client_color
+    FROM workload_items wi
+    LEFT JOIN rpo_clients rc ON rc.id = wi.rpo_client_id AND rc.team_id = wi.team_id
+    WHERE wi.team_id = $1 AND wi.owner_user_id = $2 AND wi.is_archived = false
+      AND wi.rpo_client_id IS NOT NULL
+    ORDER BY
+      CASE WHEN wi.due_date IS NULL THEN 1 ELSE 0 END,
+      wi.due_date ASC, wi.created_at ASC
+  `, [teamId, userId]);
+  return rows;
+}
+
+async function dbUpdateRpoWorkloadItem(teamId, itemId, patch) {
+  const allowed = ['title', 'notes', 'status_memo', 'due_date', 'task_status', 'is_done', 'rpo_client_id'];
+  const fields = [];
+  const vals = [teamId, itemId];
+  let i = 3;
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (!allowed.includes(key)) continue;
+    fields.push(`${key}=$${i++}`);
+    vals.push(value);
+  }
+  if (!fields.length) return null;
+  fields.push('updated_at=now()');
+  const { rows } = await dbQuery(
+    `UPDATE workload_items SET ${fields.join(', ')} WHERE team_id=$1 AND id=$2 AND rpo_client_id IS NOT NULL RETURNING *`,
+    vals
+  );
+  return rows[0] || null;
 }
 
 // ─────────────────────────────────────────
@@ -673,6 +721,7 @@ async function dbGetRpoSummary(teamId, { fullAccess = true, myTeamIds = null, fi
 module.exports = {
   dbEnsureRpoSchema,
   dbGetUserRpoAccess,
+  dbGetUserDashTeamIds,
   dbListRpoClients,
   dbGetRpoClient,
   dbCreateRpoClient,
@@ -683,6 +732,8 @@ module.exports = {
   dbListRpoWorkloadItems,
   dbCreateRpoWorkloadItem,
   dbDeleteRpoWorkloadItem,
+  dbListMyRpoTasks,
+  dbUpdateRpoWorkloadItem,
   // media masters
   dbSeedMediaMasters,
   dbListMediaMasters,

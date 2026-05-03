@@ -1802,6 +1802,26 @@ const USERGROUP_MEMBERS_CACHE_MS = 10 * 60 * 1000;
 const usergroupMembersCache = new Map(); // `${teamId}:${groupId}` -> { at, users: string[] }
 const usergroupMembersInflight = new Map();
 
+async function updateUsergroupMembers(teamId, groupId, newUserIds) {
+  // usergroups:write にはユーザートークンが必要なワークスペースがあるため
+  // SLACK_USER_TOKEN が設定されていればそちらを優先して使う
+  const { WebClient } = require("@slack/web-api");
+  const client = process.env.SLACK_USER_TOKEN ? new WebClient(process.env.SLACK_USER_TOKEN) : app.client;
+  const validIds = newUserIds.filter(id => /^[UW][A-Z0-9]{2,}$/i.test(String(id)));
+  if (validIds.length === 0) {
+    const err = new Error("cannot_make_group_empty");
+    err.code = "cannot_make_group_empty";
+    throw err;
+  }
+  await client.usergroups.users.update({
+    usergroup: groupId,
+    users: validIds.join(','),
+  });
+  // キャッシュ無効化
+  const key = `${teamId}:${groupId}`;
+  usergroupMembersCache.delete(key);
+}
+
 async function getUsergroupMembers(teamId, groupId) {
   if (!groupId) return [];
   const key = `${teamId}:${groupId}`;
@@ -2844,7 +2864,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
 
   const expressApp = receiver.app;
   expressApp.use(cookieParser());
-  expressApp.use(require("express").json());
+  expressApp.use(require("express").json({ limit: '10mb' }));
 
   // Dashboard API
   registerDashboardApi({
@@ -2923,6 +2943,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     dbListSyncLogs,
     getSubteamIdMap,
     getUsergroupMembers,
+    updateUsergroupMembers,
     // CRM
     dbCreateClient,
     dbListClients,

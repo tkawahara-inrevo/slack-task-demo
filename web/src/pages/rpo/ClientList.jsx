@@ -42,6 +42,7 @@ export default function ClientList() {
   const [teamUsers,      setTeamUsers]      = useState([]);
   const [usersLoading,   setUsersLoading]   = useState(false);
   const [filterHrId,     setFilterHrId]     = useState('');
+  const [filterName,     setFilterName]     = useState('');
 
   // kintoneサジェスト
   const [suggestions, setSuggestions] = useState([]);
@@ -262,8 +263,8 @@ export default function ClientList() {
           <p className="rpo-subtitle">クライアント企業の採用案件を管理します</p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn-secondary" onClick={() => navigate('/rpo/tree')}>ツリービュー</button>
-          <button className="btn-secondary" onClick={() => navigate('/rpo/summary', { state: { dashTeamId: effectiveTeamId || null } })}>サマリー</button>
+          <button className="btn-secondary" onClick={() => navigate('/rpo/mytasks')}>マイタスク</button>
+<button className="btn-secondary" onClick={() => navigate('/rpo/summary', { state: { dashTeamId: effectiveTeamId || null } })}>サマリー</button>
           <button className="btn-secondary" onClick={() => navigate('/rpo/workload', { state: { dashTeamId: effectiveTeamId || null } })}>工数管理</button>
           <button className="btn-primary" onClick={() => {
             setShowCreate(true);
@@ -273,25 +274,34 @@ export default function ClientList() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      {/* HR担当者フィルター */}
-      {teamUsers.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-          <label style={{ fontSize: '0.8rem', color: '#6b7280', whiteSpace: 'nowrap' }}>HR担当者</label>
-          <select
-            value={filterHrId}
-            onChange={e => setFilterHrId(e.target.value)}
-            style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.85rem' }}
-          >
-            <option value="">全員</option>
-            {teamUsers.map(u => (
-              <option key={u.userId} value={u.userId}>{u.displayName}</option>
-            ))}
-          </select>
-          {filterHrId && (
-            <button onClick={() => setFilterHrId('')} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '0.8rem' }}>✕ クリア</button>
-          )}
-        </div>
-      )}
+      {/* フィルターバー */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          value={filterName}
+          onChange={e => setFilterName(e.target.value)}
+          placeholder="案件名で検索…"
+          style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.85rem', width: '200px' }}
+        />
+        {teamUsers.length > 0 && (
+          <>
+            <label style={{ fontSize: '0.8rem', color: '#6b7280', whiteSpace: 'nowrap' }}>HR担当者</label>
+            <select
+              value={filterHrId}
+              onChange={e => setFilterHrId(e.target.value)}
+              style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.85rem' }}
+            >
+              <option value="">全員</option>
+              {teamUsers.map(u => (
+                <option key={u.userId} value={u.userId}>{u.displayName}</option>
+              ))}
+            </select>
+          </>
+        )}
+        {(filterName || filterHrId) && (
+          <button onClick={() => { setFilterName(''); setFilterHrId(''); }} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '0.8rem' }}>✕ クリア</button>
+        )}
+      </div>
 
       {/* 新規作成モーダル */}
       {showCreate && (
@@ -432,9 +442,10 @@ export default function ClientList() {
 
       {/* 案件一覧 */}
       {(() => {
-        const hrFilter = c => !filterHrId || c.data?.hrAssigneeId === filterHrId;
-        const active   = clients.filter(c => c.status !== 'archived' && hrFilter(c));
-        const archived = clients.filter(c => c.status === 'archived' && hrFilter(c));
+        const nameFilter = c => !filterName || c.name.toLowerCase().includes(filterName.toLowerCase());
+        const hrFilter   = c => !filterHrId || c.data?.hrAssigneeId === filterHrId;
+        const active     = clients.filter(c => c.status !== 'archived' && hrFilter(c) && nameFilter(c));
+        const archived   = clients.filter(c => c.status === 'archived' && hrFilter(c) && nameFilter(c));
 
         const archiveClient = async (e, clientId) => {
           e.stopPropagation();
@@ -483,6 +494,9 @@ export default function ClientList() {
                 <span className="rpo-status-pill archived">終了済み</span>
               ) : (
                 <span className="rpo-status-pill active">進行中</span>
+              )}
+              {client.data?.hrAssigneeName && (
+                <span className="rpo-card-assignee">👤 {client.data.hrAssigneeName}</span>
               )}
               {client.dash_team_id && !effectiveTeamId && (
                 <span className="rpo-card-team">

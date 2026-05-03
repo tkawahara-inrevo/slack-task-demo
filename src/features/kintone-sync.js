@@ -3,21 +3,29 @@ const https = require('https');
 
 const DOMAIN = process.env.KINTONE_DOMAIN || 'ca7n5wh2hfvv.cybozu.com';
 
-// アプリごとの設定（$id は常に先頭に含める）
+// アプリごとの設定
+// fields: [] → 全フィールド取得（kintoneのfields指定なし）
 const APPS = {
   102: {
     token: process.env.KINTONE_APP_102_TOKEN || '01jtfMuLD7b8d28JyBODFrMp7T2QHJK76pF0XkZq',
     companyField: '顧客',
-    fields: ['$id', '顧客', '支払方式', '受注日', '担当営業_0', '見込売り上げ_税抜き', '数値_0'],
+    fields: [], // 全フィールドを取得
+  },
+  170: {
+    token: process.env.KINTONE_APP_170_TOKEN,
+    companyField: 'company',
+    fields: ['$id', 'company', '数値', '数値_0', 'date', 'plan', 'Staff'],
   },
 };
 
-// kintone Records APIをGET
+// kintone Records APIをGET（fields が空配列の場合は全フィールド取得）
 function kintoneGet(appId, token, fields, offset) {
   return new Promise((resolve, reject) => {
-    const fieldParams = fields.map((f, i) => `fields[${i}]=${encodeURIComponent(f)}`).join('&');
-    const query      = encodeURIComponent(`order by $id asc limit 500 offset ${offset}`);
-    const path       = `/k/v1/records.json?app=${appId}&${fieldParams}&query=${query}`;
+    const fieldParams = fields.length > 0
+      ? '&' + fields.map((f, i) => `fields[${i}]=${encodeURIComponent(f)}`).join('&')
+      : '';
+    const query = encodeURIComponent(`order by $id asc limit 500 offset ${offset}`);
+    const path  = `/k/v1/records.json?app=${appId}${fieldParams}&query=${query}`;
 
     const req = https.request({
       hostname: DOMAIN,
@@ -64,7 +72,9 @@ async function syncKintoneApp(appId, cfg) {
 
       const recordId = extractValue(rec['$id']);
       const parsed = {};
-      for (const f of fields) {
+      // fields が空 = 全フィールド取得モード → レコードの全キーをパース
+      const keys = fields.length > 0 ? fields : Object.keys(rec);
+      for (const f of keys) {
         if (f === '$id') continue;
         parsed[f] = extractValue(rec[f]);
       }

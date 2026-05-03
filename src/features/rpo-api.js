@@ -3,6 +3,7 @@ const { findClientFolder, searchClientFolders, findManagementSheet, parseFolderI
 const {
   dbEnsureRpoSchema,
   dbGetUserRpoAccess,
+  dbGetUserDashTeamIds,
   dbListRpoClients,
   dbGetRpoClient,
   dbCreateRpoClient,
@@ -13,6 +14,8 @@ const {
   dbListRpoWorkloadItems,
   dbCreateRpoWorkloadItem,
   dbDeleteRpoWorkloadItem,
+  dbListMyRpoTasks,
+  dbUpdateRpoWorkloadItem,
   dbListRpoTaskTemplates,
   dbCreateRpoTaskTemplate,
   dbUpdateRpoTaskTemplate,
@@ -253,6 +256,89 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
       res.json({ client: updated });
     } catch (e) {
       console.error('[RPO] update client error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ─────────────────────────────────────────
+  // GET  /api/rpo/my-tasks   自分の全RPOタスク
+  // POST /api/rpo/my-tasks   タスク作成
+  // PATCH/DELETE /api/rpo/my-tasks/:id
+  // ─────────────────────────────────────────
+  expressApp.get('/api/rpo/my-tasks', authWithRole, async (req, res) => {
+    try {
+      const access = await withRpoAccess(req, res);
+      if (!access) return;
+      const { teamId, userId } = req.dashboardUser;
+
+      // クライアントドロップダウン: admin でも自分の所属チームのみに絞る
+      let clientTeamIds = access.myTeamIds;
+      if (!clientTeamIds) {
+        clientTeamIds = await dbGetUserDashTeamIds(teamId, userId);
+      }
+      const clientOpts = clientTeamIds.length > 0
+        ? { fullAccess: false, myTeamIds: clientTeamIds }
+        : { fullAccess: true };
+
+      const [tasks, clients] = await Promise.all([
+        dbListMyRpoTasks(teamId, userId),
+        dbListRpoClients(teamId, clientOpts),
+      ]);
+      res.json({ tasks, clients: clients.filter(c => c.status !== 'archived') });
+    } catch (e) {
+      console.error('[RPO] my-tasks error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  expressApp.post('/api/rpo/my-tasks', authWithRole, async (req, res) => {
+    try {
+      const access = await withRpoAccess(req, res);
+      if (!access) return;
+      const { teamId, userId } = req.dashboardUser;
+      const { rpoClientId, title, dueDate, taskStatus, notes, statusMemo } = req.body;
+      const item = await dbCreateRpoWorkloadItem(teamId, {
+        rpoClientId, dashTeamId: null, ownerUserId: userId,
+        title: title || '', notes: notes || null,
+        dueDate: dueDate || null, statusMemo: statusMemo || null, createdBy: userId,
+      });
+      if (taskStatus && item) {
+        await dbUpdateRpoWorkloadItem(teamId, item.id, { task_status: taskStatus });
+        item.task_status = taskStatus;
+      }
+      res.status(201).json({ item });
+    } catch (e) {
+      console.error('[RPO] create my-task error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  expressApp.patch('/api/rpo/my-tasks/:id', authWithRole, async (req, res) => {
+    try {
+      const access = await withRpoAccess(req, res);
+      if (!access) return;
+      const { teamId } = req.dashboardUser;
+      const allowed = ['title', 'notes', 'status_memo', 'due_date', 'task_status', 'is_done', 'rpo_client_id'];
+      const patch = {};
+      for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+      const item = await dbUpdateRpoWorkloadItem(teamId, req.params.id, patch);
+      if (!item) return res.status(404).json({ error: 'not_found' });
+      res.json({ item });
+    } catch (e) {
+      console.error('[RPO] patch my-task error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  expressApp.delete('/api/rpo/my-tasks/:id', authWithRole, async (req, res) => {
+    try {
+      const access = await withRpoAccess(req, res);
+      if (!access) return;
+      const { teamId } = req.dashboardUser;
+      await dbDeleteRpoWorkloadItem(teamId, req.params.id);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[RPO] delete my-task error:', e);
       res.status(500).json({ error: 'internal' });
     }
   });
@@ -518,7 +604,23 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
   });
 
   // 外部Webhook（認証なし、webhookKeyで識別）
+  // シンプルなIPベースレート制限: 1分間に30リクエストまで
+  const webhookRateMap = new Map(); // key → { count, resetAt }
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of webhookRateMap) {
+      if (now >= v.resetAt) webhookRateMap.delete(k);
+    }
+  }, 60_000);
+
   expressApp.post('/api/rpo/webhook/:key', async (req, res) => {
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const entry = webhookRateMap.get(ip) || { count: 0, resetAt: now + 60_000 };
+    if (now >= entry.resetAt) { entry.count = 0; entry.resetAt = now + 60_000; }
+    entry.count += 1;
+    webhookRateMap.set(ip, entry);
+    if (entry.count > 30) return res.status(429).json({ error: 'rate_limit_exceeded' });
     try {
       const source = await dbGetRpoMediaSourceByKey(req.params.key);
       if (!source) return res.status(404).json({ error: 'invalid_key' });
@@ -685,12 +787,7 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
       // 非管理者は自分が所属するチームの案件のみ
       let myTeamIds = null;
       if (!fullAccess) {
-        const { rows } = await require('../db/index').dbQuery(
-          `SELECT id FROM dash_teams WHERE team_id = $1 AND id IN (
-             SELECT team_id FROM dash_team_members WHERE user_id = $2
-           )`, [teamId, req.dashboardUser.userId]
-        );
-        myTeamIds = rows.map(r => r.id);
+        myTeamIds = await dbGetUserDashTeamIds(teamId, req.dashboardUser.userId);
       }
       // クエリパラメータでチーム絞り込み
       const filterDashTeamId = req.query.dashTeamId || null;

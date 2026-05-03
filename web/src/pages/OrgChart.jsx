@@ -47,6 +47,323 @@ function Avatar({ member, size = 48 }) {
   );
 }
 
+// ─── OrgChartView: 組織図表示 ───────────────────────────────────────────────
+
+function MemberChipSmall({ member }) {
+  const name = member.display_name || member.real_name || member.user_id;
+  const r = derivedRole(member);
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 8px', background:'#f9fafb', borderRadius:8, border:'1px solid #f3f4f6' }}>
+      <Avatar member={member} size={28} />
+      <div>
+        <div style={{ fontSize:'0.78rem', fontWeight:600, color:'#111827', whiteSpace:'nowrap' }}>{name.split('/')[0].trim()}</div>
+        {r.value !== 'member' && <div style={{ fontSize:'0.65rem', color:r.color, fontWeight:700 }}>{r.label}</div>}
+        {member.title && <div style={{ fontSize:'0.65rem', color:'#9ca3af' }}>{member.title}</div>}
+      </div>
+    </div>
+  );
+}
+
+// 全メンバー数を再帰集計
+function countAll(teamId, membersMap, childrenOf) {
+  const direct = (membersMap[teamId] || []).length;
+  return direct + (childrenOf[teamId] || []).reduce((s, c) => s + countAll(c.id, membersMap, childrenOf), 0);
+}
+
+// チームノード（再帰・display_rowグルーピング対応）
+function TeamTreeNode({ team, membersMap, childrenOf, selectedId, onSelect }) {
+  const children = childrenOf[team.id] || [];
+  const memberCount = (membersMap[team.id] || []).length;
+
+  const byRow = {};
+  for (const c of children) {
+    const row = c.display_row || 1;
+    if (!byRow[row]) byRow[row] = [];
+    byRow[row].push(c);
+  }
+  const rows = Object.keys(byRow).map(Number).sort((a, b) => a - b);
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+      <div
+        className={`org-chart-node org-chart-node--child${selectedId === team.id ? ' org-chart-node--selected' : ''}`}
+        onClick={() => onSelect(team.id)}>
+        <div>{team.name}</div>
+        <div style={{ fontSize:'0.68rem', color:'#9ca3af', marginTop:2 }}>{memberCount}名</div>
+      </div>
+      {rows.map(row => (
+        <div key={row} style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+          <div style={{ width:1, height:16, background:'#c8b96e' }} />
+          <div className="org-children">
+            {byRow[row].map(child => (
+              <div key={child.id} className="org-child-col">
+                <TeamTreeNode team={child} membersMap={membersMap} childrenOf={childrenOf} selectedId={selectedId} onSelect={onSelect} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UnassignedCollapsible({ members }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop:20, border:'1px solid #e5e7eb', borderRadius:10, background:'#f9fafb', overflow:'hidden' }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', background:'none', border:'none', cursor:'pointer', textAlign:'left' }}>
+        <span style={{ fontWeight:700, fontSize:'0.82rem', color:'#6b7280' }}>未所属 ({members.length}名)</span>
+        <span style={{ fontSize:11, color:'#9ca3af' }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ padding:'0 16px 14px', display:'flex', flexWrap:'wrap', gap:6 }}>
+          {members.map(m => <MemberChipSmall key={m.user_id} member={m} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 階層型チームピッカー
+function TeamPicker({ allTeams, childrenOf, excludeId, onSelect }) {
+  const [openParent, setOpenParent] = useState(null);
+  const topLevel = allTeams.filter(t => !t.parent_id && t.id !== excludeId);
+  return (
+    <div style={{ marginTop:6, border:'1px solid #e5e7eb', borderRadius:6, overflow:'hidden', background:'#fff', maxHeight:200, overflowY:'auto' }}>
+      {topLevel.map(parent => {
+        const children = (childrenOf[parent.id] || []).filter(c => c.id !== excludeId);
+        const isOpen = openParent === parent.id;
+        if (children.length === 0) {
+          return (
+            <button key={parent.id} onClick={() => onSelect(parent.id)}
+              style={{ display:'block', width:'100%', padding:'6px 10px', background:'none', border:'none', borderBottom:'1px solid #f3f4f6', cursor:'pointer', textAlign:'left', fontSize:12, color:'#374151' }}
+              onMouseEnter={e => e.currentTarget.style.background='#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background='none'}>
+              {parent.name}
+            </button>
+          );
+        }
+        return (
+          <div key={parent.id}>
+            <button onClick={() => setOpenParent(isOpen ? null : parent.id)}
+              style={{ display:'flex', alignItems:'center', gap:6, width:'100%', padding:'6px 10px', background: isOpen ? '#fffef0' : 'none', border:'none', borderBottom:'1px solid #f3f4f6', cursor:'pointer', textAlign:'left', fontSize:12, fontWeight:600, color:'#374151' }}>
+              <span style={{ fontSize:9, color:'#c8b96e' }}>{isOpen ? '▼' : '▶'}</span>
+              {parent.name}
+            </button>
+            {isOpen && children.map(child => (
+              <button key={child.id} onClick={() => onSelect(child.id)}
+                style={{ display:'block', width:'100%', padding:'5px 10px 5px 24px', background:'none', border:'none', borderBottom:'1px solid #f9fafb', cursor:'pointer', textAlign:'left', fontSize:11, color:'#6b7280' }}
+                onMouseEnter={e => e.currentTarget.style.background='#f9fafb'}
+                onMouseLeave={e => e.currentTarget.style.background='none'}>
+                {child.name}
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function OrgChartView({ parentGroups, childrenOf, filteredMembersMap, standalones, liveUnassigned, search, setSearch, ceo, allTeams, membersMap, onMemberAdd, onMemberRemove, onMemberMove }) {
+  const [selectedId, setSelectedId] = useState(null);
+  const [addSearch, setAddSearch] = useState('');
+  const [moveTarget, setMoveTarget] = useState('');
+  const [movingMemberId, setMovingMemberId] = useState(null);
+
+  const allNodes = Object.values(childrenOf).flat().concat(parentGroups, standalones);
+  const selectedTeam = allNodes.find(t => t.id === selectedId);
+  const selectedMembers = selectedId ? (filteredMembersMap[selectedId] || []) : [];
+  const select = (id) => { setSelectedId(prev => prev === id ? null : id); setAddSearch(''); setMoveTarget(''); setMovingMemberId(null); };
+  const allDepts = [...parentGroups, ...standalones];
+  const ceoName = ceo ? (ceo.display_name || ceo.real_name || '').split('/')[0].trim() : '南 晴仁';
+
+  return (
+    <div>
+      {/* 検索 */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
+        <input type="text" placeholder="名前・役職で検索…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ fontSize:14, padding:'7px 14px', border:'1px solid #e5e7eb', borderRadius:8, width:240, outline:'none' }} />
+        {liveUnassigned.length > 0 && (
+          <span style={{ fontSize:12, color:'#9ca3af' }}>未所属: {liveUnassigned.length}名</span>
+        )}
+      </div>
+
+      {/* 組織図 + 右サイドパネル */}
+      <div style={{ display:'flex', alignItems:'flex-start', gap:0 }}>
+
+        {/* ───── 組織図エリア（横スクロール） ───── */}
+        <div style={{ flex:1, overflowX:'auto', minWidth:0 }}>
+          <div className="org-tree" style={{ minWidth:'fit-content', padding:'8px 24px 32px' }}>
+
+            {/* CEO ノード */}
+            <div className="org-chart-node org-chart-node--root">
+              <div style={{ padding:'5px 24px 3px', borderBottom:'1px solid #c8b96e30', fontSize:'0.62rem', fontWeight:700, color:'#c8b96e70', letterSpacing:'0.16em' }}>CEO</div>
+              <div style={{ padding:'5px 20px 8px', display:'flex', alignItems:'center', gap:8, justifyContent:'center' }}>
+                {ceo?.avatar_url && (
+                  <img src={ceo.avatar_url} alt={ceoName}
+                    style={{ width:26, height:26, borderRadius:'50%', objectFit:'cover', border:'1.5px solid #c8b96e55' }} />
+                )}
+                <span style={{ fontSize:'0.88rem', fontWeight:800, color:'#c8b96e', whiteSpace:'nowrap' }}>{ceoName}</span>
+              </div>
+            </div>
+
+            {/* 部署群 */}
+            {allDepts.length > 0 && <>
+              <div style={{ width:1, height:20, background:'#c8b96e' }} />
+              <div className="org-children">
+                {allDepts.map(dept => {
+                  const directChildren = childrenOf[dept.id] || [];
+                  const total = countAll(dept.id, filteredMembersMap, childrenOf);
+                  const directMembers = (filteredMembersMap[dept.id] || []).length;
+                  const isClickable = directMembers > 0;
+                  const byRow = {};
+                  for (const c of directChildren) {
+                    const row = c.display_row || 1;
+                    if (!byRow[row]) byRow[row] = [];
+                    byRow[row].push(c);
+                  }
+                  const rows = Object.keys(byRow).map(Number).sort((a, b) => a - b);
+                  return (
+                    <div key={dept.id} className="org-child-col">
+                      <div
+                        className={`org-chart-node org-chart-node--dept${selectedId===dept.id?' org-chart-node--selected':''}`}
+                        onClick={() => isClickable && select(dept.id)}
+                        style={{ cursor: isClickable ? 'pointer' : 'default' }}>
+                        <div>{dept.name}</div>
+                        <div style={{ fontSize:'0.68rem', color:'#9ca3af', marginTop:2 }}>{total}名</div>
+                      </div>
+                      {rows.map(row => (
+                        <div key={row} style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+                          <div style={{ width:1, height:20, background:'#c8b96e' }} />
+                          <div className="org-children">
+                            {byRow[row].map(child => (
+                              <div key={child.id} className="org-child-col">
+                                <TeamTreeNode team={child} membersMap={filteredMembersMap} childrenOf={childrenOf} selectedId={selectedId} onSelect={select} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </>}
+          </div>
+        </div>
+
+        {/* ───── 右サイドパネル（選択チームのメンバー一覧） ───── */}
+        <div style={{
+          width: selectedTeam ? 260 : 0,
+          overflow: 'hidden',
+          transition: 'width 0.22s ease',
+          flexShrink: 0,
+          borderLeft: selectedTeam ? '1px solid #e8dfa8' : 'none',
+          background: '#fffef9',
+        }}>
+          {selectedTeam && (
+            <div style={{ padding:'16px 14px', width:260, boxSizing:'border-box' }}>
+              {/* ヘッダー */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
+                <div>
+                  <div style={{ fontWeight:800, fontSize:'0.9rem', color:'#1e1a10' }}>{selectedTeam.name}</div>
+                  <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:1 }}>{selectedMembers.length}名</div>
+                </div>
+                <button onClick={() => select(null)}
+                  style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:16, padding:'2px 4px', lineHeight:1 }}>✕</button>
+              </div>
+
+              {/* メンバー追加（全メンバー検索・兼任OK） */}
+              {(() => {
+                const alreadyIn = new Set((membersMap[selectedId] || []).map(m => m.user_id));
+                const allWorkspace = Object.values({
+                  ...Object.fromEntries(
+                    Object.values(membersMap).flat().map(m => [m.user_id, m])
+                  ),
+                  ...Object.fromEntries(liveUnassigned.map(m => [m.user_id, m])),
+                });
+                const candidates = allWorkspace.filter(m => {
+                  if (alreadyIn.has(m.user_id)) return false;
+                  const n = (m.display_name || m.real_name || '').toLowerCase();
+                  return addSearch && n.includes(addSearch.toLowerCase());
+                });
+                return (
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:'0.75rem', fontWeight:700, color:'#6b7280', marginBottom:4 }}>メンバーを追加</div>
+                    <input
+                      placeholder="名前で検索（兼任可）…"
+                      value={addSearch}
+                      onChange={e => setAddSearch(e.target.value)}
+                      style={{ width:'100%', fontSize:12, padding:'5px 8px', border:'1px solid #e5e7eb', borderRadius:6, outline:'none', boxSizing:'border-box' }}
+                    />
+                    {addSearch && (
+                      <div style={{ border:'1px solid #e5e7eb', borderRadius:6, marginTop:2, maxHeight:140, overflowY:'auto', background:'#fff', zIndex:10, position:'relative' }}>
+                        {candidates.length === 0
+                          ? <div style={{ padding:'8px', fontSize:12, color:'#9ca3af' }}>見つかりません</div>
+                          : candidates.slice(0, 20).map(m => {
+                              const name = (m.display_name || m.real_name || '').split('/')[0].trim();
+                              return (
+                                <button key={m.user_id}
+                                  onClick={() => { onMemberAdd(selectedId, m); setAddSearch(''); }}
+                                  style={{ display:'flex', alignItems:'center', gap:6, width:'100%', padding:'6px 8px', background:'none', border:'none', cursor:'pointer', textAlign:'left', fontSize:12, color:'#374151' }}
+                                  onMouseEnter={e => e.currentTarget.style.background='#f9fafb'}
+                                  onMouseLeave={e => e.currentTarget.style.background='none'}>
+                                  <Avatar member={m} size={20} />
+                                  <span>{name}</span>
+                                </button>
+                              );
+                            })
+                        }
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* メンバー一覧 */}
+              <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:'calc(100vh - 360px)', overflowY:'auto' }}>
+                {selectedMembers.length === 0 ? (
+                  <div style={{ fontSize:'0.8rem', color:'#d1d5db', fontStyle:'italic', paddingTop:4 }}>メンバーなし</div>
+                ) : selectedMembers.map(m => {
+                  const name = (m.display_name || m.real_name || '').split('/')[0].trim();
+                  const isMoving = movingMemberId === m.user_id;
+                  return (
+                    <div key={m.user_id} style={{ background:'#f9fafb', borderRadius:7, padding:'5px 8px', border:'1px solid #f3f4f6' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <Avatar member={m} size={24} />
+                        <span style={{ flex:1, fontSize:'0.77rem', fontWeight:600, color:'#111827', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{name}</span>
+                        <button onClick={() => setMovingMemberId(isMoving ? null : m.user_id)}
+                          title="別チームへ移動"
+                          style={{ background:'none', border:'none', cursor:'pointer', fontSize:13, color: isMoving ? '#c8b96e' : '#9ca3af', padding:'0 2px', lineHeight:1 }}>⇄</button>
+                        <button onClick={() => onMemberRemove(selectedId, m.user_id)}
+                          title="チームから外す"
+                          style={{ background:'none', border:'none', cursor:'pointer', fontSize:13, color:'#9ca3af', padding:'0 2px', lineHeight:1 }}>×</button>
+                      </div>
+                      {isMoving && (
+                        <TeamPicker
+                          allTeams={allTeams}
+                          childrenOf={childrenOf}
+                          excludeId={selectedId}
+                          onSelect={toId => { onMemberMove(selectedId, toId, m); setMovingMemberId(null); }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 未所属（折りたたみ可） */}
+      {liveUnassigned.length > 0 && <UnassignedCollapsible members={liveUnassigned} />}
+    </div>
+  );
+}
+
 // ─── Member card: view mode (existing org chart style) ───────────────────────
 function MemberCardView({ member }) {
   const name = member.display_name || member.real_name || member.user_id;
@@ -500,6 +817,246 @@ function UnassignedPanel({ members, dragState, onDragStart, onHide }) {
   );
 }
 
+// ─── TeamXX管理 ──────────────────────────────────────────────────────────────
+const TEAM_COLORS = ['#6d28d9','#2563eb','#059669','#d97706','#dc2626','#0891b2','#7c3aed','#64748b'];
+
+function TeamXXManager({ teams, membersMap, onCreateTeam, onDeleteTeam, onRenameTeam, onAddMember, onRemoveMember }) {
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedTeamId, setSelectedTeamId] = useState(null);
+  const [newName, setNewName] = useState('チーム');
+  const [createMembers, setCreateMembers] = useState(new Set());
+  const [creating, setCreating] = useState(false);
+  // 右パネル内の状態
+  const [editingName, setEditingName] = useState(false);
+  const [editNameVal, setEditNameVal] = useState('');
+  const [addTab, setAddTab] = useState('dr'); // 'dr' | 'cs'
+  const [panelAddMembers, setPanelAddMembers] = useState(new Set());
+
+  const xxTeams = teams.filter(t => t.show_in_orgchart === false);
+  const drTeam = teams.find(t => t.name.includes('Direction'));
+  const csTeam = teams.find(t => t.name.includes('Customer Success'));
+  const drMembers = drTeam ? (membersMap[drTeam.id] || []) : [];
+  const csMembers = csTeam ? (membersMap[csTeam.id] || []) : [];
+
+  const selectedTeam = selectedTeamId ? xxTeams.find(t => t.id === selectedTeamId) : null;
+  const selectedMembers = selectedTeamId ? (membersMap[selectedTeamId] || []) : [];
+  const selectedMemberIds = new Set(selectedMembers.map(m => m.user_id));
+
+  const selectTeam = (id) => {
+    setSelectedTeamId(id);
+    setEditingName(false);
+    setPanelAddMembers(new Set());
+    setAddTab('dr');
+  };
+
+  // モーダル用チェックボックス
+  const toggleCreate = (uid) => setCreateMembers(prev => { const n = new Set(prev); n.has(uid) ? n.delete(uid) : n.add(uid); return n; });
+  // パネル追加用チェックボックス（DR/CS から未所属を選ぶ）
+  const togglePanelAdd = (uid) => setPanelAddMembers(prev => { const n = new Set(prev); n.has(uid) ? n.delete(uid) : n.add(uid); return n; });
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const hrTeam = teams.find(t => t.name === 'HR');
+      const created = await onCreateTeam({ name: newName.trim(), parentId: hrTeam?.id, showInOrgchart: false });
+      const allSel = [...drMembers, ...csMembers].filter(m => createMembers.has(m.user_id));
+      for (const m of allSel) {
+        await onAddMember(created?.id, { userId: m.user_id, displayName: m.display_name, avatarUrl: m.avatar_url, title: m.title });
+      }
+      setShowCreateModal(false);
+      setNewName('チーム');
+      setCreateMembers(new Set());
+      selectTeam(created?.id);
+    } catch (e) { console.error(e); }
+    finally { setCreating(false); }
+  };
+
+  const handleSaveName = async () => {
+    if (!editNameVal.trim() || !selectedTeamId) return;
+    await onRenameTeam(selectedTeamId, editNameVal.trim());
+    setEditingName(false);
+  };
+
+  const handlePanelAdd = async () => {
+    const candidates = (addTab === 'dr' ? drMembers : csMembers).filter(m => panelAddMembers.has(m.user_id));
+    for (const m of candidates) {
+      await onAddMember(selectedTeamId, { userId: m.user_id, displayName: m.display_name, avatarUrl: m.avatar_url, title: m.title });
+    }
+    setPanelAddMembers(new Set());
+  };
+
+  const MemberCheckRow = ({ member, checked, onToggle }) => {
+    const name = (member.display_name || member.real_name || '').split('/')[0].trim();
+    return (
+      <label style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 8px', borderRadius:6, cursor:'pointer', background: checked ? '#f5f3ff' : 'transparent' }}>
+        <input type="checkbox" checked={checked} onChange={() => onToggle(member.user_id)} style={{ accentColor:'#6d28d9' }} />
+        <Avatar member={member} size={22} />
+        <span style={{ fontSize:13, color:'#374151' }}>{name}</span>
+      </label>
+    );
+  };
+
+  return (
+    <div>
+      {/* ── カードグリッド ── */}
+      <div style={{ marginBottom:20, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <p style={{ margin:0, fontSize:13, color:'#6b7280' }}>DR＋CSメンバーを組み合わせた業務チームを管理します</p>
+        <button onClick={() => setShowCreateModal(true)} className="btn btn-secondary" style={{ fontSize:13 }}>＋ チームを追加</button>
+      </div>
+      {xxTeams.length === 0 ? (
+        <div style={{ textAlign:'center', padding:'60px 20px', color:'#9ca3af' }}>
+          <div style={{ fontSize:'2rem', marginBottom:8 }}>👥</div>
+          <div style={{ fontSize:14 }}>「＋ チームを追加」で作成してください</div>
+        </div>
+      ) : (
+        <div className="rpo-team-picker-grid">
+          {xxTeams.map((team, idx) => {
+            const members = membersMap[team.id] || [];
+            const color = TEAM_COLORS[idx % TEAM_COLORS.length];
+            return (
+              <button key={team.id} className="rpo-team-picker-card" onClick={() => selectTeam(team.id)}>
+                <span className="rpo-team-picker-icon" style={{ background: color + '22', color }}>{team.name[0]}</span>
+                <span className="rpo-team-picker-name">{team.name}</span>
+                <span style={{ fontSize:11, color:'#9ca3af' }}>{members.length}名</span>
+                {members.length > 0 && (
+                  <div style={{ display:'flex' }}>
+                    {members.slice(0, 5).map((m, i) => (
+                      <div key={m.user_id} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: 5 - i }}>
+                        <Avatar member={m} size={22} />
+                      </div>
+                    ))}
+                    {members.length > 5 && <span style={{ fontSize:10, color:'#9ca3af', alignSelf:'center', marginLeft:6 }}>+{members.length-5}</span>}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* チーム編集モーダル */}
+      {selectedTeam && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={e => { if (e.target === e.currentTarget) setSelectedTeamId(null); }}>
+          <div style={{ background:'#fff', borderRadius:12, padding:28, width:500, maxWidth:'90vw', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+            {/* ヘッダー */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+              {editingName ? (
+                <div style={{ display:'flex', gap:6, flex:1, marginRight:8 }}>
+                  <input value={editNameVal} onChange={e => setEditNameVal(e.target.value)}
+                    autoFocus onKeyDown={e => { if (e.key==='Enter') handleSaveName(); if (e.key==='Escape') setEditingName(false); }}
+                    style={{ flex:1, fontSize:15, fontWeight:700, padding:'5px 10px', border:'1.5px solid #c8b96e', borderRadius:8, outline:'none' }} />
+                  <button onClick={handleSaveName} style={{ fontSize:12, background:'#c8b96e', color:'#fff', border:'none', borderRadius:8, padding:'5px 12px', cursor:'pointer', fontWeight:700 }}>保存</button>
+                  <button onClick={() => setEditingName(false)} style={{ fontSize:12, background:'#f3f4f6', color:'#6b7280', border:'none', borderRadius:8, padding:'5px 10px', cursor:'pointer' }}>取消</button>
+                </div>
+              ) : (
+                <div style={{ display:'flex', alignItems:'center', gap:8, flex:1 }}>
+                  <h3 style={{ margin:0, fontSize:'1rem', fontWeight:800 }}>{selectedTeam.name}</h3>
+                  <button onClick={() => { setEditNameVal(selectedTeam.name); setEditingName(true); }}
+                    title="名前を変更" style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:14, padding:'0 2px', lineHeight:1 }}>✎</button>
+                </div>
+              )}
+              <button onClick={() => setSelectedTeamId(null)} style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:20, lineHeight:1, flexShrink:0 }}>✕</button>
+            </div>
+
+            {/* 現在のメンバー */}
+            <div style={{ fontSize:12, fontWeight:700, color:'#6b7280', marginBottom:8 }}>メンバー（{selectedMembers.length}名）</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:20 }}>
+              {selectedMembers.length === 0
+                ? <div style={{ fontSize:12, color:'#d1d5db', fontStyle:'italic', padding:'8px 0' }}>メンバーなし</div>
+                : selectedMembers.map(m => {
+                    const name = (m.display_name || m.real_name || '').split('/')[0].trim();
+                    return (
+                      <div key={m.user_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', background:'#f9fafb', borderRadius:8, border:'1px solid #f3f4f6' }}>
+                        <Avatar member={m} size={28} />
+                        <span style={{ flex:1, fontSize:13, fontWeight:600 }}>{name}</span>
+                        <button onClick={() => onRemoveMember(selectedTeamId, m.user_id)}
+                          style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:16, lineHeight:1 }}>×</button>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+
+            {/* メンバー追加（DR/CSタブ） */}
+            <div style={{ borderTop:'1px solid #f3f4f6', paddingTop:16, marginBottom:20 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#6b7280', marginBottom:10 }}>メンバーを追加</div>
+              <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                {[['dr','DR','#dbeafe','#1d4ed8'],['cs','CS','#dcfce7','#15803d']].map(([key,label,bg,col]) => (
+                  <button key={key} onClick={() => { setAddTab(key); setPanelAddMembers(new Set()); }}
+                    style={{ flex:1, padding:'6px 0', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:700,
+                      background: addTab===key ? bg : '#f3f4f6', color: addTab===key ? col : '#9ca3af' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'4px', maxHeight:180, overflowY:'auto', marginBottom:10 }}>
+                {(addTab==='dr' ? drMembers : csMembers).filter(m => !selectedMemberIds.has(m.user_id)).length === 0
+                  ? <div style={{ padding:'10px', fontSize:12, color:'#9ca3af' }}>追加できるメンバーなし</div>
+                  : (addTab==='dr' ? drMembers : csMembers)
+                      .filter(m => !selectedMemberIds.has(m.user_id))
+                      .map(m => <MemberCheckRow key={m.user_id} member={m} checked={panelAddMembers.has(m.user_id)} onToggle={togglePanelAdd} />)
+                }
+              </div>
+              {panelAddMembers.size > 0 && (
+                <button onClick={handlePanelAdd} className="btn btn-primary" style={{ width:'100%', fontSize:13 }}>
+                  {panelAddMembers.size}名を追加
+                </button>
+              )}
+            </div>
+
+            {/* 削除 */}
+            <div style={{ borderTop:'1px solid #f3f4f6', paddingTop:16, display:'flex', justifyContent:'flex-end' }}>
+              <button onClick={() => { if (window.confirm(`「${selectedTeam.name}」を削除しますか？`)) { onDeleteTeam(selectedTeam.id); setSelectedTeamId(null); } }}
+                style={{ background:'none', border:'1px solid #fee2e2', color:'#ef4444', borderRadius:8, padding:'6px 16px', fontSize:12, cursor:'pointer' }}>
+                チームを削除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* チーム作成モーダル */}
+      {showCreateModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowCreateModal(false); }}>
+          <div style={{ background:'#fff', borderRadius:12, padding:28, width:500, maxWidth:'90vw', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+              <h3 style={{ margin:0, fontSize:'1rem', fontWeight:800 }}>チームを追加</h3>
+              <button onClick={() => setShowCreateModal(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:20, lineHeight:1 }}>✕</button>
+            </div>
+            <div style={{ marginBottom:20 }}>
+              <label style={{ fontSize:12, fontWeight:700, color:'#6b7280', display:'block', marginBottom:6 }}>チーム名</label>
+              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="チーム〇〇"
+                style={{ width:'100%', fontSize:14, padding:'8px 12px', border:'1px solid #e5e7eb', borderRadius:8, outline:'none', boxSizing:'border-box' }} />
+            </div>
+            {[['dr','DR','#dbeafe','#1d4ed8', drMembers, 'Direction Team'],['cs','CS','#dcfce7','#15803d', csMembers, 'Customer Success Team']].map(([key,label,bg,col,members,teamName]) => (
+              <div key={key} style={{ marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'#6b7280', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
+                  <span style={{ background:bg, color:col, padding:'1px 8px', borderRadius:99, fontSize:11 }}>{label}</span>
+                  {teamName}（{members.length}名）
+                </div>
+                <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:'4px' }}>
+                  {members.length === 0
+                    ? <div style={{ padding:'8px', fontSize:12, color:'#9ca3af' }}>メンバーなし</div>
+                    : members.map(m => <MemberCheckRow key={m.user_id} member={m} checked={createMembers.has(m.user_id)} onToggle={toggleCreate} />)}
+                </div>
+              </div>
+            ))}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button onClick={() => setShowCreateModal(false)} className="btn btn-secondary">キャンセル</button>
+              <button onClick={handleCreate} disabled={creating || !newName.trim()} className="btn btn-primary">
+                {creating ? '作成中…' : `作成（${createMembers.size}名選択）`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OrgChart() {
   const [teams, setTeams] = useState([]);
@@ -524,7 +1081,7 @@ export default function OrgChart() {
 
   useEffect(() => { load(); }, []);
 
-  // Structure
+  // ビルドモード用: 全チーム
   const parents = useMemo(() => teams.filter(t => !t.parent_id), [teams]);
   const childrenOf = useMemo(() => {
     const map = {};
@@ -536,8 +1093,22 @@ export default function OrgChart() {
     }
     return map;
   }, [teams]);
-  const standalones = useMemo(() => parents.filter(p => !childrenOf[p.id]?.length), [parents, childrenOf]);
-  const parentGroups = useMemo(() => parents.filter(p => childrenOf[p.id]?.length > 0), [parents, childrenOf]);
+
+  // ビューモード用: show_in_orgchart=true のチームのみ
+  const orgTeams = useMemo(() => teams.filter(t => t.show_in_orgchart !== false), [teams]);
+  const orgChildrenOf = useMemo(() => {
+    const map = {};
+    for (const t of orgTeams) {
+      if (t.parent_id) {
+        if (!map[t.parent_id]) map[t.parent_id] = [];
+        map[t.parent_id].push(t);
+      }
+    }
+    return map;
+  }, [orgTeams]);
+  const orgParents = useMemo(() => orgTeams.filter(t => !t.parent_id), [orgTeams]);
+  const standalones = useMemo(() => orgParents.filter(p => !orgChildrenOf[p.id]?.length), [orgParents, orgChildrenOf]);
+  const parentGroups = useMemo(() => orgParents.filter(p => orgChildrenOf[p.id]?.length > 0), [orgParents, orgChildrenOf]);
 
   // Search filter (view mode)
   const filteredMembersMap = useMemo(() => {
@@ -551,6 +1122,12 @@ export default function OrgChart() {
     }
     return out;
   }, [membersMap, search]);
+
+  // CEO: title に「代表」を含むメンバーを全データから探す
+  const ceo = useMemo(() => {
+    const all = [...Object.values(membersMap).flat(), ...unassigned];
+    return all.find(m => m.title && (m.title.includes('代表') || m.title.toLowerCase().includes('ceo'))) || null;
+  }, [membersMap, unassigned]);
 
   // All unassigned, kept in sync as members are added/removed
   const liveUnassigned = useMemo(() => {
@@ -599,6 +1176,43 @@ export default function OrgChart() {
     }
   };
 
+  // ── Add member to team (from unassigned) ──────────────────────────────────
+  const handleMemberAdd = async (teamId, member) => {
+    const existing = membersMap[teamId] || [];
+    if (existing.find(m => m.user_id === member.user_id)) return;
+    setMembersMap(prev => ({ ...prev, [teamId]: [...existing, member] }));
+    setSaving(true);
+    try {
+      await api.adminAddTeamMember(teamId, member.user_id);
+    } catch (e) {
+      console.error(e);
+      setMembersMap(prev => ({ ...prev, [teamId]: existing }));
+    } finally { setSaving(false); }
+  };
+
+  // ── Move member between teams ──────────────────────────────────────────────
+  const handleMemberMove = async (fromId, toId, member) => {
+    const fromPrev = membersMap[fromId] || [];
+    const toPrev = membersMap[toId] || [];
+    if (toPrev.find(m => m.user_id === member.user_id)) {
+      setMembersMap(prev => ({ ...prev, [fromId]: fromPrev.filter(m => m.user_id !== member.user_id) }));
+    } else {
+      setMembersMap(prev => ({
+        ...prev,
+        [fromId]: fromPrev.filter(m => m.user_id !== member.user_id),
+        [toId]: [...toPrev, member],
+      }));
+    }
+    setSaving(true);
+    try {
+      await api.adminRemoveTeamMember(fromId, member.user_id);
+      await api.adminAddTeamMember(toId, member.user_id);
+    } catch (e) {
+      console.error(e);
+      setMembersMap(prev => ({ ...prev, [fromId]: fromPrev, [toId]: toPrev }));
+    } finally { setSaving(false); }
+  };
+
   // ── Remove member from team ────────────────────────────────────────────────
   const handleRemoveMember = async (teamId, userId) => {
     const prev = membersMap[teamId] || [];
@@ -615,14 +1229,17 @@ export default function OrgChart() {
   };
 
   // ── Create team ────────────────────────────────────────────────────────────
-  const handleCreateTeam = async () => {
-    const name = `新しいチーム ${teams.length + 1}`;
+  const handleCreateTeam = async (opts = {}) => {
+    const name = opts.name || `新しいチーム ${teams.length + 1}`;
+    const parentId = opts.parentId || null;
+    const showInOrgchart = opts.showInOrgchart !== false;
     setSaving(true);
     try {
-      const res = await api.adminCreateTeam(name);
-      const newTeam = { id: res.team.id, name: res.team.name, parent_id: null };
+      const res = await api.adminCreateTeam(name, parentId, { show_in_orgchart: showInOrgchart });
+      const newTeam = { id: res.team.id, name: res.team.name, parent_id: parentId, show_in_orgchart: showInOrgchart };
       setTeams(prev => [...prev, newTeam]);
       setMembersMap(prev => ({ ...prev, [res.team.id]: [] }));
+      return newTeam;
     } catch (e) {
       console.error(e);
     } finally {
@@ -782,7 +1399,7 @@ export default function OrgChart() {
             onClick={() => { setBuildMode(v => !v); setSearch(''); setBuildSearch1(''); setBuildSearch2(''); }}
             className={buildMode ? 'btn btn-primary' : 'btn btn-secondary'}
           >
-            {buildMode ? '✓ 編集完了' : '✏️ チームを組む'}
+            {buildMode ? '✓ 完了' : '👥 チームXX管理'}
           </button>
         </div>
       </div>
@@ -790,187 +1407,34 @@ export default function OrgChart() {
       {loading ? (
         <p className="empty-text">読み込み中…</p>
       ) : buildMode ? (
-        /* ══════════════ BUILD MODE ══════════════ */
-        <div onDragEnd={() => setDragState(null)}>
-          {/* Hint banner */}
-          <div style={{
-            background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
-            padding: '8px 14px', fontSize: 13, color: '#92400e', marginBottom: 20,
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span>💡</span>
-            <span>メンバーチップをドラッグしてチームカードにドロップするとメンバーを追加できます。最初に追加したメンバーが「リーダー」になります。</span>
-          </div>
-
-          {/* Unassigned section (drag source) */}
-          {liveUnassigned.length > 0 && (
-            <UnassignedPanel
-              members={liveUnassigned}
-              dragState={dragState}
-              onDragStart={handleDragStart}
-              onHide={handleHideUser}
-            />
-          )}
-
-          {/* Team grid */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 auto', maxWidth: 560 }}>
-              <input
-                type="text"
-                placeholder="移動元のチーム・メンバー名…"
-                value={buildSearch1}
-                onChange={e => setBuildSearch1(e.target.value)}
-                style={{
-                  flex: 1, fontSize: 13, padding: '7px 12px',
-                  border: '2px solid #3b82f6', borderRadius: 8, outline: 'none',
-                }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--gray-400)', fontWeight: 600, flexShrink: 0 }}>OR</span>
-              <input
-                type="text"
-                placeholder="移動先のチーム・メンバー名…"
-                value={buildSearch2}
-                onChange={e => setBuildSearch2(e.target.value)}
-                style={{
-                  flex: 1, fontSize: 13, padding: '7px 12px',
-                  border: '2px solid #10b981', borderRadius: 8, outline: 'none',
-                }}
-              />
-            </div>
-            <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>
-              {filteredBuildTeams.length} / {teams.length}チーム
-            </span>
-            <button onClick={handleCreateTeam} className="btn btn-secondary" style={{ fontSize: 13, padding: '6px 14px', marginLeft: 'auto' }}>
-              ＋ チームを追加
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* 部署セクション（親レベルのチームはすべて黄枠で表示） */}
-            {buildGroups.parentSections.map(({ parent, children }) => (
-              <div key={parent.id} style={{
-                border: '2px solid #c8b96e',
-                borderRadius: 12,
-                background: '#fdf9ee',
-                padding: '14px 16px',
-              }}>
-                {/* 部署名ヘッダー（カードなし） */}
-                <DeptSectionHeader team={parent} onRename={handleRenameTeam} onDelete={handleDeleteTeam} onCreateChild={handleCreateChildTeam} />
-
-                {/* 親チームに直接所属しているメンバー（New Business等） */}
-                {(membersMap[parent.id] || []).length > 0 && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e8dfa8' }}>
-                    <div style={{ fontSize: 11, color: '#9a8c5a', fontWeight: 600, marginBottom: 6 }}>直接メンバー</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {(membersMap[parent.id] || []).map(m => (
-                        <MemberChip
-                          key={m.user_id}
-                          member={m}
-                          isDragging={dragState?.userId === m.user_id}
-                          onDragStart={(e) => handleDragStart(e, m)}
-                          onRemove={() => handleRemoveMember(parent.id, m.user_id)}
-                          onRoleChange={(role) => handleRoleChange(parent.id, m.user_id, role)}
-                          showRemove
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {children.length === 0 ? (
-                  <div style={{ marginTop: 12, border: '1.5px dashed #e8dfa8', borderRadius: 8, padding: '20px 16px', textAlign: 'center', fontSize: 12, color: '#9a8c5a' }}>
-                    「＋ チームを追加」でこの部署にチームを作成できます
-                  </div>
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 12 }}>
-                    {children.map(child => (
-                      <EditableTeamCard
-                        key={child.id}
-                        team={child}
-                        members={membersMap[child.id] || []}
-                        parentTeams={parentCandidates}
-                        dragState={dragState}
-                        onDragStart={handleDragStart}
-                        onDrop={handleDrop}
-                        onRemoveMember={handleRemoveMember}
-                        onRoleChange={handleRoleChange}
-                        onDelete={handleDeleteTeam}
-                        onRename={handleRenameTeam}
-                        onSetParent={null}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* 検索で親が非表示になった孤立チーム */}
-            {buildGroups.orphans.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-                {buildGroups.orphans.map(team => (
-                  <EditableTeamCard
-                    key={team.id}
-                    team={team}
-                    members={membersMap[team.id] || []}
-                    parentTeams={parentCandidates}
-                    dragState={dragState}
-                    onDragStart={handleDragStart}
-                    onDrop={handleDrop}
-                    onRemoveMember={handleRemoveMember}
-                    onRoleChange={handleRoleChange}
-                    onDelete={handleDeleteTeam}
-                    onRename={handleRenameTeam}
-                    onSetParent={handleSetParent}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        /* ══════════════ チームXX管理 ══════════════ */
+        <TeamXXManager
+          teams={teams}
+          membersMap={membersMap}
+          onCreateTeam={handleCreateTeam}
+          onDeleteTeam={handleDeleteTeam}
+          onRenameTeam={handleRenameTeam}
+          onAddMember={handleDrop}
+          onRemoveMember={handleRemoveMember}
+        />
 
       ) : (
-        /* ══════════════ VIEW MODE ══════════════ */
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-            <input
-              type="text" placeholder="名前・役職で検索…" value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ fontSize: 14, padding: '8px 14px', border: '1px solid var(--gray-300)', borderRadius: 8, width: 260, outline: 'none' }}
-            />
-            {liveUnassigned.length > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                未所属: {liveUnassigned.length}名 — 「チームを組む」で割り当てできます
-              </span>
-            )}
-          </div>
-
-          {parentGroups.map(parent => (
-            <OrgParentSection key={parent.id} parent={parent} children={childrenOf[parent.id] || []} membersMap={filteredMembersMap} />
-          ))}
-
-          {standalones.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              {standalones.map(team => (
-                <OrgTeamBox key={team.id} team={team} members={filteredMembersMap[team.id] || []} style={{ flex: '1 1 300px', minWidth: 300 }} />
-              ))}
-            </div>
-          )}
-
-          {/* Unassigned section in view mode */}
-          {liveUnassigned.length > 0 && (
-            <div style={{ marginTop: 28, border: '1.5px solid var(--gray-200)', borderRadius: 12, background: '#f8f8f8', padding: '14px 18px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--gray-600)' }}>未所属</span>
-                <span style={{ fontSize: 11, background: 'var(--gray-200)', color: 'var(--gray-600)', padding: '2px 8px', borderRadius: 10 }}>
-                  {liveUnassigned.length}名
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                {liveUnassigned.map(m => <MemberCardView key={m.user_id} member={m} />)}
-              </div>
-            </div>
-          )}
-        </>
+        /* ══════════════ VIEW MODE: 組織図 ══════════════ */
+        <OrgChartView
+          parentGroups={parentGroups}
+          childrenOf={orgChildrenOf}
+          filteredMembersMap={filteredMembersMap}
+          standalones={standalones}
+          liveUnassigned={liveUnassigned}
+          search={search}
+          setSearch={setSearch}
+          ceo={ceo}
+          allTeams={teams}
+          membersMap={membersMap}
+          onMemberAdd={handleMemberAdd}
+          onMemberRemove={handleRemoveMember}
+          onMemberMove={handleMemberMove}
+        />
       )}
     </div>
   );

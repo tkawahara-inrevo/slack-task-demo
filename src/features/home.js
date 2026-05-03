@@ -65,8 +65,21 @@ async function publishHomeForUsers(client, teamId, userIds, intervalMs = 200) {
   }
 }
 
-const homeState = new Map();
+const homeState = new Map();        // key → state
+const homeStateLastUsed = new Map(); // key → timestamp
 const hydratedHomeState = new Set();
+
+// 24時間アクセスのないエントリを60分ごとに削除（メモリリーク防止）
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [k, ts] of homeStateLastUsed) {
+    if (ts < cutoff) {
+      homeState.delete(k);
+      homeStateLastUsed.delete(k);
+      hydratedHomeState.delete(k);
+    }
+  }
+}, 60 * 60 * 1000).unref();
 
 // 未完了（= 進行中）
 const ACTIVE_STATUSES = ["in_progress"];
@@ -74,6 +87,7 @@ const DONE_STATUSES = ["done"];
 
 function getHomeState(teamId, userId) {
   const k = `${teamId}:${userId}`;
+  homeStateLastUsed.set(k, Date.now());
   const s = homeState.get(k) || {
     viewKey: "all",
     scopeKey: "active",
@@ -140,6 +154,7 @@ function setHomeState(teamId, userId, next) {
   }
 
   homeState.set(k, merged);
+  homeStateLastUsed.set(k, Date.now());
   hydratedHomeState.add(k);
 }
 
@@ -157,19 +172,42 @@ async function ensureHomeStateLoaded(teamId, userId) {
 }
 
 function stripMentions(text) {
-  return text
+  let s = text
+    // HTMLエンティティ
+    .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "").replace(/&gt;/g, "")
+    // SlackリンクURL: <https://...|表示テキスト> → 表示テキストを残す
+    .replace(/<https?:\/\/[^|>]*\|([^>]+)>/g, "$1")
+    // ラベルなしURL: <https://...> → 除去
+    .replace(/<https?:\/\/[^>]+>/g, "")
+    // Slackメンション・チャンネル
     .replace(/<@[^>]+>/g, " ")
     .replace(/<!subteam\^[^>]+>/g, " ")
     .replace(/<!channel>/g, " ")
     .replace(/<!here>/g, " ")
     .replace(/<!everyone>/g, " ")
+    // 絵文字コード（日本語含む）: :woman-bowing: :女性土下座:
+    .replace(/:[^\s:]{1,40}:/g, "")
     // @ハンドル（英数字）
     .replace(/[@＠][\w][\w.-]*/g, " ")
     // @日本語名（+姓）(+/英名）— 例: @土井 燎/Kagari Doi
     .replace(/[@＠][^\x00-\x7F]+(?:\s+[^\x00-\x7F]+)*(?:\s*\/\s*[A-Za-z\s.]+)?/g, " ")
-    .replace(/https?:\/\/\S+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    // 残りのURL
+    .replace(/https?:\/\/\S+/g, "");
+
+  // CC:/FYI: プレフィックスと @メンション を先頭から繰り返し除去
+  for (let i = 0; i < 6; i++) {
+    const before = s;
+    s = s
+      .replace(/^\s*(CC|FYI|Cc|fyi|cc)\s*:?\s*/iu, "")
+      .replace(/^(\s*@\S+(\s+\S*\/\S+)?(\s+[A-Za-z]\S*)?)+\s*/u, "");
+    if (s === before) break;
+  }
+
+  // 先頭の記号をクリーンアップ
+  s = s.replace(/^[\s:：・>\-\[\]【】♪　]+/, "");
+
+  return s.replace(/\s+/g, " ").trim();
 }
 
 function taskLineForHome(task) {
@@ -210,8 +248,8 @@ function buildHomeFiltersModalView({ teamId, userId, st, deptText: _deptText, gr
     if (t.parent_id) { if (!childMap[t.parent_id]) childMap[t.parent_id] = []; childMap[t.parent_id].push(t); }
   }
   const visibleDepts = isAdmin
-    ? [...deptRows.filter(d => myDeptIds.has(d.id)), ...deptRows.filter(d => !myDeptIds.has(d.id))]
-    : deptRows.filter(d => myDeptIds.has(d.id));
+    ? [...deptRows.filter(d => !d.hidden && myDeptIds.has(d.id)), ...deptRows.filter(d => !d.hidden && !myDeptIds.has(d.id))]
+    : deptRows.filter(d => !d.hidden && myDeptIds.has(d.id));
 
   const rangeOptions = [
     { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
@@ -313,7 +351,7 @@ app.action("open_home_filters_modal", async ({ ack, body, client }) => {
   const [groups, personalFilters, dashTeamsRes, myTeamResModal, dashboardRoleModal] = await Promise.all([
     searchUsergroups(""),
     dbListPersonalFilters(teamId, userId).catch(() => []),
-    dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
+    dbQuery(`SELECT id, name, parent_id, hidden FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
     dbQuery(
       `SELECT DISTINCT dt.id, dt.parent_id FROM dash_team_members dtm
        JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
@@ -353,7 +391,7 @@ app.action("home_filters_range", async ({ ack, body, client }) => {
   // Only need dash teams if a dept was selected
   let dashTeams = [];
   if (selectedRange.startsWith("dash_dept:") || selectedRange.startsWith("dash_team:")) {
-    const res = await dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] }));
+    const res = await dbQuery(`SELECT id, name, parent_id, hidden FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] }));
     dashTeams = res.rows || [];
   }
 
@@ -436,7 +474,7 @@ async function publishHome({ client, teamId, userId }) {
   const [deptGroups, personalFilters, dashTeamsRes, myTeamRes, dashboardRole] = await Promise.all([
     rangeKey0 === "all" ? searchUsergroups("") : Promise.resolve([]),
     dbListPersonalFilters(teamId, userId).catch(() => []),
-    dbQuery(`SELECT id, name, parent_id FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
+    dbQuery(`SELECT id, name, parent_id, hidden FROM dash_teams WHERE team_id=$1 ORDER BY name ASC`, [teamId]).catch(() => ({ rows: [] })),
     dbQuery(
       `SELECT DISTINCT dt.id, dt.parent_id FROM dash_team_members dtm
        JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
@@ -458,8 +496,8 @@ async function publishHome({ client, teamId, userId }) {
 
   // 非adminは自分の所属部署のみ、adminは全部署（自分の所属優先）
   const visibleDepts = isAdmin
-    ? [...deptRows0.filter(d => myDeptIds.has(d.id)), ...deptRows0.filter(d => !myDeptIds.has(d.id))]
-    : deptRows0.filter(d => myDeptIds.has(d.id));
+    ? [...deptRows0.filter(d => !d.hidden && myDeptIds.has(d.id)), ...deptRows0.filter(d => !d.hidden && !myDeptIds.has(d.id))]
+    : deptRows0.filter(d => !d.hidden && myDeptIds.has(d.id));
 
   const rangeOptions0 = [
     { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },

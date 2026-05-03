@@ -1,6 +1,58 @@
 // kintone連携 API（検索・同期）
 const { dbEnsureKintoneSchema, dbUpsertKintoneRecords, dbSearchKintoneCompanies, dbGetKintoneLastSync, dbGetKintoneRecord } = require('../db/kintone');
 const { syncKintoneApp, APPS } = require('./kintone-sync');
+const { dbQuery } = require('../db/index');
+
+// kintone App102 フィールド → deals カラム のマッピング定義
+const KINTONE_DEAL_FIELD_MAP = {
+  '受注日':                         'order_date',
+  '結論日':                         'conclusion_date',
+  '支払方式':                        'contract_type',
+  '担当営業_0':                     'sales_user_id',
+  '見込売り上げ_税抜き':             'initial_fee',
+  '初回商談日_コンサルチーム':       'first_meeting_date',
+  '商談獲得日_マーケチーム':         'inflow_date',
+  '流入日':                         'inflow_date',
+  '流入経路':                        'inflow_source',
+  'ヨミ':                           'yomi',
+  '失注理由':                        'lost_reason',
+  'NextAction日':                   'next_action_date',
+  '案件名':                         'name',
+  '従業員数':                        'employment_type', // 仮マッピング
+};
+
+// kintone_cache から deals テーブルへマッピングを反映
+async function syncDealsFromKintoneCache() {
+  try {
+    const { rows } = await dbQuery(
+      `SELECT record_id, company_name, data FROM kintone_cache WHERE app_id='102'`
+    );
+    for (const rec of rows) {
+      const d = rec.data || {};
+      const sets = [];
+      const vals = [rec.record_id];
+
+      for (const [kField, dbCol] of Object.entries(KINTONE_DEAL_FIELD_MAP)) {
+        const val = d[kField];
+        if (val == null || val === '') continue;
+        sets.push(`${dbCol}=COALESCE(${dbCol}, $${vals.length + 1})`);
+        vals.push(val);
+      }
+
+      if (sets.length === 0) continue;
+
+      // kintone_record_id でマッチして deals を更新（NULLのカラムのみ上書き）
+      await dbQuery(
+        `UPDATE deals SET ${sets.join(', ')}
+         WHERE data->>'kintone_record_id'=$1`,
+        vals
+      ).catch(() => {});
+    }
+    console.log('[kintone] deals mapping updated');
+  } catch (e) {
+    console.error('[kintone] deals mapping error:', e.message);
+  }
+}
 
 const SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30分
 let syncInProgress = false;
@@ -15,6 +67,8 @@ async function runSync() {
       await dbUpsertKintoneRecords(String(appId), records);
       console.log(`[kintone] synced ${records.length} records from app ${appId}`);
     }
+    // deals テーブルへのフィールドマッピング
+    await syncDealsFromKintoneCache();
   } catch (e) {
     console.error('[kintone] sync error:', e.message);
   } finally {

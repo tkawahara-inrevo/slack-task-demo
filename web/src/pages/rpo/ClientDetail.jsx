@@ -7,7 +7,7 @@ import ApplicantTab from './ApplicantTab';
 const TABS = [
   { id: 'dashboard',  label: 'ダッシュボード' },
   { id: 'kpi',        label: 'KPI' },
-  { id: 'content',    label: '求人・媒体' },
+  { id: 'content',    label: '媒体・予算管理' },
   { id: 'applicants', label: '応募者' },
   { id: 'tasks',      label: 'タスク' },
   { id: 'documents',  label: '書類' },
@@ -522,7 +522,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
       )}
       {(revenuePeriods.length === 0 || !contractAmount || !hiringTarget) && (
         <p className="empty-hint" style={{ marginTop: '12px' }}>
-          受注金額・採用予定人数を入力し、求人・媒体タブで媒体ごとに掲載期間を設定すると1名あたりの売り上げが計算されます。
+          受注金額・採用予定人数を入力し、媒体・予算管理タブで媒体ごとに掲載期間を設定すると1名あたりの売り上げが計算されます。
         </p>
       )}
 
@@ -731,8 +731,8 @@ function KpiTab({ client, onUpdate, accentColor }) {
 
       <div className="kpi-phases">
         {phases.map((p, idx) => {
-          const statusName = PHASE_TO_STATUS[p.id];
-          const actual = statusName !== undefined ? (actualCounts[statusName] || 0) : 0;
+          const statusName = PHASE_TO_STATUS[p.id] ?? p.label;
+          const actual = actualCounts[statusName] || 0;
           const req    = required[p.id] || 0;
           const st     = phaseStatus(actual, req);
           const pct    = req > 0 ? Math.min(100, (actual / req) * 100) : 0;
@@ -771,7 +771,7 @@ function KpiTab({ client, onUpdate, accentColor }) {
   );
 }
 
-// ─── 求人・媒体 ──────────────────────────────────────
+// ─── 媒体・予算管理 ─────────────────────────────────
 function ContentTab({ client, onUpdate, accentColor }) {
   const media = client.data.mediaStatus || [];
   const [masters, setMasters]       = useState([]);
@@ -1253,7 +1253,12 @@ function SheetTable({ rows }) {
 
   if (!rows.length) return <p className="empty-hint">データがありません</p>;
   const headers = rows[0];
-  const body    = rows.slice(1).filter(r => r.some(c => c !== '' && c != null));
+  const nameColIdx = headers.findIndex(h => String(h) === '氏名');
+  const body = rows.slice(1).filter(r =>
+    nameColIdx >= 0
+      ? (r[nameColIdx] !== '' && r[nameColIdx] != null)
+      : r.some(c => c !== '' && c != null)
+  );
 
   const hasFilter = Object.values(colFilters).some(v => v);
   const visibleCols = headers.map((_, i) => i).filter(i => !hiddenCols.has(i));

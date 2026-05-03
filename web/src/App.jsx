@@ -12,16 +12,26 @@ import PermissionsAdmin from './pages/admin/PermissionsAdmin'
 import IntegrationsAdmin from './pages/admin/IntegrationsAdmin'
 import FormulasAdmin from './pages/admin/FormulasAdmin'
 import UserMappingAdmin from './pages/admin/UserMappingAdmin'
-import RpoAdmin from './pages/admin/RpoAdmin'
+import DailyReportAdmin from './pages/admin/DailyReportAdmin'
+import ChannelMapping from './pages/admin/ChannelMapping'
+import PermissionsManager from './pages/admin/PermissionsManager'
+import SlackGroups from './pages/admin/SlackGroups'
+import Recruitment from './pages/admin/Recruitment'
 import ProjectView from './pages/ProjectView'
 import Analytics from './pages/Analytics'
 import WorkloadGantt from './pages/WorkloadGantt'
 import OrgChart from './pages/OrgChart'
+import Ranking from './pages/Ranking'
 import ClientList from './pages/rpo/ClientList'
 import ClientDetail from './pages/rpo/ClientDetail'
-import TaskTreeView from './pages/rpo/TaskTreeView'
 import RpoSummary from './pages/rpo/RpoSummary'
 import RpoWorkload from './pages/rpo/RpoWorkload'
+import RpoMyTasks from './pages/rpo/RpoMyTasks'
+import CRM from './pages/crm/CRM'
+import CustomerDetail from './pages/crm/CustomerDetail'
+import Pipeline from './pages/crm/Pipeline'
+import CustomerList from './pages/crm/CustomerList'
+import SalesPerformance from './pages/crm/SalesPerformance'
 import './App.css'
 
 function App() {
@@ -35,6 +45,7 @@ function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/workload" element={<WorkloadGantt />} />
         <Route path="/org-chart" element={<OrgChart />} />
+        <Route path="/ranking" element={<Ranking />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="roles" replace />} />
@@ -45,12 +56,22 @@ function App() {
           <Route path="user-mapping" element={<UserMappingAdmin />} />
           <Route path="integrations" element={<IntegrationsAdmin />} />
           <Route path="formulas" element={<FormulasAdmin />} />
-          <Route path="rpo" element={<RpoAdmin />} />
+          <Route path="daily-report" element={<DailyReportAdmin />} />
+          <Route path="permissions-manager" element={<PermissionsManager />} />
+          <Route path="channel-mapping" element={<ChannelMapping />} />
+          <Route path="slack-groups" element={<SlackGroups />} />
+          <Route path="recruitment" element={<Recruitment />} />
+          <Route path="ranking" element={<Ranking />} />
         </Route>
+        <Route path="/crm" element={<CRM />} />
+        <Route path="/crm/customers/:id" element={<CustomerDetail />} />
+        {/* 旧URLの後方互換 */}
+        <Route path="/crm/pipeline" element={<Pipeline />} />
+        <Route path="/crm/customers" element={<CustomerList />} />
         <Route path="/rpo" element={<ClientList />} />
         <Route path="/rpo/summary" element={<RpoSummary />} />
         <Route path="/rpo/workload" element={<RpoWorkload />} />
-        <Route path="/rpo/tree" element={<TaskTreeView />} />
+        <Route path="/rpo/mytasks" element={<RpoMyTasks />} />
         <Route path="/rpo/:id" element={<ClientDetail />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

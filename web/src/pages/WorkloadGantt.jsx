@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 
 const DEFAULT_ITEM_COLOR = '#f97316';
@@ -225,12 +226,36 @@ const VIEW_CONFIG = {
 };
 
 function stripSlack(text) {
-  return (text || '')
-    .replace(/<[^>]+>/g, '')          // <@UXXX|name> etc.
-    // leading @mentions: "@姓 名/EnglishFirst EnglishLast" のような複合名前パターンを除去
-    .replace(/^(\s*@\S+(\s+\S*\/\S+)?(\s+[A-Za-z]\S*)?)+\s*/u, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let s = (text || '')
+    // HTMLエンティティ
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '').replace(/&gt;/g, '')
+    // SlackリンクURL: <https://...|表示テキスト> → 表示テキストを残す
+    .replace(/<https?:\/\/[^|>]*\|([^>]+)>/g, '$1')
+    // ラベルなしURL: <https://...> → 除去
+    .replace(/<https?:\/\/[^>]+>/g, '')
+    // その他Slackフォーマット: <@UXXX|name>, <#CXXX|ch> など
+    .replace(/<[^>]*>/g, '')
+    // 絵文字コード（日本語含む）: :woman-bowing: :女性土下座: など
+    .replace(/:[^\s:]{1,40}:/g, '');
+
+  // CC:/FYI: と @メンション を先頭から繰り返し除去
+  for (let i = 0; i < 6; i++) {
+    const before = s;
+    s = s
+      .replace(/^\s*(CC|FYI|Cc|fyi|cc)\s*:?\s*/iu, '')
+      .replace(/^(\s*@\S+(\s+\S*\/\S+)?(\s+[A-Za-z]\S*)?)+\s*/u, '');
+    if (s === before) break;
+  }
+
+  // 先頭の記号をクリーンアップ
+  s = s.replace(/^[\s:：・>\-\[\]【】♪　]+/, '');
+
+  // 複数行の場合、最初の意味ある行（5文字以上）を使う
+  const lines = s.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length >= 2);
+  if (lines.length > 1) s = lines.find(l => l.length >= 5) || lines[0] || s;
+
+  return s.replace(/\s+/g, ' ').trim();
 }
 
 function groupConsecutiveIndices(indices, dayW) {
@@ -246,6 +271,7 @@ function groupConsecutiveIndices(indices, dayW) {
 }
 
 export default function WorkloadGantt() {
+  const navigate = useNavigate();
   const initialMonth = new Date().toISOString().slice(0, 7);
   const [teams, setTeams] = useState([]);
   const [selectedParentId, setSelectedParentId] = useState('');
@@ -271,10 +297,20 @@ export default function WorkloadGantt() {
   const [rowDragId, setRowDragId] = useState(null);
   const [rowDragOverId, setRowDragOverId] = useState(null);
   const [rowDragOverMemberId, setRowDragOverMemberId] = useState(null);
-  // 自分の画面でのSlackタスクバー色（localStorage に個人設定として保存）
-  const [myTaskColor, setMyTaskColor] = useState(() =>
-    localStorage.getItem('gantt_my_task_color') || '#3b82f6'
-  );
+  const SLACK_BAR_COLOR = '#94a3b8';
+
+  // 色の使用履歴（カテゴリなし業務用）
+  const [colorHistory, setColorHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('gantt_color_history') || '[]'); }
+    catch { return []; }
+  });
+
+  const markSelfDone = async (taskId) => {
+    setSelectedTask(null);
+    await api.taskCompleteSelf(taskId).catch(console.error);
+    // 楽観的更新: ガントから即時非表示（次回ロード時にDBと同期）
+    setAllTasks(prev => prev.filter(t => t.id !== taskId));
+  };
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -289,12 +325,14 @@ export default function WorkloadGantt() {
   const [draftRecurrenceConfig, setDraftRecurrenceConfig] = useState({});
   const [draftStartDate, setDraftStartDate] = useState('');
   const [draftEndDate, setDraftEndDate] = useState('');
+  const [draftHours, setDraftHours] = useState('');
 
   const displayDates = useMemo(() => {
     if (viewMode === 'month')   return getMonthDates(monthKey);
     if (viewMode === 'week')    return getWeekDates();
-    if (viewMode === '2weeks')  return getRollingDates(new Date(), 14);
-    return getRollingDates(new Date(), 31); // 'rolling'
+    const minus7 = new Date(); minus7.setDate(minus7.getDate() - 7);
+    if (viewMode === '2weeks')  return getRollingDates(minus7, 14);
+    return getRollingDates(minus7, 31); // 'rolling'
   }, [monthKey, viewMode]);
   const requiredMonthKeys = useMemo(() => getRequiredMonthKeys(displayDates), [displayDates]);
   const rangeLabel = useMemo(() => getRangeLabel(viewMode, monthKey, displayDates), [displayDates, monthKey, viewMode]);
@@ -401,8 +439,9 @@ export default function WorkloadGantt() {
     for (const t of allTasks) {
       if (filterStatus && t.status !== filterStatus) continue;
       if (t.task_type === 'broadcast') {
-        // broadcast は target_user_ids で各メンバー行に振り分け
+        const completedIds = new Set(t.completed_user_ids || []);
         for (const uid of (t.target_user_ids || [])) {
+          if (completedIds.has(uid)) continue;
           if (teamMemberIds.size > 0 && !teamMemberIds.has(uid)) continue;
           if (!g[uid]) g[uid] = [];
           g[uid].push(t);
@@ -438,10 +477,7 @@ export default function WorkloadGantt() {
     if (effS > effE) effS = effE;
     const mStart = displayDates[0], mEnd = displayDates[displayDates.length - 1];
     if (effS > mEnd) return null;
-    // 期限が表示期間より前 — 左端に固定して表示
-    if (effE < mStart) {
-      return { left: 0, width: Math.max(ganttDayW - 2, 4), clippedLeft: true, clippedRight: false, overdue };
-    }
+    if (effE < mStart) return null;
     const cS = effS < mStart ? mStart : effS;
     const cE = effE > mEnd ? mEnd : effE;
     const si = Math.max(0, Math.round((cS - mStart) / 86400000));
@@ -586,6 +622,7 @@ export default function WorkloadGantt() {
     recurrenceType: item.recurrence_type,
     recurrenceConfig: item.recurrence_config,
     sortOrder: item.sort_order,
+    estimatedHours: item.estimated_hours ?? null,
   });
 
   const openCreateModal = (ownerUserId) => {
@@ -596,6 +633,7 @@ export default function WorkloadGantt() {
     setDraftColor(DEFAULT_ITEM_COLOR);
     setDraftRecurrenceType('other'); setDraftRecurrenceConfig({});
     setDraftStartDate(''); setDraftEndDate('');
+    setDraftHours('');
     setEditorOpen(true);
   };
 
@@ -618,6 +656,7 @@ export default function WorkloadGantt() {
     } else {
       setDraftStartDate(''); setDraftEndDate('');
     }
+    setDraftHours(item.estimated_hours != null ? String(item.estimated_hours) : '');
     setEditorOpen(true);
   };
 
@@ -627,11 +666,13 @@ export default function WorkloadGantt() {
     setDraftColor(DEFAULT_ITEM_COLOR);
     setDraftRecurrenceType('other'); setDraftRecurrenceConfig({});
     setDraftStartDate(''); setDraftEndDate('');
+    setDraftHours('');
   };
 
   const handleSubmitEditor = async () => {
     const title = draftTitle.trim();
     if (!title || !selectedTeamId || !editorOwnerUserId) return;
+    const parsedHours = draftHours !== '' ? parseFloat(draftHours) : null;
     const payload = {
       dashTeamId: selectedTeamId,
       ownerUserId: editorOwnerUserId,
@@ -641,6 +682,7 @@ export default function WorkloadGantt() {
       color: draftColor,
       recurrenceType: draftRecurrenceType,
       recurrenceConfig: draftRecurrenceType !== 'other' ? draftRecurrenceConfig : null,
+      estimatedHours: parsedHours != null && !isNaN(parsedHours) ? parsedHours : null,
     };
     let savedId = editingItemId;
     if (editorMode === 'create') {
@@ -666,6 +708,7 @@ export default function WorkloadGantt() {
         )
       );
     }
+    if (!draftCategory) addColorToHistory(draftColor);
     closeEditor();
     await loadBoard(selectedTeamId);
   };
@@ -752,9 +795,10 @@ export default function WorkloadGantt() {
     }));
   };
 
-  const handleMyTaskColorChange = (color) => {
-    setMyTaskColor(color);
-    localStorage.setItem('gantt_my_task_color', color);
+  const addColorToHistory = (color) => {
+    const next = [color, ...colorHistory.filter(c => c !== color)].slice(0, 10);
+    setColorHistory(next);
+    localStorage.setItem('gantt_color_history', JSON.stringify(next));
   };
 
   const handleCrossMemberDrop = async (targetMemberId) => {
@@ -777,7 +821,37 @@ export default function WorkloadGantt() {
     });
   };
 
-  const ROW_H = 36;
+  const [rowH, setRowHState] = useState(() => parseInt(localStorage.getItem('gantt_row_h') || '36'));
+  const setRowSize = (v) => { setRowHState(v); localStorage.setItem('gantt_row_h', String(v)); };
+
+  const [customLeftW, setCustomLeftW] = useState(() => {
+    const v = parseInt(localStorage.getItem('gantt_left_w') || '0');
+    return v >= 160 ? v : 0;
+  });
+  const effectiveLeftW = customLeftW || leftPanelW;
+
+  const [ganttView, setGanttView] = useState('gantt'); // 'gantt' | 'capacity'
+  const [capPopup, setCapPopup] = useState(null); // { uid, dk, name, tasks, x, y }
+
+  const startPanelResize = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = effectiveLeftW;
+    const onMove = (me) => {
+      const next = Math.max(160, Math.min(700, startW + me.clientX - startX));
+      setCustomLeftW(next);
+      localStorage.setItem('gantt_left_w', String(next));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const ROW_H = rowH;
+  const wrapText = ROW_H > 40;
   const HEADER_H = 52;
 
   return (
@@ -827,12 +901,25 @@ export default function WorkloadGantt() {
         >
           Slackタスク {showSlackTasks ? '表示中' : '非表示'}
         </button>
-        {showSlackTasks && (
-          <label title="Slackタスクの表示色（自分の画面のみ）" style={{ position: 'relative', width: 18, height: 18, borderRadius: '50%', background: myTaskColor, flexShrink: 0, cursor: 'pointer', border: '2px solid rgba(0,0,0,0.15)', display: 'inline-block' }}>
-            <input type="color" value={myTaskColor} onChange={(e) => handleMyTaskColorChange(e.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
-          </label>
-        )}
-        <button type="button" className="filter-clear-btn" style={{ marginLeft: 'auto' }} onClick={() => setCatMgrOpen(v => !v)}>
+        <div style={{ display: 'flex', border: '1px solid var(--gray-300)', borderRadius: 6, overflow: 'hidden' }}>
+          {[['gantt','ガント'], ['capacity','負荷']].map(([v, label]) => (
+            <button key={v} type="button" onClick={() => setGanttView(v)}
+              style={{ padding: '4px 12px', fontSize: 12, border: 'none', cursor: 'pointer',
+                background: ganttView === v ? '#1e293b' : '#fff',
+                color: ganttView === v ? '#fff' : 'var(--gray-500)', fontWeight: ganttView === v ? 700 : 400 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          <span style={{ fontSize: 11, color: 'var(--gray-400)', whiteSpace: 'nowrap' }}>行高</span>
+          <input type="range" min="22" max="72" step="2" value={rowH}
+            onChange={e => setRowSize(Number(e.target.value))}
+            style={{ width: 72, cursor: 'pointer', accentColor: 'var(--gray-500)' }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--gray-400)', width: 24, textAlign: 'right' }}>{rowH}</span>
+        </div>
+        <button type="button" className="filter-clear-btn" onClick={() => setCatMgrOpen(v => !v)}>
           カテゴリ管理
         </button>
       </div>
@@ -846,8 +933,8 @@ export default function WorkloadGantt() {
           <div style={{ display: 'flex' }}>
 
             {/* ── Left: fixed label column ── */}
-            <div style={{ flexShrink: 0, width: leftPanelW, borderRight: '2px solid var(--gray-200)' }}>
-              <div style={{ height: HEADER_H, borderBottom: '2px solid var(--gray-200)', display: 'flex', alignItems: 'center', padding: '0 16px', background: '#f8fafc', fontWeight: 600, fontSize: 12, color: 'var(--gray-500)' }}>
+            <div style={{ flexShrink: 0, width: effectiveLeftW, borderRight: 'none' }}>
+              <div style={{ height: HEADER_H, borderBottom: '2px solid var(--gray-200)', display: 'flex', alignItems: 'center', padding: '0 16px', background: '#f8fafc', fontWeight: 600, fontSize: 12, color: 'var(--gray-500)', overflow: 'hidden' }}>
                 担当者 / Slackタスク・業務
               </div>
               {members.map((member) => {
@@ -862,15 +949,17 @@ export default function WorkloadGantt() {
                       onDrop={(e) => { e.preventDefault(); handleCrossMemberDrop(member.user_id); }}
                       style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8, background: rowDragOverMemberId === member.user_id ? '#dbeafe' : '#f1f5f9', borderBottom: '1px solid var(--gray-200)', borderTop: rowDragOverMemberId === member.user_id ? '2px solid var(--primary)' : '2px solid transparent', fontWeight: 700, fontSize: 13, color: 'var(--gray-700)', transition: 'background 0.1s' }}
                     >
-                      {member.avatar_url
-                        ? <img src={member.avatar_url} alt="" style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0 }} />
-                        : <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--primary-light)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{name[0]?.toUpperCase()}</div>
-                      }
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
                       <span style={{ fontSize: 11, color: 'var(--gray-400)', flexShrink: 0 }}>{workItems.length + slackTasks.length}件</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); openCreateModal(member.user_id); }}
+                        title="業務を追加"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-400)', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
+                      >＋</button>
                     </div>
                     {/* Workload item rows */}
-                    {workItems.map((item) => {
+                    {ganttView === 'capacity' && <div style={{ height: 56, borderBottom: '2px solid var(--gray-200)', background: '#fff' }} />}
+                    {ganttView === 'gantt' && workItems.map((item) => {
                       const isRecurrence = item.recurrence_type && item.recurrence_type !== 'other';
                       const catObj = item.category ? categories.find((c) => c.name === item.category) : null;
                       const isDragOver = rowDragOverId === item.id && rowDragId !== item.id;
@@ -885,59 +974,144 @@ export default function WorkloadGantt() {
                           onDrop={(e) => { e.preventDefault(); handleRowDrop(member.user_id, item.id); }}
                           onClick={() => openEditModal(item)}
                           style={{
-                            height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6,
+                            height: ROW_H, padding: wrapText ? '6px 16px' : '0 16px',
+                            display: 'flex', alignItems: wrapText ? 'flex-start' : 'center', gap: 6,
                             borderTop: isDragOver ? '2px solid var(--primary)' : '1px solid transparent',
                             borderBottom: '1px solid var(--gray-100)',
-                            fontSize: 12, cursor: 'grab',
+                            fontSize: 12, cursor: 'grab', overflow: 'hidden',
                             opacity: rowDragId === item.id ? 0.4 : 1,
                             background: rowDragId === item.id ? '#f0f0f0' : '',
                           }}
                         >
                           <span style={{ color: 'var(--gray-300)', fontSize: 13, flexShrink: 0, cursor: 'grab' }}>⠿</span>
-                          <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: item.color || DEFAULT_ITEM_COLOR, flexShrink: 0 }} />
                           <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0 }}>{isRecurrence ? '↺' : '▬'}</span>
                           {catObj && <span style={{ fontSize: 9, fontWeight: 600, flexShrink: 0, color: catObj.color, background: catObj.color + '22', padding: '1px 5px', borderRadius: 6 }}>{catObj.name}</span>}
                           {item.rpo_client_name && <span style={{ fontSize: 9, fontWeight: 600, flexShrink: 0, color: '#6d28d9', background: '#ede9fe', padding: '1px 5px', borderRadius: 6 }} title="RPO案件">RPO: {item.rpo_client_name}</span>}
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: 'var(--gray-800)' }}>{item.title}</span>
+                          <span style={{ flex: 1, color: 'var(--gray-800)', whiteSpace: wrapText ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: wrapText ? 'unset' : 'ellipsis', wordBreak: 'break-all', lineHeight: 1.4 }}>{item.title}</span>
+                          {item.estimated_hours != null && (
+                            <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0, whiteSpace: 'nowrap' }}>{item.estimated_hours}h</span>
+                          )}
                           <button onClick={e => { e.stopPropagation(); handleDuplicateItem(item); }} title="複製" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-300)', fontSize: 12, lineHeight: 1, padding: 0, flexShrink: 0 }}>⧉</button>
                           <button onClick={e => { e.stopPropagation(); handleDeleteItem(item.id); }} title="削除" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-300)', fontSize: 14, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
                         </div>
                       );
                     })}
                     {/* Slack task rows */}
-                    {showSlackTasks && slackTasks.map((task) => {
-                      const sc = statusDef(task.status);
+                    {ganttView === 'gantt' && showSlackTasks && slackTasks.map((task) => {
+
                       const title = stripSlack(task.title || '（タイトルなし）');
-                      const maxLen = Math.floor(leftPanelW / 7);
+                      const isDone = task.status === 'done' || task.status === 'cancelled';
                       return (
                         <div key={task.id}
                           onClick={() => setSelectedTask(task)}
                           onMouseEnter={e => e.currentTarget.style.background = '#f0f7ff'}
                           onMouseLeave={e => e.currentTarget.style.background = ''}
-                          style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12, cursor: 'pointer' }}
+                          style={{ height: ROW_H, padding: wrapText ? '6px 16px' : '0 16px', display: 'flex', alignItems: wrapText ? 'flex-start' : 'center', gap: 6, borderBottom: '1px solid var(--gray-100)', fontSize: 12, cursor: 'pointer', overflow: 'hidden' }}
                         >
-                          {task.status !== 'in_progress' && (
-                            <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: sc.text, background: sc.bg, padding: '2px 5px', borderRadius: 7, whiteSpace: 'nowrap' }}>{sc.label}</span>
-                          )}
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: task.status === 'done' || task.status === 'cancelled' ? 'var(--gray-400)' : 'var(--gray-800)', textDecoration: task.status === 'cancelled' ? 'line-through' : 'none' }}>
-                            {title.length > maxLen ? title.slice(0, maxLen) + '…' : title}
+                          <span style={{ color: 'transparent', fontSize: 13, flexShrink: 0, userSelect: 'none' }}>⠿</span>
+                          <span style={{ fontSize: 9, fontWeight: 600, flexShrink: 0, color: '#475569', background: '#e2e8f0', padding: '1px 5px', borderRadius: 6 }}>タスク</span>
+                          <span style={{ flex: 1, color: isDone ? 'var(--gray-400)' : 'var(--gray-800)', textDecoration: task.status === 'cancelled' ? 'line-through' : 'none', whiteSpace: wrapText ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: wrapText ? 'unset' : 'ellipsis', wordBreak: 'break-all', lineHeight: 1.4 }}>
+                            {title}
                           </span>
                         </div>
                       );
                     })}
-                    {/* Add button row */}
-                    <div style={{ height: ROW_H, padding: '0 16px', display: 'flex', alignItems: 'center', borderBottom: '2px solid var(--gray-200)', background: '#fafafa' }}>
-                      <button onClick={() => openCreateModal(member.user_id)} style={{ background: 'none', border: '1px dashed var(--gray-300)', borderRadius: 6, fontSize: 11, color: 'var(--gray-400)', cursor: 'pointer', padding: '3px 10px', width: '100%', textAlign: 'left' }}>
-                        ＋ 業務を追加
-                      </button>
-                    </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* ── Right: scrollable Gantt ── */}
-            <div style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
+            {/* ── Resize handle ── */}
+            <div
+              onMouseDown={startPanelResize}
+              style={{ width: 5, flexShrink: 0, cursor: 'col-resize', background: 'var(--gray-200)', transition: 'background 0.1s' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#94a3b8'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--gray-200)'}
+              title="ドラッグで幅を変更"
+            />
+
+            {/* ── Right: scrollable Gantt / Capacity ── */}
+            {ganttView === 'capacity' && (() => {
+              const CAP_H = 56;
+              const capData = {};
+              for (const item of items) {
+                if (!item.estimated_hours) continue;
+                const cells = cellsByItem[item.id] || {};
+                const activeDays = Object.keys(cells).filter(k => cells[k] > 0);
+                if (!activeDays.length) continue;
+                const dailyH = item.estimated_hours / activeDays.length;
+                const uid = item.owner_user_id;
+                if (!capData[uid]) capData[uid] = {};
+                for (const d of activeDays) capData[uid][d] = (capData[uid][d] || 0) + dailyH;
+              }
+              const capColor = (h) => h > 8 ? '#fecaca' : h > 6 ? '#fef3c7' : h > 0 ? '#dcfce7' : 'transparent';
+              const capTextColor = (h) => h > 8 ? '#dc2626' : h > 6 ? '#d97706' : '#15803d';
+              return (
+                <div style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
+                  <div style={{ width: totalWidth, minWidth: '100%' }}>
+                    {/* ヘッダー */}
+                    <div style={{ display: 'flex', height: HEADER_H, position: 'sticky', top: 0, zIndex: 2, background: '#f8fafc', borderBottom: '2px solid var(--gray-200)' }}>
+                      {displayDates.map((d, i) => {
+                        const isToday = i === todayIdx;
+                        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                        const isHoliday = !isWeekend && holidaySet.has(_dateKey(d));
+                        return (
+                          <div key={i} style={{ width: ganttDayW, flexShrink: 0, borderRight: '1px solid var(--gray-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: isToday ? '#dbeafe' : 'transparent', fontSize: 11 }}>
+                            <span style={{ fontWeight: isToday ? 700 : 400, color: isHoliday ? '#ef4444' : isWeekend ? 'var(--gray-400)' : 'var(--gray-700)' }}>{d.getDate()}</span>
+                            <span style={{ fontSize: 10, color: d.getDay() === 0 || isHoliday ? '#ef4444' : d.getDay() === 6 ? '#3b82f6' : 'var(--gray-400)' }}>{DOW_JP[d.getDay()]}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* メンバー行 */}
+                    {members.map(member => {
+                      const name = (member.real_name || member.display_name || member.user_id).split('/')[0].trim();
+                      const uid = member.user_id;
+                      return (
+                        <div key={uid}>
+                          {/* メンバーヘッダー行 */}
+                          <div style={{ height: ROW_H, background: '#f1f5f9', borderBottom: '1px solid var(--gray-200)', display: 'flex' }}>
+                            {displayDates.map((_, i) => (
+                              <div key={i} style={{ width: ganttDayW, flexShrink: 0, borderRight: '1px solid var(--gray-100)' }} />
+                            ))}
+                          </div>
+                          {/* 負荷セル行 */}
+                          <div style={{ height: CAP_H, borderBottom: '2px solid var(--gray-200)', display: 'flex', alignItems: 'flex-end' }}>
+                            {displayDates.map((d, i) => {
+                              const dk = dateKey(d);
+                              const h = Math.round((capData[uid]?.[dk] || 0) * 10) / 10;
+                              const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                              const pct = Math.min(100, (h / 10) * 100);
+                              const handleCapClick = (e) => {
+                                if (h === 0) return;
+                                const dayTasks = items
+                                  .filter(it => it.owner_user_id === uid && it.estimated_hours)
+                                  .map(it => {
+                                    const cs = cellsByItem[it.id] || {};
+                                    const active = Object.keys(cs).filter(k => cs[k] > 0);
+                                    if (!active.includes(dk)) return null;
+                                    return { title: it.title, category: it.category, h: Math.round((it.estimated_hours / active.length) * 10) / 10 };
+                                  }).filter(Boolean);
+                                setCapPopup({ uid, dk, name, tasks: dayTasks, x: e.clientX, y: e.clientY });
+                              };
+                              return (
+                                <div key={i} onClick={handleCapClick} style={{ width: ganttDayW, flexShrink: 0, height: '100%', borderRight: '1px solid var(--gray-100)', background: isWeekend ? '#f9fafb' : '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', padding: '2px 1px', boxSizing: 'border-box', cursor: h > 0 ? 'pointer' : 'default' }}>
+                                  {h > 0 && <>
+                                    <span style={{ fontSize: 9, fontWeight: 700, color: capTextColor(h), lineHeight: 1, marginBottom: 1 }}>{h}</span>
+                                    <div style={{ width: '80%', height: `${pct}%`, background: capColor(h), borderRadius: '2px 2px 0 0', minHeight: 3 }} />
+                                  </>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+            {ganttView === 'gantt' && <div style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
               <div style={{ width: totalWidth, minWidth: '100%', position: 'relative' }}>
                 {/* Date header */}
                 <div style={{ display: 'flex', height: HEADER_H, position: 'sticky', top: 0, zIndex: 2, background: '#f8fafc', borderBottom: '2px solid var(--gray-200)' }}>
@@ -1034,7 +1208,7 @@ export default function WorkloadGantt() {
                           : undefined;
                         const bar = getTaskBar(task, dueDateOverride);
                         const opacity = task.status === 'done' ? 0.65 : 1;
-                        const barBg = bar?.overdue ? '#ef4444' : myTaskColor;
+                        const barBg = bar?.overdue ? '#ef4444' : SLACK_BAR_COLOR;
                         return (
                           <div key={task.id} style={{ height: ROW_H, borderBottom: '1px solid var(--gray-100)', position: 'relative', background: '#fff' }}>
                             {displayDates.map((_, i) => weekendBg(i))}
@@ -1064,14 +1238,11 @@ export default function WorkloadGantt() {
                           </div>
                         );
                       })}
-                      <div style={{ height: ROW_H, borderBottom: '2px solid var(--gray-200)', position: 'relative', background: '#fafafa' }}>
-                        {todayLine}
-                      </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </div>}
 
           </div>
         </div>
@@ -1110,6 +1281,14 @@ export default function WorkloadGantt() {
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                {t.task_type === 'broadcast' && (
+                  <button
+                    className="btn-secondary"
+                    style={{ fontSize: 12, color: '#6b7280' }}
+                    onClick={() => markSelfDone(t.id)}
+                    title="自分の行からのみ非表示にします"
+                  >自分のみ完了</button>
+                )}
                 {Object.entries(STATUS_DEF).map(([k, v]) => (
                   <button key={k}
                     className={t.status === k ? 'btn-primary' : 'btn-secondary'}
@@ -1128,6 +1307,35 @@ export default function WorkloadGantt() {
               </div>
             </div>
           </div>
+        );
+      })()}
+
+      {/* キャパシティセル クリックポップアップ */}
+      {capPopup && (() => {
+        const total = capPopup.tasks.reduce((s, t) => s + t.h, 0);
+        const popW = 220;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const left = Math.min(capPopup.x + 8, vw - popW - 8);
+        const top  = capPopup.y + 8 + 200 > vh ? capPopup.y - 16 - (capPopup.tasks.length * 28 + 72) : capPopup.y + 8;
+        return (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 998 }} onClick={() => setCapPopup(null)} />
+            <div style={{ position: 'fixed', left, top, zIndex: 999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', width: popW, padding: '10px 12px', fontSize: '0.82rem' }}>
+              <div style={{ fontWeight: 700, color: '#374151', marginBottom: 6 }}>
+                {capPopup.name.split('/')[0].trim()}
+                <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 400 }}>{capPopup.dk}</span>
+              </div>
+              {capPopup.tasks.map((t, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: '1px solid #f3f4f6' }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#374151' }}>{t.title}</span>
+                  <span style={{ flexShrink: 0, marginLeft: 8, color: '#6b7280', fontWeight: 600 }}>{t.h}h</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontWeight: 700, color: total > 8 ? '#ef4444' : '#374151' }}>
+                <span>合計</span><span>{Math.round(total * 10) / 10}h</span>
+              </div>
+            </div>
+          </>
         );
       })()}
 
@@ -1216,7 +1424,11 @@ export default function WorkloadGantt() {
             <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'flex-end' }}>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label htmlFor="wl-category">カテゴリ</label>
-                <select id="wl-category" value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)}>
+                <select id="wl-category" value={draftCategory} onChange={(e) => {
+                  setDraftCategory(e.target.value);
+                  const cat = categories.find(c => c.name === e.target.value);
+                  if (cat) setDraftColor(cat.color);
+                }}>
                   <option value="">なし</option>
                   {categories.map((cat) => (
                     <option key={cat.id} value={cat.name}>{cat.name}</option>
@@ -1224,20 +1436,50 @@ export default function WorkloadGantt() {
                 </select>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label htmlFor="wl-color" style={{ color: draftCategory ? 'var(--gray-400)' : 'inherit' }}>
-                  色{draftCategory && <span style={{ fontSize: 10, marginLeft: 4 }}>(カテゴリ色を使用)</span>}
-                </label>
-                <input
-                  id="wl-color"
-                  type="color"
-                  value={draftCategory ? (categories.find(c => c.name === draftCategory)?.color || draftColor) : draftColor}
-                  onChange={(e) => setDraftColor(e.target.value)}
-                  disabled={!!draftCategory}
-                  style={{ width: 48, height: 36, border: '1px solid var(--gray-200)', borderRadius: 6, padding: 2, cursor: draftCategory ? 'not-allowed' : 'pointer', opacity: draftCategory ? 0.5 : 1 }}
-                />
+                <label style={{ color: draftCategory ? 'var(--gray-400)' : 'inherit' }}>色</label>
+                {draftCategory ? (
+                  <div style={{ width: 48, height: 36, borderRadius: 6, background: categories.find(c => c.name === draftCategory)?.color || draftColor, border: '1px solid var(--gray-200)' }} title="カテゴリ色" />
+                ) : (
+                  <input
+                    id="wl-color"
+                    type="color"
+                    value={draftColor}
+                    onChange={(e) => setDraftColor(e.target.value)}
+                    style={{ width: 48, height: 36, border: '1px solid var(--gray-200)', borderRadius: 6, padding: 2, cursor: 'pointer' }}
+                  />
+                )}
               </div>
             </div>
+            {!draftCategory && colorHistory.length > 0 && (
+              <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: 10, color: 'var(--gray-400)', marginRight: 2 }}>履歴</span>
+                {colorHistory.map((c) => (
+                  <button key={c} type="button" onClick={() => setDraftColor(c)}
+                    style={{ width: 20, height: 20, borderRadius: '50%', background: c, border: draftColor === c ? '2px solid #334155' : '2px solid transparent', cursor: 'pointer', padding: 0 }}
+                    title={c}
+                  />
+                ))}
+              </div>
+            )}
 
+            <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'flex-end' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label htmlFor="wl-hours" style={{ fontSize: 12 }}>総工数 (h)</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input id="wl-hours" type="number" min="0" step="0.5" value={draftHours}
+                    onChange={e => setDraftHours(e.target.value)}
+                    placeholder="例: 20"
+                    style={{ width: 80, fontSize: 13 }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>h</span>
+                </div>
+              </div>
+              {draftHours && draftStartDate && draftEndDate && (() => {
+                const days = Math.max(1, Math.round((new Date(draftEndDate) - new Date(draftStartDate)) / 86400000) + 1);
+                const perDay = Math.round((parseFloat(draftHours) / days) * 10) / 10;
+                return <span style={{ fontSize: 11, color: 'var(--gray-500)', marginBottom: 6 }}>→ 1日あたり約 <b>{perDay}h</b>（{days}日間）</span>;
+              })()}
+            </div>
             <div className="admin-form-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginTop: 12 }}>
               <label htmlFor="wl-notes">補足</label>
               <textarea id="wl-notes" value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} placeholder="補足事項を入力" rows={2} style={{ width: '100%', resize: 'vertical' }} />

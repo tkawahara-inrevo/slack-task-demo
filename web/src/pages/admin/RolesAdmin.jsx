@@ -89,6 +89,7 @@ export default function RolesAdmin() {
         ))}
         {admins.length === 0 && <p className="empty-text">管理者はまだいません</p>}
       </div>
+
     </div>
   );
 }

@@ -436,19 +436,8 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS contract_cc_email TEXT`);
   await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS preliminary_info JSONB DEFAULT '{}'::jsonb`);
 
-  // deal_activities: add result and yomi_at_time
-  await dbQuery(`ALTER TABLE deal_activities ADD COLUMN IF NOT EXISTS result TEXT`).catch(() => {});
-  await dbQuery(`ALTER TABLE deal_activities ADD COLUMN IF NOT EXISTS yomi_at_time TEXT`).catch(() => {});
-
-  // crm_activity_settings: customizable activity types and result options per team
-  await dbQuery(`
-    CREATE TABLE IF NOT EXISTS crm_activity_settings (
-      team_id TEXT PRIMARY KEY,
-      activity_types JSONB NOT NULL DEFAULT '["架電","商談","メール","受電","その他"]'::jsonb,
-      result_options JSONB NOT NULL DEFAULT '["アポ獲得","有効会話","不通","折り返し","NG","その他"]'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `).catch(() => {});
+  // deal_activities: add result
+  await dbQuery(`ALTER TABLE deal_activities ADD COLUMN IF NOT EXISTS result TEXT`);
 
   // deal_payments: add direction, invoice_sent, incentive_amount
   await dbQuery(`ALTER TABLE deal_payments ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT '入金'`);
@@ -539,12 +528,6 @@ async function dbEnsureSettingsSchema() {
       last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
-
-  // recruitment_settings: 送信元メール・メールテンプレート・配点
-  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS from_email TEXT`).catch(() => {});
-  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_subject TEXT`).catch(() => {});
-  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_body TEXT`).catch(() => {});
-  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS total_score INTEGER`).catch(() => {});
 
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
@@ -1152,18 +1135,18 @@ async function dbListDashboardAdmins(teamId) {
 // ================================
 // Dash teams
 // ================================
-async function dbCreateDashTeam(id, teamId, name, createdBy, parentId = null, showInOrgchart = true) {
+async function dbCreateDashTeam(id, teamId, name, createdBy, parentId = null) {
   const q = `
-    INSERT INTO dash_teams (id, team_id, name, created_by, parent_id, show_in_orgchart, created_at)
-    VALUES ($1, $2, $3, $4, $5, $6, now())
+    INSERT INTO dash_teams (id, team_id, name, created_by, parent_id, created_at)
+    VALUES ($1, $2, $3, $4, $5, now())
     RETURNING *;
   `;
-  const res = await dbQuery(q, [id, teamId, name, createdBy, parentId || null, showInOrgchart]);
+  const res = await dbQuery(q, [id, teamId, name, createdBy, parentId || null]);
   return res.rows[0];
 }
 
 async function dbListDashTeams(teamId) {
-  const q = `SELECT *, (SELECT COUNT(*) FROM dash_team_members m WHERE m.dash_team_id=dt.id AND m.team_id=dt.team_id) AS member_count FROM dash_teams dt WHERE team_id=$1 ORDER BY parent_id NULLS FIRST, COALESCE(sort_order, 99), created_at ASC;`;
+  const q = `SELECT *, (SELECT COUNT(*) FROM dash_team_members m WHERE m.dash_team_id=dt.id AND m.team_id=dt.team_id) AS member_count FROM dash_teams dt WHERE team_id=$1 ORDER BY parent_id NULLS FIRST, created_at ASC;`;
   const res = await dbQuery(q, [teamId]);
   return res.rows;
 }

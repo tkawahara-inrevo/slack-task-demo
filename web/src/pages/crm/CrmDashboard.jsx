@@ -238,26 +238,12 @@ export default function CrmDashboard() {
           style={{ padding:'5px 14px', border:'1px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.8rem', cursor:'pointer' }}>
           ↻ 更新
         </button>
-        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          {[
-            { label:'入金額',   value:`¥${fmtM(curr.paymentAmount)}`, diff: prev ? diffPct(curr.paymentAmount, prev.paymentAmount) : null },
-            { label:'受注件数', value:`${curr.wonCount}件`,            diff: prev ? diffPct(curr.wonCount, prev.wonCount) : null },
-            { label:'初回商談', value:`${curr.meetingCount}件`,        diff: prev ? diffPct(curr.meetingCount, prev.meetingCount) : null },
-          ].map(kpi => (
-            <div key={kpi.label} style={{ background:'#fff', borderRadius:8, padding:'4px 14px', border:'1px solid #e2e8f0', textAlign:'center' }}>
-              <div style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{kpi.label}</div>
-              <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a', display:'flex', alignItems:'center', gap:5 }}>
-                {kpi.value} <DiffTag diff={kpi.diff} />
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* ── KPIカード 5枚 ── */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
-        {/* 入金額 */}
-        <div style={cardStyle}>
+        {/* 入金額 — green */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #059669' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>入金額</span>
             <span style={{ width:28, height:28, borderRadius:8, background:'#f0fdf4', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.8rem', color:'#059669' }}>¥</span>
@@ -269,8 +255,8 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* 受注件数 */}
-        <div style={cardStyle}>
+        {/* 受注件数 — blue */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #1e40af' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>受注件数</span>
             <span style={{ width:28, height:28, borderRadius:8, background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#1e40af' }}>件</span>
@@ -284,8 +270,8 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* 初回商談数 */}
-        <div style={cardStyle}>
+        {/* 初回商談数 — amber */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #d97706' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>初回商談数</span>
             <span style={{ width:28, height:28, borderRadius:8, background:'#fffbeb', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#d97706' }}>商</span>
@@ -299,8 +285,8 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* 受注率 */}
-        <div style={cardStyle}>
+        {/* 受注率 — purple */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #7c3aed' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>受注率</span>
             <span style={{ width:28, height:28, borderRadius:8, background:'#f5f3ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#7c3aed' }}>率</span>
@@ -314,8 +300,9 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* KPI達成率 */}
-        <div style={cardStyle}>
+        {/* KPI達成率 — dynamic color top border */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0',
+          borderTop:`3px solid ${kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444'}` }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>KPI達成率</span>
             <span style={{ width:28, height:28, borderRadius:8, background:'#fef9c3', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#a16207' }}>%</span>
@@ -423,63 +410,68 @@ export default function CrmDashboard() {
             </table>
           </div>
 
-          {/* アラート */}
-          {alertCount > 0 && (
-            <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-              <button onClick={() => setAlertOpen(v => !v)}
-                style={{ width:'100%', padding:'10px 16px', background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:8, textAlign:'left' }}>
-                <span style={{ width:8, height:8, borderRadius:'50%', background:'#ef4444', display:'inline-block' }} />
-                <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>アラート</span>
-                <span style={{ background:'#fef2f2', color:'#dc2626', borderRadius:10, padding:'1px 8px', fontSize:'0.72rem', fontWeight:700 }}>{alertCount}件</span>
-                <span style={{ marginLeft:'auto', fontSize:'0.72rem', color:'#94a3b8' }}>{alertOpen ? '折りたたむ' : '展開'}</span>
-              </button>
-              {alertOpen && (
-                <div style={{ padding:'0 16px 14px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-                  {overdueAlerts.length > 0 && (
-                    <div>
-                      <div style={{ fontSize:'0.72rem', fontWeight:600, color:'#dc2626', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
-                        ⚠ アクション期限切れ
-                        <span style={{ background:'#fef2f2', padding:'1px 6px', borderRadius:8 }}>{overdueAlerts.length}</span>
+          {/* アラート — 常に表示 */}
+          <div style={{ background:'#fff', borderRadius:12, border:`1px solid ${alertCount > 0 ? '#fca5a5' : '#e2e8f0'}`, overflow:'hidden' }}>
+            <button onClick={() => setAlertOpen(v => !v)}
+              style={{ width:'100%', padding:'10px 16px', background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:8, textAlign:'left' }}>
+              <span style={{ width:8, height:8, borderRadius:'50%', background: alertCount > 0 ? '#ef4444' : '#86efac', display:'inline-block' }} />
+              <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>アラート</span>
+              {alertCount > 0
+                ? <span style={{ background:'#fef2f2', color:'#dc2626', borderRadius:10, padding:'1px 8px', fontSize:'0.72rem', fontWeight:700 }}>{alertCount}件</span>
+                : <span style={{ background:'#f0fdf4', color:'#059669', borderRadius:10, padding:'1px 8px', fontSize:'0.72rem', fontWeight:600 }}>なし</span>
+              }
+              <span style={{ marginLeft:'auto', fontSize:'0.72rem', color:'#94a3b8' }}>{alertOpen ? '折りたたむ' : '展開'}</span>
+            </button>
+            {alertOpen && (
+              alertCount === 0
+                ? <div style={{ padding:'10px 16px 14px', fontSize:'0.78rem', color:'#94a3b8', textAlign:'center' }}>期限切れ・停滞中の案件はありません ✓</div>
+                : (
+                  <div style={{ padding:'0 16px 14px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    {overdueAlerts.length > 0 && (
+                      <div>
+                        <div style={{ fontSize:'0.72rem', fontWeight:600, color:'#dc2626', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
+                          ⚠ アクション期限切れ
+                          <span style={{ background:'#fef2f2', padding:'1px 6px', borderRadius:8 }}>{overdueAlerts.length}</span>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          {overdueAlerts.map(d => {
+                            const daysOver = Math.round((new Date() - new Date(d.next_action_date)) / 86400000);
+                            return (
+                              <div key={d.id} style={{ padding:'7px 10px', background:'#fff9f9', borderRadius:8, borderLeft:'3px solid #fca5a5' }}>
+                                <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.78rem' }}>{d.customer_name}</div>
+                                <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
+                                  <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>担当: {d.sales_person}</span>
+                                  <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:600 }}>{fmtDate(d.next_action_date)} ({daysOver}日超過)</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                        {overdueAlerts.map(d => {
-                          const daysOver = Math.round((new Date() - new Date(d.next_action_date)) / 86400000);
-                          return (
-                            <div key={d.id} style={{ padding:'7px 10px', background:'#fff9f9', borderRadius:8, borderLeft:'3px solid #fca5a5' }}>
+                    )}
+                    {stagnantAlerts.length > 0 && (
+                      <div>
+                        <div style={{ fontSize:'0.72rem', fontWeight:600, color:'#b45309', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
+                          ‖ 停滞中案件
+                          <span style={{ background:'#fffbeb', padding:'1px 6px', borderRadius:8 }}>{stagnantAlerts.length}</span>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          {stagnantAlerts.map(d => (
+                            <div key={d.id} style={{ padding:'7px 10px', background:'#fffdf5', borderRadius:8, borderLeft:'3px solid #fcd34d' }}>
                               <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.78rem' }}>{d.customer_name}</div>
                               <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
                                 <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>担当: {d.sales_person}</span>
-                                <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:600 }}>{fmtDate(d.next_action_date)} ({daysOver}日超過)</span>
+                                <span style={{ fontSize:'0.65rem', color:'#b45309', fontWeight:600 }}>{d.days_since_update}日未更新</span>
                               </div>
                             </div>
-                          );
-                        })}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {stagnantAlerts.length > 0 && (
-                    <div>
-                      <div style={{ fontSize:'0.72rem', fontWeight:600, color:'#b45309', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
-                        ‖ 停滞中案件
-                        <span style={{ background:'#fffbeb', padding:'1px 6px', borderRadius:8 }}>{stagnantAlerts.length}</span>
-                      </div>
-                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                        {stagnantAlerts.map(d => (
-                          <div key={d.id} style={{ padding:'7px 10px', background:'#fffdf5', borderRadius:8, borderLeft:'3px solid #fcd34d' }}>
-                            <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.78rem' }}>{d.customer_name}</div>
-                            <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
-                              <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>担当: {d.sales_person}</span>
-                              <span style={{ fontSize:'0.65rem', color:'#b45309', fontWeight:600 }}>{d.days_since_update}日未更新</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                    )}
+                  </div>
+                )
+            )}
+          </div>
         </div>
 
         {/* 右カラム */}

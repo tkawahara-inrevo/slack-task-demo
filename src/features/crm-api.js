@@ -519,12 +519,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
-      // 担当者リスト
-      const salesUsersRes = await dbQuery(
-        `SELECT DISTINCT COALESCE(sales_person, sales_user_id) AS name FROM deals
-         WHERE team_id=$1 AND COALESCE(sales_person, sales_user_id) IS NOT NULL ORDER BY name`,
-        [teamId]
-      );
+      // 担当者リスト & 担当者別KPI目標
+      const [salesUsersRes, repTargetRes] = await Promise.all([
+        dbQuery(
+          `SELECT DISTINCT COALESCE(sales_person, sales_user_id) AS name FROM deals
+           WHERE team_id=$1 AND COALESCE(sales_person, sales_user_id) IS NOT NULL ORDER BY name`,
+          [teamId]
+        ),
+        dbQuery('SELECT role_name, monthly_target FROM crm_role_targets WHERE team_id=$1', [teamId]),
+      ]);
+      const repTargetMap = {};
+      for (const r of repTargetRes.rows) repTargetMap[r.role_name] = Number(r.monthly_target || 0);
 
       res.json({
         period, rangeStart, rangeEnd,
@@ -532,6 +537,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         curr: currMetrics,
         prev: prevMetrics,
         repTable,
+        repTargetMap,
         yomiBreakdown: yomiRes.rows,
         overdueAlerts: overdueRes.rows,
         stagnantAlerts: stagnantRes.rows,
@@ -596,6 +602,26 @@ function registerCrmApi({ expressApp, authWithRole }) {
           ${salesUser ? `AND staff=$1` : ''}
         GROUP BY 1 ORDER BY 1
       `, salesUser ? [salesUser] : []);
+      res.json({ rows });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ── 最近のアクティビティ（ダッシュボード用）──────────────────
+  expressApp.get('/api/crm/dashboard/recent-activities', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const limit = Math.min(Number(req.query.limit) || 8, 30);
+      const { rows } = await dbQuery(`
+        SELECT da.id, da.activity_type, da.result, da.content, da.created_at,
+               c.name AS customer_name,
+               COALESCE(d.sales_person, d.sales_user_id) AS sales_person
+        FROM deal_activities da
+        JOIN deals d ON d.id = da.deal_id
+        JOIN customers c ON c.id = d.customer_id
+        WHERE da.team_id = $1
+        ORDER BY da.created_at DESC
+        LIMIT $2
+      `, [teamId, limit]);
       res.json({ rows });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });

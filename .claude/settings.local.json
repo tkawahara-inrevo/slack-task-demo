@@ -30,7 +30,17 @@
       "Bash(grep -r \"workload-\" /c/Users/kawah/slack-home-demo/web/src/*.html)",
       "Bash(node --check index.js)",
       "Read(//c/Users/kawah/.ssh/**)",
-      "Bash(bash /c/Users/kawah/slack-home-demo/deploy.sh)"
+      "Bash(bash /c/Users/kawah/slack-home-demo/deploy.sh)",
+      "Bash(git pull *)",
+      "Bash(New-Item -ItemType Directory -Force -Path \"C:\\\\Users\\\\takar\\\\.claude\\\\projects\\\\e--dev-slack-task-demo\\\\memory\")",
+      "Bash(git fetch *)",
+      "Bash(git stash *)",
+      "Bash(git rebase --continue -m 'Redesign CRM dashboard UI with KPI cards, pipeline funnel, and activity feed *)",
+      "Bash(git rebase *)",
+      "Bash(GIT_EDITOR=true git rebase --continue)",
+      "Bash(git -c core.editor=true rebase --continue)",
+      "Bash(EDITOR=\"echo\" git rebase --continue)",
+      "Bash(echo \"Exit code: $?\")"
     ]
   }
 }

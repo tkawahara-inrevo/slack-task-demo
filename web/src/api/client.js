@@ -241,6 +241,7 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return crmFetch(`/dashboard/monthly-trend${qs ? '?' + qs : ''}`);
   },
+  crmDashboardRecentActivities: (limit = 8) => crmFetch(`/dashboard/recent-activities?limit=${limit}`),
 
   // CRM: Payments
   crmPayments: (dealId) => crmFetch(`/deals/${dealId}/payments`),

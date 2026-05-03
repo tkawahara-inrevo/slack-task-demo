@@ -46,27 +46,34 @@ MK（リード獲得: 広告/架電/アライアンス/代理店）
 - **ポート**: 3000
 - **SSH鍵**: `LightsailDefaultKey-us-east-1.txt`（都度ユーザーから提供）
 
-### デプロイ手順
+### デプロイ手順（git経由）
+
+**基本フロー：コードを変更 → commit → push → サーバーで deploy.sh を実行**
+
 ```bash
-# 鍵を準備
+# ローカル: 変更をコミットしてpush
+git add -A
+git commit -m "変更内容"
+git push origin main
+
+# サーバーでデプロイ（SSH鍵が手元にある場合）
 cat > /tmp/deploy/key.pem << 'EOF'
 （SSH鍵を貼り付け）
 EOF
 chmod 600 /tmp/deploy/key.pem
 
-# フロントエンドビルド
-cd web && npm run build
+ssh -i /tmp/deploy/key.pem -o StrictHostKeyChecking=no ubuntu@3.222.101.208 \
+  "bash /home/ubuntu/deploy.sh"
+```
 
-# バックエンド転送（変更ファイルのみ）
-scp -i /tmp/deploy/key.pem -o StrictHostKeyChecking=no \
-  src/features/crm-api.js ubuntu@3.222.101.208:/home/ubuntu/slack-task-demo/src/features/
-
-# フロントエンド転送（dist を完全入れ替え）
-ssh ... "rm -rf /home/ubuntu/slack-task-demo/web/dist && mkdir -p /home/ubuntu/slack-task-demo/web/dist"
-scp -i /tmp/deploy/key.pem -o StrictHostKeyChecking=no -r web/dist/. ubuntu@3.222.101.208:/home/ubuntu/slack-task-demo/web/dist/
-
-# 再起動
-ssh ... "pm2 restart slack-task && sleep 5 && ss -tlnp | grep ':3000'"
+**deploy.sh の内容（サーバーの `/home/ubuntu/deploy.sh`）：**
+```bash
+cd /home/ubuntu/slack-task-demo
+git pull origin main       # 最新コードを取得
+cd web
+npm ci --silent            # 依存関係インストール
+npm run build              # フロントエンドビルド
+pm2 restart slack-task     # 再起動
 ```
 
 ### DB操作（直接実行が必要な場合）

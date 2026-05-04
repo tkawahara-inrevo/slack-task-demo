@@ -84,49 +84,65 @@ function Drilldown({ rep, type, start, end, onClose }) {
       .catch(() => setRows([]));
   }, []);
 
+  const payTotal = type === 'payments' && rows
+    ? rows.reduce((s, r) => s + Number(r.incentive_amount || 0), 0) : 0;
+
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
-      <div style={{ background:'#fff', borderRadius:16, width:'min(580px,90vw)', maxHeight:'75vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding:'14px 20px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f8fafc' }}>
-          <div style={{ fontWeight:700, color:'#0f172a' }}>{rep} — {type === 'payments' ? '入金内訳' : '受注案件'}</div>
-          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:20, lineHeight:1 }}>×</button>
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
+      <div style={{ background:'#f8fafc', borderRadius:16, width:'min(600px,92vw)', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+
+        {/* ヘッダー */}
+        <div style={{ padding:'16px 20px', background:'#fff', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+          <div>
+            <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginBottom:3 }}>
+              {type === 'payments' ? '入金内訳' : '受注案件'}
+            </div>
+            <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>{rep}</div>
+            {type === 'payments' && rows?.length > 0 && (
+              <div style={{ marginTop:3, fontSize:'0.82rem', fontWeight:700, color:'#059669' }}>
+                合計 {fmtMYen(payTotal)} / {rows.length}件
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} style={{ width:30, height:30, borderRadius:8, background:'#f1f5f9', border:'none', cursor:'pointer', color:'#64748b', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
         </div>
-        <div style={{ overflowY:'auto' }}>
-          {rows === null
-            ? <div style={{ padding:32, textAlign:'center', color:'#94a3b8' }}>読み込み中…</div>
-            : rows.length === 0
-            ? <div style={{ padding:32, textAlign:'center', color:'#94a3b8' }}>データなし</div>
-            : (
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem' }}>
-                <thead>
-                  <tr style={{ background:'#f8fafc' }}>
-                    {type === 'payments'
-                      ? ['入金日','会社名','プラン','インセン'].map(h => <th key={h} style={{ padding:'8px 16px', textAlign:h==='インセン'?'right':'left', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9' }}>{h}</th>)
-                      : ['受注日','顧客名'].map(h => <th key={h} style={{ padding:'8px 16px', textAlign:'left', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9' }}>{h}</th>)
-                    }
-                  </tr>
-                </thead>
-                <tbody>
-                  {type === 'payments'
-                    ? rows.map((r, i) => (
-                        <tr key={i} style={{ borderBottom:'1px solid #f8fafc' }}>
-                          <td style={{ padding:'8px 16px', color:'#64748b', whiteSpace:'nowrap' }}>{r.payment_date ? String(r.payment_date).substring(5, 10).replace('-', '/') : '—'}</td>
-                          <td style={{ padding:'8px 16px', color:'#0f172a', fontWeight:500 }}>{r.company}</td>
-                          <td style={{ padding:'8px 16px', color:'#64748b' }}>{r.plan || '—'}</td>
-                          <td style={{ padding:'8px 16px', textAlign:'right', fontWeight:700, color:'#059669' }}>{fmtMYen(r.incentive_amount)}</td>
-                        </tr>
-                      ))
-                    : rows.map((r, i) => (
-                        <tr key={i} style={{ borderBottom:'1px solid #f8fafc' }}>
-                          <td style={{ padding:'8px 16px', color:'#64748b', whiteSpace:'nowrap' }}>{fmtDate(r.order_date)}</td>
-                          <td style={{ padding:'8px 16px', color:'#0f172a', fontWeight:500 }}>{r.customer_name}</td>
-                        </tr>
-                      ))
-                  }
-                </tbody>
-              </table>
-            )
-          }
+
+        {/* コンテンツ */}
+        <div style={{ overflowY:'auto', padding:'8px 16px 16px' }}>
+          {rows === null ? (
+            <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>データがありません</div>
+          ) : type === 'payments' ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{ background:'#fff', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width:36, fontSize:'0.68rem', color:'#94a3b8', flexShrink:0, textAlign:'center', background:'#f8fafc', borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
+                    {r.payment_date ? fmtDate(r.payment_date).substring(5) : '—'}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</div>
+                    {r.plan && (
+                      <span style={{ fontSize:'0.62rem', background:'#eff6ff', color:'#1e40af', borderRadius:4, padding:'1px 7px', marginTop:3, display:'inline-block', fontWeight:600 }}>{r.plan}</span>
+                    )}
+                  </div>
+                  <div style={{ fontWeight:800, color:'#059669', fontSize:'0.9rem', flexShrink:0 }}>{fmtMYen(r.incentive_amount)}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{ background:'#fff', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width:36, fontSize:'0.68rem', color:'#94a3b8', flexShrink:0, textAlign:'center', background:'#f8fafc', borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
+                    {r.order_date ? fmtDate(r.order_date).substring(5) : '—'}
+                  </div>
+                  <div style={{ flex:1, fontWeight:600, color:'#0f172a', fontSize:'0.85rem' }}>{r.customer_name}</div>
+                  <span style={{ fontSize:'0.65rem', background:'#dcfce7', color:'#059669', borderRadius:4, padding:'2px 8px', fontWeight:700, flexShrink:0 }}>受注</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -359,7 +375,8 @@ export default function CrmDashboard() {
                 {reps.map((r, ri) => {
                   const color       = REP_COLORS[ri % REP_COLORS.length];
                   const repWinRate  = r.meetingCount > 0 ? Math.round(r.wonCount / r.meetingCount * 100) : 0;
-                  const repTarget   = repTargetMap[r.rep] || 0;
+                  const perRepFallback = forecastKpi > 0 ? Math.round(forecastKpi / TARGET_REPS.length) : 0;
+                  const repTarget   = repTargetMap[r.rep] > 0 ? repTargetMap[r.rep] : perRepFallback;
                   const repAchieve  = (repTarget > 0 && !r.isOther) ? Math.round(r.paymentAmount / repTarget * 100) : null;
                   const [fam, given] = r.rep.split(/[\s　]/);
                   return (
@@ -567,13 +584,14 @@ export default function CrmDashboard() {
                 </div>
                 <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
                   {planData.map((p, i) => {
-                    const pct = planTotal > 0 ? Math.round(p.amount / planTotal * 100) : 0;
+                    const exact = planTotal > 0 ? p.amount / planTotal * 100 : 0;
+                    const pctLabel = exact <= 0 ? '0%' : exact < 1 ? '<1%' : `${Math.floor(exact)}%`;
                     return (
                       <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
                         <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
                         <span style={{ fontSize:'0.7rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
                         <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
-                        <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:36, textAlign:'right' }}>{pct}%</span>
+                        <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:36, textAlign:'right' }}>{pctLabel}</span>
                       </div>
                     );
                   })}

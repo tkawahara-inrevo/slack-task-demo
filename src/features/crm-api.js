@@ -519,6 +519,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
+      // プラン別入金内訳
+      const planBreakdownRes = await dbQuery(`
+        SELECT COALESCE(plan, '未設定') AS plan,
+               COUNT(*)::int AS cnt,
+               COALESCE(SUM(incentive_amount),0)::bigint AS amount
+        FROM kintone_payments
+        WHERE payment_date BETWEEN $1::date AND $2::date
+          AND incentive_amount > 0
+        GROUP BY 1 ORDER BY amount DESC
+      `, [rangeStart, rangeEnd]);
+
       // 担当者リスト & 担当者別KPI目標
       const [salesUsersRes, repTargetRes] = await Promise.all([
         dbQuery(
@@ -538,6 +549,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         prev: prevMetrics,
         repTable,
         repTargetMap,
+        planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,
         overdueAlerts: overdueRes.rows,
         stagnantAlerts: stagnantRes.rows,

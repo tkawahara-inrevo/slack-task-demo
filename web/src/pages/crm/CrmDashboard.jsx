@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import { api } from '../../api/client';
 
 const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '添田 剛', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
@@ -13,6 +13,8 @@ const ACT_CFG = {
   'タスク':   { color:'#8b5cf6', bg:'#f3e8ff' },
   '見積':     { color:'#ec4899', bg:'#fce7f3' },
 };
+
+const PLAN_COLORS = ['#1e40af','#059669','#d97706','#7c3aed','#dc2626','#0ea5e9','#ec4899','#64748b'];
 
 const YOMI_ORDER  = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％'];
 const YOMI_LABELS = {
@@ -171,7 +173,7 @@ export default function CrmDashboard() {
 
   const {
     curr, prev, repTable, yomiBreakdown = [], overdueAlerts = [], stagnantAlerts = [],
-    rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {},
+    rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, planBreakdown = [],
   } = data;
 
   const reps = buildRepTable(repTable);
@@ -326,7 +328,7 @@ export default function CrmDashboard() {
       </div>
 
       {/* ── メイン2カラム ── */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 390px', gap:10, flex:1 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, flex:1 }}>
 
         {/* 左カラム */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
@@ -474,7 +476,7 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* 右カラム */}
+        {/* 右カラム — 優先度順: 収支見込み → 入金推移 → プラン割合 → ファネル */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
 
           {/* 収支見込み */}
@@ -526,6 +528,56 @@ export default function CrmDashboard() {
             </div>
           )}
 
+          {/* 入金推移 */}
+          <div style={{ ...cardStyle, padding:'14px 16px' }}>
+            {sectionHead('入金推移', '過去6ヶ月　単位: 万円')}
+            <ResponsiveContainer width="100%" height={130}>
+              <BarChart data={trendData} margin={{ top:0, right:0, left:0, bottom:0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={v => `${Math.round(v / 1e4)}万`} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={42} />
+                <Tooltip formatter={v => [`${fmtM(v)}`, '入金額']}
+                  contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
+                <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
+                  {trendData.map((_, i) => <Cell key={i} fill={i === trendData.length - 1 ? '#1e40af' : '#bfdbfe'} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* プラン割合（円グラフ） */}
+          {planBreakdown.length > 0 && (
+            <div style={{ ...cardStyle, padding:'14px 16px' }}>
+              {sectionHead('受注プラン割合', `入金確定 ${planBreakdown.length}種`)}
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <ResponsiveContainer width={140} height={140}>
+                  <PieChart>
+                    <Pie data={planBreakdown} dataKey="amount" nameKey="plan"
+                      cx="50%" cy="50%" outerRadius={62} innerRadius={32} paddingAngle={2}>
+                      {planBreakdown.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v, name) => [`${fmtM(v)}`, name]}
+                      contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:4 }}>
+                  {planBreakdown.map((p, i) => {
+                    const total = planBreakdown.reduce((s, r) => s + Number(r.amount), 0);
+                    const pct = total > 0 ? Math.round(Number(p.amount) / total * 100) : 0;
+                    return (
+                      <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
+                        <span style={{ fontSize:'0.68rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
+                        <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
+                        <span style={{ fontSize:'0.68rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:34, textAlign:'right' }}>{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* パイプラインファネル */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>
             {sectionHead('パイプラインファネル', `${totalActiveCount}件 / ${fmtM(totalActiveAmount)}`)}
@@ -560,50 +612,6 @@ export default function CrmDashboard() {
               )}
             </div>
           </div>
-
-          {/* 入金推移 */}
-          <div style={{ ...cardStyle, padding:'14px 16px' }}>
-            {sectionHead('入金推移', '過去6ヶ月　単位: 万円')}
-            <ResponsiveContainer width="100%" height={120}>
-              <BarChart data={trendData} margin={{ top:0, right:0, left:0, bottom:0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={v => `${Math.round(v / 1e4)}万`} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={42} />
-                <Tooltip formatter={v => [`${fmtM(v)}`, '入金額']}
-                  contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
-                <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
-                  {trendData.map((_, i) => <Cell key={i} fill={i === trendData.length - 1 ? '#1e40af' : '#bfdbfe'} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* 最近のアクティビティ */}
-          {activities.length > 0 && (
-            <div style={{ ...cardStyle, padding:'14px 16px' }}>
-              {sectionHead('最近のアクティビティ', `直近${activities.length}件`)}
-              <div style={{ display:'flex', flexDirection:'column', gap:7 }}>
-                {activities.map(act => {
-                  const cfg = ACT_CFG[act.activity_type] || { color:'#64748b', bg:'#f8fafc' };
-                  return (
-                    <div key={act.id} style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
-                      <span style={{ padding:'2px 7px', borderRadius:10, background:cfg.bg, color:cfg.color, fontSize:'0.62rem', fontWeight:700, whiteSpace:'nowrap', flexShrink:0, marginTop:2 }}>
-                        {act.activity_type}
-                      </span>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:'0.78rem', color:'#0f172a', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                          {act.customer_name}
-                          {act.result && <span style={{ color:'#64748b', marginLeft:4, fontWeight:400 }}>・{act.result}</span>}
-                        </div>
-                        <div style={{ fontSize:'0.65rem', color:'#94a3b8' }}>担当: {act.sales_person}</div>
-                      </div>
-                      <span style={{ fontSize:'0.65rem', color:'#94a3b8', flexShrink:0, marginTop:2 }}>{timeAgo(act.created_at)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

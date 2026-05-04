@@ -537,14 +537,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
-      // プラン別入金内訳（1顧客=1件でカウント）
+      // プラン別入金内訳（1顧客=1件でカウント、実入金額ベース）
       const planBreakdownRes = await dbQuery(`
         SELECT COALESCE(plan, '未設定') AS plan,
                COUNT(DISTINCT company)::int AS cnt,
-               COALESCE(SUM(incentive_amount),0)::bigint AS amount
+               COALESCE(SUM(amount),0)::bigint AS amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
-          AND incentive_amount > 0
+          AND amount > 0
         GROUP BY 1 ORDER BY amount DESC
       `, [rangeStart, rangeEnd]);
 

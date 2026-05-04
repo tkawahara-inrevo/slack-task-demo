@@ -131,25 +131,37 @@ function IndividualDetail({ staff, onClose }) {
               {/* 月別明細 */}
               <div style={{ border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
                 <div style={{ padding:'10px 14px', background:'#f8fafc', borderBottom:'1px solid #f3f4f6', fontWeight:700, fontSize:'0.82rem' }}>今期 月別明細</div>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem' }}>
                   <thead>
                     <tr style={{ background:'#f9fafb' }}>
-                      {['月','インセン合計','月間目標達成率'].map(h => (
-                        <th key={h} style={{ padding:'6px 14px', textAlign:'left', color:'#9ca3af', fontWeight:600, borderBottom:'1px solid #f3f4f6' }}>{h}</th>
+                      {['月','インセン合計','月間目標達成率'].map((h, i) => (
+                        <th key={h} style={{ padding:'7px 14px', textAlign: i===0?'left':'right', color:'#9ca3af', fontWeight:600, borderBottom:'1px solid #f3f4f6' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.monthlyMap).sort().map(([month, amount]) => {
-                      const r = lines.currentTarget > 0 ? (amount / lines.currentTarget) * 100 : 0;
-                      return (
-                        <tr key={month} style={{ borderBottom:'1px solid #f9fafb' }}>
-                          <td style={{ padding:'7px 14px', fontWeight:500 }}>{month}</td>
-                          <td style={{ padding:'7px 14px', fontWeight:600 }}>{fmt(amount)}</td>
-                          <td style={{ padding:'7px 14px', color: r>=100?'#059669':r>=70?'#d97706':'#dc2626', fontWeight:600 }}>{Math.round(r)}%</td>
-                        </tr>
-                      );
-                    })}
+                    {Object.entries(data.monthlyMap)
+                      .filter(([m]) => /^\d{4}-\d{2}$/.test(m))
+                      .sort()
+                      .map(([month, amount]) => {
+                        const [y, mo] = month.split('-');
+                        const label = `${y}年${parseInt(mo, 10)}月`;
+                        const r = lines.currentTarget > 0 ? (amount / lines.currentTarget) * 100 : 0;
+                        const rColor = r >= 100 ? '#059669' : r >= 70 ? '#d97706' : '#dc2626';
+                        return (
+                          <tr key={month} style={{ borderBottom:'1px solid #f9fafb' }}
+                            onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+                            onMouseLeave={e => e.currentTarget.style.background=''}>
+                            <td style={{ padding:'8px 14px', fontWeight:600, color:'#111827' }}>{label}</td>
+                            <td style={{ padding:'8px 14px', fontWeight:600, textAlign:'right', color:'#374151' }}>{fmt(amount)}</td>
+                            <td style={{ padding:'8px 14px', textAlign:'right' }}>
+                              <span style={{ fontWeight:700, color:rColor, background:rColor+'14', padding:'2px 10px', borderRadius:99, fontSize:'0.8rem' }}>
+                                {Math.round(r)}%
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>

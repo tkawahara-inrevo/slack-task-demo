@@ -1166,7 +1166,11 @@ function registerCrmApi({ expressApp, authWithRole }) {
       // 月別集計（今期）
       const monthlyMap = {};
       currRows.forEach(r => {
-        const m = r.payment_date ? String(r.payment_date).substring(0, 7) : '不明';
+        // DateオブジェクトはtoISOString()で安全にYYYY-MMへ変換
+        const pd = r.payment_date;
+        const m = pd
+          ? (pd instanceof Date ? pd.toISOString() : String(pd)).substring(0, 7)
+          : '不明';
         if (!monthlyMap[m]) monthlyMap[m] = 0;
         monthlyMap[m] += Number(r.incentive_amount || 0);
       });

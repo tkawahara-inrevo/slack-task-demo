@@ -195,7 +195,13 @@ export const api = {
 
   // CRM: Pipeline summary
   crmPipelineSummary: () => crmFetch('/pipeline-summary'),
-  crmMonthlySummary: (month) => crmFetch(`/monthly-summary${month ? '?month='+month : ''}`),
+  crmMonthlySummary: (month, salesUser) => {
+    const p = new URLSearchParams();
+    if (month) p.set('month', month);
+    if (salesUser) p.set('salesUser', salesUser);
+    const qs = p.toString();
+    return crmFetch(`/monthly-summary${qs ? '?'+qs : ''}`);
+  },
   crmYomiKanri: () => crmFetch('/yomi-kanri'),
   crmRoleTargets: () => crmFetch('/role-targets'),
   crmRoleTargetsSave: (targets) => crmFetch('/role-targets', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets}) }),

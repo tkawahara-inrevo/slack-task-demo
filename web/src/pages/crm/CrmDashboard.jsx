@@ -190,7 +190,7 @@ export default function CrmDashboard() {
       const summaryMonth = p === 'custom' && cm ? cm : undefined;
       const [d, s, t, acts] = await Promise.all([
         api.crmDashboard(params),
-        api.crmMonthlySummary(summaryMonth),
+        api.crmMonthlySummary(summaryMonth, u || undefined),
         api.crmDashboardMonthlyTrend({ months: p === 'term' ? 12 : 6, ...(u ? { salesUser: u } : {}) }),
         api.crmDashboardRecentActivities(8),
       ]);

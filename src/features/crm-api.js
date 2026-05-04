@@ -982,14 +982,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.get('/api/crm/monthly-summary', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { month } = req.query; // YYYY-MM 形式
+      const { month, salesUser } = req.query; // YYYY-MM 形式
       const targetMonth = month ? new Date(`${month}-01`) : new Date();
       const year = targetMonth.getFullYear();
       const mon = targetMonth.getMonth() + 1;
       const monthStart = `${year}-${String(mon).padStart(2,'0')}-01`;
       const monthEnd = new Date(year, mon, 0).toISOString().split('T')[0];
 
-      // 今月入金確定: kintone_payments (App170) から取得（実入金額 + インセン両方）
+      // 今月入金確定（担当者フィルタ対応）
       const paymentsRes = await dbQuery(`
         SELECT payment_date, company, staff, plan,
                amount AS payment_amount,
@@ -997,32 +997,36 @@ function registerCrmApi({ expressApp, authWithRole }) {
         FROM kintone_payments
         WHERE payment_date BETWEEN $1 AND $2
           AND amount > 0
+          ${salesUser ? 'AND staff=$3' : ''}
         ORDER BY payment_date
-      `, [monthStart, monthEnd]);
+      `, salesUser ? [monthStart, monthEnd, salesUser] : [monthStart, monthEnd]);
 
-      // 締結ほぼ確実 (yomi A or S) — 全進行中案件（日付フィルターなし）
+      const salesFilter = salesUser ? `AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '';
+      const salesParams = salesUser ? [teamId, salesUser] : [teamId];
+
+      // 締結ほぼ確実 (yomi A or S)（担当者フィルタ対応）
       const highRes = await dbQuery(`
         SELECT d.id, d.name, d.yomi, d.contract_type, d.initial_fee, d.monthly_fee,
                d.unit_price, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
                d.conclusion_date, c.name AS customer_name
         FROM deals d JOIN customers c ON c.id = d.customer_id
-        WHERE d.team_id=$1
+        WHERE d.team_id=$1 ${salesFilter}
           AND d.yomi IN ('A 70％','S 90％')
           AND d.status = 'active'
         ORDER BY d.updated_at DESC
-      `, [teamId]);
+      `, salesParams);
 
-      // 締結多分いける (yomi B or C) — 全進行中案件
+      // 締結多分いける (yomi B or C)（担当者フィルタ対応）
       const medRes = await dbQuery(`
         SELECT d.id, d.name, d.yomi, d.contract_type, d.initial_fee, d.monthly_fee,
                d.unit_price, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
                d.conclusion_date, c.name AS customer_name
         FROM deals d JOIN customers c ON c.id = d.customer_id
-        WHERE d.team_id=$1
+        WHERE d.team_id=$1 ${salesFilter}
           AND d.yomi IN ('B 50％','C 30％')
           AND d.status = 'active'
         ORDER BY d.updated_at DESC
-      `, [teamId]);
+      `, salesParams);
 
       // KPI計算ヘルパー
       const calcKpi = (deal) => {

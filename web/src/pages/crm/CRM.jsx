@@ -147,6 +147,174 @@ function YomiPanel({ full = false }) {
   );
 }
 
+// ── カスタムフィールド設定 ────────────────────────────────────
+const FIELD_TYPES = [
+  { value:'text',     label:'テキスト' },
+  { value:'textarea', label:'メモ（複数行）' },
+  { value:'number',   label:'数値' },
+  { value:'date',     label:'日付' },
+  { value:'select',   label:'選択肢' },
+  { value:'checkbox', label:'チェックボックス' },
+];
+
+function CustomFieldsManager() {
+  const [entity, setEntity] = useState('customer');
+  const [fields, setFields] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newField, setNewField] = useState({ field_label:'', field_type:'text', options:'' });
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+
+  const load = async (e = entity) => {
+    setLoading(true);
+    try { const r = await api.crmCustomFields(e); setFields(r.fields || []); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(entity); }, [entity]);
+
+  const handleAdd = async () => {
+    if (!newField.field_label.trim()) return;
+    setAdding(true);
+    try {
+      const opts = newField.field_type === 'select'
+        ? newField.options.split('\n').map(s => s.trim()).filter(Boolean)
+        : [];
+      await api.crmCreateCustomField({ entity_type: entity, field_label: newField.field_label, field_type: newField.field_type, options: opts });
+      setNewField({ field_label:'', field_type:'text', options:'' });
+      load(entity);
+    } finally { setAdding(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('このフィールドを削除しますか？\n入力済みのデータは残りますが画面上から見えなくなります。')) return;
+    await api.crmDeleteCustomField(id);
+    load(entity);
+  };
+
+  const handleSaveEdit = async (id) => {
+    const opts = editForm.field_type === 'select'
+      ? (editForm.options_text || '').split('\n').map(s => s.trim()).filter(Boolean)
+      : [];
+    await api.crmUpdateCustomField(id, { field_label: editForm.field_label, field_type: editForm.field_type, options: opts });
+    setEditingId(null);
+    load(entity);
+  };
+
+  const handleMoveUp = async (idx) => {
+    if (idx === 0) return;
+    await api.crmUpdateCustomField(fields[idx].id, { sort_order: idx - 1 });
+    await api.crmUpdateCustomField(fields[idx-1].id, { sort_order: idx });
+    load(entity);
+  };
+
+  const inputStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.82rem', outline:'none', background:'#fff' };
+
+  return (
+    <div>
+      {/* エンティティ切り替え */}
+      <div style={{ display:'flex', background:'#f1f5f9', borderRadius:8, padding:3, width:'fit-content', marginBottom:16, gap:2 }}>
+        {[['customer','顧客フォーム'],['deal','案件フォーム']].map(([v,l]) => (
+          <button key={v} onClick={() => setEntity(v)}
+            style={{ padding:'4px 16px', borderRadius:6, border:'none', cursor:'pointer', fontSize:'0.8rem',
+              fontWeight:entity===v?700:400, background:entity===v?'#fff':'transparent',
+              color:entity===v?'#1e40af':'#64748b', boxShadow:entity===v?'0 1px 3px rgba(0,0,0,0.08)':'none' }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* 既存フィールド一覧 */}
+      {loading ? (
+        <div style={{ color:'#94a3b8', fontSize:'0.82rem', padding:'8px 0' }}>読み込み中…</div>
+      ) : fields.length === 0 ? (
+        <div style={{ color:'#94a3b8', fontSize:'0.82rem', padding:'8px 0' }}>フィールドがありません</div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:16 }}>
+          {fields.map((f, idx) => (
+            <div key={f.id} style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:9, padding:'10px 14px', display:'flex', alignItems:'flex-start', gap:10 }}>
+              {/* 並び替えボタン */}
+              <div style={{ display:'flex', flexDirection:'column', gap:2, flexShrink:0, marginTop:2 }}>
+                <button onClick={() => handleMoveUp(idx)} disabled={idx===0}
+                  style={{ padding:'1px 5px', fontSize:'0.65rem', border:'1px solid #e2e8f0', borderRadius:4, background:'#fff', cursor:'pointer', opacity:idx===0?0.3:1 }}>▲</button>
+                <button onClick={async()=>{ await api.crmUpdateCustomField(f.id,{sort_order:idx+1}); if(fields[idx+1]) await api.crmUpdateCustomField(fields[idx+1].id,{sort_order:idx}); load(entity); }}
+                  disabled={idx===fields.length-1}
+                  style={{ padding:'1px 5px', fontSize:'0.65rem', border:'1px solid #e2e8f0', borderRadius:4, background:'#fff', cursor:'pointer', opacity:idx===fields.length-1?0.3:1 }}>▼</button>
+              </div>
+
+              {editingId === f.id ? (
+                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
+                  <input value={editForm.field_label} onChange={e => setEditForm(p=>({...p,field_label:e.target.value}))}
+                    style={{ ...inputStyle, width:'100%', boxSizing:'border-box' }} />
+                  <select value={editForm.field_type} onChange={e => setEditForm(p=>({...p,field_type:e.target.value}))}
+                    style={{ ...inputStyle, width:160 }}>
+                    {FIELD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                  {editForm.field_type === 'select' && (
+                    <textarea value={editForm.options_text} onChange={e => setEditForm(p=>({...p,options_text:e.target.value}))}
+                      rows={3} placeholder="選択肢を1行ずつ入力"
+                      style={{ ...inputStyle, width:'100%', boxSizing:'border-box', resize:'vertical' }} />
+                  )}
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button onClick={() => handleSaveEdit(f.id)}
+                      style={{ padding:'4px 14px', background:'#1e40af', color:'#fff', border:'none', borderRadius:6, fontSize:'0.78rem', fontWeight:600, cursor:'pointer' }}>保存</button>
+                    <button onClick={() => setEditingId(null)}
+                      style={{ padding:'4px 10px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.78rem', background:'#fff', cursor:'pointer' }}>キャンセル</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ flex:1 }}>
+                    <span style={{ fontSize:'0.85rem', fontWeight:600, color:'#0f172a' }}>{f.field_label}</span>
+                    <span style={{ fontSize:'0.7rem', color:'#94a3b8', marginLeft:8 }}>
+                      {FIELD_TYPES.find(t=>t.value===f.field_type)?.label || f.field_type}
+                    </span>
+                    {f.field_type === 'select' && f.options?.length > 0 && (
+                      <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:2 }}>
+                        選択肢: {f.options.join(' / ')}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                    <button onClick={() => { setEditingId(f.id); setEditForm({ field_label:f.field_label, field_type:f.field_type, options_text:(f.options||[]).join('\n') }); }}
+                      style={{ padding:'3px 10px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', cursor:'pointer', color:'#374151' }}>編集</button>
+                    <button onClick={() => handleDelete(f.id)}
+                      style={{ padding:'3px 10px', border:'1px solid #fca5a5', borderRadius:6, fontSize:'0.75rem', background:'#fff', cursor:'pointer', color:'#dc2626' }}>削除</button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 新規追加フォーム */}
+      <div style={{ background:'#f8fafc', border:'1px dashed #e2e8f0', borderRadius:10, padding:'14px 16px' }}>
+        <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#374151', marginBottom:10 }}>フィールドを追加</div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-start' }}>
+          <input value={newField.field_label} onChange={e => setNewField(p=>({...p,field_label:e.target.value}))}
+            placeholder="フィールド名（例: 決裁者名）"
+            style={{ ...inputStyle, flex:'1 1 160px' }} />
+          <select value={newField.field_type} onChange={e => setNewField(p=>({...p,field_type:e.target.value}))}
+            style={{ ...inputStyle, flexShrink:0 }}>
+            {FIELD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <button onClick={handleAdd} disabled={adding || !newField.field_label.trim()}
+            style={{ padding:'6px 18px', background:'#1e40af', color:'#fff', border:'none', borderRadius:7, fontSize:'0.82rem', fontWeight:700, cursor:'pointer', opacity:!newField.field_label.trim()?0.5:1 }}>
+            追加
+          </button>
+        </div>
+        {newField.field_type === 'select' && (
+          <textarea value={newField.options} onChange={e => setNewField(p=>({...p,options:e.target.value}))}
+            rows={3} placeholder="選択肢を1行ずつ入力（例: 新卒採用&#10;中途採用）"
+            style={{ ...inputStyle, width:'100%', boxSizing:'border-box', marginTop:8, resize:'vertical' }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── CRM設定 ──────────────────────────────────────────────────
 function CrmSettings() {
   const [roleTargetRows, setRoleTargetRows] = useState([]);
@@ -291,13 +459,16 @@ function CrmSettings() {
         </div>
       </div>
 
-      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:36 }}>
         <button onClick={handleSave} disabled={saving}
           style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:saving?'default':'pointer' }}>
           {saving?'保存中…':'保存'}
         </button>
         {notice && <span style={{ fontSize:'0.8rem', color:notice.includes('失敗')?'#dc2626':'#059669', fontWeight:600 }}>{notice}</span>}
       </div>
+
+      {sectionTitle('カスタムフィールド', '顧客・案件フォームに自由に項目を追加できます。追加したフィールドは各詳細画面の編集フォームに表示されます。')}
+      <CustomFieldsManager />
     </div>
   );
 }

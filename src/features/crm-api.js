@@ -691,6 +691,58 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── カスタムフィールド CRUD ───────────────────────────────────
+  expressApp.get('/api/crm/custom-fields', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { entity } = req.query; // 'customer' | 'deal'
+      const { rows } = await dbQuery(
+        `SELECT * FROM crm_custom_fields WHERE team_id=$1 ${entity ? 'AND entity_type=$2' : ''}
+         ORDER BY entity_type, sort_order, created_at`,
+        entity ? [teamId, entity] : [teamId]
+      );
+      res.json({ fields: rows });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.post('/api/crm/custom-fields', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { entity_type, field_label, field_type = 'text', options = [], is_required = false } = req.body;
+      const field_key = 'cf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+      const { rows } = await dbQuery(
+        `INSERT INTO crm_custom_fields (team_id, entity_type, field_key, field_label, field_type, options, is_required)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [teamId, entity_type, field_key, field_label, field_type, JSON.stringify(options), is_required]
+      );
+      res.json({ field: rows[0] });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.patch('/api/crm/custom-fields/:fieldId', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { field_label, field_type, options, is_required, sort_order } = req.body;
+      const sets = [], vals = [teamId, req.params.fieldId];
+      if (field_label  !== undefined) { sets.push(`field_label=$${vals.length+1}`);  vals.push(field_label); }
+      if (field_type   !== undefined) { sets.push(`field_type=$${vals.length+1}`);   vals.push(field_type); }
+      if (options      !== undefined) { sets.push(`options=$${vals.length+1}`);      vals.push(JSON.stringify(options)); }
+      if (is_required  !== undefined) { sets.push(`is_required=$${vals.length+1}`);  vals.push(is_required); }
+      if (sort_order   !== undefined) { sets.push(`sort_order=$${vals.length+1}`);   vals.push(sort_order); }
+      if (!sets.length) return res.json({ ok: true });
+      await dbQuery(`UPDATE crm_custom_fields SET ${sets.join(',')} WHERE team_id=$1 AND id=$2`, vals);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.delete('/api/crm/custom-fields/:fieldId', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      await dbQuery(`DELETE FROM crm_custom_fields WHERE team_id=$1 AND id=$2`, [teamId, req.params.fieldId]);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── 成績ページ閲覧可否（admin / BC管理職以上）──────────────────
   expressApp.get('/api/crm/performance-access', authWithRole, async (req, res) => {
     try {

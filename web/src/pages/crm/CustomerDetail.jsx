@@ -32,6 +32,31 @@ const S = {
   row2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px 16px' },
 };
 
+function CustomFieldInput({ field, value, onChange }) {
+  const { field_type, options = [] } = field;
+  if (field_type === 'select') return (
+    <select value={value||''} onChange={e => onChange(e.target.value)} style={S.select}>
+      <option value="">—</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+  if (field_type === 'textarea') return (
+    <textarea value={value||''} onChange={e => onChange(e.target.value)}
+      rows={2} style={{ ...S.input, resize:'vertical' }}
+      onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+  );
+  if (field_type === 'checkbox') return (
+    <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginTop:4 }}>
+      <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} />
+      <span style={{ fontSize:'0.85rem', color:'#374151' }}>有効</span>
+    </label>
+  );
+  return (
+    <InputF type={field_type === 'number' ? 'number' : field_type === 'date' ? 'date' : 'text'}
+      value={value||''} onChange={e => onChange(e.target.value)} />
+  );
+}
+
 function Field({ label, required, children }) {
   return (
     <div>
@@ -273,7 +298,7 @@ function DealActivitySection({ deal, activitySettings }) {
   );
 }
 
-function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings }) {
+function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, customFields = [] }) {
   const [editing, setEditing] = useState(false);
   const [showActivities, setShowActivities] = useState(false);
   const [form, setForm] = useState({ ...deal, ...deal.data });
@@ -541,6 +566,22 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings })
           <textarea value={form.memo||''} onChange={e=>setAuto('memo',e.target.value)}
             rows={8} style={{ ...S.input, resize:'vertical', lineHeight:1.7 }}
             onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+
+          {/* 案件カスタムフィールド */}
+          {customFields.length > 0 && (
+            <div style={{ marginTop:18, paddingTop:14, borderTop:'1px dashed #e5e7eb' }}>
+              <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#94a3b8', marginBottom:12 }}>カスタムフィールド</div>
+              <div style={S.row2}>
+                {customFields.map(f => (
+                  <Field key={f.field_key} label={f.field_label}>
+                    <CustomFieldInput field={f}
+                      value={(form.data||{})[f.field_key]}
+                      onChange={v => setAuto('data', { ...(form.data||{}), [f.field_key]: v })} />
+                  </Field>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
@@ -584,9 +625,12 @@ export default function CustomerDetail() {
   const [showDealModal, setShowDealModal] = useState(false);
   const [dealForm, setDealForm] = useState({ name:'', yomi:'アポ化前' });
   const [saving, setSaving] = useState(false);
+  const [customFields, setCustomFields] = useState({ customer:[], deal:[] });
 
   useEffect(() => {
     api.crmActivitySettings().then(setActivitySettings).catch(() => {});
+    api.crmCustomFields('customer').then(r => setCustomFields(p => ({ ...p, customer: r.fields||[] }))).catch(()=>{});
+    api.crmCustomFields('deal').then(r => setCustomFields(p => ({ ...p, deal: r.fields||[] }))).catch(()=>{});
 
     Promise.all([
       api.crmGetCustomer(id),
@@ -651,6 +695,7 @@ export default function CustomerDetail() {
         address: custForm.address || null,
         serviceLpUrl1: custForm.service_lp_url1 || null,
         serviceLpUrl2: custForm.service_lp_url2 || null,
+        data: custForm.data || {},
       });
       setCustomer(r.customer);
       setCustSavedAt(new Date().toLocaleTimeString('ja-JP'));
@@ -805,7 +850,8 @@ export default function CustomerDetail() {
         ? <p style={{ color:'#9ca3af', textAlign:'center', padding:32 }}>商談がありません</p>
         : deals.map(deal => (
           <DealCard key={deal.id} deal={{...deal, data: deal.data||{}}} meta={meta} members={members}
-            onUpdate={handleUpdateDeal} onDelete={handleDeleteDeal} activitySettings={activitySettings} />
+            onUpdate={handleUpdateDeal} onDelete={handleDeleteDeal} activitySettings={activitySettings}
+            customFields={customFields.deal} />
         ))
       }
 
@@ -885,6 +931,22 @@ export default function CustomerDetail() {
                   onBlur={e=>e.target.style.borderColor='#e5e7eb'}
                 />
               </Field>
+
+              {/* カスタムフィールド */}
+              {customFields.customer.length > 0 && (
+                <div style={{ marginTop:18, paddingTop:14, borderTop:'1px dashed #e5e7eb' }}>
+                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#94a3b8', marginBottom:12 }}>カスタムフィールド</div>
+                  <div style={S.row2}>
+                    {customFields.customer.map(f => (
+                      <Field key={f.field_key} label={f.field_label}>
+                        <CustomFieldInput field={f}
+                          value={(custForm.data||{})[f.field_key]}
+                          onChange={v => setCustForm(p => ({ ...p, data: { ...(p.data||{}), [f.field_key]: v } }))} />
+                      </Field>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center' }}>

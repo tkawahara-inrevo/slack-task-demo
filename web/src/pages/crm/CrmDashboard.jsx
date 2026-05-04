@@ -163,6 +163,9 @@ export default function CrmDashboard() {
   const [customMonth, setCustomMonth] = useState(currentMonth);
   const [drill, setDrill]         = useState(null);
   const [alertOpen, setAlertOpen] = useState(true);
+  const [syncing, setSyncing]     = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncDone, setSyncDone]   = useState(false);
 
   const load = async (u, p, cm) => {
     setLoading(true);
@@ -183,6 +186,34 @@ export default function CrmDashboard() {
   };
 
   useEffect(() => { load('', 'custom', currentMonth); }, []);
+
+  const handleKintoneSync = async () => {
+    if (syncing) return;
+    setSyncing(true); setSyncDone(false); setSyncProgress(5);
+    try {
+      await api.kintoneSync();
+      // 進捗アニメーション＋ポーリング
+      let prog = 5;
+      const tick = setInterval(async () => {
+        prog = Math.min(prog + Math.random() * 8, 90);
+        setSyncProgress(Math.round(prog));
+        try {
+          const st = await api.kintoneStatus();
+          if (!st.inProgress) {
+            clearInterval(tick);
+            setSyncProgress(100);
+            setSyncDone(true);
+            setSyncing(false);
+            // データ再読み込み
+            setTimeout(() => {
+              load(salesUser, period, customMonth);
+              setSyncDone(false); setSyncProgress(0);
+            }, 1500);
+          }
+        } catch { clearInterval(tick); setSyncing(false); }
+      }, 2000);
+    } catch { setSyncing(false); }
+  };
 
   if (loading && !data) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#94a3b8', fontSize:'0.88rem' }}>
@@ -262,6 +293,26 @@ export default function CrmDashboard() {
           <option value="">全員</option>
           {TARGET_REPS.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
+
+        {/* kintone同期ボタン（暫定） */}
+        <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:4, alignItems:'flex-end' }}>
+          <button onClick={handleKintoneSync} disabled={syncing}
+            style={{ padding:'5px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.78rem', fontWeight:600, cursor: syncing ? 'default' : 'pointer',
+              background: syncDone ? '#f0fdf4' : syncing ? '#f8fafc' : '#fff',
+              color: syncDone ? '#059669' : syncing ? '#94a3b8' : '#374151',
+              display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
+            <span style={{ fontSize:'0.85rem' }}>{syncDone ? '✓' : '⟳'}</span>
+            {syncDone ? '同期完了' : syncing ? 'kintone同期中…' : 'kintoneデータ取得'}
+          </button>
+          {syncing && (
+            <div style={{ width:160, height:4, background:'#e2e8f0', borderRadius:2, overflow:'hidden' }}>
+              <div style={{ height:'100%', width:`${syncProgress}%`, background:'#1e40af', borderRadius:2, transition:'width 0.4s ease' }} />
+            </div>
+          )}
+          {syncing && (
+            <span style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{syncProgress}%</span>
+          )}
+        </div>
       </div>
 
       {/* ── KPIカード 5枚 ── */}

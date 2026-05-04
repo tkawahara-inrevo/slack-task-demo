@@ -312,6 +312,8 @@ export const api = {
   // kintone連携
   kintoneSearch:    (q)  => kintoneFetch(`/search?q=${encodeURIComponent(q)}`),
   kintoneRecord:    (id) => kintoneFetch(`/record/${encodeURIComponent(id)}`),
+  kintoneSync:      ()   => kintoneFetch('/sync', { method: 'POST' }),
+  kintoneStatus:    ()   => kintoneFetch('/status'),
 
   // RPO案件管理
   rpoAccess:       ()        => rpoFetch('/access'),

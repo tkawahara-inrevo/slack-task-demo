@@ -446,8 +446,9 @@ export default function CrmDashboard() {
                 {reps.map((r, ri) => {
                   const color       = REP_COLORS[ri % REP_COLORS.length];
                   const repWinRate  = r.meetingCount > 0 ? Math.round(r.wonCount / r.meetingCount * 100) : 0;
-                  const repTarget   = repTargetMap[r.rep] || 0;
-                  const repAchieve  = (repTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTarget * 100) : null;
+                  const repTarget      = repTargetMap[r.rep] || 0;
+                  const repTermTarget  = period === 'term' ? repTarget * termMonths : repTarget;
+                  const repAchieve     = (repTermTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTermTarget * 100) : null;
                   const [fam, given] = r.rep.split(/[\s　]/);
                   return (
                     <tr key={r.rep} style={{ borderBottom:'1px solid #f8fafc', transition:'background 0.1s' }}

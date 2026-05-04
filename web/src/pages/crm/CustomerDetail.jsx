@@ -416,188 +416,311 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
     </div>
   );
 
-  // ─── 編集モーダル（カード外に表示）───────────────
+  // ─── ヨミ設定 ───────────────────────────────────────────────
+  const YOMI_PILLS = [
+    { val:'アポ化前',       label:'アポ前', color:'#64748b', bg:'#f1f5f9' },
+    { val:'アポ化済商談前', label:'商談前', color:'#475569', bg:'#e2e8f0' },
+    { val:'E 5％',         label:'E',      color:'#94a3b8', bg:'#f8fafc' },
+    { val:'D 15％',        label:'D',      color:'#64748b', bg:'#f1f5f9' },
+    { val:'C 30％',        label:'C',      color:'#d97706', bg:'#fef3c7' },
+    { val:'B 50％',        label:'B',      color:'#0891b2', bg:'#e0f2fe' },
+    { val:'A 70％',        label:'A',      color:'#2563eb', bg:'#dbeafe' },
+    { val:'S 90％',        label:'S',      color:'#4f46e5', bg:'#ede9fe' },
+    { val:'受注',          label:'受注',   color:'#059669', bg:'#d1fae5' },
+    { val:'失注',          label:'失注',   color:'#dc2626', bg:'#fee2e2' },
+  ];
+
+  const bantCount = ['budget','authority','needs','timeframe'].filter(k => !!form[k]).length;
+  const salesDisplay = form.salesUserId || form.sales_user_id || '';
+  const salesInitial = salesDisplay ? salesDisplay.split(/[\s　]/)[0]?.[0] || '?' : '?';
+
+  // ─── 編集モーダル（リデザイン版）──────────────────────────────
   const editModal = editing && (
     <div className="modal-overlay" onClick={()=>{ clearTimeout(autoSaveTimer.current); setEditing(false); }}>
-      <div className="modal-content" onClick={e=>e.stopPropagation()} style={{ maxWidth:820, width:'90vw', padding:0, overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'88vh' }}>
-        {/* モーダルヘッダー */}
-        <div style={{ padding:'14px 24px', borderBottom:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
-          <div>
-            <div style={{ fontSize:'0.75rem', color:'#9ca3af', marginBottom:2 }}>商談を編集</div>
-            <div style={{ fontWeight:800, fontSize:'1rem', color:'#111827' }}>{deal.name}</div>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            {savedAt && (
-              <span style={{ fontSize:'0.75rem', color:'#10b981', fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>
-                <span style={{ width:7, height:7, borderRadius:'50%', background:'#10b981', display:'inline-block' }} />
-                {savedAt} に保存済み
-              </span>
-            )}
-            <button onClick={()=>{ clearTimeout(autoSaveTimer.current); setEditing(false); }}
-              style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:18, lineHeight:1, padding:4 }}>×</button>
-          </div>
-        </div>
+      <div className="modal-content" onClick={e=>e.stopPropagation()}
+        style={{ maxWidth:820, width:'90vw', padding:0, overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'92vh', borderRadius:16 }}>
 
-        <div style={{ flex:1, overflowY:'auto', padding:'20px 24px' }}>
-          <SectionHeader title="基本情報" sub="商談の概要と担当者" />
-          <div style={{ marginBottom:16 }}>
-            <Field label="商談名" required>
-              <InputF value={form.name} onChange={e=>setAuto('name',e.target.value)} />
-            </Field>
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px 16px', marginBottom:20 }}>
-            <Field label="ヨミ" required>
-              <SelectF value={form.yomi} onChange={e=>setAuto('yomi',e.target.value)} options={YOMI_ORDER} />
-            </Field>
-            <Field label="契約形態">
-              <SelectF value={form.contractType||form.contract_type} onChange={e=>setAuto('contractType',e.target.value)} options={fieldOptions.contract_type || meta?.contractTypes || []} />
-            </Field>
-            <Field label="支払方式">
-              <SelectF value={form.paymentType||form.payment_type} onChange={e=>setAuto('paymentType',e.target.value)} options={fieldOptions.payment_type || meta?.paymentTypes || []} />
-            </Field>
-            <Field label="担当営業">
-              <select value={form.salesUserId||form.sales_user_id||''} onChange={e=>setAuto('salesUserId',e.target.value)} style={S.select}>
-                <option value="">選択してください</option>
-                {salesUsers.map(n=><option key={n} value={n}>{n}</option>)}
-              </select>
-            </Field>
-            <Field label="NA担当者">
-              <select value={form.naUserId||form.na_user_id||''} onChange={e=>setAuto('naUserId',e.target.value)} style={S.select}>
-                <option value="">選択してください</option>
-                {salesUsers.map(n=><option key={n} value={n}>{n}</option>)}
-              </select>
-            </Field>
-            <Field label="雇用形態">
-              <SelectF value={form.employmentType||form.employment_type} onChange={e=>setAuto('employmentType',e.target.value)} options={fieldOptions.employment_type || ['新卒','中途','業務委託','アルバイト/インターン']} />
-            </Field>
-          </div>
-
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px 16px', marginBottom:20 }}>
-            <Field label="流入日（案件）">
-              <InputF type="date" value={form.inflowDate||form.inflow_date||''} onChange={e=>setAuto('inflowDate',e.target.value)} />
-            </Field>
-            <Field label="流入経路（案件）">
-              {fieldOptions.inflow_source?.length > 0
-                ? <SelectF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} options={fieldOptions.inflow_source} />
-                : <InputF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} placeholder="例: 問い合わせ" />}
-            </Field>
-            <Field label="初回商談日">
-              <InputF type="date" value={form.firstMeetingDate||form.first_meeting_date||''} onChange={e=>setAuto('firstMeetingDate',e.target.value)} />
-            </Field>
-          </div>
-
-          <SectionHeader title="費用・条件" sub="契約金額と採用条件" />
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px 16px', marginBottom:20 }}>
-            <Field label="初期費用 (円)">
-              <InputF type="number" value={form.initialFee??form.initial_fee} onChange={e=>setAuto('initialFee',e.target.value)} placeholder="例: 500000" />
-            </Field>
-            <Field label="月額費用 (円)">
-              <InputF type="number" value={form.monthlyFee??form.monthly_fee} onChange={e=>setAuto('monthlyFee',e.target.value)} placeholder="例: 300000" />
-            </Field>
-            <Field label="採用目標人数">
-              <InputF type="number" value={form.hiringTarget??form.hiring_target} onChange={e=>setAuto('hiringTarget',e.target.value)} />
-            </Field>
-            <Field label="契約月数">
-              <InputF type="number" value={form.contractMonths??form.contract_months} onChange={e=>setAuto('contractMonths',e.target.value)} />
-            </Field>
-            <Field label="失注理由">
-              <SelectF value={form.lostReason||form.lost_reason} onChange={e=>setAuto('lostReason',e.target.value)} options={meta?.lostReasons||[]} />
-            </Field>
-          </div>
-
-          <SectionHeader title="BANT" sub="予算・決裁権・ニーズ・導入時期の確認状況" />
-          <div style={{ background:'#fafafa', borderRadius:10, padding:'14px 16px', marginBottom:20, border:'1px solid #f3f4f6' }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px 16px', marginBottom:12 }}>
-              {[['budget','Budget（予算）'],['authority','Authority（決裁権）'],['needs','Needs（ニーズ）'],['timeframe','Timeframe（導入時期）']].map(([k,l])=>(
-                <label key={k} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:'0.85rem', color:'#374151', fontWeight:500 }}>
-                  <input type="checkbox" checked={!!form[k]} onChange={e=>setAuto(k,e.target.checked)}
-                    style={{ width:16, height:16, accentColor:'#6366f1', cursor:'pointer' }} />
-                  {l}確認済
-                </label>
-              ))}
+        {/* ── グラデーションヘッダー ── */}
+        <div style={{ background:'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', padding:'16px 22px', flexShrink:0 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+            <div>
+              <div style={{ fontSize:'0.7rem', color:'rgba(255,255,255,0.7)', marginBottom:3, letterSpacing:'0.05em' }}>商談を編集</div>
+              <div style={{ fontWeight:800, fontSize:'1.15rem', color:'#fff', lineHeight:1.2 }}>{deal.name.split('_')[0]}</div>
+              {(deal.contract_type || deal.inflow_date) && (
+                <div style={{ fontSize:'0.75rem', color:'rgba(255,255,255,0.75)', marginTop:3 }}>
+                  {[deal.contract_type, deal.inflow_date && `流入日 ${deal.inflow_date}`].filter(Boolean).join('・')}
+                </div>
+              )}
             </div>
-            <Field label="BANT メモ">
-              <textarea value={form.bantMemo||''} onChange={e=>setAuto('bantMemo',e.target.value)}
-                rows={2} style={{ ...S.input, resize:'vertical' }}
-                onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-            </Field>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              {savedAt && (
+                <span style={{ fontSize:'0.72rem', color:'rgba(255,255,255,0.9)', fontWeight:600, display:'flex', alignItems:'center', gap:5, background:'rgba(255,255,255,0.15)', padding:'4px 10px', borderRadius:20 }}>
+                  <span style={{ width:7, height:7, borderRadius:'50%', background:'#4ade80', display:'inline-block' }} />
+                  {savedAt} 保存済み
+                </span>
+              )}
+              <button onClick={()=>{ clearTimeout(autoSaveTimer.current); setEditing(false); }}
+                style={{ background:'rgba(255,255,255,0.2)', border:'none', cursor:'pointer', color:'#fff', width:28, height:28, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:700 }}>×</button>
+            </div>
           </div>
 
-          <SectionHeader title="RPO費用" sub="RPO費用サブテーブル" />
-          <SubTableEditor
-            dealId={deal.id} path="rpo-costs"
-            columns={[
-              { key:'initial_cost', label:'初期費用', type:'number' },
-              { key:'monthly_cost', label:'月額費用', type:'number' },
-              { key:'months', label:'利用月数', type:'number' },
-              { key:'total_cost', label:'合計費用', type:'number' },
-            ]}
-          />
-
-          <SectionHeader title="採用費用" sub="採用費用サブテーブル" />
-          <SubTableEditor
-            dealId={deal.id} path="hiring-costs"
-            columns={[
-              { key:'hire_count', label:'採用人数', type:'number' },
-              { key:'unit_price', label:'採用単価', type:'number' },
-              { key:'media_cost', label:'媒体費用', type:'number' },
-              { key:'rpo_cost', label:'RPO費用', type:'number' },
-              { key:'total_cost', label:'合計費用', type:'number' },
-            ]}
-          />
-
-          <SectionHeader title="人件費" sub="人件費サブテーブル" />
-          <SubTableEditor
-            dealId={deal.id} path="labor-costs"
-            columns={[
-              { key:'labor_cost', label:'人件費/月', type:'number' },
-              { key:'months', label:'利用月数', type:'number' },
-              { key:'total_cost', label:'合計人件費', type:'number' },
-            ]}
-          />
-
-          <SectionHeader title="応募予測" sub="媒体ごとの応募予測" />
-          <SubTableEditor
-            dealId={deal.id} path="app-forecasts"
-            columns={[
-              { key:'position_name', label:'採用ポジション', type:'text' },
-              { key:'media_name', label:'媒体', type:'text' },
-              { key:'scout_count', label:'スカウト数', type:'number' },
-              { key:'application_count', label:'応募数', type:'number' },
-              { key:'offer_count', label:'内定数', type:'number' },
-            ]}
-          />
-
-          <SectionHeader title="メモ" sub="商談に関する詳細メモ・ヒアリング内容など" />
-          <textarea value={form.memo||''} onChange={e=>setAuto('memo',e.target.value)}
-            rows={8} style={{ ...S.input, resize:'vertical', lineHeight:1.7 }}
-            onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-
-          {/* 案件カスタムフィールド */}
-          {customFields.length > 0 && (
-            <div style={{ marginTop:18, paddingTop:14, borderTop:'1px dashed #e5e7eb' }}>
-              <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#94a3b8', marginBottom:12 }}>カスタムフィールド</div>
-              <div style={S.row2}>
-                {customFields.map(f => (
-                  <Field key={f.field_key} label={f.field_label}>
-                    <CustomFieldInput field={f}
-                      value={(form.data||{})[f.field_key]}
-                      onChange={v => setAuto('data', { ...(form.data||{}), [f.field_key]: v })} />
-                  </Field>
-                ))}
+          {/* サマリーカード */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, marginTop:14 }}>
+            {/* 月額/初期費用 */}
+            <div style={{ background:'rgba(255,255,255,0.15)', borderRadius:10, padding:'10px 12px', backdropFilter:'blur(4px)' }}>
+              <div style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.7)', marginBottom:3 }}>月額</div>
+              <div style={{ fontWeight:800, fontSize:'1rem', color:'#fff' }}>
+                {form.monthlyFee||form.monthly_fee ? `¥${Number(form.monthlyFee||form.monthly_fee).toLocaleString()}` : <span style={{ fontSize:'0.8rem', color:'rgba(255,255,255,0.5)' }}>未入力</span>}
+              </div>
+              <div style={{ fontSize:'0.62rem', color:'rgba(255,255,255,0.6)', marginTop:2 }}>
+                初期 {form.initialFee||form.initial_fee ? `¥${Number(form.initialFee||form.initial_fee).toLocaleString()}` : '—'}
               </div>
             </div>
-          )}
+            {/* ヨミ */}
+            <div style={{ background:'rgba(255,255,255,0.15)', borderRadius:10, padding:'10px 12px', backdropFilter:'blur(4px)' }}>
+              <div style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.7)', marginBottom:5 }}>ヨミ</div>
+              {form.yomi ? (
+                <span style={{ fontSize:'0.82rem', fontWeight:700, padding:'3px 10px', borderRadius:99, background:'rgba(255,255,255,0.25)', color:'#fff' }}>{form.yomi}</span>
+              ) : <span style={{ fontSize:'0.8rem', color:'rgba(255,255,255,0.5)' }}>未設定</span>}
+            </div>
+            {/* BANT */}
+            <div style={{ background:'rgba(255,255,255,0.15)', borderRadius:10, padding:'10px 12px', backdropFilter:'blur(4px)' }}>
+              <div style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.7)', marginBottom:5 }}>BANT</div>
+              <div style={{ display:'flex', gap:4 }}>
+                {[['B','budget'],['A','authority'],['N','needs'],['T','timeframe']].map(([l,k]) => (
+                  <span key={k} style={{ width:20, height:20, borderRadius:5, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', fontWeight:800,
+                    background: form[k] ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.2)', color: form[k] ? '#4f46e5' : 'rgba(255,255,255,0.5)' }}>{l}</span>
+                ))}
+              </div>
+              <div style={{ fontSize:'0.62rem', color:'rgba(255,255,255,0.6)', marginTop:3 }}>{bantCount}/4 確認済</div>
+            </div>
+            {/* 担当 */}
+            <div style={{ background:'rgba(255,255,255,0.15)', borderRadius:10, padding:'10px 12px', backdropFilter:'blur(4px)' }}>
+              <div style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.7)', marginBottom:5 }}>担当</div>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ width:26, height:26, borderRadius:8, background:'rgba(255,255,255,0.3)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#fff', flexShrink:0 }}>
+                  {salesInitial}
+                </span>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {salesDisplay || <span style={{ color:'rgba(255,255,255,0.5)' }}>未設定</span>}
+                  </div>
+                  {(form.naUserId||form.na_user_id) && (
+                    <div style={{ fontSize:'0.62rem', color:'rgba(255,255,255,0.65)' }}>NA: {form.naUserId||form.na_user_id}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
-          <span style={{ fontSize:'0.75rem', color:'#9ca3af' }}>
+        {/* ── フォームエリア ── */}
+        <div style={{ flex:1, overflowY:'auto', background:'#f8fafc' }}>
+          {/* 01 基本情報 */}
+          <div style={{ margin:'16px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ width:28, height:28, borderRadius:8, background:'#ede9fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#6d28d9' }}>01</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>基本情報</span>
+              </div>
+              <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>商談の概要と担当者</span>
+            </div>
+            <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:14 }}>
+              <Field label="商談名" required><InputF value={form.name} onChange={e=>setAuto('name',e.target.value)} /></Field>
+
+              {/* ヨミ ピル選択 */}
+              <div>
+                <label style={S.label}>ヨミ <span style={{ color:'#ef4444' }}>*</span></label>
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                  {YOMI_PILLS.map(p => {
+                    const active = form.yomi === p.val;
+                    return (
+                      <button key={p.val} onClick={()=>setAuto('yomi', p.val)}
+                        style={{ padding:'5px 14px', borderRadius:99, border:`1.5px solid ${active ? p.color : '#e2e8f0'}`, cursor:'pointer', fontSize:'0.8rem', fontWeight:active?700:500, transition:'all 0.12s',
+                          background: active ? p.color : '#fff', color: active ? '#fff' : '#64748b' }}>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                <Field label="契約形態">
+                  <SelectF value={form.contractType||form.contract_type} onChange={e=>setAuto('contractType',e.target.value)} options={fieldOptions.contract_type || meta?.contractTypes || []} />
+                </Field>
+                <Field label="支払方式">
+                  <SelectF value={form.paymentType||form.payment_type} onChange={e=>setAuto('paymentType',e.target.value)} options={fieldOptions.payment_type || meta?.paymentTypes || []} />
+                </Field>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+                <Field label="担当営業">
+                  <div style={{ position:'relative' }}>
+                    {(form.salesUserId||form.sales_user_id) && (
+                      <span style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', width:20, height:20, borderRadius:5, background:'#ede9fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.62rem', fontWeight:800, color:'#6d28d9', zIndex:1 }}>
+                        {(form.salesUserId||form.sales_user_id).split(/[\s　]/)[0]?.[0]}
+                      </span>
+                    )}
+                    <select value={form.salesUserId||form.sales_user_id||''} onChange={e=>setAuto('salesUserId',e.target.value)}
+                      style={{ ...S.select, paddingLeft:(form.salesUserId||form.sales_user_id)?'36px':'12px' }}>
+                      <option value="">選択してください</option>
+                      {salesUsers.map(n=><option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                </Field>
+                <Field label="NA担当者">
+                  <div style={{ position:'relative' }}>
+                    {(form.naUserId||form.na_user_id) && (
+                      <span style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', width:20, height:20, borderRadius:5, background:'#dcfce7', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.62rem', fontWeight:800, color:'#059669', zIndex:1 }}>
+                        {(form.naUserId||form.na_user_id).split(/[\s　]/)[0]?.[0]}
+                      </span>
+                    )}
+                    <select value={form.naUserId||form.na_user_id||''} onChange={e=>setAuto('naUserId',e.target.value)}
+                      style={{ ...S.select, paddingLeft:(form.naUserId||form.na_user_id)?'36px':'12px' }}>
+                      <option value="">選択してください</option>
+                      {salesUsers.map(n=><option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                </Field>
+                <Field label="雇用形態">
+                  <SelectF value={form.employmentType||form.employment_type} onChange={e=>setAuto('employmentType',e.target.value)} options={fieldOptions.employment_type || ['新卒','中途','業務委託','アルバイト/インターン']} />
+                </Field>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+                <Field label="流入日">
+                  <InputF type="date" value={form.inflowDate||form.inflow_date||''} onChange={e=>setAuto('inflowDate',e.target.value)} />
+                </Field>
+                <Field label="流入経路">
+                  {fieldOptions.inflow_source?.length > 0
+                    ? <SelectF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} options={fieldOptions.inflow_source} />
+                    : <InputF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} placeholder="例: 問い合わせ" />}
+                </Field>
+                <Field label="初回商談日">
+                  <InputF type="date" value={form.firstMeetingDate||form.first_meeting_date||''} onChange={e=>setAuto('firstMeetingDate',e.target.value)} />
+                </Field>
+              </div>
+            </div>
+          </div>
+
+          {/* 02 費用・条件 */}
+          <div style={{ margin:'12px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ width:28, height:28, borderRadius:8, background:'#dcfce7', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#059669' }}>02</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>費用・条件</span>
+              </div>
+              <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>契約金額と採用条件</span>
+            </div>
+            <div style={{ padding:'16px 18px' }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
+                <Field label="初期費用 (円)">
+                  <InputF type="number" value={form.initialFee??form.initial_fee} onChange={e=>setAuto('initialFee',e.target.value)} placeholder="例: 500000" />
+                </Field>
+                <Field label="月額費用 (円)">
+                  <InputF type="number" value={form.monthlyFee??form.monthly_fee} onChange={e=>setAuto('monthlyFee',e.target.value)} placeholder="例: 300000" />
+                </Field>
+                <Field label="採用目標人数">
+                  <InputF type="number" value={form.hiringTarget??form.hiring_target} onChange={e=>setAuto('hiringTarget',e.target.value)} />
+                </Field>
+                <Field label="契約月数">
+                  <InputF type="number" value={form.contractMonths??form.contract_months} onChange={e=>setAuto('contractMonths',e.target.value)} />
+                </Field>
+                <Field label="失注理由">
+                  <SelectF value={form.lostReason||form.lost_reason} onChange={e=>setAuto('lostReason',e.target.value)} options={meta?.lostReasons||[]} />
+                </Field>
+              </div>
+            </div>
+          </div>
+
+          {/* 03 BANT */}
+          <div style={{ margin:'12px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ width:28, height:28, borderRadius:8, background:'#fef3c7', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#d97706' }}>03</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>BANT</span>
+              </div>
+              <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{bantCount}/4 確認済</span>
+            </div>
+            <div style={{ padding:'16px 18px' }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginBottom:14 }}>
+                {[['B','budget','予算'],['A','authority','決裁権'],['N','needs','ニーズ'],['T','timeframe','導入時期']].map(([l,k,desc])=>(
+                  <button key={k} onClick={()=>setAuto(k,!form[k])}
+                    style={{ padding:'10px 8px', borderRadius:10, border:`2px solid ${form[k]?'#6366f1':'#e2e8f0'}`, cursor:'pointer', textAlign:'center', transition:'all 0.15s',
+                      background:form[k]?'#ede9fe':'#fff' }}>
+                    <div style={{ fontSize:'1.1rem', fontWeight:900, color:form[k]?'#6366f1':'#cbd5e1', marginBottom:2 }}>{l}</div>
+                    <div style={{ fontSize:'0.65rem', color:form[k]?'#6366f1':'#94a3b8', fontWeight:600 }}>{desc}</div>
+                  </button>
+                ))}
+              </div>
+              <Field label="BANT メモ">
+                <textarea value={form.bantMemo||''} onChange={e=>setAuto('bantMemo',e.target.value)}
+                  rows={2} style={{ ...S.input, resize:'vertical' }}
+                  onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+              </Field>
+            </div>
+          </div>
+
+          {/* 04 サブテーブル */}
+          <div style={{ margin:'12px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:10 }}>
+              <span style={{ width:28, height:28, borderRadius:8, background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#0891b2' }}>04</span>
+              <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>費用テーブル</span>
+            </div>
+            <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:16 }}>
+              {[
+                { title:'RPO費用', path:'rpo-costs', cols:[{key:'initial_cost',label:'初期費用',type:'number'},{key:'monthly_cost',label:'月額費用',type:'number'},{key:'months',label:'利用月数',type:'number'},{key:'total_cost',label:'合計費用',type:'number'}] },
+                { title:'採用費用', path:'hiring-costs', cols:[{key:'hire_count',label:'採用人数',type:'number'},{key:'unit_price',label:'採用単価',type:'number'},{key:'media_cost',label:'媒体費用',type:'number'},{key:'rpo_cost',label:'RPO費用',type:'number'},{key:'total_cost',label:'合計費用',type:'number'}] },
+                { title:'人件費', path:'labor-costs', cols:[{key:'labor_cost',label:'人件費/月',type:'number'},{key:'months',label:'利用月数',type:'number'},{key:'total_cost',label:'合計人件費',type:'number'}] },
+                { title:'応募予測', path:'app-forecasts', cols:[{key:'position_name',label:'ポジション',type:'text'},{key:'media_name',label:'媒体',type:'text'},{key:'scout_count',label:'スカウト',type:'number'},{key:'application_count',label:'応募',type:'number'},{key:'offer_count',label:'内定',type:'number'}] },
+              ].map(({title,path,cols}) => (
+                <div key={path}>
+                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#374151', marginBottom:6 }}>{title}</div>
+                  <SubTableEditor dealId={deal.id} path={path} columns={cols} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 05 メモ */}
+          <div style={{ margin:'12px 20px 16px', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ width:28, height:28, borderRadius:8, background:'#fce7f3', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#db2777' }}>05</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>メモ</span>
+              </div>
+            </div>
+            <div style={{ padding:'16px 18px' }}>
+              <textarea value={form.memo||''} onChange={e=>setAuto('memo',e.target.value)}
+                rows={6} style={{ ...S.input, resize:'vertical', lineHeight:1.7 }}
+                onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+              {customFields.length > 0 && (
+                <div style={{ marginTop:14, paddingTop:12, borderTop:'1px dashed #e5e7eb' }}>
+                  <div style={{ fontSize:'0.75rem', fontWeight:700, color:'#94a3b8', marginBottom:10 }}>カスタムフィールド</div>
+                  <div style={S.row2}>
+                    {customFields.map(f => (
+                      <Field key={f.field_key} label={f.field_label}>
+                        <CustomFieldInput field={f} value={(form.data||{})[f.field_key]}
+                          onChange={v => setAuto('data', { ...(form.data||{}), [f.field_key]: v })} />
+                      </Field>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* フッター */}
+        <div style={{ padding:'12px 20px', borderTop:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'#fff' }}>
+          <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>
             {deal.updated_at ? `最終更新: ${formatUpdatedAt(deal.updated_at)}` : ''}
           </span>
           <div style={{ display:'flex', gap:8 }}>
-            <button style={{ padding:'8px 20px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#6b7280', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
+            <button style={{ padding:'8px 20px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#64748b', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
               onClick={()=>{ clearTimeout(autoSaveTimer.current); setEditing(false); }}>キャンセル</button>
-            <button style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}
+            <button style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(79,70,229,0.35)' }}
               onClick={()=>save()} disabled={saving}>
               {saving ? '保存中...' : '✓ 保存して閉じる'}
             </button>

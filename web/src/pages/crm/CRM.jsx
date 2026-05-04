@@ -11,16 +11,16 @@ const ROLE_NAMES  = ['役職無し', 'Lead', 'Sub Chief', 'Chief', 'Sub Expert',
 const ROLE_OPTIONS = ['', ...ROLE_NAMES];
 
 function CrmSettings() {
-  const [roleTargetRows, setRoleTargetRows] = useState([]); // [{role_name, monthly_target, sort_order}]
-  const [roleTargets, setRoleTargets]       = useState({}); // role_name → monthly_target (万円単位の数値)
-  const [repRoles, setRepRoles]             = useState({}); // rep_name → { role_name, monthly_target_override }
+  const [roleTargetRows, setRoleTargetRows] = useState([]);
+  const [roleTargets, setRoleTargets]       = useState({});
+  const [repRoles, setRepRoles]             = useState({});
+  const [period, setPeriod]                 = useState({ prevStart:'', prevEnd:'', currStart:'', currEnd:'' });
   const [saving, setSaving]                 = useState(false);
   const [notice, setNotice]                 = useState('');
 
   useEffect(() => {
-    Promise.all([api.crmRoleTargets(), api.crmRepRoles()]).then(([rt, rr]) => {
+    Promise.all([api.crmRoleTargets(), api.crmRepRoles(), api.crmPeriodSettings()]).then(([rt, rr, ps]) => {
       const rows = rt.targets || [];
-      // 全役職分を確保（DBにないものは0で補完）
       const merged = ROLE_NAMES.map((name, i) => {
         const ex = rows.find(r => r.role_name === name);
         return { role_name: name, monthly_target: Number(ex?.monthly_target || 0), sort_order: i };
@@ -32,6 +32,13 @@ function CrmSettings() {
       const rrMap = {};
       for (const r of (rr.repRoles || [])) rrMap[r.rep_name] = r;
       setRepRoles(rrMap);
+      const s = ps.settings || {};
+      setPeriod({
+        prevStart: s.prev_start?.split('T')[0] || '',
+        prevEnd:   s.prev_end?.split('T')[0]   || '',
+        currStart: s.curr_start?.split('T')[0] || '',
+        currEnd:   s.curr_end?.split('T')[0]   || '',
+      });
     });
   }, []);
 
@@ -72,7 +79,11 @@ function CrmSettings() {
         monthly_target: r.monthly_target,
         sort_order: i,
       }));
-      await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr)]);
+      await Promise.all([
+        api.crmRepRolesSave(repArr),
+        api.crmRoleTargetsSave(roleArr),
+        api.crmPeriodSettingsSave({ prevStart: period.prevStart, prevEnd: period.prevEnd, currStart: period.currStart, currEnd: period.currEnd }),
+      ]);
       setNotice('保存しました');
       setTimeout(() => setNotice(''), 2500);
     } catch {
@@ -93,6 +104,25 @@ function CrmSettings() {
 
   return (
     <div style={{ padding:'28px 32px', maxWidth:640 }}>
+
+      {/* ── 期間設定 ── */}
+      {sectionTitle('集計期間', '前期・今期の開始日と終了日を設定します（個人成績の評価期間に使用）')}
+      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden', marginBottom:28 }}>
+        {[
+          [['prevStart','前期 開始'],['prevEnd','前期 終了']],
+          [['currStart','今期 開始'],['currEnd','今期 終了']],
+        ].map((row, ri) => (
+          <div key={ri} style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:0, borderBottom: ri === 0 ? '1px solid #f1f5f9' : 'none' }}>
+            {row.map(([key, label]) => (
+              <div key={key} style={{ padding:'10px 18px', borderRight: key.endsWith('Start') ? '1px solid #f1f5f9' : 'none' }}>
+                <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginBottom:4 }}>{label}</div>
+                <input type="date" value={period[key] || ''} onChange={e => setPeriod(p => ({ ...p, [key]: e.target.value }))}
+                  style={{ width:'100%', padding:'5px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.85rem', outline:'none', color:'#0f172a', boxSizing:'border-box' }} />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
 
       {/* ── 役職別目標 ── */}
       {sectionTitle('役職別 月次目標', '成績ページの昇降格ラインにも使用されます')}

@@ -49,36 +49,14 @@ function IndividualDetail({ staff, onClose }) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentRole, setCurrentRole] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
-  const [roleTargets, setRoleTargets] = useState([]);
-  const [periodForm, setPeriodForm] = useState({});
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.crmIndividualPerformance(staff), api.crmRoleTargets(), api.crmPeriodSettings()])
-      .then(([perf, roles, period]) => {
-        setData(perf);
-        setRoleTargets(roles.targets);
-        setPeriodForm({ prevStart: period.settings.prev_start?.split('T')[0], prevEnd: period.settings.prev_end?.split('T')[0], currStart: period.settings.curr_start?.split('T')[0], currEnd: period.settings.curr_end?.split('T')[0] });
-      })
+    api.crmIndividualPerformance(staff)
+      .then(perf => setData(perf))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [staff]);
-
-  const handleSaveSettings = async () => {
-    setSaving(true);
-    try {
-      await Promise.all([
-        api.crmRoleTargetsSave(roleTargets),
-        api.crmPeriodSettingsSave(periodForm),
-      ]);
-      const perf = await api.crmIndividualPerformance(staff);
-      setData(perf);
-      setShowSettings(false);
-    } catch (e) { alert('保存に失敗しました'); }
-    finally { setSaving(false); }
-  };
 
   if (loading) return <div style={{ padding:40, textAlign:'center', color:'#9ca3af' }}>読み込み中…</div>;
   if (!data) return null;
@@ -95,10 +73,7 @@ function IndividualDetail({ staff, onClose }) {
         {/* ヘッダー */}
         <div style={{ padding:'16px 24px', borderBottom:'1px solid #f3f4f6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <h3 style={{ margin:0, fontSize:'1rem', fontWeight:800 }}>{staff} — 個人成績評価</h3>
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={() => setShowSettings(v=>!v)} style={{ fontSize:12, padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:6, background:'#fff', cursor:'pointer', color:'#6b7280' }}>⚙️ 設定</button>
-            <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:20 }}>✕</button>
-          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:20 }}>✕</button>
         </div>
 
         <div style={{ padding:'20px 24px' }}>
@@ -117,35 +92,6 @@ function IndividualDetail({ staff, onClose }) {
               ))}
             </div>
           </div>
-
-          {/* 設定パネル */}
-          {showSettings && (
-            <div style={{ marginBottom:20, border:'1px solid #e5e7eb', borderRadius:10, padding:16, background:'#fafafa' }}>
-              <div style={{ fontWeight:700, fontSize:'0.85rem', marginBottom:12 }}>期間・目標設定</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
-                {[['prevStart','前期開始'],['prevEnd','前期終了'],['currStart','今期開始'],['currEnd','今期終了']].map(([k,l]) => (
-                  <div key={k}>
-                    <div style={{ fontSize:11, color:'#9ca3af', marginBottom:3 }}>{l}</div>
-                    <input type="date" value={periodForm[k]||''} onChange={e => setPeriodForm(p=>({...p,[k]:e.target.value}))}
-                      style={{ fontSize:12, padding:'5px 8px', border:'1px solid #e5e7eb', borderRadius:6, outline:'none', width:'100%', boxSizing:'border-box' }} />
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>役職別月間目標（円）</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12 }}>
-                {roleTargets.map((t,i) => (
-                  <div key={t.role_name}>
-                    <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>{t.role_name}</div>
-                    <input type="number" value={t.monthly_target} onChange={e => setRoleTargets(prev => prev.map((x,j) => j===i?{...x,monthly_target:Number(e.target.value)}:x))}
-                      style={{ fontSize:12, padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:6, outline:'none', width:'100%', boxSizing:'border-box' }} />
-                  </div>
-                ))}
-              </div>
-              <button onClick={handleSaveSettings} disabled={saving} className="btn btn-primary" style={{ fontSize:12 }}>
-                {saving ? '保存中…' : '保存'}
-              </button>
-            </div>
-          )}
 
           {!role ? (
             <div style={{ textAlign:'center', padding:'32px 0', color:'#9ca3af' }}>上から役職を選択してください</div>

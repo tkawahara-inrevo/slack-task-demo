@@ -244,7 +244,8 @@ export default function CrmDashboard() {
     kpiTotal:           summary.totals?.kpiTotal           || 0,
     kpi:                summary.totals?.kpi                || 0,
   } : null;
-  const forecastTotal = forecast?.kpiTotal || 0; // インセン確定 + A/S + B/C見込み
+  const forecastTotal    = forecast?.kpiTotal || 0;  // インセンベース（KPI計算用）
+  const forecastDispTotal = forecast?.total   || 0;  // 実入金ベース（表示・バー用）
   // teamTarget = 担当者役職別目標の合計（固定）/ フォールバック: 動的KPI
   const kpiDenom   = teamTarget > 0 ? teamTarget : (forecast?.kpi || 0);
   const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;
@@ -626,9 +627,12 @@ export default function CrmDashboard() {
               {sectionHead('収支見込み', '対象月')}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
                 <div>
-                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>KPI見込み合計（インセン）</div>
+                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>見込み合計</div>
                   <div style={{ fontSize:'1.45rem', fontWeight:800, color:'#0f172a' }}>
-                    {fmtM(forecastTotal)}<span style={{ fontSize:'0.8rem' }}>円</span>
+                    {fmtM(forecastDispTotal)}<span style={{ fontSize:'0.8rem' }}>円</span>
+                  </div>
+                  <div style={{ fontSize:'0.62rem', color:'#94a3b8', marginTop:1 }}>
+                    KPI見込み（インセン） {fmtM(forecastTotal)}
                   </div>
                 </div>
                 {kpiRate != null && (
@@ -642,11 +646,11 @@ export default function CrmDashboard() {
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                 {[
-                  { label:'入金確定',            amount:forecast.confirmed, sub:`インセン ${fmtM(forecast.confirmedIncentive)}`,                     color:'#059669', count:summary?.payments?.length },
-                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.highKpi,  sub:`売上見込 ${fmtM(forecast.high)}`,  color:'#1e40af', count:summary?.highDeals?.length },
-                  { label:'締結多分いける [B/C]', amount:forecast.mediumKpi,sub:`売上見込 ${fmtM(forecast.medium)}`,color:'#d97706', count:summary?.mediumDeals?.length },
+                  { label:'入金確定',            amount:forecast.confirmed,  sub:`インセン ${fmtM(forecast.confirmedIncentive)}`,       color:'#059669', count:summary?.payments?.length },
+                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.high,       sub:`インセン見込 ${fmtM(forecast.highKpi)}`,             color:'#1e40af', count:summary?.highDeals?.length },
+                  { label:'締結多分いける [B/C]', amount:forecast.medium,     sub:`インセン見込 ${fmtM(forecast.mediumKpi)}`,           color:'#d97706', count:summary?.mediumDeals?.length },
                 ].map(item => {
-                  const pct = forecastTotal > 0 ? Math.round((item.amount / forecastTotal) * 100) : 0;
+                  const pct = forecastDispTotal > 0 ? Math.round((item.amount / forecastDispTotal) * 100) : 0;
                   return (
                     <div key={item.label}>
                       <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>

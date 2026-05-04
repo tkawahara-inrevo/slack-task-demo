@@ -939,6 +939,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         ...s,
         total:    s.confirmed + s.high + s.medium,
         kpiTotal: (s.confirmedIncentive || 0) + (s.highKpi || 0) + (s.mediumKpi || 0),
+        kpi:      (s.highKpi || 0) + (s.mediumKpi || 0), // パイプライン KPI合計（目標フォールバック用）
       })).sort((a,b) => b.total - a.total);
 
       const totals = staffSummary.reduce((acc, s) => ({
@@ -950,7 +951,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
         mediumKpi:          acc.mediumKpi          + (s.mediumKpi || 0),
         total:              acc.total              + s.total,
         kpiTotal:           acc.kpiTotal           + (s.kpiTotal || 0),
-      }), { confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0, total: 0, kpiTotal: 0 });
+        kpi:                acc.kpi                + (s.kpi || 0),
+      }), { confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0, total: 0, kpiTotal: 0, kpi: 0 });
 
       res.json({
         month: `${year}-${String(mon).padStart(2,'0')}`,

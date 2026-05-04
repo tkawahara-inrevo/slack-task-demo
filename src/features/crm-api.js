@@ -1275,9 +1275,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
     try {
       const { teamId } = req.dashboardUser;
       const { rows } = await dbQuery(`
-        SELECT d.id, d.name, d.yomi, d.contract_type, d.initial_fee, d.monthly_fee,
-               d.unit_price, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
-               d.conclusion_date, d.updated_at, d.sales_memo, c.name AS customer_name
+        SELECT d.id, d.customer_id, d.name, d.yomi, d.contract_type,
+               d.initial_fee, d.monthly_fee, d.unit_price,
+               COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
+               d.conclusion_date, d.updated_at, d.sales_memo, d.memo,
+               d.next_action_date, d.next_action_content,
+               c.name AS customer_name
         FROM deals d JOIN customers c ON c.id = d.customer_id
         WHERE d.team_id=$1
           AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％')

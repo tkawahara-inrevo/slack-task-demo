@@ -12,137 +12,235 @@ const ROLE_OPTIONS = ['', ...ROLE_NAMES];
 const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const YOMI_COLOR = { 'S 90％':'#7c3aed','A 70％':'#1d4ed8','B 50％':'#0891b2','C 30％':'#059669' };
 
+// 表示から除外するスタッフ
+const YOMI_EXCLUDED = ['外山 雄大', '添田 剛'];
+
+const YOMI_CFG_PANEL = {
+  'S 90％': { color:'#4f46e5', bg:'#ede9fe', border:'#c4b5fd' },
+  'A 70％': { color:'#1d4ed8', bg:'#dbeafe', border:'#93c5fd' },
+  'B 50％': { color:'#0891b2', bg:'#cffafe', border:'#67e8f9' },
+  'C 30％': { color:'#059669', bg:'#d1fae5', border:'#6ee7b7' },
+};
+
+// ── 案件詳細モーダル ──────────────────────────────────────────
+function DealDetailModal({ deal, onClose, onMemoSave }) {
+  const [memo, setMemo] = useState(deal.sales_memo || '');
+  const [saving, setSaving] = useState(false);
+  const cfg = YOMI_CFG_PANEL[deal.yomi] || { color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' };
+  const amt = Number(deal.monthly_fee || deal.initial_fee || 0) * 1.1;
+  const daysSince = Math.floor((Date.now() - new Date(deal.updated_at)) / 86400000);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try { await api.crmUpdateDeal(deal.id, { salesMemo: memo }); onMemoSave(deal.id, memo); }
+    catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+      onClick={onClose}>
+      <div style={{ background:'#fff', borderRadius:16, width:'min(560px,92vw)', maxHeight:'85vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.25)' }}
+        onClick={e => e.stopPropagation()}>
+        {/* ヘッダー */}
+        <div style={{ padding:'16px 20px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+              <span style={{ fontSize:'0.78rem', fontWeight:700, padding:'3px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{deal.yomi}</span>
+              {deal.contract_type && <span style={{ fontSize:'0.72rem', color:'#6366f1', background:'#eef2ff', borderRadius:5, padding:'2px 8px', fontWeight:600 }}>{deal.contract_type}</span>}
+            </div>
+            <div style={{ fontWeight:800, fontSize:'1.05rem', color:'#0f172a' }}>{deal.customer_name}</div>
+            <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginTop:2 }}>{deal.name}</div>
+          </div>
+          <button onClick={onClose} style={{ width:28, height:28, borderRadius:8, background:'#f1f5f9', border:'none', cursor:'pointer', color:'#64748b', fontSize:16 }}>×</button>
+        </div>
+
+        <div style={{ overflowY:'auto', padding:'16px 20px', display:'flex', flexDirection:'column', gap:14 }}>
+          {/* 金額・担当 */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            {amt > 0 && (
+              <div style={{ padding:'10px 14px', background:'#f8fafc', borderRadius:10, border:'1px solid #f1f5f9' }}>
+                <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:3 }}>{deal.monthly_fee > 0 ? '月額' : '初期費用'}</div>
+                <div style={{ fontWeight:800, fontSize:'1rem', color:'#059669' }}>{fmt(amt)}</div>
+              </div>
+            )}
+            <div style={{ padding:'10px 14px', background:'#f8fafc', borderRadius:10, border:'1px solid #f1f5f9' }}>
+              <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:3 }}>最終更新</div>
+              <div style={{ fontWeight:600, fontSize:'0.85rem', color: daysSince >= 14 ? '#dc2626' : '#374151' }}>
+                {daysSince === 0 ? '今日' : `${daysSince}日前`}
+              </div>
+            </div>
+          </div>
+
+          {/* 次回アクション */}
+          {deal.next_action_date && (
+            <div style={{ padding:'10px 14px', background:'#fef9c3', borderRadius:10, border:'1px solid #fcd34d' }}>
+              <div style={{ fontSize:'0.65rem', color:'#92400e', fontWeight:600, marginBottom:2 }}>次回アクション</div>
+              <div style={{ fontSize:'0.82rem', fontWeight:600, color:'#78350f' }}>{deal.next_action_date}</div>
+              {deal.next_action_content && <div style={{ fontSize:'0.75rem', color:'#92400e', marginTop:2 }}>{deal.next_action_content}</div>}
+            </div>
+          )}
+
+          {/* メモ */}
+          <div>
+            <div style={{ fontSize:'0.72rem', fontWeight:700, color:'#374151', marginBottom:6 }}>商談メモ</div>
+            <textarea value={memo} onChange={e => setMemo(e.target.value)} rows={5}
+              placeholder="メモを入力…"
+              style={{ width:'100%', boxSizing:'border-box', padding:'10px 12px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.85rem', outline:'none', resize:'vertical', lineHeight:1.7 }}
+              onFocus={e => e.target.style.borderColor='#6366f1'}
+              onBlur={e => e.target.style.borderColor='#e2e8f0'} />
+          </div>
+
+          {/* 案件メモ（別フィールド） */}
+          {deal.memo && deal.memo !== memo && (
+            <div style={{ padding:'10px 14px', background:'#f8fafc', borderRadius:10, border:'1px solid #f1f5f9' }}>
+              <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:4 }}>案件詳細メモ</div>
+              <div style={{ fontSize:'0.8rem', color:'#374151', whiteSpace:'pre-wrap', lineHeight:1.7 }}>{deal.memo}</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:'12px 20px', borderTop:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <a href={`/crm/customers/${deal.customer_id}`}
+            style={{ fontSize:'0.78rem', color:'#6366f1', textDecoration:'none', fontWeight:600 }}>
+            → 顧客詳細を開く
+          </a>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding:'7px 20px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
+            {saving ? '保存中…' : 'メモを保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── ヨミ管理パネル ──────────────────────────────────────────
 function YomiPanel({ full = false }) {
   const [yomiKanri, setYomiKanri] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editingMemo, setEditingMemo] = useState(null);
-  const [memoValues, setMemoValues] = useState({});
-  const [savingMemo, setSavingMemo] = useState({});
+  const [selectedDeal, setSelectedDeal] = useState(null);
+  const [memoCache, setMemoCache] = useState({});
 
   useEffect(() => {
     api.crmYomiKanri().then(r => {
       setYomiKanri(r);
       const init = {};
       Object.values(r.byStaff).flat().forEach(d => { init[d.id] = d.sales_memo || ''; });
-      setMemoValues(init);
+      setMemoCache(init);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
-
-  const handleMemoSave = async (dealId) => {
-    setSavingMemo(p => ({ ...p, [dealId]: true }));
-    try { await api.crmUpdateDeal(dealId, { salesMemo: memoValues[dealId] || '' }); }
-    catch (e) { console.error(e); }
-    finally { setSavingMemo(p => { const n={...p}; delete n[dealId]; return n; }); setEditingMemo(null); }
-  };
 
   if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;
   if (!yomiKanri) return null;
 
   const entries = Object.entries(yomiKanri.byStaff)
-    .filter(([, d]) => d.length > 0)
+    .filter(([name, d]) => d.length > 0 && !YOMI_EXCLUDED.some(ex => name.includes(ex.split(' ')[0])))
     .sort((a,b) => b[1].length - a[1].length);
 
-  return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#f8fafc' }}>
-      <div style={{ padding:'12px 20px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0, display:'flex', alignItems:'center', gap:10 }}>
-        <div>
-          <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>ヨミ管理</div>
-          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
-            進行中 C以上 {yomiKanri.total}件
+  const totalFiltered = entries.reduce((s,[,d]) => s + d.length, 0);
+
+  const DealCard = ({ d, compact = false }) => {
+    const cfg = YOMI_CFG_PANEL[d.yomi] || { color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' };
+    const amt = Number(d.monthly_fee || d.initial_fee || 0) * 1.1;
+    const memo = memoCache[d.id] || d.sales_memo || '';
+    const daysSince = Math.floor((Date.now() - new Date(d.updated_at)) / 86400000);
+    const stale = daysSince >= 14;
+
+    if (compact) {
+      return (
+        <div onClick={() => setSelectedDeal(d)} style={{ padding:'10px 14px', borderBottom:'1px solid #f8fafc', cursor:'pointer', transition:'background 0.1s' }}
+          onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+          onMouseLeave={e => e.currentTarget.style.background=''}>
+          <div style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
+              <div style={{ display:'flex', gap:6, marginTop:3, alignItems:'center', flexWrap:'wrap' }}>
+                <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'1px 8px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{d.yomi}</span>
+                {d.contract_type && <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>{d.contract_type}</span>}
+                {stale && <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:600 }}>{daysSince}日未更新</span>}
+              </div>
+              {memo && <div style={{ fontSize:'0.72rem', color:'#64748b', marginTop:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{memo}</div>}
+            </div>
+            <div style={{ textAlign:'right', flexShrink:0 }}>
+              {amt > 0 && <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#059669' }}>{fmt(amt)}</div>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div onClick={() => setSelectedDeal(d)}
+        style={{ padding:'14px 16px', borderBottom:'1px solid #f1f5f9', cursor:'pointer', transition:'background 0.1s' }}
+        onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+        onMouseLeave={e => e.currentTarget.style.background=''}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontWeight:800, fontSize:'0.92rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
+            <div style={{ display:'flex', gap:6, marginTop:4, alignItems:'center', flexWrap:'wrap' }}>
+              <span style={{ fontSize:'0.75rem', fontWeight:700, padding:'2px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{d.yomi}</span>
+              {d.contract_type && <span style={{ fontSize:'0.72rem', color:'#6366f1', background:'#eef2ff', borderRadius:5, padding:'1px 7px', fontWeight:600 }}>{d.contract_type}</span>}
+              {stale && <span style={{ fontSize:'0.68rem', color:'#dc2626', fontWeight:700 }}>{daysSince}日未更新</span>}
+            </div>
+            {memo && <div style={{ fontSize:'0.75rem', color:'#64748b', marginTop:5, lineHeight:1.5, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{memo}</div>}
+          </div>
+          <div style={{ textAlign:'right', flexShrink:0 }}>
+            {amt > 0 && <div style={{ fontWeight:800, fontSize:'0.88rem', color:'#059669' }}>{fmt(amt)}</div>}
+            <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:2 }}>クリックで詳細</div>
           </div>
         </div>
       </div>
+    );
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#f8fafc' }}>
+      <div style={{ padding:'12px 20px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0 }}>
+        <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>ヨミ管理</div>
+        <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>C以上 進行中 {totalFiltered}件</div>
+      </div>
       <div style={{ flex:1, overflowY:'auto', padding:'12px 20px' }}>
         {full ? (
-          /* フルページ: 担当者を横並び（グリッド） */
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(340px, 1fr))', gap:12 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(360px, 1fr))', gap:14 }}>
             {entries.map(([staff, sDeals]) => (
               <div key={staff} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-                <div style={{ padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
-                  <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#374151' }}>{staff.split('/')[0].trim()}</span>
-                  <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{sDeals.length}件</span>
-                  <span style={{ fontSize:'0.78rem', color:'#059669', marginLeft:'auto', fontWeight:600 }}>
+                <div style={{ padding:'11px 16px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ fontWeight:800, fontSize:'0.88rem', color:'#0f172a' }}>{staff.split('/')[0].trim()}</span>
+                  <span style={{ fontSize:'0.72rem', background:'#e2e8f0', color:'#64748b', borderRadius:99, padding:'1px 8px', fontWeight:600 }}>{sDeals.length}件</span>
+                  <span style={{ fontSize:'0.78rem', color:'#059669', marginLeft:'auto', fontWeight:700 }}>
                     {fmt(sDeals.reduce((s,d) => s + Number(d.monthly_fee||d.initial_fee||0)*1.1, 0))}
                   </span>
                 </div>
-                <div style={{ maxHeight:400, overflowY:'auto' }}>
-                  {sDeals.map(d => {
-                    const yomiColor = YOMI_COLOR[d.yomi] || '#64748b';
-                    return (
-                      <div key={d.id} style={{ padding:'8px 16px', borderBottom:'1px solid #f8fafc', display:'flex', justifyContent:'space-between', alignItems:'start', gap:8 }}>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:'0.82rem', fontWeight:600, color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
-                          <div style={{ display:'flex', gap:6, marginTop:2, alignItems:'center', flexWrap:'wrap' }}>
-                            <span style={{ fontSize:'0.68rem', fontWeight:700, color:yomiColor }}>{d.yomi}</span>
-                            {d.contract_type && <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>{d.contract_type}</span>}
-                            {d.conclusion_date && <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>{d.conclusion_date.split('T')[0]}</span>}
-                          </div>
-                          {editingMemo === d.id ? (
-                            <input autoFocus value={memoValues[d.id] ?? ''} onChange={e => setMemoValues(p => ({...p,[d.id]:e.target.value}))}
-                              onBlur={() => handleMemoSave(d.id)}
-                              onKeyDown={e => { if(e.key==='Enter') handleMemoSave(d.id); if(e.key==='Escape') setEditingMemo(null); }}
-                              style={{ fontSize:'0.72rem', padding:'2px 6px', border:'1px solid #6366f1', borderRadius:5, outline:'none', width:'100%', boxSizing:'border-box', marginTop:3 }} />
-                          ) : (
-                            <div onClick={() => setEditingMemo(d.id)}
-                              style={{ fontSize:'0.7rem', color: memoValues[d.id]?'#374151':'#cbd5e1', cursor:'text', marginTop:3, padding:'2px 4px', borderRadius:4 }}>
-                              {savingMemo[d.id] ? '保存中…' : (memoValues[d.id] || '+ メモ')}
-                            </div>
-                          )}
-                        </div>
-                        <span style={{ fontSize:'0.75rem', color:'#059669', fontWeight:600, flexShrink:0 }}>
-                          {fmt(Number(d.monthly_fee||d.initial_fee||0)*1.1)}
-                        </span>
-                      </div>
-                    );
-                  })}
+                <div style={{ maxHeight:500, overflowY:'auto' }}>
+                  {sDeals.map(d => <DealCard key={d.id} d={d} />)}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          /* サイドパネル: コンパクト縦並び */
           entries.map(([staff, sDeals]) => (
             <div key={staff} style={{ marginBottom:10, background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-              <div style={{ padding:'8px 12px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ padding:'8px 14px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
                 <span style={{ fontWeight:700, fontSize:'0.82rem', color:'#374151' }}>{staff.split('/')[0].trim()}</span>
                 <span style={{ fontSize:'0.7rem', color:'#94a3b8' }}>{sDeals.length}件</span>
-                <span style={{ fontSize:'0.72rem', color:'#059669', marginLeft:'auto' }}>
+                <span style={{ fontSize:'0.72rem', color:'#059669', marginLeft:'auto', fontWeight:600 }}>
                   {fmt(sDeals.reduce((s,d) => s + Number(d.monthly_fee||d.initial_fee||0)*1.1, 0))}
                 </span>
               </div>
-              {sDeals.map(d => {
-                const yomiColor = YOMI_COLOR[d.yomi] || '#64748b';
-                return (
-                  <div key={d.id} style={{ padding:'7px 12px', borderBottom:'1px solid #f8fafc', display:'grid', gridTemplateColumns:'1fr auto', gap:6, alignItems:'start' }}>
-                    <div>
-                      <div style={{ fontSize:'0.78rem', fontWeight:600, color:'#0f172a' }}>{d.customer_name}</div>
-                      <div style={{ display:'flex', gap:6, marginTop:2, alignItems:'center' }}>
-                        <span style={{ fontSize:'0.65rem', fontWeight:700, color:yomiColor }}>{d.yomi}</span>
-                        {d.conclusion_date && <span style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{d.conclusion_date.split('T')[0]}</span>}
-                      </div>
-                      {editingMemo === d.id ? (
-                        <input autoFocus value={memoValues[d.id] ?? ''} onChange={e => setMemoValues(p => ({...p,[d.id]:e.target.value}))}
-                          onBlur={() => handleMemoSave(d.id)}
-                          onKeyDown={e => { if(e.key==='Enter') handleMemoSave(d.id); if(e.key==='Escape') setEditingMemo(null); }}
-                          style={{ fontSize:'0.7rem', padding:'2px 6px', border:'1px solid #6366f1', borderRadius:5, outline:'none', width:'100%', boxSizing:'border-box', marginTop:3 }} />
-                      ) : (
-                        <div onClick={() => setEditingMemo(d.id)}
-                          style={{ fontSize:'0.68rem', color: memoValues[d.id]?'#374151':'#cbd5e1', cursor:'text', marginTop:3, padding:'2px 4px', borderRadius:4 }}>
-                          {savingMemo[d.id] ? '保存中…' : (memoValues[d.id] || '+ メモ')}
-                        </div>
-                      )}
-                    </div>
-                    <span style={{ fontSize:'0.7rem', color:'#059669', fontWeight:600, flexShrink:0 }}>
-                      {fmt(Number(d.monthly_fee||d.initial_fee||0)*1.1)}
-                    </span>
-                  </div>
-                );
-              })}
+              {sDeals.map(d => <DealCard key={d.id} d={d} compact />)}
             </div>
           ))
         )}
       </div>
+
+      {selectedDeal && (
+        <DealDetailModal
+          deal={{ ...selectedDeal, sales_memo: memoCache[selectedDeal.id] ?? selectedDeal.sales_memo }}
+          onClose={() => setSelectedDeal(null)}
+          onMemoSave={(id, memo) => setMemoCache(p => ({...p, [id]: memo}))}
+        />
+      )}
     </div>
   );
 }

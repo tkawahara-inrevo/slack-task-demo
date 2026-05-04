@@ -5,7 +5,7 @@ const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const fmtM = (n) => n ? `¥${(Math.round(Number(n)/10000)).toLocaleString()}万` : '—';
 const pct = (n) => n != null ? `${Math.round(Number(n)*100)/100}%` : '—';
 
-const ROLE_ORDER = ['役職無し','Lead','Sub Chief','Chief','Sub Expert','Expert'];
+const ROLE_ORDER = ['役職無し','Lead','Sub Manager','Chief','Sub Expert','Expert'];
 
 function getUpperRoles(currentRole) {
   const idx = ROLE_ORDER.indexOf(currentRole);
@@ -52,8 +52,12 @@ function IndividualDetail({ staff, onClose }) {
 
   useEffect(() => {
     setLoading(true);
-    api.crmIndividualPerformance(staff)
-      .then(perf => setData(perf))
+    Promise.all([api.crmIndividualPerformance(staff), api.crmRepRoles()])
+      .then(([perf, rr]) => {
+        setData(perf);
+        const stored = (rr.repRoles || []).find(r => r.rep_name === staff);
+        setCurrentRole(stored?.role_name || '役職無し');
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [staff]);
@@ -77,20 +81,13 @@ function IndividualDetail({ staff, onClose }) {
         </div>
 
         <div style={{ padding:'20px 24px' }}>
-          {/* 役職選択 */}
-          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20, padding:'12px 16px', background:'#f8fafc', borderRadius:8 }}>
-            <label style={{ fontSize:'0.82rem', fontWeight:700, color:'#374151', whiteSpace:'nowrap' }}>現在の役職</label>
-            <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-              {ROLE_ORDER.map(r => (
-                <button key={r} onClick={() => setCurrentRole(r)}
-                  style={{ fontSize:12, padding:'4px 12px', borderRadius:99,
-                    border:`1.5px solid ${currentRole===r?'#6366f1':'#e5e7eb'}`,
-                    background: currentRole===r?'#eef2ff':'#fff',
-                    color: currentRole===r?'#4f46e5':'#6b7280', cursor:'pointer', fontWeight:currentRole===r?700:400 }}>
-                  {r}
-                </button>
-              ))}
-            </div>
+          {/* 役職表示（設定タブから自動取得） */}
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20, padding:'10px 16px', background:'#f8fafc', borderRadius:8 }}>
+            <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#374151' }}>役職</span>
+            <span style={{ fontSize:'0.82rem', fontWeight:700, background:'#eef2ff', color:'#4f46e5', borderRadius:20, padding:'3px 14px', border:'1.5px solid #c7d2fe' }}>
+              {currentRole || '役職無し'}
+            </span>
+            <span style={{ fontSize:'0.72rem', color:'#94a3b8', marginLeft:4 }}>※ 設定タブで変更できます</span>
           </div>
 
           {!role ? (

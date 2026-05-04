@@ -691,6 +691,22 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── 成績ページ閲覧可否（admin / BC管理職以上）──────────────────
+  expressApp.get('/api/crm/performance-access', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+      if (role === 'admin') return res.json({ allowed: true });
+      if (role !== 'corp') return res.json({ allowed: false });
+      const { rows } = await dbQuery(
+        `SELECT profile_json->>'title' AS title FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2`,
+        [teamId, userId]
+      );
+      const t = (rows[0]?.title || '').toLowerCase();
+      const allowed = ['sub manager','sub chief','chief','sub expert','expert','manager'].some(k => t.includes(k));
+      res.json({ allowed, title: rows[0]?.title || '' });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── 担当者別役職・目標設定 ────────────────────────────────────
   expressApp.get('/api/crm/rep-roles', authWithRole, async (req, res) => {
     try {

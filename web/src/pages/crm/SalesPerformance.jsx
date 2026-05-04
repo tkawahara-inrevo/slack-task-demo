@@ -183,44 +183,15 @@ export default function SalesPerformance({ embedded }) {
   const now = new Date();
   const defaultMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
-  const [tab, setTab] = useState('individual'); // 'individual' | 'yomi'
   const [detailStaff, setDetailStaff] = useState(null);
   const [perfStaff, setPerfStaff] = useState([]);
   const [perfStaffLoading, setPerfStaffLoading] = useState(false);
-  const [yomiKanri, setYomiKanri] = useState(null);
-  const [yomiLoading, setYomiLoading] = useState(false);
-  const [editingMemo, setEditingMemo] = useState(null);
-  const [memoValues, setMemoValues] = useState({});
-  const [savingMemo, setSavingMemo] = useState({});
 
   useEffect(() => {
-    if (tab !== 'individual' || perfStaff.length > 0) return;
+    if (perfStaff.length > 0) return;
     setPerfStaffLoading(true);
     api.crmPerfStaff().then(r => setPerfStaff(r.staff || [])).catch(() => {}).finally(() => setPerfStaffLoading(false));
-  }, [tab]);
-
-  useEffect(() => {
-    if (tab !== 'yomi' || yomiKanri) return;
-    setYomiLoading(true);
-    api.crmYomiKanri().then(r => {
-      setYomiKanri(r);
-      // メモの初期値をセット
-      const initMemos = {};
-      Object.values(r.byStaff).flat().forEach(d => { initMemos[d.id] = d.sales_memo || ''; });
-      setMemoValues(initMemos);
-    }).catch(() => {}).finally(() => setYomiLoading(false));
-  }, [tab]);
-
-  const handleMemoSave = async (dealId) => {
-    setSavingMemo(p => ({ ...p, [dealId]: true }));
-    try {
-      await api.crmUpdateDeal(dealId, { salesMemo: memoValues[dealId] || '' });
-    } catch (e) { console.error(e); }
-    finally {
-      setSavingMemo(p => { const n = {...p}; delete n[dealId]; return n; });
-      setEditingMemo(null);
-    }
-  };
+  }, []);
 
   // 表示対象スタッフ（姓で絞り込み）
   const TARGET_STAFF_LAST = ['板金','野村','藤原','山本','萩原','荻原','添田'];
@@ -235,22 +206,10 @@ export default function SalesPerformance({ embedded }) {
 
   return (
     <div style={wrapper}>
-      {/* タブ */}
-      <div style={{ display:'flex', gap:4, padding:'3px', background:'#f1f5f9', borderRadius:8, marginBottom:20, width:'fit-content' }}>
-        {[['individual','👤 個人成績'], ['yomi','📋 ヨミ管理']].map(([v,l]) => (
-          <button key={v} onClick={() => setTab(v)}
-            style={{ padding:'5px 18px', borderRadius:6, border:'none', cursor:'pointer', fontSize:'0.82rem',
-              fontWeight: v===tab?700:400, background: v===tab?'#fff':'transparent',
-              color: v===tab?'#374151':'#9ca3af', boxShadow: v===tab?'0 1px 3px rgba(0,0,0,0.1)':'none' }}>
-            {l}
-          </button>
-        ))}
-      </div>
-
-      {/* ── 個人成績 ── */}
       {detailStaff && <IndividualDetail staff={detailStaff} onClose={() => setDetailStaff(null)} />}
 
-      {tab === 'individual' && (
+      {/* 個人成績 */}
+      {(() => (
         <div>
           {perfStaffLoading ? (
             <div style={{ color:'#9ca3af', padding:24 }}>読み込み中…</div>
@@ -293,77 +252,8 @@ export default function SalesPerformance({ embedded }) {
             </>
           )}
         </div>
-      )}
+      ))()}
 
-      {/* ── ヨミ管理 ── */}
-      {tab === 'yomi' && (
-        <div>
-          {yomiLoading ? (
-            <div style={{ color:'#9ca3af', padding:24 }}>読み込み中…</div>
-          ) : yomiKanri && (
-            <>
-              <div style={{ fontSize:'0.82rem', color:'#6b7280', marginBottom:16 }}>
-                進行中案件のうちヨミC以上（C 30% / B 50% / A 70% / S 90%）を担当者別に表示。合計 {yomiKanri.total}件
-              </div>
-              {Object.entries(yomiKanri.byStaff).sort((a,b) => b[1].length - a[1].length).map(([staff, sDeals]) => (
-                <div key={staff} style={{ marginBottom:16, border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
-                  <div style={{ padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e5e7eb', display:'flex', alignItems:'center', gap:10 }}>
-                    <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#374151' }}>{staff.split('/')[0].trim()}</span>
-                    <span style={{ fontSize:'0.78rem', color:'#9ca3af' }}>{sDeals.length}件</span>
-                    <span style={{ fontSize:'0.78rem', color:'#10b981', marginLeft:'auto' }}>
-                      {fmt(sDeals.reduce((s,d) => s + Number(d.monthly_fee||d.initial_fee||0)*1.1, 0))} 合計
-                    </span>
-                  </div>
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.78rem' }}>
-                    <thead>
-                      <tr style={{ background:'#f9fafb' }}>
-                        {['顧客名','ヨミ','金額（税込）','契約プラン','結論予定日','メモ'].map(h => (
-                          <th key={h} style={{ padding:'6px 12px', textAlign:'left', color:'#9ca3af', fontWeight:600, borderBottom:'1px solid #f3f4f6', whiteSpace:'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sDeals.map(d => {
-                        const yomiColor = { 'S 90％':'#7c3aed', 'A 70％':'#1d4ed8', 'B 50％':'#0891b2', 'C 30％':'#6b7280' }[d.yomi] || '#9ca3af';
-                        return (
-                          <tr key={d.id} style={{ borderBottom:'1px solid #f9fafb' }}>
-                            <td style={{ padding:'7px 12px', fontWeight:500, color:'#374151' }}>{d.customer_name}</td>
-                            <td style={{ padding:'7px 12px' }}>
-                              <span style={{ fontWeight:700, color:yomiColor, fontSize:'0.8rem' }}>{d.yomi}</span>
-                            </td>
-                            <td style={{ padding:'7px 12px', color:'#374151' }}>{fmt(Number(d.monthly_fee||d.initial_fee||0)*1.1)}</td>
-                            <td style={{ padding:'7px 12px', color:'#6b7280' }}>{d.contract_type || '—'}</td>
-                            <td style={{ padding:'7px 12px', color:'#9ca3af' }}>{d.conclusion_date ? d.conclusion_date.split('T')[0] : '—'}</td>
-                            <td style={{ padding:'4px 8px', minWidth:160 }}>
-                              {editingMemo === d.id ? (
-                                <input
-                                  autoFocus
-                                  value={memoValues[d.id] ?? ''}
-                                  onChange={e => setMemoValues(p => ({ ...p, [d.id]: e.target.value }))}
-                                  onBlur={() => handleMemoSave(d.id)}
-                                  onKeyDown={e => { if (e.key === 'Enter') handleMemoSave(d.id); if (e.key === 'Escape') setEditingMemo(null); }}
-                                  style={{ fontSize:12, padding:'3px 6px', border:'1px solid #6366f1', borderRadius:5, outline:'none', width:'100%', boxSizing:'border-box' }}
-                                />
-                              ) : (
-                                <div
-                                  onClick={() => setEditingMemo(d.id)}
-                                  style={{ fontSize:12, color: memoValues[d.id] ? '#374151' : '#d1d5db', cursor:'text', padding:'3px 6px', borderRadius:5, minHeight:22,
-                                    border:'1px solid transparent', ':hover': { borderColor: '#e5e7eb' } }}>
-                                  {savingMemo[d.id] ? '保存中…' : (memoValues[d.id] || 'メモを追加…')}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }

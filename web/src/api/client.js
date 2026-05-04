@@ -242,6 +242,7 @@ export const api = {
     return crmFetch(`/dashboard/monthly-trend${qs ? '?' + qs : ''}`);
   },
   crmDashboardRecentActivities: (limit = 8) => crmFetch(`/dashboard/recent-activities?limit=${limit}`),
+  crmPerformanceAccess: () => crmFetch('/performance-access'),
   crmRepRoles: () => crmFetch('/rep-roles'),
   crmRepRolesSave: (repRoles) => crmFetch('/rep-roles', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ repRoles }) }),
 

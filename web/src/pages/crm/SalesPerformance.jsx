@@ -30,12 +30,13 @@ function calcLines(currentRole, roles, totalCurrMonths) {
   };
 }
 
-function calcRates(prevTotal, currTotal, currentTarget, totalCurrMonths, elapsedMonths) {
-  const prevRate = totalCurrMonths > 0 ? (prevTotal / (currentTarget * totalCurrMonths)) * 100 : 0;
-  const currRate = elapsedMonths > 0   ? (currTotal / (currentTarget * elapsedMonths)) * 100 : 0;
-  const avgRate  = (currentTarget * (totalCurrMonths + elapsedMonths)) > 0
-    ? ((prevTotal + currTotal) / (currentTarget * (totalCurrMonths + elapsedMonths))) * 100 : 0;
-  return { prevRate, currRate, avgRate };
+function calcRates(prevTotal, currTotal, currentTarget, totalCurrMonths, elapsedMonths, prevTarget) {
+  const pt = prevTarget || currentTarget; // 前期役職目標（未設定なら現役職で代替）
+  const prevRate = (pt > 0 && totalCurrMonths > 0) ? (prevTotal / (pt * totalCurrMonths)) * 100 : 0;
+  const currRate = (currentTarget > 0 && elapsedMonths > 0) ? (currTotal / (currentTarget * elapsedMonths)) * 100 : 0;
+  const totalTarget = (pt * totalCurrMonths) + (currentTarget * elapsedMonths);
+  const avgRate  = totalTarget > 0 ? ((prevTotal + currTotal) / totalTarget) * 100 : 0;
+  return { prevRate, currRate, avgRate, prevTarget: pt };
 }
 
 function getJudgment(avgRate) {
@@ -67,7 +68,7 @@ function IndividualDetail({ staff, onClose }) {
 
   const role = currentRole || '';
   const lines = role ? calcLines(role, data.roles, data.totalCurrMonths) : null;
-  const rates = role && lines ? calcRates(data.prevTotal, data.currTotal, lines.currentTarget, data.totalCurrMonths, data.elapsedMonths) : null;
+  const rates = role && lines ? calcRates(data.prevTotal, data.currTotal, lines.currentTarget, data.totalCurrMonths, data.elapsedMonths, data.prevMonthlyTarget) : null;
   const judgment = rates ? getJudgment(rates.avgRate) : null;
 
   return (

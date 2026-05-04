@@ -459,8 +459,9 @@ function CrmSettings() {
     return roleTargets[r?.role_name || '役職無し'] || 0;
   };
 
-  const setRepRole    = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), role_name: role } }));
-  const setOverride   = (rep, wan)  => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), monthly_target_override: wan===''?null:Number(wan)*10000 } }));
+  const setRepRole     = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), role_name: role } }));
+  const setPrevRepRole = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), prev_role_name: role } }));
+  const setOverride    = (rep, wan)  => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), monthly_target_override: wan===''?null:Number(wan)*10000 } }));
   const setRoleTarget = (roleName, wan) => {
     setRoleTargetRows(prev => prev.map(r => r.role_name===roleName ? {...r, monthly_target: Number(wan)*10000} : r));
     setRoleTargets(prev => ({...prev, [roleName]: Number(wan)*10000}));
@@ -469,7 +470,13 @@ function CrmSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const repArr  = TARGET_REPS.map(rep => ({ rep_name:rep, role_name:repRoles[rep]?.role_name||'', monthly_target_override:repRoles[rep]?.monthly_target_override||null }));
+      const repArr  = TARGET_REPS.map(rep => ({
+        rep_name:rep,
+        role_name:repRoles[rep]?.role_name||'',
+        monthly_target_override:repRoles[rep]?.monthly_target_override||null,
+        prev_role_name:repRoles[rep]?.prev_role_name||'',
+        prev_monthly_target_override:repRoles[rep]?.prev_monthly_target_override||null,
+      }));
       const roleArr = roleTargetRows.map((r,i) => ({ role_name:r.role_name, monthly_target:r.monthly_target, sort_order:i }));
       await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({ prevStart:period.prevStart, prevEnd:period.prevEnd, currStart:period.currStart, currEnd:period.currEnd })]);
       setNotice('保存しました'); setTimeout(() => setNotice(''), 2500);
@@ -566,14 +573,24 @@ function CrmSettings() {
                         <span style={{ color:'#374151', fontSize:'0.82rem' }}>{given}</span>
                         {effective > 0 && <span style={{ marginLeft:'auto', fontSize:'0.72rem', fontWeight:700, color:'#1e40af' }}>{Math.round(effective/10000)}万</span>}
                       </div>
-                      <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                        <select value={roleName} onChange={e => setRepRole(rep, e.target.value)}
-                          style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none' }}>
-                          {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 未選択 —'}</option>)}
-                        </select>
+                      <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:4, flex:'1 1 120px' }}>
+                          <span style={{ fontSize:'0.62rem', color:'#94a3b8', flexShrink:0 }}>今期</span>
+                          <select value={roleName} onChange={e => setRepRole(rep, e.target.value)}
+                            style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none' }}>
+                            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 未選択 —'}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:4, flex:'1 1 120px' }}>
+                          <span style={{ fontSize:'0.62rem', color:'#94a3b8', flexShrink:0 }}>前期</span>
+                          <select value={repRoles[rep]?.prev_role_name||''} onChange={e => setPrevRepRole(rep, e.target.value)}
+                            style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none', color: repRoles[rep]?.prev_role_name ? '#0f172a' : '#94a3b8' }}>
+                            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 今期と同じ —'}</option>)}
+                          </select>
+                        </div>
                         <input type="number" min="0" step="10" value={overrideWan}
                           onChange={e => setOverride(rep, e.target.value)} placeholder="手動"
-                          style={{ width:60, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', textAlign:'right', outline:'none' }} />
+                          style={{ width:52, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', textAlign:'right', outline:'none' }} />
                         <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>万</span>
                       </div>
                     </div>

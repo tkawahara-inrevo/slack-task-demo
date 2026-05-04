@@ -550,6 +550,10 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`UPDATE crm_role_targets SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
   await dbQuery(`UPDATE crm_rep_roles SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
 
+  // 前期役職カラム追加
+  await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS prev_role_name TEXT NOT NULL DEFAULT ''`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS prev_monthly_target_override BIGINT`).catch(() => {});
+
   // フィールド選択肢設定
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS crm_field_options (

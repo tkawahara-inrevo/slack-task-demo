@@ -798,11 +798,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { repRoles } = req.body;
       for (const r of repRoles) {
         await dbQuery(`
-          INSERT INTO crm_rep_roles (team_id, rep_name, role_name, monthly_target_override)
-          VALUES ($1, $2, $3, $4)
+          INSERT INTO crm_rep_roles (team_id, rep_name, role_name, monthly_target_override, prev_role_name, prev_monthly_target_override)
+          VALUES ($1, $2, $3, $4, $5, $6)
           ON CONFLICT (team_id, rep_name) DO UPDATE
-          SET role_name=$3, monthly_target_override=$4
-        `, [teamId, r.rep_name, r.role_name || '', r.monthly_target_override || null]);
+          SET role_name=$3, monthly_target_override=$4, prev_role_name=$5, prev_monthly_target_override=$6
+        `, [teamId, r.rep_name, r.role_name || '', r.monthly_target_override || null,
+            r.prev_role_name || '', r.prev_monthly_target_override || null]);
       }
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
@@ -1146,13 +1147,25 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { staff } = req.query;
       if (!staff) return res.status(400).json({ error: 'staff required' });
 
-      // 設定取得
-      const [periodRes, roleRes] = await Promise.all([
+      // 設定取得（前期役職情報も取得）
+      const [periodRes, roleRes, repRoleRes] = await Promise.all([
         dbQuery('SELECT * FROM crm_period_settings WHERE team_id=$1', [teamId]),
         dbQuery('SELECT * FROM crm_role_targets WHERE team_id=$1 ORDER BY sort_order', [teamId]),
+        dbQuery('SELECT rep_name, role_name, prev_role_name, monthly_target_override, prev_monthly_target_override FROM crm_rep_roles WHERE team_id=$1 AND rep_name=$2', [teamId, staff]),
       ]);
       const period = periodRes.rows[0] || { prev_start:'2025-08-01', prev_end:'2025-11-30', curr_start:'2025-12-01', curr_end:'2026-05-31' };
       const roles = roleRes.rows;
+      const repRole = repRoleRes.rows[0] || {};
+
+      // 役職別目標マップ
+      const roleTargetMap = {};
+      for (const r of roles) roleTargetMap[r.role_name] = Number(r.monthly_target || 0);
+
+      // 前期目標（前期役職 or 現役職にフォールバック）
+      const prevRoleName = repRole.prev_role_name || repRole.role_name || '役職無し';
+      const prevMonthlyTarget = repRole.prev_monthly_target_override
+        ? Number(repRole.prev_monthly_target_override)
+        : (roleTargetMap[prevRoleName] || 0);
 
       // 前期・今期のインセン合計
       const [prevRes, currRes] = await Promise.all([
@@ -1186,7 +1199,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       res.json({
         staff, prevTotal, currTotal, currRows: currRows.slice(0,50), monthlyMap,
         elapsedMonths, totalCurrMonths,
-        period, roles,
+        period, roles, repRole, prevMonthlyTarget,
       });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });

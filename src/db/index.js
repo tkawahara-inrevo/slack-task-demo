@@ -546,6 +546,17 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_body TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS total_score INTEGER`).catch(() => {});
 
+  // 担当者別役職・目標上書き設定
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS crm_rep_roles (
+      team_id TEXT NOT NULL,
+      rep_name TEXT NOT NULL,
+      role_name TEXT NOT NULL DEFAULT '',
+      monthly_target_override BIGINT,
+      PRIMARY KEY (team_id, rep_name)
+    )
+  `).catch(() => {});
+
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
   if (INITIAL_ADMIN_ID) {

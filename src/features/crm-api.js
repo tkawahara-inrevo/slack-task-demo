@@ -542,17 +542,36 @@ function registerCrmApi({ expressApp, authWithRole }) {
         GROUP BY 1 ORDER BY amount DESC
       `, [rangeStart, rangeEnd]);
 
-      // 担当者リスト & 担当者別KPI目標
-      const [salesUsersRes, repTargetRes] = await Promise.all([
+      // 担当者リスト & 役職別目標 & 担当者役職マッピング
+      const [salesUsersRes, roleTargetRes, repRoleRes] = await Promise.all([
         dbQuery(
           `SELECT DISTINCT COALESCE(sales_person, sales_user_id) AS name FROM deals
            WHERE team_id=$1 AND COALESCE(sales_person, sales_user_id) IS NOT NULL ORDER BY name`,
           [teamId]
         ),
         dbQuery('SELECT role_name, monthly_target FROM crm_role_targets WHERE team_id=$1', [teamId]),
+        dbQuery('SELECT rep_name, role_name, monthly_target_override FROM crm_rep_roles WHERE team_id=$1', [teamId]),
       ]);
+
+      // 役職別目標マップ
+      const roleTargetMap = {};
+      for (const r of roleTargetRes.rows) roleTargetMap[r.role_name] = Number(r.monthly_target || 0);
+
+      // 担当者別実効目標（上書きあり→上書き、なし→役職目標）
+      const repRepRoleMap = {};
+      for (const r of repRoleRes.rows) repRepRoleMap[r.rep_name] = r;
+
       const repTargetMap = {};
-      for (const r of repTargetRes.rows) repTargetMap[r.role_name] = Number(r.monthly_target || 0);
+      const TARGET_REPS_SERVER = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘'];
+      let teamTarget = 0;
+      for (const rep of TARGET_REPS_SERVER) {
+        const repRole = repRepRoleMap[rep];
+        const override = repRole?.monthly_target_override;
+        const roleName = repRole?.role_name || '';
+        const effective = override != null ? Number(override) : (roleTargetMap[roleName] || 0);
+        repTargetMap[rep] = effective;
+        teamTarget += effective;
+      }
 
       res.json({
         period, rangeStart, rangeEnd,
@@ -561,6 +580,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         prev: prevMetrics,
         repTable,
         repTargetMap,
+        teamTarget,
         planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,
         overdueAlerts: overdueRes.rows,
@@ -627,6 +647,31 @@ function registerCrmApi({ expressApp, authWithRole }) {
         GROUP BY 1 ORDER BY 1
       `, salesUser ? [salesUser] : []);
       res.json({ rows });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ── 担当者別役職・目標設定 ────────────────────────────────────
+  expressApp.get('/api/crm/rep-roles', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows } = await dbQuery('SELECT * FROM crm_rep_roles WHERE team_id=$1', [teamId]);
+      res.json({ repRoles: rows });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.put('/api/crm/rep-roles', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { repRoles } = req.body;
+      for (const r of repRoles) {
+        await dbQuery(`
+          INSERT INTO crm_rep_roles (team_id, rep_name, role_name, monthly_target_override)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (team_id, rep_name) DO UPDATE
+          SET role_name=$3, monthly_target_override=$4
+        `, [teamId, r.rep_name, r.role_name || '', r.monthly_target_override || null]);
+      }
+      res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
 

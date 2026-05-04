@@ -193,7 +193,7 @@ export default function CrmDashboard() {
 
   const {
     curr, prev, repTable, yomiBreakdown = [], overdueAlerts = [], stagnantAlerts = [],
-    rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, planBreakdown = [],
+    rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, teamTarget = 0, planBreakdown = [],
   } = data;
 
   const reps = buildRepTable(repTable, salesUser);
@@ -208,9 +208,10 @@ export default function CrmDashboard() {
     kpi:       summary.totals?.kpi       || 0,
   } : null;
   const forecastTotal = forecast?.total || 0;
-  const forecastKpi   = forecast?.kpi   || 0;
-  const kpiAchieve    = forecastKpi > 0 ? Math.round(curr.paymentAmount / forecastKpi * 100) : null;
-  const kpiRate       = forecastKpi > 0 ? Math.round(forecastTotal / forecastKpi * 100) : null;
+  // teamTarget = 担当者役職別目標の合計（固定）/ フォールバック: 動的KPI
+  const kpiDenom   = teamTarget > 0 ? teamTarget : (forecast?.kpi || 0);
+  const kpiAchieve = kpiDenom > 0 ? Math.round(curr.paymentAmount / kpiDenom * 100) : null;
+  const kpiRate    = kpiDenom > 0 ? Math.round(forecastTotal / kpiDenom * 100) : null;
 
   const winRate     = curr.meetingCount > 0 ? Math.round(curr.wonCount / curr.meetingCount * 100) : 0;
   const prevWinRate = prev?.meetingCount > 0 ? Math.round(prev.wonCount / prev.meetingCount * 100) : null;
@@ -334,14 +335,14 @@ export default function CrmDashboard() {
             color: kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#d97706' : '#dc2626' }}>
             {kpiAchieve != null ? kpiAchieve : '—'}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
           </div>
-          {forecastKpi > 0 && (
+          {kpiDenom > 0 && (
             <div style={{ marginTop:6 }}>
               <div style={{ height:5, background:'#f1f5f9', borderRadius:3, overflow:'hidden' }}>
                 <div style={{ height:'100%', width:`${Math.min(100, kpiAchieve || 0)}%`, borderRadius:3, transition:'width 0.5s',
                   background: kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444' }} />
               </div>
               <div style={{ fontSize:'0.6rem', color:'#94a3b8', marginTop:2 }}>
-                {fmtM(curr.paymentAmount)} / 目標 {fmtM(forecastKpi)}
+                {fmtM(curr.paymentAmount)} / 目標 {fmtM(kpiDenom)}
               </div>
             </div>
           )}
@@ -375,8 +376,7 @@ export default function CrmDashboard() {
                 {reps.map((r, ri) => {
                   const color       = REP_COLORS[ri % REP_COLORS.length];
                   const repWinRate  = r.meetingCount > 0 ? Math.round(r.wonCount / r.meetingCount * 100) : 0;
-                  const perRepFallback = forecastKpi > 0 ? Math.round(forecastKpi / TARGET_REPS.length) : 0;
-                  const repTarget   = repTargetMap[r.rep] > 0 ? repTargetMap[r.rep] : perRepFallback;
+                  const repTarget = repTargetMap[r.rep] || 0;
                   const repAchieve  = (repTarget > 0 && !r.isOther) ? Math.round(r.paymentAmount / repTarget * 100) : null;
                   const [fam, given] = r.rep.split(/[\s　]/);
                   return (
@@ -516,7 +516,7 @@ export default function CrmDashboard() {
                   <div style={{ textAlign:'right' }}>
                     <div style={{ fontSize:'0.62rem', color: kpiRate >= 100 ? '#059669' : '#94a3b8', marginBottom:2 }}>KPI達成見込み {kpiRate}%</div>
                     <div style={{ fontSize:'1rem', fontWeight:800, color: kpiRate >= 100 ? '#059669' : kpiRate >= 70 ? '#d97706' : '#dc2626' }}>
-                      {forecastTotal >= forecastKpi ? '+' : ''}{fmtM(forecastTotal - forecastKpi)}
+                      {forecastTotal >= kpiDenom ? '+' : ''}{fmtM(forecastTotal - kpiDenom)}
                     </div>
                   </div>
                 )}

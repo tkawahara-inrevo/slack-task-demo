@@ -936,7 +936,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       const staffSummary = Object.values(staffMap).map(s => ({
         ...s,
-        total: s.confirmed + s.high + s.medium,
+        total:    s.confirmed + s.high + s.medium,
+        kpiTotal: (s.confirmedIncentive || 0) + s.high + s.medium,
       })).sort((a,b) => b.total - a.total);
 
       const totals = staffSummary.reduce((acc, s) => ({
@@ -945,8 +946,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
         high:               acc.high               + s.high,
         medium:             acc.medium             + s.medium,
         total:              acc.total              + s.total,
+        kpiTotal:           acc.kpiTotal           + (s.kpiTotal || 0),
         kpi:                acc.kpi                + s.kpi,
-      }), { confirmed: 0, confirmedIncentive: 0, high: 0, medium: 0, total: 0, kpi: 0 });
+      }), { confirmed: 0, confirmedIncentive: 0, high: 0, medium: 0, total: 0, kpiTotal: 0, kpi: 0 });
 
       res.json({
         month: `${year}-${String(mon).padStart(2,'0')}`,

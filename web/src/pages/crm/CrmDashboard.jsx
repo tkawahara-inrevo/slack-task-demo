@@ -239,9 +239,10 @@ export default function CrmDashboard() {
     high:               summary.totals?.high               || 0,
     medium:             summary.totals?.medium             || 0,
     total:              summary.totals?.total              || 0,
+    kpiTotal:           summary.totals?.kpiTotal           || 0,
     kpi:                summary.totals?.kpi                || 0,
   } : null;
-  const forecastTotal = forecast?.total || 0;
+  const forecastTotal = forecast?.kpiTotal || 0; // インセン確定 + A/S + B/C見込み
   // teamTarget = 担当者役職別目標の合計（固定）/ フォールバック: 動的KPI
   const kpiDenom   = teamTarget > 0 ? teamTarget : (forecast?.kpi || 0);
   const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;
@@ -430,7 +431,7 @@ export default function CrmDashboard() {
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
               <thead>
                 <tr style={{ background:'#f8fafc' }}>
-                  {['担当者','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
+                  {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
                     <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -463,7 +464,10 @@ export default function CrmDashboard() {
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding:'9px 14px', textAlign:'right' }}>
+                      <td style={{ padding:'9px 10px', textAlign:'right', color: r.isOther ? '#94a3b8' : '#374151', fontSize:'0.8rem' }}>
+                        {fmtM(r.paymentAmount)}
+                      </td>
+                      <td style={{ padding:'9px 10px', textAlign:'right' }}>
                         {r.isOther
                           ? <span style={{ color:'#94a3b8' }}>{fmtM(r.incentiveAmount || 0)}</span>
                           : <button onClick={() => setDrill({ rep:r.rep, type:'payments' })}
@@ -620,7 +624,7 @@ export default function CrmDashboard() {
               {sectionHead('収支見込み', '対象月')}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
                 <div>
-                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>見込み合計</div>
+                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>KPI見込み合計（インセン）</div>
                   <div style={{ fontSize:'1.45rem', fontWeight:800, color:'#0f172a' }}>
                     {fmtM(forecastTotal)}<span style={{ fontSize:'0.8rem' }}>円</span>
                   </div>
@@ -745,40 +749,6 @@ export default function CrmDashboard() {
             );
           })()}
 
-          {/* パイプラインファネル */}
-          <div style={{ ...cardStyle, padding:'14px 16px' }}>
-            {sectionHead('パイプラインファネル', `${totalActiveCount}件 / ${fmtM(totalActiveAmount)}`)}
-            <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-              {YOMI_ORDER.map(key => {
-                const r = yomiMap[key];
-                if (!r) return null;
-                const color = YOMI_COLORS[key] || '#94a3b8';
-                const pct   = totalActiveCount > 0 ? (r.cnt / totalActiveCount) * 100 : 0;
-                return (
-                  <div key={key} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <span style={{ fontSize:'0.62rem', color:'#64748b', width:54, flexShrink:0, textAlign:'right' }}>{YOMI_LABELS[key]}</span>
-                    <div style={{ flex:1, height:18, background:'#f1f5f9', borderRadius:4, overflow:'hidden', position:'relative' }}>
-                      <div style={{ height:'100%', width:`${Math.max(pct, r.cnt > 0 ? 8 : 0)}%`, background:color, borderRadius:4, display:'flex', alignItems:'center', paddingLeft:5, minWidth:r.cnt > 0 ? 24 : 0 }}>
-                        {r.cnt > 0 && <span style={{ fontSize:'0.6rem', fontWeight:700, color: pct > 25 ? '#fff' : '#374151', whiteSpace:'nowrap' }}>{r.cnt}件</span>}
-                      </div>
-                    </div>
-                    <span style={{ fontSize:'0.65rem', color:'#94a3b8', width:50, flexShrink:0, textAlign:'right' }}>{fmtM(r.total_initial)}</span>
-                  </div>
-                );
-              })}
-              {curr.wonCount > 0 && (
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <span style={{ fontSize:'0.62rem', color:'#059669', width:54, flexShrink:0, textAlign:'right', fontWeight:600 }}>受注</span>
-                  <div style={{ flex:1, height:18, background:'#dcfce7', borderRadius:4, overflow:'hidden' }}>
-                    <div style={{ height:'100%', width:'100%', background:'#059669', borderRadius:4, display:'flex', alignItems:'center', paddingLeft:5 }}>
-                      <span style={{ fontSize:'0.6rem', fontWeight:700, color:'#fff' }}>{curr.wonCount}件</span>
-                    </div>
-                  </div>
-                  <span style={{ fontSize:'0.65rem', color:'#94a3b8', width:50, flexShrink:0, textAlign:'right' }}>{fmtM(curr.wonAmount)}</span>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 

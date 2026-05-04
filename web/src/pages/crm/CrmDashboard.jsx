@@ -237,7 +237,9 @@ export default function CrmDashboard() {
     confirmed:          summary.totals?.confirmed          || 0,
     confirmedIncentive: summary.totals?.confirmedIncentive || 0,
     high:               summary.totals?.high               || 0,
+    highKpi:            summary.totals?.highKpi            || 0,
     medium:             summary.totals?.medium             || 0,
+    mediumKpi:          summary.totals?.mediumKpi          || 0,
     total:              summary.totals?.total              || 0,
     kpiTotal:           summary.totals?.kpiTotal           || 0,
     kpi:                summary.totals?.kpi                || 0,
@@ -640,9 +642,9 @@ export default function CrmDashboard() {
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                 {[
-                  { label:'入金確定', amount:forecast.confirmed, sub: forecast.confirmedIncentive > 0 ? `インセン ${fmtM(forecast.confirmedIncentive)}` : null, color:'#059669', count:summary?.payments?.length },
-                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.high,   color:'#1e40af', count:summary?.highDeals?.length },
-                  { label:'締結多分いける [B/C]', amount:forecast.medium, color:'#d97706', count:summary?.mediumDeals?.length },
+                  { label:'入金確定',            amount:forecast.confirmed, sub:`インセン ${fmtM(forecast.confirmedIncentive)}`,                     color:'#059669', count:summary?.payments?.length },
+                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.highKpi,  sub:`売上見込 ${fmtM(forecast.high)}`,  color:'#1e40af', count:summary?.highDeals?.length },
+                  { label:'締結多分いける [B/C]', amount:forecast.mediumKpi,sub:`売上見込 ${fmtM(forecast.medium)}`,color:'#d97706', count:summary?.mediumDeals?.length },
                 ].map(item => {
                   const pct = forecastTotal > 0 ? Math.round((item.amount / forecastTotal) * 100) : 0;
                   return (

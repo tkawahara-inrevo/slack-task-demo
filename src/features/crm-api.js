@@ -912,11 +912,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       // 担当者別集計
       const staffMap = {};
-      const addToStaff = (name, key, amount, kpi = 0) => {
+      const addToStaff = (name, key, amount) => {
         const n = name || '未設定';
-        if (!staffMap[n]) staffMap[n] = { name: n, confirmed: 0, confirmedIncentive: 0, high: 0, medium: 0, kpi: 0 };
+        if (!staffMap[n]) staffMap[n] = { name: n, confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0 };
         staffMap[n][key] += amount;
-        staffMap[n].kpi += kpi;
       };
 
       paymentsRes.rows.forEach(p => {
@@ -926,29 +925,32 @@ function registerCrmApi({ expressApp, authWithRole }) {
       highRes.rows.forEach(d => {
         const staffName = d.sales_person || d.sales_user_id || '未設定';
         const amt = Number(d.monthly_fee || d.initial_fee || 0) * 1.1;
-        addToStaff(staffName, 'high', Math.round(amt), calcKpi(d));
+        addToStaff(staffName, 'high', Math.round(amt));       // 売上見込み（表示用）
+        addToStaff(staffName, 'highKpi', calcKpi(d));         // インセン見込み（KPI用）
       });
       medRes.rows.forEach(d => {
         const staffName = d.sales_person || d.sales_user_id || '未設定';
         const amt = Number(d.monthly_fee || d.initial_fee || 0) * 1.1;
-        addToStaff(staffName, 'medium', Math.round(amt), calcKpi(d));
+        addToStaff(staffName, 'medium', Math.round(amt));     // 売上見込み（表示用）
+        addToStaff(staffName, 'mediumKpi', calcKpi(d));       // インセン見込み（KPI用）
       });
 
       const staffSummary = Object.values(staffMap).map(s => ({
         ...s,
         total:    s.confirmed + s.high + s.medium,
-        kpiTotal: (s.confirmedIncentive || 0) + s.high + s.medium,
+        kpiTotal: (s.confirmedIncentive || 0) + (s.highKpi || 0) + (s.mediumKpi || 0),
       })).sort((a,b) => b.total - a.total);
 
       const totals = staffSummary.reduce((acc, s) => ({
         confirmed:          acc.confirmed          + s.confirmed,
         confirmedIncentive: acc.confirmedIncentive + (s.confirmedIncentive || 0),
         high:               acc.high               + s.high,
+        highKpi:            acc.highKpi            + (s.highKpi || 0),
         medium:             acc.medium             + s.medium,
+        mediumKpi:          acc.mediumKpi          + (s.mediumKpi || 0),
         total:              acc.total              + s.total,
         kpiTotal:           acc.kpiTotal           + (s.kpiTotal || 0),
-        kpi:                acc.kpi                + s.kpi,
-      }), { confirmed: 0, confirmedIncentive: 0, high: 0, medium: 0, total: 0, kpiTotal: 0, kpi: 0 });
+      }), { confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0, total: 0, kpiTotal: 0 });
 
       res.json({
         month: `${year}-${String(mon).padStart(2,'0')}`,

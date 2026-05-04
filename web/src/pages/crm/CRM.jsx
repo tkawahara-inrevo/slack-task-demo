@@ -317,6 +317,7 @@ function CustomFieldsManager() {
 
 // ── 選択肢管理 ───────────────────────────────────────────────
 const SYSTEM_FIELDS = [
+  { name:'sales_person',    label:'担当営業',   defaults:['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘','添田 剛'] },
   { name:'contract_type',   label:'契約形態',   defaults:['採用保証','月額','後払い','変動プラン'] },
   { name:'payment_type',    label:'支払方式',   defaults:['一括','分割','月払い'] },
   { name:'employment_type', label:'採用形態',   defaults:['新卒','中途','業務委託','アルバイト/インターン'] },

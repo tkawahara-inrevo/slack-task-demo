@@ -331,8 +331,10 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
     scheduleAutoSave(next);
   };
 
-  // BC固定メンバー + 既存データにある担当者名 を合わせた一覧
-  const salesUsers = [...new Set([...BC_MEMBERS, ...(meta?.salesUsers || [])])].filter(Boolean);
+  // 設定の担当営業リスト > BC固定メンバー > 既存データの担当者名
+  const salesUsers = fieldOptions.sales_person?.length > 0
+    ? fieldOptions.sales_person
+    : [...new Set([...BC_MEMBERS, ...(meta?.salesUsers || [])])].filter(Boolean);
   const rpoId = deal.data?.rpo_client_id;
 
   // 担当者セレクト（DBの実際の名前から選択）

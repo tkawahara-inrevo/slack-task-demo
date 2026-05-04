@@ -546,9 +546,9 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_body TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS total_score INTEGER`).catch(() => {});
 
-  // Sub Chief → Sub Manager リネーム
-  await dbQuery(`UPDATE crm_role_targets SET role_name='Sub Manager' WHERE role_name='Sub Chief'`).catch(() => {});
-  await dbQuery(`UPDATE crm_rep_roles SET role_name='Sub Manager' WHERE role_name='Sub Chief'`).catch(() => {});
+  // 誤ってSub ManagerにリネームされたSub Chiefを元に戻す
+  await dbQuery(`UPDATE crm_role_targets SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
+  await dbQuery(`UPDATE crm_rep_roles SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
 
   // 担当者別役職・目標上書き設定
   await dbQuery(`

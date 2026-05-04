@@ -7,7 +7,7 @@ import CrmDashboard from './CrmDashboard';
 import { api } from '../../api/client';
 
 const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
-const ROLE_NAMES  = ['役職無し', 'Lead', 'Sub Manager', 'Chief', 'Sub Expert', 'Expert'];
+const ROLE_NAMES  = ['役職無し', 'Lead', 'Sub Manager', 'Sub Chief', 'Chief', 'Sub Expert', 'Expert'];
 const ROLE_OPTIONS = ['', ...ROLE_NAMES];
 
 function CrmSettings() {

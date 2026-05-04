@@ -1079,7 +1079,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         if (t.includes('sub expert'))  return 'Sub Expert';
         if (t.includes('expert'))      return 'Expert';
         if (t.includes('sub manager')) return 'Sub Manager';
-        if (t.includes('sub chief'))   return 'Sub Manager'; // 旧称を新称にマップ
+        if (t.includes('sub chief'))   return 'Sub Chief';
         if (t.includes('chief'))       return 'Chief';
         if (t.includes('manager'))     return 'Chief';
         if (t.includes('lead'))        return 'Lead';

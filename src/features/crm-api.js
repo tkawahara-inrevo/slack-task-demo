@@ -496,7 +496,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         paymentAmount: repPayMap[r.rep] || 0,
       }));
 
-      // ── アラート（担当者フィルター適用）──
+      // ── アラート（全担当者対象、フィルター不要）──
       const today = new Date().toISOString().split('T')[0];
       const [overdueRes, stagnantRes] = await Promise.all([
         dbQuery(`
@@ -504,9 +504,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
                  COALESCE(d.sales_person, d.sales_user_id) AS sales_person, c.name AS customer_name
           FROM deals d JOIN customers c ON c.id=d.customer_id
           WHERE d.team_id=$1 AND d.status='active'
-            AND d.next_action_date < $2::date AND d.next_action_date IS NOT NULL${personFilter}
+            AND d.next_action_date < $2::date AND d.next_action_date IS NOT NULL
           ORDER BY d.next_action_date ASC LIMIT 30
-        `, [...personParams, today]),
+        `, [teamId, today]),
         dbQuery(`
           SELECT d.id, d.name, d.yomi, d.updated_at,
                  COALESCE(d.sales_person, d.sales_user_id) AS sales_person, c.name AS customer_name,
@@ -514,9 +514,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
           FROM deals d JOIN customers c ON c.id=d.customer_id
           WHERE d.team_id=$1 AND d.status='active'
             AND d.yomi NOT IN ('アポ化前','受注','失注')
-            AND d.updated_at < now() - interval '14 days'${personFilter}
+            AND d.updated_at < now() - interval '14 days'
           ORDER BY d.updated_at ASC LIMIT 30
-        `, personParams),
+        `, [teamId]),
       ]);
 
       // ── ヨミ別内訳（アクティブ）──

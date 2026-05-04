@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import { api } from '../../api/client';
 
-const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '添田 剛', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
+const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
 const REP_COLORS  = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6'];
 
 const ACT_CFG = {
@@ -56,8 +56,12 @@ function DiffTag({ diff }) {
   );
 }
 
-function buildRepTable(repTable) {
+function buildRepTable(repTable, filterRep) {
   if (!repTable?.length) return [];
+  if (filterRep && TARGET_REPS.includes(filterRep)) {
+    const f = repTable.find(r => r.rep === filterRep);
+    return [f ? { ...f } : { rep: filterRep, wonCount: 0, meetingCount: 0, paymentAmount: 0 }];
+  }
   const rows = TARGET_REPS.map(name => {
     const f = repTable.find(r => r.rep === name);
     return f ? { ...f } : { rep: name, wonCount: 0, meetingCount: 0, paymentAmount: 0 };
@@ -144,7 +148,7 @@ export default function CrmDashboard() {
   const [drill, setDrill]         = useState(null);
   const [alertOpen, setAlertOpen] = useState(true);
 
-  const load = useCallback(async (u = salesUser, p = period, cm = customMonth) => {
+  const load = async (u, p, cm) => {
     setLoading(true);
     try {
       const params = { period: p };
@@ -160,9 +164,9 @@ export default function CrmDashboard() {
       setData(d); setSummary(s); setTrend(t.rows || []); setActivities(acts.rows || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, []);
+  };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load('', 'custom', currentMonth); }, []);
 
   if (loading && !data) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#94a3b8', fontSize:'0.88rem' }}>
@@ -176,7 +180,7 @@ export default function CrmDashboard() {
     rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, planBreakdown = [],
   } = data;
 
-  const reps = buildRepTable(repTable);
+  const reps = buildRepTable(repTable, salesUser);
   const termLabel = period === 'term' ? '期' : '月';
   const alertCount = overdueAlerts.length + stagnantAlerts.length;
 
@@ -200,6 +204,9 @@ export default function CrmDashboard() {
   const yomiMap          = Object.fromEntries((yomiBreakdown).map(r => [r.yomi, r]));
   const totalActiveCount  = yomiBreakdown.reduce((s, r) => s + r.cnt, 0);
   const totalActiveAmount = yomiBreakdown.reduce((s, r) => s + Number(r.total_initial || 0), 0);
+
+  const planData  = planBreakdown.map(r => ({ ...r, amount: Number(r.amount) }));
+  const planTotal = planData.reduce((s, r) => s + r.amount, 0);
 
   const cardStyle = { background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0' };
   const sectionHead = (label, right) => (
@@ -227,19 +234,17 @@ export default function CrmDashboard() {
             </button>
           ))}
         </div>
-        <input type="month" value={customMonth}
-          onChange={e => { setCustomMonth(e.target.value); if (period === 'custom') load(salesUser, 'custom', e.target.value); }}
+        <input type="month" value={customMonth} disabled={period === 'term'}
+          onChange={e => { setCustomMonth(e.target.value); load(salesUser, 'custom', e.target.value); }}
           style={{ padding:'4px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem',
-            background:period==='custom' ? '#fff' : '#f8fafc', color:period==='custom' ? '#0f172a' : '#94a3b8', outline:'none' }} />
-        <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period); }}
+            background: period === 'term' ? '#f1f5f9' : '#fff',
+            color: period === 'term' ? '#cbd5e1' : '#0f172a',
+            outline:'none', cursor: period === 'term' ? 'not-allowed' : 'auto' }} />
+        <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period, customMonth); }}
           style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', background:'#fff', cursor:'pointer', color:'#0f172a' }}>
           <option value="">全員</option>
           {TARGET_REPS.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
-        <button onClick={() => load()}
-          style={{ padding:'5px 14px', border:'1px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.8rem', cursor:'pointer' }}>
-          ↻ 更新
-        </button>
       </div>
 
       {/* ── KPIカード 5枚 ── */}
@@ -546,38 +551,36 @@ export default function CrmDashboard() {
           </div>
 
           {/* プラン割合（ドーナツグラフ） */}
-          {planBreakdown.length > 0 && (() => {
-            const planData = planBreakdown.map(r => ({ ...r, amount: Number(r.amount) }));
-            const planTotal = planData.reduce((s, r) => s + r.amount, 0);
-            return (
-              <div style={{ ...cardStyle, padding:'14px 16px' }}>
-                {sectionHead('受注プラン割合', `入金確定 ${planData.length}種`)}
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          {planData.length > 0 && (
+            <div style={{ ...cardStyle, padding:'14px 16px' }}>
+              {sectionHead('受注プラン割合', `入金確定 ${planData.length}種`)}
+              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                <div style={{ width:140, height:140, flexShrink:0 }}>
                   <PieChart width={140} height={140}>
                     <Pie data={planData} dataKey="amount" nameKey="plan"
-                      cx={70} cy={70} outerRadius={62} innerRadius={36} paddingAngle={2}>
+                      cx="50%" cy="50%" outerRadius={62} innerRadius={36} paddingAngle={2}>
                       {planData.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(v, name) => [`${fmtM(v)}`, name]}
                       contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11 }} />
                   </PieChart>
-                  <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
-                    {planData.map((p, i) => {
-                      const pct = planTotal > 0 ? Math.round(p.amount / planTotal * 100) : 0;
-                      return (
-                        <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                          <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
-                          <span style={{ fontSize:'0.7rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
-                          <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
-                          <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:36, textAlign:'right' }}>{pct}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                </div>
+                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
+                  {planData.map((p, i) => {
+                    const pct = planTotal > 0 ? Math.round(p.amount / planTotal * 100) : 0;
+                    return (
+                      <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
+                        <span style={{ fontSize:'0.7rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
+                        <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
+                        <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:36, textAlign:'right' }}>{pct}%</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })()}
+            </div>
+          )}
 
           {/* パイプラインファネル */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>

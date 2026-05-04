@@ -683,7 +683,7 @@ export default function CustomerDetail() {
     <div className="rpo-page">
       {/* 顧客ヘッダー */}
       <div style={{ marginBottom:24 }}>
-        <button className="btn-back-inline" onClick={()=>navigate('/crm/customers')} style={{ marginBottom:8 }}>← 顧客一覧</button>
+        <button className="btn-back-inline" onClick={()=>navigate('/crm?tab=customers')} style={{ marginBottom:8 }}>← 顧客一覧</button>
         {!editingCustomer && (
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>

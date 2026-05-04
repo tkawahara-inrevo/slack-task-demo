@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useSearchParams, Outlet, useOutlet, useMatch } from 'react-router-dom';
 import CustomerList from './CustomerList';
 import SalesPerformance from './SalesPerformance';
 import CrmDashboard from './CrmDashboard';
@@ -307,7 +307,9 @@ export default function CRM() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab') || 'dashboard';
   const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
-  const [canViewPerf, setCanViewPerf] = useState(null); // null=loading
+  const [canViewPerf, setCanViewPerf] = useState(null);
+  const outlet = useOutlet();
+  const onCustomerDetail = !!useMatch('/crm/customers/:id');
 
   useEffect(() => {
     api.crmPerformanceAccess()
@@ -327,27 +329,32 @@ export default function CRM() {
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
       {/* タブバー */}
       <div style={{ display:'flex', borderBottom:'1px solid #e5e7eb', background:'#fff', paddingLeft:8, flexShrink:0 }}>
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ padding:'10px 20px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem',
-              fontWeight: tab===t.key?700:400, color:tab===t.key?'#1d4ed8':'#6b7280',
-              borderBottom: tab===t.key?'2px solid #1d4ed8':'2px solid transparent', transition:'color 0.15s' }}>
-            {t.label}
-          </button>
-        ))}
+        {tabs.map(t => {
+          const active = onCustomerDetail ? t.key === 'customers' : t.key === tab;
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              style={{ padding:'10px 20px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem',
+                fontWeight: active?700:400, color:active?'#1d4ed8':'#6b7280',
+                borderBottom: active?'2px solid #1d4ed8':'2px solid transparent', transition:'color 0.15s' }}>
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* タブコンテンツ */}
       <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {tab === 'dashboard'   && <div style={{ flex:1, overflow:'auto' }}><CrmDashboard /></div>}
+        {/* 顧客詳細（ネストルート）はタブを保持したまま表示 */}
+        {outlet && <div style={{ flex:1, overflow:'auto' }}>{outlet}</div>}
 
-        {tab === 'customers'  && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><CustomerList /></div>}
-        {tab === 'yomi'       && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>}
+        {!outlet && tab === 'dashboard'   && <div style={{ flex:1, overflow:'auto' }}><CrmDashboard /></div>}
+        {!outlet && tab === 'customers'  && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><CustomerList /></div>}
+        {!outlet && tab === 'yomi'       && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>}
 
-        {tab === 'performance' && canViewPerf && (
+        {!outlet && tab === 'performance' && canViewPerf && (
           <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>
         )}
-        {tab === 'performance' && canViewPerf === false && (
+        {!outlet && tab === 'performance' && canViewPerf === false && (
           <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#94a3b8', flexDirection:'column', gap:8 }}>
             <div style={{ fontSize:'1.5rem' }}>🔒</div>
             <div style={{ fontWeight:700, color:'#374151' }}>アクセス権限がありません</div>
@@ -355,7 +362,7 @@ export default function CRM() {
           </div>
         )}
 
-        {tab === 'settings' && <div style={{ flex:1, overflow:'auto' }}><CrmSettings /></div>}
+        {!outlet && tab === 'settings' && <div style={{ flex:1, overflow:'auto' }}><CrmSettings /></div>}
       </div>
     </div>
   );

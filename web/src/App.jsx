@@ -63,8 +63,9 @@ function App() {
           <Route path="recruitment" element={<Recruitment />} />
           <Route path="ranking" element={<Ranking />} />
         </Route>
-        <Route path="/crm" element={<CRM />} />
-        <Route path="/crm/customers/:id" element={<CustomerDetail />} />
+        <Route path="/crm" element={<CRM />}>
+          <Route path="customers/:id" element={<CustomerDetail />} />
+        </Route>
         {/* 旧URLの後方互換 */}
         <Route path="/crm/pipeline" element={<Pipeline />} />
         <Route path="/crm/customers" element={<CustomerList />} />

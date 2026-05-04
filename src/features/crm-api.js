@@ -678,7 +678,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { rows } = await dbQuery(`
         SELECT
           TO_CHAR(payment_date, 'YYYY/MM') AS month,
-          COALESCE(SUM(incentive_amount), 0)::bigint AS amount,
+          COALESCE(SUM(amount), 0)::bigint AS amount,
+          COALESCE(SUM(incentive_amount), 0)::bigint AS incentive_amount,
           COUNT(*)::int AS count
         FROM kintone_payments
         WHERE payment_date >= (CURRENT_DATE - INTERVAL '${Number(months)} months')

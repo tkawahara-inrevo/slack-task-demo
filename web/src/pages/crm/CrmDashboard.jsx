@@ -246,8 +246,17 @@ export default function CrmDashboard() {
   } : null;
   const forecastTotal    = forecast?.kpiTotal || 0;  // インセンベース（KPI計算用）
   const forecastDispTotal = forecast?.total   || 0;  // 実入金ベース（表示・バー用）
-  // teamTarget = 担当者役職別目標の合計（固定）/ フォールバック: 動的KPI
-  const kpiDenom   = teamTarget > 0 ? teamTarget : (forecast?.kpi || 0);
+
+  // 今期モード専用: termMonthsをkpiDenom計算より先に定義
+  const termMonths = (period === 'term' && rangeStart && rangeEnd)
+    ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)) + 1)
+    : 1;
+  const termKpiTarget = period === 'term' ? teamTarget * termMonths : 0;
+
+  // KPI分母: 今期は月次目標×月数、指定月は月次目標（フォールバック: 動的KPI）
+  const kpiDenom   = period === 'term'
+    ? (termKpiTarget > 0 ? termKpiTarget : (forecast?.kpi || 0))
+    : (teamTarget > 0 ? teamTarget : (forecast?.kpi || 0));
   const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;
   const kpiRate    = kpiDenom > 0 ? Math.round(forecastTotal / kpiDenom * 100) : null;
 
@@ -262,12 +271,6 @@ export default function CrmDashboard() {
 
   const planData  = planBreakdown.map(r => ({ ...r, amount: Number(r.amount) }));
   const planTotal = planData.reduce((s, r) => s + r.amount, 0);
-
-  // 今期モード専用計算
-  const termMonths = (period === 'term' && rangeStart && rangeEnd)
-    ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)) + 1)
-    : 1;
-  const termKpiTarget   = period === 'term' ? teamTarget * termMonths : 0;
   const termAchieve     = termKpiTarget > 0 ? Math.round((curr.incentiveAmount || 0) / termKpiTarget * 100) : null;
   const prevTermAchieve = (termKpiTarget > 0 && prev) ? Math.round((prev.incentiveAmount || 0) / termKpiTarget * 100) : null;
 
@@ -681,18 +684,14 @@ export default function CrmDashboard() {
 
           {/* 入金推移 */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>
-            {sectionHead('入金推移', period === 'term' ? `今期（月次目標 ${fmtM(teamTarget)}/月）` : '過去6ヶ月　単位: 万円')}
+            {sectionHead('入金推移（実入金額）', period === 'term' ? '今期 月別' : '過去6ヶ月　単位: 万円')}
             <ResponsiveContainer width="100%" height={period === 'term' ? 160 : 130}>
               <BarChart data={trendData} margin={{ top:8, right:0, left:0, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis tickFormatter={v => `${Math.round(v / 1e4)}万`} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={42} />
-                <Tooltip formatter={v => [`${fmtM(v)}`, '入金額']}
+                <Tooltip formatter={v => [`${fmtM(v)}`, '実入金額']}
                   contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
-                {period === 'term' && teamTarget > 0 && (
-                  <ReferenceLine y={teamTarget} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5}
-                    label={{ value:`目標 ${fmtM(teamTarget)}`, position:'insideTopRight', fontSize:9, fill:'#ef4444' }} />
-                )}
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
                   <LabelList dataKey="amount" position="top"
                     formatter={v => v > 0 ? `${Math.round(v / 1e4)}万` : ''}

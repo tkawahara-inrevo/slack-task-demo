@@ -737,7 +737,7 @@ export default function CustomerDetail() {
         <button className="btn-back-inline" onClick={()=>navigate('/crm?tab=customers')} style={{ marginBottom:8 }}>← 顧客一覧</button>
         {!editingCustomer && (
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-            <div>
+            <div style={{ flex:1 }}>
               <h1 style={{ margin:'0 0 6px', fontSize:'1.6rem', fontWeight:800, color:'#111827', letterSpacing:'-0.02em' }}>{customer.name}</h1>
               <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center', fontSize:'0.83rem', color:'#6b7280' }}>
                 {customer.industry && <span style={{ background:'#f1f5f9', padding:'2px 8px', borderRadius:99, fontWeight:500 }}>{customer.industry}</span>}
@@ -755,55 +755,46 @@ export default function CustomerDetail() {
                   {customer.competitors.map(c => <span key={c} style={{ fontSize:'0.75rem', background:'#fef3c7', color:'#d97706', padding:'1px 7px', borderRadius:99 }}>{c}</span>)}
                 </div>
               )}
+
+              {/* 担当者情報（会社情報内に統合）*/}
+              <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid #f3f4f6' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom: contacts.length > 0 ? 8 : 0 }}>
+                  <span style={{ fontSize:'0.78rem', fontWeight:600, color:'#6b7280' }}>担当者</span>
+                  <button style={{ fontSize:'0.72rem', padding:'2px 10px', border:'1px solid #e5e7eb', borderRadius:6, background:'#fff', cursor:'pointer', color:'#374151' }}
+                    onClick={() => { setContactForm({}); setEditingContact('new'); }}>＋ 追加</button>
+                </div>
+                {contacts.length > 0 && (
+                  <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                    {contacts.map(c => (
+                      <div key={c.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 10px', background:'#f8fafc', borderRadius:8, fontSize:'0.82rem' }}>
+                        <span style={{ fontWeight:600, color:'#111827' }}>
+                          {c.last_name}{c.first_name}
+                          {c.sales_prohibited && <span style={{ fontSize:'0.68rem', background:'#fee2e2', color:'#ef4444', padding:'0 5px', borderRadius:99, marginLeft:5 }}>営業禁止</span>}
+                        </span>
+                        {c.position_title && <span style={{ color:'#6b7280', fontSize:'0.78rem' }}>{c.position_title}</span>}
+                        {c.department && <span style={{ color:'#9ca3af', fontSize:'0.75rem' }}>{c.department}</span>}
+                        {c.email && <a href={`mailto:${c.email}`} style={{ color:'#6366f1', fontSize:'0.78rem' }}>{c.email}</a>}
+                        {c.phone && <span style={{ color:'#6b7280', fontSize:'0.78rem' }}>{c.phone}</span>}
+                        <div style={{ marginLeft:'auto', display:'flex', gap:4 }}>
+                          <button onClick={() => { setContactForm(c); setEditingContact(c); }}
+                            style={{ fontSize:'0.68rem', color:'#6b7280', background:'none', border:'1px solid #e5e7eb', borderRadius:5, padding:'1px 7px', cursor:'pointer' }}>編集</button>
+                          <button onClick={() => handleDeleteContact(c.id)}
+                            style={{ fontSize:'0.68rem', color:'#ef4444', background:'none', border:'1px solid #fee2e2', borderRadius:5, padding:'1px 7px', cursor:'pointer' }}>削除</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {contacts.length === 0 && (
+                  <span style={{ fontSize:'0.75rem', color:'#d1d5db' }}>なし</span>
+                )}
+              </div>
             </div>
             <button style={{ padding:'7px 16px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.83rem', fontWeight:600, cursor:'pointer', flexShrink:0 }}
               onClick={() => { setCustForm(customer); setCustSavedAt(null); setEditingCustomer(true); }}>
               編集
             </button>
           </div>
-        )}
-      </div>
-
-      {/* 担当者情報 */}
-      <div style={{ marginBottom:24, border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
-          <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#374151' }}>担当者情報 <span style={{ fontSize:'0.8rem', color:'#9ca3af', fontWeight:400 }}>{contacts.length}名</span></span>
-          <button style={{ fontSize:12, padding:'4px 12px', border:'1px solid #e5e7eb', borderRadius:6, background:'#fff', cursor:'pointer' }}
-            onClick={() => { setContactForm({}); setEditingContact('new'); }}>＋ 追加</button>
-        </div>
-        {contacts.length === 0 ? (
-          <div style={{ padding:'16px', textAlign:'center', color:'#9ca3af', fontSize:'0.83rem' }}>担当者情報がありません</div>
-        ) : (
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.83rem' }}>
-            <thead>
-              <tr style={{ background:'#f9fafb' }}>
-                {['氏名','役職','部署','メール','電話',''].map(h => (
-                  <th key={h} style={{ padding:'7px 12px', textAlign:'left', fontWeight:600, color:'#6b7280', borderBottom:'1px solid #f3f4f6', whiteSpace:'nowrap' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {contacts.map(c => (
-                <tr key={c.id} style={{ borderBottom:'1px solid #f9fafb' }}>
-                  <td style={{ padding:'8px 12px', fontWeight:600 }}>
-                    {c.last_name}{c.first_name}
-                    {c.furigana && <div style={{ fontSize:'0.72rem', color:'#9ca3af' }}>{c.furigana}</div>}
-                    {c.sales_prohibited && <span style={{ fontSize:'0.7rem', background:'#fee2e2', color:'#ef4444', padding:'0 5px', borderRadius:99, marginLeft:4 }}>営業禁止</span>}
-                  </td>
-                  <td style={{ padding:'8px 12px', color:'#6b7280' }}>{c.position_title || '—'}</td>
-                  <td style={{ padding:'8px 12px', color:'#6b7280' }}>{c.department || '—'}</td>
-                  <td style={{ padding:'8px 12px' }}>{c.email ? <a href={`mailto:${c.email}`} style={{ color:'#6366f1' }}>{c.email}</a> : '—'}</td>
-                  <td style={{ padding:'8px 12px', color:'#6b7280' }}>{c.phone || '—'}</td>
-                  <td style={{ padding:'8px 12px', textAlign:'right' }}>
-                    <button onClick={() => { setContactForm(c); setEditingContact(c); }}
-                      style={{ fontSize:11, color:'#6b7280', background:'none', border:'1px solid #e5e7eb', borderRadius:5, padding:'2px 8px', cursor:'pointer', marginRight:4 }}>編集</button>
-                    <button onClick={() => handleDeleteContact(c.id)}
-                      style={{ fontSize:11, color:'#ef4444', background:'none', border:'1px solid #fee2e2', borderRadius:5, padding:'2px 8px', cursor:'pointer' }}>削除</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
       </div>
 

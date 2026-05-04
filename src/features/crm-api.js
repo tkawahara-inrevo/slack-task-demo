@@ -563,17 +563,50 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const roleTargetMap = {};
       for (const r of roleTargetRes.rows) roleTargetMap[r.role_name] = Number(r.monthly_target || 0);
 
-      // 担当者別実効目標（上書きあり→上書き、なし→役職目標）
+      // 担当者別手動設定マップ
       const repRepRoleMap = {};
       for (const r of repRoleRes.rows) repRepRoleMap[r.rep_name] = r;
 
+      // Slack プロフィールから役職を自動推定するヘルパー（perf-staffと共通ロジック）
+      const inferRoleFromTitle = (title) => {
+        if (!title) return '役職無し';
+        const t = title.toLowerCase();
+        if (t.includes('sub expert'))  return 'Sub Expert';
+        if (t.includes('expert'))      return 'Expert';
+        if (t.includes('sub manager')) return 'Sub Manager';
+        if (t.includes('sub chief'))   return 'Sub Chief';
+        if (t.includes('chief'))       return 'Chief';
+        if (t.includes('manager'))     return 'Chief';
+        if (t.includes('lead'))        return 'Lead';
+        return '役職無し';
+      };
+
+      // Slack ディレクトリから担当者タイトルを取得
+      const slackDirRes = await dbQuery(
+        `SELECT display_name, real_name, profile_json->>'title' AS title
+         FROM dashboard_user_directory WHERE team_id=$1 AND is_active=true`,
+        [teamId]
+      );
+
       const repTargetMap = {};
+      const repRoleInferred = {}; // フロントに渡す自動推定役職
       const TARGET_REPS_SERVER = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘'];
       let teamTarget = 0;
       for (const rep of TARGET_REPS_SERVER) {
-        const repRole = repRepRoleMap[rep];
+        const repRole  = repRepRoleMap[rep];
         const override = repRole?.monthly_target_override;
-        const roleName = repRole?.role_name || '';
+
+        // 役職: 手動設定 > Slackプロフィール自動推定
+        let roleName = repRole?.role_name || '';
+        if (!roleName) {
+          const lastName = rep.split(/[\s　]/)[0];
+          const profile  = slackDirRes.rows.find(d =>
+            d.display_name?.includes(lastName) || d.real_name?.includes(lastName)
+          );
+          roleName = inferRoleFromTitle(profile?.title);
+        }
+        repRoleInferred[rep] = roleName;
+
         const effective = override != null ? Number(override) : (roleTargetMap[roleName] || 0);
         repTargetMap[rep] = effective;
         teamTarget += effective;
@@ -586,6 +619,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         prev: prevMetrics,
         repTable,
         repTargetMap,
+        repRoleInferred,
         teamTarget,
         planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,

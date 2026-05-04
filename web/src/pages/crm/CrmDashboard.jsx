@@ -226,7 +226,7 @@ export default function CrmDashboard() {
 
   const {
     curr, prev, repTable, yomiBreakdown = [], overdueAlerts = [], stagnantAlerts = [],
-    rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, teamTarget = 0, planBreakdown = [],
+    rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, repRoleInferred = {}, teamTarget = 0, planBreakdown = [],
   } = data;
 
   const reps = buildRepTable(repTable, salesUser);
@@ -494,7 +494,10 @@ export default function CrmDashboard() {
                       </td>
                       <td style={{ padding:'9px 14px', textAlign:'right' }}>
                         {repAchieve != null
-                          ? <span style={{ fontWeight:700, fontSize:'0.82rem', color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</span>
+                          ? <div>
+                              <span style={{ fontWeight:700, fontSize:'0.82rem', color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</span>
+                              <div style={{ fontSize:'0.58rem', color:'#94a3b8', marginTop:1 }}>{repRoleInferred[r.rep] || ''}</div>
+                            </div>
                           : <span style={{ color:'#cbd5e1' }}>—</span>}
                       </td>
                     </tr>

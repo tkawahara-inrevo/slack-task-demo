@@ -71,7 +71,8 @@ function buildRepTable(repTable, filterRep) {
     rep: 'その他', isOther: true,
     wonCount:      others.reduce((s, r) => s + r.wonCount, 0),
     meetingCount:  others.reduce((s, r) => s + r.meetingCount, 0),
-    paymentAmount: others.reduce((s, r) => s + r.paymentAmount, 0),
+    paymentAmount:   others.reduce((s, r) => s + r.paymentAmount, 0),
+    incentiveAmount: others.reduce((s, r) => s + (r.incentiveAmount || 0), 0),
   });
   return rows;
 }
@@ -163,6 +164,7 @@ export default function CrmDashboard() {
   const [customMonth, setCustomMonth] = useState(currentMonth);
   const [drill, setDrill]         = useState(null);
   const [alertOpen, setAlertOpen] = useState(true);
+  const [planMode, setPlanMode]   = useState('amount'); // 'amount' | 'count'
   const [syncing, setSyncing]     = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncDone, setSyncDone]   = useState(false);
@@ -241,11 +243,8 @@ export default function CrmDashboard() {
   const forecastTotal = forecast?.total || 0;
   // teamTarget = 担当者役職別目標の合計（固定）/ フォールバック: 動的KPI
   const kpiDenom   = teamTarget > 0 ? teamTarget : (forecast?.kpi || 0);
-  const kpiAchieve = kpiDenom > 0 ? Math.round(curr.paymentAmount / kpiDenom * 100) : null;
+  const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;
   const kpiRate    = kpiDenom > 0 ? Math.round(forecastTotal / kpiDenom * 100) : null;
-
-  const winRate     = curr.meetingCount > 0 ? Math.round(curr.wonCount / curr.meetingCount * 100) : 0;
-  const prevWinRate = prev?.meetingCount > 0 ? Math.round(prev.wonCount / prev.meetingCount * 100) : null;
 
   const trendData = trend.map(r => ({ month: r.month, amount: Number(r.amount) }));
 
@@ -261,8 +260,8 @@ export default function CrmDashboard() {
     ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)) + 1)
     : 1;
   const termKpiTarget   = period === 'term' ? teamTarget * termMonths : 0;
-  const termAchieve     = termKpiTarget > 0 ? Math.round(curr.paymentAmount / termKpiTarget * 100) : null;
-  const prevTermAchieve = (termKpiTarget > 0 && prev) ? Math.round(prev.paymentAmount / termKpiTarget * 100) : null;
+  const termAchieve     = termKpiTarget > 0 ? Math.round((curr.incentiveAmount || 0) / termKpiTarget * 100) : null;
+  const prevTermAchieve = (termKpiTarget > 0 && prev) ? Math.round((prev.incentiveAmount || 0) / termKpiTarget * 100) : null;
 
   const cardStyle = { background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0' };
   const sectionHead = (label, right) => (
@@ -325,18 +324,28 @@ export default function CrmDashboard() {
 
       {/* ── KPIカード 5枚 ── */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
-        {/* インセン合計 — green */}
+        {/* 入金額 — green */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #059669' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <div>
-              <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>インセン合計</span>
-              <div style={{ fontSize:'0.6rem', color:'#cbd5e1' }}>kintone incentive_amount</div>
-            </div>
+            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>入金額</span>
             <span style={{ width:28, height:28, borderRadius:8, background:'#f0fdf4', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.8rem', color:'#059669' }}>¥</span>
           </div>
           <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>{fmtM(curr.paymentAmount)}</div>
           <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
             <DiffTag diff={prev ? diffPct(curr.paymentAmount, prev.paymentAmount) : null} />
+            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
+          </div>
+        </div>
+
+        {/* インセン合計 — teal */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #0891b2' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>インセン</span>
+            <span style={{ width:28, height:28, borderRadius:8, background:'#ecfeff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#0891b2' }}>円</span>
+          </div>
+          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>{fmtM(curr.incentiveAmount || 0)}</div>
+          <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
+            <DiffTag diff={prev ? diffPct(curr.incentiveAmount || 0, prev.incentiveAmount || 0) : null} />
             <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
           </div>
         </div>
@@ -371,21 +380,6 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* 受注率 — purple */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #7c3aed' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>受注率</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#f5f3ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#7c3aed' }}>率</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
-            {winRate}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
-          </div>
-          <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
-            <DiffTag diff={prevWinRate != null ? diffPct(winRate, prevWinRate) : null} />
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
-          </div>
-        </div>
-
         {/* KPI達成率 — dynamic color top border */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0',
           borderTop:`3px solid ${kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444'}` }}>
@@ -404,7 +398,7 @@ export default function CrmDashboard() {
                   background: kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444' }} />
               </div>
               <div style={{ fontSize:'0.6rem', color:'#94a3b8', marginTop:2 }}>
-                {fmtM(curr.paymentAmount)} / 目標 {fmtM(kpiDenom)}
+                インセン {fmtM(curr.incentiveAmount || 0)} / 目標 {fmtM(kpiDenom)}
               </div>
             </div>
           )}
@@ -438,8 +432,8 @@ export default function CrmDashboard() {
                 {reps.map((r, ri) => {
                   const color       = REP_COLORS[ri % REP_COLORS.length];
                   const repWinRate  = r.meetingCount > 0 ? Math.round(r.wonCount / r.meetingCount * 100) : 0;
-                  const repTarget = repTargetMap[r.rep] || 0;
-                  const repAchieve  = (repTarget > 0 && !r.isOther) ? Math.round(r.paymentAmount / repTarget * 100) : null;
+                  const repTarget   = repTargetMap[r.rep] || 0;
+                  const repAchieve  = (repTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTarget * 100) : null;
                   const [fam, given] = r.rep.split(/[\s　]/);
                   return (
                     <tr key={r.rep} style={{ borderBottom:'1px solid #f8fafc', transition:'background 0.1s' }}
@@ -464,10 +458,10 @@ export default function CrmDashboard() {
                       </td>
                       <td style={{ padding:'9px 14px', textAlign:'right' }}>
                         {r.isOther
-                          ? <span style={{ color:'#94a3b8' }}>{fmtM(r.paymentAmount)}</span>
+                          ? <span style={{ color:'#94a3b8' }}>{fmtM(r.incentiveAmount || 0)}</span>
                           : <button onClick={() => setDrill({ rep:r.rep, type:'payments' })}
-                              style={{ background:'none', border:'none', cursor:'pointer', fontWeight:700, color:'#059669', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #059669' }}>
-                              {fmtM(r.paymentAmount)}
+                              style={{ background:'none', border:'none', cursor:'pointer', fontWeight:700, color:'#0891b2', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #0891b2' }}>
+                              {fmtM(r.incentiveAmount || 0)}
                             </button>}
                       </td>
                       <td style={{ padding:'9px 14px', textAlign:'right' }}>
@@ -569,10 +563,13 @@ export default function CrmDashboard() {
               {sectionHead('今期 KPI達成状況', `${fmtDate(rangeStart)} 〜 ${fmtDate(rangeEnd)}`)}
               <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:14 }}>
                 <div>
-                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>今期入金合計</div>
+                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>今期インセン合計</div>
                   <div style={{ fontSize:'1.5rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
-                    {fmtM(curr.paymentAmount)}
+                    {fmtM(curr.incentiveAmount || 0)}
                     <span style={{ fontSize:'0.78rem', color:'#94a3b8', marginLeft:4 }}>/ {fmtM(termKpiTarget)}</span>
+                  </div>
+                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:2 }}>
+                    入金額 {fmtM(curr.paymentAmount)}
                   </div>
                 </div>
                 <div style={{ textAlign:'right' }}>
@@ -681,38 +678,59 @@ export default function CrmDashboard() {
           </div>
 
           {/* プラン割合（ドーナツグラフ） */}
-          {planData.length > 0 && (
-            <div style={{ ...cardStyle, padding:'14px 16px' }}>
-              {sectionHead('受注プラン割合', `入金確定 ${planData.length}種`)}
-              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                <div style={{ width:140, height:140, flexShrink:0 }}>
-                  <PieChart width={140} height={140}>
-                    <Pie data={planData} dataKey="amount" nameKey="plan"
-                      cx="50%" cy="50%" outerRadius={62} innerRadius={36} paddingAngle={2}>
-                      {planData.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(v, name) => [`${fmtM(v)}`, name]}
-                      contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11 }} />
-                  </PieChart>
+          {planData.length > 0 && (() => {
+            const totalCnt = planData.reduce((s, r) => s + r.cnt, 0);
+            const pieData  = planMode === 'count'
+              ? planData.map(p => ({ ...p, pieValue: p.cnt }))
+              : planData.map(p => ({ ...p, pieValue: p.amount }));
+            const pieTotal = planMode === 'count' ? totalCnt : planTotal;
+            return (
+              <div style={{ ...cardStyle, padding:'14px 16px' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                    <span style={{ width:8, height:8, borderRadius:'50%', background:'#6366f1', display:'inline-block' }} />
+                    <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>受注プラン割合</span>
+                  </div>
+                  <div style={{ display:'flex', background:'#f1f5f9', borderRadius:6, padding:2, gap:1 }}>
+                    {[['amount','金額'], ['count','件数']].map(([v, l]) => (
+                      <button key={v} onClick={() => setPlanMode(v)}
+                        style={{ padding:'2px 10px', borderRadius:5, border:'none', cursor:'pointer', fontSize:'0.68rem', fontWeight: planMode===v ? 700 : 400,
+                          background: planMode===v ? '#fff' : 'transparent', color: planMode===v ? '#1e40af' : '#64748b', boxShadow: planMode===v ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
-                  {planData.map((p, i) => {
-                    const exact = planTotal > 0 ? p.amount / planTotal * 100 : 0;
-                    const pctLabel = exact <= 0 ? '0%' : exact < 1 ? '<1%' : `${Math.floor(exact)}%`;
-                    return (
-                      <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:5 }}>
-                        <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
-                        <span style={{ fontSize:'0.68rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
-                        <span style={{ fontSize:'0.65rem', color:'#94a3b8', flexShrink:0 }}>{p.cnt}件</span>
-                        <span style={{ fontSize:'0.65rem', color:'#64748b', flexShrink:0, width:46, textAlign:'right' }}>{fmtM(p.amount)}</span>
-                        <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:34, textAlign:'right' }}>{pctLabel}</span>
-                      </div>
-                    );
-                  })}
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                  <div style={{ width:140, height:140, flexShrink:0 }}>
+                    <PieChart width={140} height={140}>
+                      <Pie data={pieData} dataKey="pieValue" nameKey="plan"
+                        cx="50%" cy="50%" outerRadius={62} innerRadius={36} paddingAngle={2}>
+                        {pieData.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v, name) => [planMode === 'count' ? `${v}件` : `${fmtM(v)}`, name]}
+                        contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11 }} />
+                    </PieChart>
+                  </div>
+                  <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
+                    {pieData.map((p, i) => {
+                      const exact = pieTotal > 0 ? p.pieValue / pieTotal * 100 : 0;
+                      const pctLabel = exact <= 0 ? '0%' : exact < 1 ? '<1%' : `${Math.floor(exact)}%`;
+                      return (
+                        <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                          <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
+                          <span style={{ fontSize:'0.68rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
+                          <span style={{ fontSize:'0.65rem', color:'#94a3b8', flexShrink:0 }}>{p.cnt}件</span>
+                          <span style={{ fontSize:'0.65rem', color:'#64748b', flexShrink:0, width:46, textAlign:'right' }}>{fmtM(p.amount)}</span>
+                          <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:34, textAlign:'right' }}>{pctLabel}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* パイプラインファネル */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>

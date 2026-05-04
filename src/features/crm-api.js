@@ -431,8 +431,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
           dbQuery(`SELECT COUNT(*)::int AS cnt FROM deals d
             WHERE d.team_id=$1${pf}
             AND d.first_meeting_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 入金額
-          dbQuery(`SELECT COALESCE(SUM(kp.incentive_amount),0)::bigint AS amount
+          // 入金額 & インセン（両方取得）
+          dbQuery(`SELECT COALESCE(SUM(kp.amount),0)::bigint AS total_amount,
+                          COALESCE(SUM(kp.incentive_amount),0)::bigint AS incentive_amount
             FROM kintone_payments kp
             WHERE kp.payment_date BETWEEN $1::date AND $2::date
             ${salesUser ? `AND kp.staff=$3` : ''}`,
@@ -442,10 +443,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
         const wonCount = wonRes.rows[0]?.cnt || 0;
         return {
           wonCount,
-          wonAmount:     Number(wonRes.rows[0]?.amount || 0),
-          winRate:       null, // 受注率は担当者別テーブルで表示
-          meetingCount:  meetingRes.rows[0]?.cnt || 0,
-          paymentAmount: Number(payRes.rows[0]?.amount || 0),
+          wonAmount:        Number(wonRes.rows[0]?.amount || 0),
+          meetingCount:     meetingRes.rows[0]?.cnt || 0,
+          paymentAmount:    Number(payRes.rows[0]?.total_amount || 0),    // 入金額合計
+          incentiveAmount:  Number(payRes.rows[0]?.incentive_amount || 0), // インセン合計
         };
       };
 
@@ -479,21 +480,26 @@ function registerCrmApi({ expressApp, authWithRole }) {
         GROUP BY 1 ORDER BY 1
       `, [teamId, rangeStart, rangeEnd]);
 
-      // 担当者別入金額（kintone_payments）
+      // 担当者別入金額 & インセン（kintone_payments）
       const repPayRows = await dbQuery(`
-        SELECT staff, COALESCE(SUM(incentive_amount),0)::bigint AS payment_amount
+        SELECT staff,
+               COALESCE(SUM(amount),0)::bigint AS payment_amount,
+               COALESCE(SUM(incentive_amount),0)::bigint AS incentive_amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
         GROUP BY staff
       `, [rangeStart, rangeEnd]);
       const repPayMap = {};
-      for (const r of repPayRows.rows) repPayMap[r.staff] = Number(r.payment_amount);
+      for (const r of repPayRows.rows) {
+        repPayMap[r.staff] = { payment: Number(r.payment_amount), incentive: Number(r.incentive_amount) };
+      }
 
       const repTable = repRows.rows.map(r => ({
-        rep:           r.rep,
-        wonCount:      r.won_count,
-        meetingCount:  r.meeting_count,
-        paymentAmount: repPayMap[r.rep] || 0,
+        rep:              r.rep,
+        wonCount:         r.won_count,
+        meetingCount:     r.meeting_count,
+        paymentAmount:    repPayMap[r.rep]?.payment   || 0,
+        incentiveAmount:  repPayMap[r.rep]?.incentive || 0,
       }));
 
       // ── アラート（全担当者対象、フィルター不要）──

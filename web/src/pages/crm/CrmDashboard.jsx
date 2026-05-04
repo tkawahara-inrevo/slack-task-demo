@@ -325,10 +325,13 @@ export default function CrmDashboard() {
 
       {/* ── KPIカード 5枚 ── */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
-        {/* 入金額 — green */}
+        {/* インセン合計 — green */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #059669' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>入金額</span>
+            <div>
+              <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>インセン合計</span>
+              <div style={{ fontSize:'0.6rem', color:'#cbd5e1' }}>kintone incentive_amount</div>
+            </div>
             <span style={{ width:28, height:28, borderRadius:8, background:'#f0fdf4', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.8rem', color:'#059669' }}>¥</span>
           </div>
           <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>{fmtM(curr.paymentAmount)}</div>
@@ -426,7 +429,7 @@ export default function CrmDashboard() {
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
               <thead>
                 <tr style={{ background:'#f8fafc' }}>
-                  {['担当者','入金額','受注','初回商談','受注率','達成率'].map((h, i) => (
+                  {['担当者','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
                     <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -697,11 +700,12 @@ export default function CrmDashboard() {
                     const exact = planTotal > 0 ? p.amount / planTotal * 100 : 0;
                     const pctLabel = exact <= 0 ? '0%' : exact < 1 ? '<1%' : `${Math.floor(exact)}%`;
                     return (
-                      <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:5 }}>
                         <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
-                        <span style={{ fontSize:'0.7rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
-                        <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
-                        <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:36, textAlign:'right' }}>{pctLabel}</span>
+                        <span style={{ fontSize:'0.68rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
+                        <span style={{ fontSize:'0.65rem', color:'#94a3b8', flexShrink:0 }}>{p.cnt}件</span>
+                        <span style={{ fontSize:'0.65rem', color:'#64748b', flexShrink:0, width:46, textAlign:'right' }}>{fmtM(p.amount)}</span>
+                        <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:34, textAlign:'right' }}>{pctLabel}</span>
                       </div>
                     );
                   })}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine } from 'recharts';
 import { api } from '../../api/client';
 
 const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
@@ -177,7 +177,7 @@ export default function CrmDashboard() {
       const [d, s, t, acts] = await Promise.all([
         api.crmDashboard(params),
         api.crmMonthlySummary(summaryMonth),
-        api.crmDashboardMonthlyTrend({ months: 6, ...(u ? { salesUser: u } : {}) }),
+        api.crmDashboardMonthlyTrend({ months: p === 'term' ? 12 : 6, ...(u ? { salesUser: u } : {}) }),
         api.crmDashboardRecentActivities(8),
       ]);
       setData(d); setSummary(s); setTrend(t.rows || []); setActivities(acts.rows || []);
@@ -255,6 +255,14 @@ export default function CrmDashboard() {
 
   const planData  = planBreakdown.map(r => ({ ...r, amount: Number(r.amount) }));
   const planTotal = planData.reduce((s, r) => s + r.amount, 0);
+
+  // 今期モード専用計算
+  const termMonths = (period === 'term' && rangeStart && rangeEnd)
+    ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)) + 1)
+    : 1;
+  const termKpiTarget   = period === 'term' ? teamTarget * termMonths : 0;
+  const termAchieve     = termKpiTarget > 0 ? Math.round(curr.paymentAmount / termKpiTarget * 100) : null;
+  const prevTermAchieve = (termKpiTarget > 0 && prev) ? Math.round(prev.paymentAmount / termKpiTarget * 100) : null;
 
   const cardStyle = { background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0' };
   const sectionHead = (label, right) => (
@@ -549,11 +557,58 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* 右カラム — 優先度順: 収支見込み → 入金推移 → プラン割合 → ファネル */}
+        {/* 右カラム */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
 
-          {/* 収支見込み */}
-          {forecast && (
+          {/* 今期KPI達成状況（今期モードのみ） */}
+          {period === 'term' && (
+            <div style={{ ...cardStyle, padding:'18px 16px' }}>
+              {sectionHead('今期 KPI達成状況', `${fmtDate(rangeStart)} 〜 ${fmtDate(rangeEnd)}`)}
+              <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>今期入金合計</div>
+                  <div style={{ fontSize:'1.5rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
+                    {fmtM(curr.paymentAmount)}
+                    <span style={{ fontSize:'0.78rem', color:'#94a3b8', marginLeft:4 }}>/ {fmtM(termKpiTarget)}</span>
+                  </div>
+                </div>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:'2rem', fontWeight:900, lineHeight:1,
+                    color: termAchieve == null ? '#94a3b8' : termAchieve >= 100 ? '#059669' : termAchieve >= 70 ? '#d97706' : '#dc2626' }}>
+                    {termAchieve != null ? `${termAchieve}%` : '—'}
+                  </div>
+                  <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:2 }}>達成率</div>
+                </div>
+              </div>
+              {/* 達成プログレスバー */}
+              <div style={{ height:12, background:'#f1f5f9', borderRadius:6, overflow:'hidden', marginBottom:10, position:'relative' }}>
+                <div style={{ height:'100%', width:`${Math.min(100, termAchieve || 0)}%`, borderRadius:6, transition:'width 0.6s ease',
+                  background: termAchieve == null ? '#e2e8f0' : termAchieve >= 100 ? '#059669' : termAchieve >= 70 ? '#f59e0b' : '#ef4444' }} />
+              </div>
+              {/* 前期比 */}
+              {prev && (
+                <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:'#f8fafc', borderRadius:8 }}>
+                  <span style={{ fontSize:'0.72rem', color:'#64748b' }}>前期入金</span>
+                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#374151' }}>{fmtM(prev.paymentAmount)}</span>
+                  {prev.paymentAmount > 0 && (
+                    <span style={{ fontSize:'0.72rem', fontWeight:700, marginLeft:4,
+                      color: curr.paymentAmount >= prev.paymentAmount ? '#059669' : '#dc2626' }}>
+                      {curr.paymentAmount >= prev.paymentAmount ? '▲' : '▼'}
+                      {Math.abs(Math.round((curr.paymentAmount - prev.paymentAmount) / prev.paymentAmount * 100))}%
+                    </span>
+                  )}
+                  {prevTermAchieve != null && (
+                    <span style={{ fontSize:'0.68rem', color:'#94a3b8', marginLeft:'auto' }}>
+                      前期達成率 {prevTermAchieve}%
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 収支見込み（指定月モードのみ） */}
+          {period !== 'term' && forecast && (
             <div style={{ ...cardStyle, padding:'14px 16px' }}>
               {sectionHead('収支見込み', '対象月')}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
@@ -603,14 +658,18 @@ export default function CrmDashboard() {
 
           {/* 入金推移 */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>
-            {sectionHead('入金推移', '過去6ヶ月　単位: 万円')}
-            <ResponsiveContainer width="100%" height={130}>
-              <BarChart data={trendData} margin={{ top:0, right:0, left:0, bottom:0 }}>
+            {sectionHead('入金推移', period === 'term' ? `今期（月次目標 ${fmtM(teamTarget)}/月）` : '過去6ヶ月　単位: 万円')}
+            <ResponsiveContainer width="100%" height={period === 'term' ? 160 : 130}>
+              <BarChart data={trendData} margin={{ top:8, right:0, left:0, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis tickFormatter={v => `${Math.round(v / 1e4)}万`} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={42} />
                 <Tooltip formatter={v => [`${fmtM(v)}`, '入金額']}
                   contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
+                {period === 'term' && teamTarget > 0 && (
+                  <ReferenceLine y={teamTarget} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1.5}
+                    label={{ value:`目標 ${fmtM(teamTarget)}`, position:'insideTopRight', fontSize:9, fill:'#ef4444' }} />
+                )}
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
                   {trendData.map((_, i) => <Cell key={i} fill={i === trendData.length - 1 ? '#1e40af' : '#bfdbfe'} />)}
                 </Bar>

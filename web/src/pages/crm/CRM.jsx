@@ -317,10 +317,19 @@ function CustomFieldsManager() {
 
 // ── 選択肢管理 ───────────────────────────────────────────────
 const SYSTEM_FIELDS = [
-  { name:'sales_person',    label:'担当営業',   defaults:['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘','添田 剛'] },
-  { name:'contract_type',   label:'契約形態',   defaults:['採用保証','月額','後払い','変動プラン'] },
-  { name:'payment_type',    label:'支払方式',   defaults:['一括','分割','月払い'] },
-  { name:'employment_type', label:'採用形態',   defaults:['新卒','中途','業務委託','アルバイト/インターン'] },
+  { name:'sales_person', label:'担当営業', defaults:[
+    '藤原 一矢','野村 尭弘','山本 夏乃','板金 慎太郎','萩原 隼人','添田 剛',
+    '丸山 彰太','坂本 綾音','鈴木 直輝','長門 絢美','早川 恭平','窪田 健斗',
+    '南 晴仁','西木 有理','外山 雄大','Marketing',
+  ] },
+  { name:'contract_type', label:'契約形態（kintone:支払方式）', defaults:[
+    '月額','月額（1st upsell）',
+    '採用保証','採用保証（1st upsell）','採用保証（2st upsell）',
+    '後払い（媒体費用INREVO持ち)）','後払い（媒体費用クライアント持ち）',
+    '変動プラン',
+  ] },
+  { name:'payment_type',    label:'支払方式（独自管理）', defaults:['一括','分割','月払い'] },
+  { name:'employment_type', label:'採用形態', defaults:['新卒','中途','アルバイト/インターン','業務委託'] },
   { name:'inflow_source', label:'流入経路', defaults:[
     'UNLIMT','カイマク','GLOXY','BrainNew','株式会社cluein','十方株式会社','株式会社Any Arts',
     'コバプロ','zerowork','セールスボンド株式会社','株式会社Dairi','株式会社mizusashi',
@@ -338,7 +347,14 @@ const SYSTEM_FIELDS = [
     'BDRリスト','メタ広告','オンリーストーリー','Sales dex','アポレル','MC経由',
     '代理店開拓（自社アウトバウンド）','資料請求サイト','リスティング広告','TikTok',
   ] },
-  { name:'industry',        label:'業界',       defaults:['製造業','情報通信業','卸売業・小売業','建設業','医療、福祉','教育、学習支援業','金融業・保険業','不動産業','サービス業（他に分類されないもの）','その他'] },
+  { name:'industry', label:'業界（kintone:業界_0）', defaults:[
+    '農業、林業','漁業','鉱業、採石業、砂利採取業','建設業','製造業',
+    '電気・ガス・熱供給・水道業','情報通信業','運輸業、郵便業','卸売業・小売業',
+    '金融業・保険業','不動産業、物品賃貸業','学術研究、専門・技術サービス業',
+    '宿泊業、飲食サービス業','生活関連サービス業、娯楽業','教育、学習支援業',
+    '医療、福祉','複合サービス事業','サービス業（他に分類されないもの）',
+    '公務（他に分類されるものを除く）','分類不能の産業',
+  ] },
 ];
 
 function FieldOptionsManager() {

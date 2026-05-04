@@ -249,7 +249,7 @@ export default function CrmDashboard() {
 
   // 今期モード専用: termMonthsをkpiDenom計算より先に定義
   const termMonths = (period === 'term' && rangeStart && rangeEnd)
-    ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)) + 1)
+    ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)))
     : 1;
   const termKpiTarget = period === 'term' ? teamTarget * termMonths : 0;
 

@@ -537,7 +537,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
-      // プラン別入金内訳（1顧客=1件でカウント、実入金額ベース）
+      // プラン別入金内訳（1顧客=1件でカウント、担当者フィルタ対応）
       const planBreakdownRes = await dbQuery(`
         SELECT COALESCE(plan, '未設定') AS plan,
                COUNT(DISTINCT company)::int AS cnt,
@@ -545,8 +545,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
           AND amount > 0
+          ${salesUser ? 'AND staff=$3' : ''}
         GROUP BY 1 ORDER BY amount DESC
-      `, [rangeStart, rangeEnd]);
+      `, salesUser ? [rangeStart, rangeEnd, salesUser] : [rangeStart, rangeEnd]);
 
       // 担当者リスト & 役職別目標 & 担当者役職マッピング
       const [salesUsersRes, roleTargetRes, repRoleRes] = await Promise.all([
@@ -652,7 +653,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
         res.json({ rows });
       } else if (type === 'won') {
         const { rows } = await dbQuery(`
-          SELECT d.order_date, c.name AS customer_name
+          SELECT d.order_date, c.name AS customer_name,
+                 d.contract_type, d.initial_fee, d.monthly_fee
           FROM deals d JOIN customers c ON c.id=d.customer_id
           WHERE d.team_id=$1
             AND COALESCE(d.sales_person, d.sales_user_id)=$2

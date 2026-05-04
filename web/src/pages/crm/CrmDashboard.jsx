@@ -134,11 +134,23 @@ function Drilldown({ rep, type, start, end, onClose }) {
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
               {rows.map((r, i) => (
-                <div key={i} style={{ background:'#fff', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div key={i} style={{ background:'#fff', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
                   <div style={{ width:36, fontSize:'0.68rem', color:'#94a3b8', flexShrink:0, textAlign:'center', background:'#f8fafc', borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
                     {r.order_date ? fmtDate(r.order_date).substring(5) : '—'}
                   </div>
-                  <div style={{ flex:1, fontWeight:600, color:'#0f172a', fontSize:'0.85rem' }}>{r.customer_name}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.customer_name}</div>
+                    {r.contract_type && (
+                      <span style={{ fontSize:'0.65rem', color:'#6366f1', background:'#eef2ff', borderRadius:4, padding:'1px 6px', marginTop:2, display:'inline-block' }}>
+                        {r.contract_type}
+                      </span>
+                    )}
+                  </div>
+                  {(r.initial_fee > 0 || r.monthly_fee > 0) && (
+                    <span style={{ fontSize:'0.72rem', color:'#059669', fontWeight:700, flexShrink:0 }}>
+                      {r.monthly_fee > 0 ? `月${fmtM(r.monthly_fee)}` : fmtM(r.initial_fee)}
+                    </span>
+                  )}
                   <span style={{ fontSize:'0.65rem', background:'#dcfce7', color:'#059669', borderRadius:4, padding:'2px 8px', fontWeight:700, flexShrink:0 }}>受注</span>
                 </div>
               ))}
@@ -251,12 +263,16 @@ export default function CrmDashboard() {
   const termMonths = (period === 'term' && rangeStart && rangeEnd)
     ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)))
     : 1;
-  const termKpiTarget = period === 'term' ? teamTarget * termMonths : 0;
+  // 担当者フィルタ時は個人目標、全員表示時はチーム合計
+  const effectiveMonthlyTarget = salesUser && repTargetMap[salesUser] > 0
+    ? repTargetMap[salesUser]
+    : teamTarget;
+  const termKpiTarget = period === 'term' ? effectiveMonthlyTarget * termMonths : 0;
 
-  // KPI分母: 今期は月次目標×月数、指定月は月次目標（フォールバック: 動的KPI）
+  // KPI分母: 今期は月次目標×月数、指定月は月次目標（担当者フィルタ時は個人目標）
   const kpiDenom   = period === 'term'
     ? (termKpiTarget > 0 ? termKpiTarget : (forecast?.kpi || 0))
-    : (teamTarget > 0 ? teamTarget : (forecast?.kpi || 0));
+    : (effectiveMonthlyTarget > 0 ? effectiveMonthlyTarget : (forecast?.kpi || 0));
   const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;
   const kpiRate    = kpiDenom > 0 ? Math.round(forecastTotal / kpiDenom * 100) : null;
 

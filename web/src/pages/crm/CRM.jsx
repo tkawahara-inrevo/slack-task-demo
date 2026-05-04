@@ -13,7 +13,7 @@ const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const YOMI_COLOR = { 'S 90％':'#7c3aed','A 70％':'#1d4ed8','B 50％':'#0891b2','C 30％':'#059669' };
 
 // ── ヨミ管理パネル ──────────────────────────────────────────
-function YomiPanel() {
+function YomiPanel({ full = false }) {
   const [yomiKanri, setYomiKanri] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingMemo, setEditingMemo] = useState(null);
@@ -36,22 +36,73 @@ function YomiPanel() {
     finally { setSavingMemo(p => { const n={...p}; delete n[dealId]; return n; }); setEditingMemo(null); }
   };
 
-  if (loading) return <div style={{ padding:24, textAlign:'center', color:'#94a3b8', fontSize:'0.82rem' }}>読み込み中…</div>;
+  if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;
   if (!yomiKanri) return null;
 
+  const entries = Object.entries(yomiKanri.byStaff)
+    .filter(([, d]) => d.length > 0)
+    .sort((a,b) => b[1].length - a[1].length);
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <div style={{ padding:'10px 16px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0 }}>
-        <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>ヨミ管理</div>
-        <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
-          C以上 進行中 {yomiKanri.total}件
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#f8fafc' }}>
+      <div style={{ padding:'12px 20px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0, display:'flex', alignItems:'center', gap:10 }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>ヨミ管理</div>
+          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
+            進行中 C以上 {yomiKanri.total}件
+          </div>
         </div>
       </div>
-      <div style={{ flex:1, overflowY:'auto', padding:'8px 12px' }}>
-        {Object.entries(yomiKanri.byStaff)
-          .filter(([, d]) => d.length > 0)
-          .sort((a,b) => b[1].length - a[1].length)
-          .map(([staff, sDeals]) => (
+      <div style={{ flex:1, overflowY:'auto', padding:'12px 20px' }}>
+        {full ? (
+          /* フルページ: 担当者を横並び（グリッド） */
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(340px, 1fr))', gap:12 }}>
+            {entries.map(([staff, sDeals]) => (
+              <div key={staff} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+                <div style={{ padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#374151' }}>{staff.split('/')[0].trim()}</span>
+                  <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{sDeals.length}件</span>
+                  <span style={{ fontSize:'0.78rem', color:'#059669', marginLeft:'auto', fontWeight:600 }}>
+                    {fmt(sDeals.reduce((s,d) => s + Number(d.monthly_fee||d.initial_fee||0)*1.1, 0))}
+                  </span>
+                </div>
+                <div style={{ maxHeight:400, overflowY:'auto' }}>
+                  {sDeals.map(d => {
+                    const yomiColor = YOMI_COLOR[d.yomi] || '#64748b';
+                    return (
+                      <div key={d.id} style={{ padding:'8px 16px', borderBottom:'1px solid #f8fafc', display:'flex', justifyContent:'space-between', alignItems:'start', gap:8 }}>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:'0.82rem', fontWeight:600, color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
+                          <div style={{ display:'flex', gap:6, marginTop:2, alignItems:'center', flexWrap:'wrap' }}>
+                            <span style={{ fontSize:'0.68rem', fontWeight:700, color:yomiColor }}>{d.yomi}</span>
+                            {d.contract_type && <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>{d.contract_type}</span>}
+                            {d.conclusion_date && <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>{d.conclusion_date.split('T')[0]}</span>}
+                          </div>
+                          {editingMemo === d.id ? (
+                            <input autoFocus value={memoValues[d.id] ?? ''} onChange={e => setMemoValues(p => ({...p,[d.id]:e.target.value}))}
+                              onBlur={() => handleMemoSave(d.id)}
+                              onKeyDown={e => { if(e.key==='Enter') handleMemoSave(d.id); if(e.key==='Escape') setEditingMemo(null); }}
+                              style={{ fontSize:'0.72rem', padding:'2px 6px', border:'1px solid #6366f1', borderRadius:5, outline:'none', width:'100%', boxSizing:'border-box', marginTop:3 }} />
+                          ) : (
+                            <div onClick={() => setEditingMemo(d.id)}
+                              style={{ fontSize:'0.7rem', color: memoValues[d.id]?'#374151':'#cbd5e1', cursor:'text', marginTop:3, padding:'2px 4px', borderRadius:4 }}>
+                              {savingMemo[d.id] ? '保存中…' : (memoValues[d.id] || '+ メモ')}
+                            </div>
+                          )}
+                        </div>
+                        <span style={{ fontSize:'0.75rem', color:'#059669', fontWeight:600, flexShrink:0 }}>
+                          {fmt(Number(d.monthly_fee||d.initial_fee||0)*1.1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* サイドパネル: コンパクト縦並び */
+          entries.map(([staff, sDeals]) => (
             <div key={staff} style={{ marginBottom:10, background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', overflow:'hidden' }}>
               <div style={{ padding:'8px 12px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
                 <span style={{ fontWeight:700, fontSize:'0.82rem', color:'#374151' }}>{staff.split('/')[0].trim()}</span>
@@ -60,41 +111,37 @@ function YomiPanel() {
                   {fmt(sDeals.reduce((s,d) => s + Number(d.monthly_fee||d.initial_fee||0)*1.1, 0))}
                 </span>
               </div>
-              <div>
-                {sDeals.map(d => {
-                  const yomiColor = YOMI_COLOR[d.yomi] || '#64748b';
-                  return (
-                    <div key={d.id} style={{ padding:'7px 12px', borderBottom:'1px solid #f8fafc', display:'grid', gridTemplateColumns:'1fr auto', gap:6, alignItems:'start' }}>
-                      <div>
-                        <div style={{ fontSize:'0.78rem', fontWeight:600, color:'#0f172a' }}>{d.customer_name}</div>
-                        <div style={{ display:'flex', gap:6, marginTop:2, alignItems:'center', flexWrap:'wrap' }}>
-                          <span style={{ fontSize:'0.65rem', fontWeight:700, color:yomiColor }}>{d.yomi}</span>
-                          {d.contract_type && <span style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{d.contract_type}</span>}
-                          {d.conclusion_date && <span style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{d.conclusion_date.split('T')[0]}</span>}
-                        </div>
-                        {/* メモ */}
-                        {editingMemo === d.id ? (
-                          <input autoFocus value={memoValues[d.id] ?? ''} onChange={e => setMemoValues(p => ({...p,[d.id]:e.target.value}))}
-                            onBlur={() => handleMemoSave(d.id)}
-                            onKeyDown={e => { if(e.key==='Enter') handleMemoSave(d.id); if(e.key==='Escape') setEditingMemo(null); }}
-                            style={{ fontSize:'0.7rem', padding:'2px 6px', border:'1px solid #6366f1', borderRadius:5, outline:'none', width:'100%', boxSizing:'border-box', marginTop:3 }} />
-                        ) : (
-                          <div onClick={() => setEditingMemo(d.id)}
-                            style={{ fontSize:'0.68rem', color: memoValues[d.id]?'#374151':'#cbd5e1', cursor:'text', marginTop:3,
-                              padding:'2px 4px', borderRadius:4, border:'1px solid transparent' }}>
-                            {savingMemo[d.id] ? '保存中…' : (memoValues[d.id] || '+ メモ')}
-                          </div>
-                        )}
+              {sDeals.map(d => {
+                const yomiColor = YOMI_COLOR[d.yomi] || '#64748b';
+                return (
+                  <div key={d.id} style={{ padding:'7px 12px', borderBottom:'1px solid #f8fafc', display:'grid', gridTemplateColumns:'1fr auto', gap:6, alignItems:'start' }}>
+                    <div>
+                      <div style={{ fontSize:'0.78rem', fontWeight:600, color:'#0f172a' }}>{d.customer_name}</div>
+                      <div style={{ display:'flex', gap:6, marginTop:2, alignItems:'center' }}>
+                        <span style={{ fontSize:'0.65rem', fontWeight:700, color:yomiColor }}>{d.yomi}</span>
+                        {d.conclusion_date && <span style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{d.conclusion_date.split('T')[0]}</span>}
                       </div>
-                      <span style={{ fontSize:'0.7rem', color:'#059669', fontWeight:600, flexShrink:0 }}>
-                        {fmt(Number(d.monthly_fee||d.initial_fee||0)*1.1)}
-                      </span>
+                      {editingMemo === d.id ? (
+                        <input autoFocus value={memoValues[d.id] ?? ''} onChange={e => setMemoValues(p => ({...p,[d.id]:e.target.value}))}
+                          onBlur={() => handleMemoSave(d.id)}
+                          onKeyDown={e => { if(e.key==='Enter') handleMemoSave(d.id); if(e.key==='Escape') setEditingMemo(null); }}
+                          style={{ fontSize:'0.7rem', padding:'2px 6px', border:'1px solid #6366f1', borderRadius:5, outline:'none', width:'100%', boxSizing:'border-box', marginTop:3 }} />
+                      ) : (
+                        <div onClick={() => setEditingMemo(d.id)}
+                          style={{ fontSize:'0.68rem', color: memoValues[d.id]?'#374151':'#cbd5e1', cursor:'text', marginTop:3, padding:'2px 4px', borderRadius:4 }}>
+                          {savingMemo[d.id] ? '保存中…' : (memoValues[d.id] || '+ メモ')}
+                        </div>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
+                    <span style={{ fontSize:'0.7rem', color:'#059669', fontWeight:600, flexShrink:0 }}>
+                      {fmt(Number(d.monthly_fee||d.initial_fee||0)*1.1)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          ))
+        )}
       </div>
     </div>
   );
@@ -271,6 +318,7 @@ export default function CRM() {
   const tabs = [
     { key:'dashboard',   label:'ダッシュボード' },
     { key:'customers',   label:'顧客一覧' },
+    { key:'yomi',        label:'ヨミ管理' },
     ...(canViewPerf ? [{ key:'performance', label:'成績' }] : []),
     { key:'settings',    label:'設定' },
   ];
@@ -293,17 +341,8 @@ export default function CRM() {
       <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
         {tab === 'dashboard'   && <div style={{ flex:1, overflow:'auto' }}><CrmDashboard /></div>}
 
-        {/* 顧客一覧 + ヨミ管理 分割レイアウト */}
-        {tab === 'customers' && (
-          <div style={{ flex:1, display:'grid', gridTemplateColumns:'1fr 320px', overflow:'hidden' }}>
-            <div style={{ overflow:'hidden', borderRight:'1px solid #e2e8f0', display:'flex', flexDirection:'column' }}>
-              <CustomerList />
-            </div>
-            <div style={{ overflow:'hidden', display:'flex', flexDirection:'column', background:'#f8fafc' }}>
-              <YomiPanel />
-            </div>
-          </div>
-        )}
+        {tab === 'customers'  && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><CustomerList /></div>}
+        {tab === 'yomi'       && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>}
 
         {tab === 'performance' && canViewPerf && (
           <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>

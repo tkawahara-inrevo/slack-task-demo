@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine, LabelList } from 'recharts';
 import { api } from '../../api/client';
 
 const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
@@ -234,17 +234,21 @@ export default function CrmDashboard() {
   const alertCount = overdueAlerts.length + stagnantAlerts.length;
 
   const forecast = summary ? {
-    confirmed: summary.totals?.confirmed || 0,
-    high:      summary.totals?.high      || 0,
-    medium:    summary.totals?.medium    || 0,
-    total:     summary.totals?.total     || 0,
-    kpi:       summary.totals?.kpi       || 0,
+    confirmed:          summary.totals?.confirmed          || 0,
+    confirmedIncentive: summary.totals?.confirmedIncentive || 0,
+    high:               summary.totals?.high               || 0,
+    medium:             summary.totals?.medium             || 0,
+    total:              summary.totals?.total              || 0,
+    kpi:                summary.totals?.kpi                || 0,
   } : null;
   const forecastTotal = forecast?.total || 0;
   // teamTarget = 担当者役職別目標の合計（固定）/ フォールバック: 動的KPI
   const kpiDenom   = teamTarget > 0 ? teamTarget : (forecast?.kpi || 0);
   const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;
   const kpiRate    = kpiDenom > 0 ? Math.round(forecastTotal / kpiDenom * 100) : null;
+
+  const winRate     = curr.meetingCount > 0 ? Math.round(curr.wonCount / curr.meetingCount * 100) : 0;
+  const prevWinRate = prev?.meetingCount > 0 ? Math.round(prev.wonCount / prev.meetingCount * 100) : null;
 
   const trendData = trend.map(r => ({ month: r.month, amount: Number(r.amount) }));
 
@@ -337,19 +341,6 @@ export default function CrmDashboard() {
           </div>
         </div>
 
-        {/* インセン合計 — teal */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #0891b2' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>インセン</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#ecfeff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#0891b2' }}>円</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>{fmtM(curr.incentiveAmount || 0)}</div>
-          <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
-            <DiffTag diff={prev ? diffPct(curr.incentiveAmount || 0, prev.incentiveAmount || 0) : null} />
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
-          </div>
-        </div>
-
         {/* 受注件数 — blue */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #1e40af' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
@@ -380,6 +371,21 @@ export default function CrmDashboard() {
           </div>
         </div>
 
+        {/* 受注率 — purple */}
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #7c3aed' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>受注率</span>
+            <span style={{ width:28, height:28, borderRadius:8, background:'#f5f3ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#7c3aed' }}>率</span>
+          </div>
+          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
+            {winRate}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
+          </div>
+          <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
+            <DiffTag diff={prevWinRate != null ? diffPct(winRate, prevWinRate) : null} />
+            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
+          </div>
+        </div>
+
         {/* KPI達成率 — dynamic color top border */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0',
           borderTop:`3px solid ${kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444'}` }}>
@@ -399,6 +405,7 @@ export default function CrmDashboard() {
               </div>
               <div style={{ fontSize:'0.6rem', color:'#94a3b8', marginTop:2 }}>
                 インセン {fmtM(curr.incentiveAmount || 0)} / 目標 {fmtM(kpiDenom)}
+                {curr.paymentAmount > 0 && <span style={{ marginLeft:6 }}>（入金 {fmtM(curr.paymentAmount)}）</span>}
               </div>
             </div>
           )}
@@ -629,9 +636,9 @@ export default function CrmDashboard() {
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                 {[
-                  { label:'入金確定',            amount:forecast.confirmed, color:'#059669', count:summary?.payments?.length },
-                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.high,      color:'#1e40af', count:summary?.highDeals?.length },
-                  { label:'締結多分いける [B/C]', amount:forecast.medium,    color:'#d97706', count:summary?.mediumDeals?.length },
+                  { label:'入金確定', amount:forecast.confirmed, sub: forecast.confirmedIncentive > 0 ? `インセン ${fmtM(forecast.confirmedIncentive)}` : null, color:'#059669', count:summary?.payments?.length },
+                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.high,   color:'#1e40af', count:summary?.highDeals?.length },
+                  { label:'締結多分いける [B/C]', amount:forecast.medium, color:'#d97706', count:summary?.mediumDeals?.length },
                 ].map(item => {
                   const pct = forecastTotal > 0 ? Math.round((item.amount / forecastTotal) * 100) : 0;
                   return (
@@ -639,9 +646,12 @@ export default function CrmDashboard() {
                       <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
                         <div style={{ display:'flex', alignItems:'center', gap:5 }}>
                           <span style={{ width:10, height:10, borderRadius:3, background:item.color, display:'inline-block' }} />
-                          <span style={{ fontSize:'0.7rem', color:'#374151' }}>{item.label}</span>
+                          <div>
+                            <span style={{ fontSize:'0.7rem', color:'#374151' }}>{item.label}</span>
+                            {item.sub && <div style={{ fontSize:'0.6rem', color:'#94a3b8' }}>{item.sub}</div>}
+                          </div>
                         </div>
-                        <div>
+                        <div style={{ textAlign:'right' }}>
                           <span style={{ fontSize:'0.78rem', fontWeight:700, color:item.color }}>{fmtM(item.amount)}</span>
                           {item.count != null && <span style={{ fontSize:'0.65rem', color:'#94a3b8', marginLeft:5 }}>{item.count}件</span>}
                         </div>
@@ -671,6 +681,9 @@ export default function CrmDashboard() {
                     label={{ value:`目標 ${fmtM(teamTarget)}`, position:'insideTopRight', fontSize:9, fill:'#ef4444' }} />
                 )}
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
+                  <LabelList dataKey="amount" position="top"
+                    formatter={v => v > 0 ? `${Math.round(v / 1e4)}万` : ''}
+                    style={{ fontSize:8, fill:'#94a3b8' }} />
                   {trendData.map((_, i) => <Cell key={i} fill={i === trendData.length - 1 ? '#1e40af' : '#bfdbfe'} />)}
                 </Bar>
               </BarChart>

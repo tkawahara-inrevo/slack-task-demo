@@ -537,10 +537,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
-      // プラン別入金内訳
+      // プラン別入金内訳（1顧客=1件でカウント）
       const planBreakdownRes = await dbQuery(`
         SELECT COALESCE(plan, '未設定') AS plan,
-               COUNT(*)::int AS cnt,
+               COUNT(DISTINCT company)::int AS cnt,
                COALESCE(SUM(incentive_amount),0)::bigint AS amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
@@ -859,13 +859,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const monthStart = `${year}-${String(mon).padStart(2,'0')}-01`;
       const monthEnd = new Date(year, mon, 0).toISOString().split('T')[0];
 
-      // 今月入金確定: kintone_payments (App170) から取得
+      // 今月入金確定: kintone_payments (App170) から取得（実入金額 + インセン両方）
       const paymentsRes = await dbQuery(`
         SELECT payment_date, company, staff, plan,
-               incentive_amount AS amount
+               amount AS payment_amount,
+               incentive_amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1 AND $2
-          AND incentive_amount > 0
+          AND amount > 0
         ORDER BY payment_date
       `, [monthStart, monthEnd]);
 
@@ -913,13 +914,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const staffMap = {};
       const addToStaff = (name, key, amount, kpi = 0) => {
         const n = name || '未設定';
-        if (!staffMap[n]) staffMap[n] = { name: n, confirmed: 0, high: 0, medium: 0, kpi: 0 };
+        if (!staffMap[n]) staffMap[n] = { name: n, confirmed: 0, confirmedIncentive: 0, high: 0, medium: 0, kpi: 0 };
         staffMap[n][key] += amount;
         staffMap[n].kpi += kpi;
       };
 
       paymentsRes.rows.forEach(p => {
-        addToStaff(p.staff || '未設定', 'confirmed', Number(p.amount || 0));
+        addToStaff(p.staff || '未設定', 'confirmed', Number(p.payment_amount || 0));
+        addToStaff(p.staff || '未設定', 'confirmedIncentive', Number(p.incentive_amount || 0));
       });
       highRes.rows.forEach(d => {
         const staffName = d.sales_person || d.sales_user_id || '未設定';
@@ -938,12 +940,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
       })).sort((a,b) => b.total - a.total);
 
       const totals = staffSummary.reduce((acc, s) => ({
-        confirmed: acc.confirmed + s.confirmed,
-        high: acc.high + s.high,
-        medium: acc.medium + s.medium,
-        total: acc.total + s.total,
-        kpi: acc.kpi + s.kpi,
-      }), { confirmed: 0, high: 0, medium: 0, total: 0, kpi: 0 });
+        confirmed:          acc.confirmed          + s.confirmed,
+        confirmedIncentive: acc.confirmedIncentive + (s.confirmedIncentive || 0),
+        high:               acc.high               + s.high,
+        medium:             acc.medium             + s.medium,
+        total:              acc.total              + s.total,
+        kpi:                acc.kpi                + s.kpi,
+      }), { confirmed: 0, confirmedIncentive: 0, high: 0, medium: 0, total: 0, kpi: 0 });
 
       res.json({
         month: `${year}-${String(mon).padStart(2,'0')}`,

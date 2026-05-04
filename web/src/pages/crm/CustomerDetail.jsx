@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../../api/client';
 
 const YOMI_ORDER = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
+const BC_MEMBERS = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘','添田 剛'];
 const YOMI_COLOR = {
   'アポ化前':'#9ca3af','アポ化済商談前':'#6b7280',
   'E 5％':'#d1d5db','D 15％':'#94a3b8',
@@ -330,7 +331,8 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
     scheduleAutoSave(next);
   };
 
-  const salesUsers = meta?.salesUsers || [];
+  // BC固定メンバー + 既存データにある担当者名 を合わせた一覧
+  const salesUsers = [...new Set([...BC_MEMBERS, ...(meta?.salesUsers || [])])].filter(Boolean);
   const rpoId = deal.data?.rpo_client_id;
 
   // 担当者セレクト（DBの実際の名前から選択）

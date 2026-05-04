@@ -260,7 +260,7 @@ export default function SalesPerformance({ embedded }) {
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))', gap:12 }}>
                 {filteredPerfStaff.map(s => {
                   const lastName = s.displayName;
-                  const roleColor = { 'Expert':'#7c3aed','Sub Expert':'#6d28d9','Chief':'#1d4ed8','Sub Chief':'#0891b2','Lead':'#059669','役職無し':'#6b7280' }[s.role] || '#9ca3af';
+                  const roleColor = { 'Expert':'#7c3aed','Sub Expert':'#6d28d9','Chief':'#1d4ed8','Sub Manager':'#0891b2','Lead':'#059669','役職無し':'#6b7280' }[s.role] || '#9ca3af';
                   return (
                     <div key={s.name}
                       onClick={() => setDetailStaff(s.name)}

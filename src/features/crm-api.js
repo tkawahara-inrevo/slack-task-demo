@@ -1076,13 +1076,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const inferRole = (title) => {
         if (!title) return null;
         const t = title.toLowerCase();
-        if (t.includes('sub expert')) return 'Sub Expert';
-        if (t.includes('expert'))     return 'Expert';
-        if (t.includes('sub chief'))  return 'Sub Chief';
-        if (t.includes('chief'))      return 'Chief';
-        if (t.includes('sub manager'))return 'Sub Chief'; // Sub Manager → Sub Chief扱い
-        if (t.includes('manager'))    return 'Chief';     // Manager → Chief扱い
-        if (t.includes('lead'))       return 'Lead';
+        if (t.includes('sub expert'))  return 'Sub Expert';
+        if (t.includes('expert'))      return 'Expert';
+        if (t.includes('sub manager')) return 'Sub Manager';
+        if (t.includes('sub chief'))   return 'Sub Manager'; // 旧称を新称にマップ
+        if (t.includes('chief'))       return 'Chief';
+        if (t.includes('manager'))     return 'Chief';
+        if (t.includes('lead'))        return 'Lead';
         return '役職無し';
       };
 

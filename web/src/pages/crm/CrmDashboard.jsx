@@ -545,38 +545,39 @@ export default function CrmDashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* プラン割合（円グラフ） */}
-          {planBreakdown.length > 0 && (
-            <div style={{ ...cardStyle, padding:'14px 16px' }}>
-              {sectionHead('受注プラン割合', `入金確定 ${planBreakdown.length}種`)}
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <ResponsiveContainer width={140} height={140}>
-                  <PieChart>
-                    <Pie data={planBreakdown} dataKey="amount" nameKey="plan"
-                      cx="50%" cy="50%" outerRadius={62} innerRadius={32} paddingAngle={2}>
-                      {planBreakdown.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
+          {/* プラン割合（ドーナツグラフ） */}
+          {planBreakdown.length > 0 && (() => {
+            const planData = planBreakdown.map(r => ({ ...r, amount: Number(r.amount) }));
+            const planTotal = planData.reduce((s, r) => s + r.amount, 0);
+            return (
+              <div style={{ ...cardStyle, padding:'14px 16px' }}>
+                {sectionHead('受注プラン割合', `入金確定 ${planData.length}種`)}
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                  <PieChart width={140} height={140}>
+                    <Pie data={planData} dataKey="amount" nameKey="plan"
+                      cx={70} cy={70} outerRadius={62} innerRadius={36} paddingAngle={2}>
+                      {planData.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(v, name) => [`${fmtM(v)}`, name]}
                       contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11 }} />
                   </PieChart>
-                </ResponsiveContainer>
-                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:4 }}>
-                  {planBreakdown.map((p, i) => {
-                    const total = planBreakdown.reduce((s, r) => s + Number(r.amount), 0);
-                    const pct = total > 0 ? Math.round(Number(p.amount) / total * 100) : 0;
-                    return (
-                      <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                        <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
-                        <span style={{ fontSize:'0.68rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
-                        <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
-                        <span style={{ fontSize:'0.68rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:34, textAlign:'right' }}>{pct}%</span>
-                      </div>
-                    );
-                  })}
+                  <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
+                    {planData.map((p, i) => {
+                      const pct = planTotal > 0 ? Math.round(p.amount / planTotal * 100) : 0;
+                      return (
+                        <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                          <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
+                          <span style={{ fontSize:'0.7rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
+                          <span style={{ fontSize:'0.68rem', color:'#64748b', flexShrink:0 }}>{p.cnt}件</span>
+                          <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:36, textAlign:'right' }}>{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* パイプラインファネル */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>

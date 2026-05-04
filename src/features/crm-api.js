@@ -449,9 +449,21 @@ function registerCrmApi({ expressApp, authWithRole }) {
         };
       };
 
+      // 前月算出（custom期間の場合は1ヶ月前）
+      let prevRangeStart = null, prevRangeEnd = null;
+      if (period === 'term') {
+        [prevRangeStart, prevRangeEnd] = [prevStart, prevEnd];
+      } else if (period === 'custom' && customMonth) {
+        const cm = new Date(`${customMonth}-01`);
+        cm.setMonth(cm.getMonth() - 1);
+        const py = cm.getFullYear(), pmn = cm.getMonth() + 1;
+        prevRangeStart = `${py}-${String(pmn).padStart(2, '0')}-01`;
+        prevRangeEnd   = new Date(py, pmn, 0).toISOString().split('T')[0];
+      }
+
       const [currMetrics, prevMetrics] = await Promise.all([
         getMetrics(rangeStart, rangeEnd),
-        period === 'term' ? getMetrics(prevStart, prevEnd) : null,
+        prevRangeStart ? getMetrics(prevRangeStart, prevRangeEnd) : null,
       ]);
 
       // ── 担当者別テーブル ──

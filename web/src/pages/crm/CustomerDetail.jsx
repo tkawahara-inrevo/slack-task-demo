@@ -298,7 +298,7 @@ function DealActivitySection({ deal, activitySettings }) {
   );
 }
 
-function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, customFields = [] }) {
+function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, customFields = [], fieldOptions = {} }) {
   const [editing, setEditing] = useState(false);
   const [showActivities, setShowActivities] = useState(false);
   const [form, setForm] = useState({ ...deal, ...deal.data });
@@ -446,10 +446,10 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
               <SelectF value={form.yomi} onChange={e=>setAuto('yomi',e.target.value)} options={YOMI_ORDER} />
             </Field>
             <Field label="契約形態">
-              <SelectF value={form.contractType||form.contract_type} onChange={e=>setAuto('contractType',e.target.value)} options={meta?.contractTypes||[]} />
+              <SelectF value={form.contractType||form.contract_type} onChange={e=>setAuto('contractType',e.target.value)} options={fieldOptions.contract_type || meta?.contractTypes || []} />
             </Field>
             <Field label="支払方式">
-              <SelectF value={form.paymentType||form.payment_type} onChange={e=>setAuto('paymentType',e.target.value)} options={meta?.paymentTypes||[]} />
+              <SelectF value={form.paymentType||form.payment_type} onChange={e=>setAuto('paymentType',e.target.value)} options={fieldOptions.payment_type || meta?.paymentTypes || []} />
             </Field>
             <Field label="担当営業">
               <select value={form.salesUserId||form.sales_user_id||''} onChange={e=>setAuto('salesUserId',e.target.value)} style={S.select}>
@@ -464,7 +464,7 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
               </select>
             </Field>
             <Field label="雇用形態">
-              <SelectF value={form.employmentType||form.employment_type} onChange={e=>setAuto('employmentType',e.target.value)} options={['新卒','中途','業務委託','アルバイト/インターン']} />
+              <SelectF value={form.employmentType||form.employment_type} onChange={e=>setAuto('employmentType',e.target.value)} options={fieldOptions.employment_type || ['新卒','中途','業務委託','アルバイト/インターン']} />
             </Field>
           </div>
 
@@ -473,7 +473,9 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
               <InputF type="date" value={form.inflowDate||form.inflow_date||''} onChange={e=>setAuto('inflowDate',e.target.value)} />
             </Field>
             <Field label="流入経路（案件）">
-              <InputF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} placeholder="例: 問い合わせ" />
+              {fieldOptions.inflow_source?.length > 0
+                ? <SelectF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} options={fieldOptions.inflow_source} />
+                : <InputF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} placeholder="例: 問い合わせ" />}
             </Field>
             <Field label="初回商談日">
               <InputF type="date" value={form.firstMeetingDate||form.first_meeting_date||''} onChange={e=>setAuto('firstMeetingDate',e.target.value)} />
@@ -626,11 +628,13 @@ export default function CustomerDetail() {
   const [dealForm, setDealForm] = useState({ name:'', yomi:'アポ化前' });
   const [saving, setSaving] = useState(false);
   const [customFields, setCustomFields] = useState({ customer:[], deal:[] });
+  const [fieldOptions, setFieldOptions] = useState({});
 
   useEffect(() => {
     api.crmActivitySettings().then(setActivitySettings).catch(() => {});
     api.crmCustomFields('customer').then(r => setCustomFields(p => ({ ...p, customer: r.fields||[] }))).catch(()=>{});
     api.crmCustomFields('deal').then(r => setCustomFields(p => ({ ...p, deal: r.fields||[] }))).catch(()=>{});
+    api.crmFieldOptions().then(r => setFieldOptions(r.options || {})).catch(() => {});
 
     Promise.all([
       api.crmGetCustomer(id),
@@ -851,7 +855,7 @@ export default function CustomerDetail() {
         : deals.map(deal => (
           <DealCard key={deal.id} deal={{...deal, data: deal.data||{}}} meta={meta} members={members}
             onUpdate={handleUpdateDeal} onDelete={handleDeleteDeal} activitySettings={activitySettings}
-            customFields={customFields.deal} />
+            customFields={customFields.deal} fieldOptions={fieldOptions} />
         ))
       }
 
@@ -885,13 +889,17 @@ export default function CustomerDetail() {
               </div>
               <div style={{ ...S.row2, marginBottom:14 }}>
                 <Field label="会社名（株式会社抜き）"><InputF value={custForm.name_short||''} onChange={e=>setCustForm(p=>({...p,name_short:e.target.value}))} /></Field>
-                <Field label="業界"><SelectF value={custForm.industry} onChange={e=>setCustForm(p=>({...p,industry:e.target.value}))} options={INDUSTRIES} /></Field>
+                <Field label="業界"><SelectF value={custForm.industry} onChange={e=>setCustForm(p=>({...p,industry:e.target.value}))} options={fieldOptions.industry || INDUSTRIES} /></Field>
                 <Field label="都道府県"><SelectF value={custForm.prefecture} onChange={e=>setCustForm(p=>({...p,prefecture:e.target.value}))} options={PREFECTURES} /></Field>
                 <Field label="従業員数"><SelectF value={custForm.employee_count} onChange={e=>setCustForm(p=>({...p,employee_count:e.target.value}))} options={EMP_COUNTS} /></Field>
               </div>
               <div style={{ ...S.row2, marginBottom:14 }}>
                 <Field label="流入日"><InputF type="date" value={custForm.inflow_date||''} onChange={e=>setCustForm(p=>({...p,inflow_date:e.target.value}))} /></Field>
-                <Field label="流入経路"><InputF value={custForm.inflow_source||''} onChange={e=>setCustForm(p=>({...p,inflow_source:e.target.value}))} placeholder="例: 問い合わせ・紹介" /></Field>
+                <Field label="流入経路">
+                  {fieldOptions.inflow_source?.length > 0
+                    ? <SelectF value={custForm.inflow_source||''} onChange={e=>setCustForm(p=>({...p,inflow_source:e.target.value}))} options={fieldOptions.inflow_source} />
+                    : <InputF value={custForm.inflow_source||''} onChange={e=>setCustForm(p=>({...p,inflow_source:e.target.value}))} placeholder="例: 問い合わせ・紹介" />}
+                </Field>
                 <Field label="Webサイト"><InputF value={custForm.website||''} onChange={e=>setCustForm(p=>({...p,website:e.target.value}))} placeholder="https://" /></Field>
                 <Field label="サービスLP URL①"><InputF value={custForm.service_lp_url1||''} onChange={e=>setCustForm(p=>({...p,service_lp_url1:e.target.value}))} placeholder="https://" /></Field>
               </div>

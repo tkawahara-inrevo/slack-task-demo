@@ -550,6 +550,16 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`UPDATE crm_role_targets SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
   await dbQuery(`UPDATE crm_rep_roles SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
 
+  // フィールド選択肢設定
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS crm_field_options (
+      team_id    TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      options    JSONB NOT NULL DEFAULT '[]',
+      PRIMARY KEY (team_id, field_name)
+    )
+  `).catch(() => {});
+
   // カスタムフィールド設定
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS crm_custom_fields (

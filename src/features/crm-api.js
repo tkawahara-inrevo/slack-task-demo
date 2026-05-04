@@ -691,6 +691,30 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── フィールド選択肢管理 ────────────────────────────────────────
+  expressApp.get('/api/crm/field-options', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows } = await dbQuery('SELECT field_name, options FROM crm_field_options WHERE team_id=$1', [teamId]);
+      const map = {};
+      for (const r of rows) map[r.field_name] = r.options;
+      res.json({ options: map });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.put('/api/crm/field-options/:fieldName', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { options } = req.body;
+      await dbQuery(
+        `INSERT INTO crm_field_options (team_id, field_name, options) VALUES ($1,$2,$3)
+         ON CONFLICT (team_id, field_name) DO UPDATE SET options=$3`,
+        [teamId, req.params.fieldName, JSON.stringify(options)]
+      );
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── カスタムフィールド CRUD ───────────────────────────────────
   expressApp.get('/api/crm/custom-fields', authWithRole, async (req, res) => {
     try {

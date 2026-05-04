@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, Outlet, useOutlet, useMatch } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import CustomerList from './CustomerList';
 import SalesPerformance from './SalesPerformance';
 import CrmDashboard from './CrmDashboard';
@@ -315,8 +315,101 @@ function CustomFieldsManager() {
   );
 }
 
-// ── CRM設定 ──────────────────────────────────────────────────
+// ── 選択肢管理 ───────────────────────────────────────────────
+const SYSTEM_FIELDS = [
+  { name:'contract_type',   label:'契約形態',   defaults:['採用保証','月額','後払い','変動プラン'] },
+  { name:'payment_type',    label:'支払方式',   defaults:['一括','分割','月払い'] },
+  { name:'employment_type', label:'採用形態',   defaults:['新卒','中途','業務委託','アルバイト/インターン'] },
+  { name:'inflow_source',   label:'流入経路',   defaults:['リスト','紹介','広告','展示会','Web問合せ','その他'] },
+  { name:'industry',        label:'業界',       defaults:['製造業','情報通信業','卸売業・小売業','建設業','医療、福祉','教育、学習支援業','金融業・保険業','不動産業','サービス業（他に分類されないもの）','その他'] },
+];
+
+function FieldOptionsManager() {
+  const [optionsMap, setOptionsMap] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState({});
+  const [notice, setNotice] = useState({});
+  const [newOption, setNewOption] = useState({});
+
+  useEffect(() => {
+    api.crmFieldOptions().then(r => {
+      const map = r.options || {};
+      // デフォルト値でフォールバック
+      const init = {};
+      for (const f of SYSTEM_FIELDS) init[f.name] = map[f.name] || [...f.defaults];
+      setOptionsMap(init);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async (fieldName) => {
+    setSaving(p => ({...p, [fieldName]: true}));
+    try {
+      await api.crmUpdateFieldOptions(fieldName, optionsMap[fieldName] || []);
+      setNotice(p => ({...p, [fieldName]: '保存しました'}));
+      setTimeout(() => setNotice(p => ({...p, [fieldName]: ''})), 2000);
+    } catch { setNotice(p => ({...p, [fieldName]: 'エラー'})); }
+    setSaving(p => ({...p, [fieldName]: false}));
+  };
+
+  const addOption = (fieldName) => {
+    const v = (newOption[fieldName] || '').trim();
+    if (!v) return;
+    setOptionsMap(p => ({...p, [fieldName]: [...(p[fieldName]||[]), v]}));
+    setNewOption(p => ({...p, [fieldName]: ''}));
+  };
+
+  const removeOption = (fieldName, idx) => {
+    setOptionsMap(p => ({...p, [fieldName]: p[fieldName].filter((_,i) => i!==idx)}));
+  };
+
+  if (loading) return <div style={{ color:'#94a3b8', fontSize:'0.82rem' }}>読み込み中…</div>;
+
+  const inputStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.82rem', outline:'none' };
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+      {SYSTEM_FIELDS.map(f => (
+        <div key={f.name} style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:12, overflow:'hidden' }}>
+          <div style={{ padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>{f.label}</span>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              {notice[f.name] && <span style={{ fontSize:'0.72rem', color:'#059669' }}>{notice[f.name]}</span>}
+              <button onClick={() => handleSave(f.name)} disabled={saving[f.name]}
+                style={{ padding:'3px 12px', background:'#1e40af', color:'#fff', border:'none', borderRadius:6, fontSize:'0.75rem', fontWeight:600, cursor:'pointer' }}>
+                保存
+              </button>
+            </div>
+          </div>
+          <div style={{ padding:'10px 12px', display:'flex', flexDirection:'column', gap:5, maxHeight:200, overflowY:'auto' }}>
+            {(optionsMap[f.name]||[]).map((opt, idx) => (
+              <div key={idx} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <input value={opt} onChange={e => setOptionsMap(p => ({...p, [f.name]: p[f.name].map((o,i)=>i===idx?e.target.value:o)}))}
+                  style={{ ...inputStyle, flex:1 }} />
+                <button onClick={() => removeOption(f.name, idx)}
+                  style={{ padding:'3px 8px', border:'1px solid #fca5a5', borderRadius:5, background:'#fff', color:'#dc2626', fontSize:'0.72rem', cursor:'pointer', flexShrink:0 }}>
+                  削除
+                </button>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding:'8px 12px', borderTop:'1px solid #f1f5f9', display:'flex', gap:6 }}>
+            <input value={newOption[f.name]||''} onChange={e => setNewOption(p=>({...p,[f.name]:e.target.value}))}
+              onKeyDown={e => e.key==='Enter' && addOption(f.name)}
+              placeholder="追加…" style={{ ...inputStyle, flex:1 }} />
+            <button onClick={() => addOption(f.name)}
+              style={{ padding:'4px 12px', background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.78rem', cursor:'pointer' }}>
+              ＋
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── CRM設定（サイドバー型） ─────────────────────────────────────
 function CrmSettings() {
+  const [section, setSection] = useState('kpi');
   const [roleTargetRows, setRoleTargetRows] = useState([]);
   const [roleTargets, setRoleTargets]       = useState({});
   const [repRoles, setRepRoles]             = useState({});
@@ -339,136 +432,164 @@ function CrmSettings() {
       for (const r of (rr.repRoles || [])) rrMap[r.rep_name] = r;
       setRepRoles(rrMap);
       const s = ps.settings || {};
-      setPeriod({ prevStart: s.prev_start?.split('T')[0]||'', prevEnd: s.prev_end?.split('T')[0]||'', currStart: s.curr_start?.split('T')[0]||'', currEnd: s.curr_end?.split('T')[0]||'' });
+      setPeriod({ prevStart:s.prev_start?.split('T')[0]||'', prevEnd:s.prev_end?.split('T')[0]||'', currStart:s.curr_start?.split('T')[0]||'', currEnd:s.curr_end?.split('T')[0]||'' });
     });
   }, []);
 
   const getEffective = (rep) => {
     const r = repRoles[rep];
     if (r?.monthly_target_override) return Number(r.monthly_target_override);
-    const roleName = r?.role_name || '役職無し';
-    return roleTargets[roleName] || 0;
+    return roleTargets[r?.role_name || '役職無し'] || 0;
   };
 
-  const setRepRole = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), role_name: role } }));
-  const setOverride = (rep, wan) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), monthly_target_override: wan===''?null:Number(wan)*10000 } }));
+  const setRepRole    = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), role_name: role } }));
+  const setOverride   = (rep, wan)  => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), monthly_target_override: wan===''?null:Number(wan)*10000 } }));
   const setRoleTarget = (roleName, wan) => {
     setRoleTargetRows(prev => prev.map(r => r.role_name===roleName ? {...r, monthly_target: Number(wan)*10000} : r));
-    setRoleTargets(prev => ({ ...prev, [roleName]: Number(wan)*10000 }));
+    setRoleTargets(prev => ({...prev, [roleName]: Number(wan)*10000}));
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const repArr = TARGET_REPS.map(rep => ({ rep_name: rep, role_name: repRoles[rep]?.role_name||'', monthly_target_override: repRoles[rep]?.monthly_target_override||null }));
-      const roleArr = roleTargetRows.map((r, i) => ({ role_name: r.role_name, monthly_target: r.monthly_target, sort_order: i }));
+      const repArr  = TARGET_REPS.map(rep => ({ rep_name:rep, role_name:repRoles[rep]?.role_name||'', monthly_target_override:repRoles[rep]?.monthly_target_override||null }));
+      const roleArr = roleTargetRows.map((r,i) => ({ role_name:r.role_name, monthly_target:r.monthly_target, sort_order:i }));
       await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({ prevStart:period.prevStart, prevEnd:period.prevEnd, currStart:period.currStart, currEnd:period.currEnd })]);
-      setNotice('保存しました');
-      setTimeout(() => setNotice(''), 2500);
+      setNotice('保存しました'); setTimeout(() => setNotice(''), 2500);
     } catch { setNotice('保存に失敗しました'); setTimeout(() => setNotice(''), 3000); }
     setSaving(false);
   };
 
   const teamTotal = TARGET_REPS.reduce((s, rep) => s + getEffective(rep), 0);
-  const sectionTitle = (label, sub) => (
-    <div style={{ marginBottom:12 }}>
-      <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>{label}</div>
-      {sub && <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginTop:2 }}>{sub}</div>}
-    </div>
-  );
+
+  const SECTIONS = [
+    { key:'kpi',     label:'役職・KPI目標', icon:'🎯' },
+    { key:'period',  label:'集計期間',      icon:'📅' },
+    { key:'fields',  label:'カスタムフィールド', icon:'📋' },
+    { key:'options', label:'選択肢管理',    icon:'⚙️' },
+  ];
 
   return (
-    <div style={{ padding:'28px 32px', maxWidth:640, overflowY:'auto' }}>
-      {sectionTitle('集計期間', '前期・今期の開始日と終了日を設定します')}
-      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden', marginBottom:28 }}>
-        {[
-          [['prevStart','前期 開始'],['prevEnd','前期 終了']],
-          [['currStart','今期 開始'],['currEnd','今期 終了']],
-        ].map((row, ri) => (
-          <div key={ri} style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:0, borderBottom: ri===0?'1px solid #f1f5f9':'none' }}>
-            {row.map(([key, label]) => (
-              <div key={key} style={{ padding:'10px 18px', borderRight:key.endsWith('Start')?'1px solid #f1f5f9':'none' }}>
-                <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginBottom:4 }}>{label}</div>
-                <input type="date" value={period[key]||''} onChange={e => setPeriod(p => ({...p,[key]:e.target.value}))}
-                  style={{ width:'100%', padding:'5px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.85rem', outline:'none', color:'#0f172a', boxSizing:'border-box' }} />
+    <div style={{ display:'flex', height:'100%', overflow:'hidden' }}>
+      {/* サイドバー */}
+      <div style={{ width:180, borderRight:'1px solid #e2e8f0', background:'#f8fafc', flexShrink:0, padding:'16px 8px', display:'flex', flexDirection:'column', gap:2 }}>
+        {SECTIONS.map(s => (
+          <button key={s.key} onClick={() => setSection(s.key)}
+            style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px', borderRadius:8, border:'none', cursor:'pointer', textAlign:'left', fontSize:'0.83rem',
+              fontWeight: section===s.key?700:400,
+              background: section===s.key?'#fff':'transparent',
+              color: section===s.key?'#1e40af':'#374151',
+              boxShadow: section===s.key?'0 1px 3px rgba(0,0,0,0.08)':'none' }}>
+            <span>{s.icon}</span> {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* コンテンツ */}
+      <div style={{ flex:1, overflow:'auto', padding:'24px 32px' }}>
+
+        {section === 'period' && (<>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginBottom:4 }}>集計期間</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:16 }}>前期・今期の開始日と終了日を設定します</div>
+          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden', maxWidth:480, marginBottom:20 }}>
+            {[[['prevStart','前期 開始'],['prevEnd','前期 終了']],[['currStart','今期 開始'],['currEnd','今期 終了']]].map((row,ri) => (
+              <div key={ri} style={{ display:'grid', gridTemplateColumns:'1fr 1fr', borderBottom:ri===0?'1px solid #f1f5f9':'none' }}>
+                {row.map(([key,label]) => (
+                  <div key={key} style={{ padding:'12px 18px', borderRight:key.endsWith('Start')?'1px solid #f1f5f9':'none' }}>
+                    <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginBottom:4 }}>{label}</div>
+                    <input type="date" value={period[key]||''} onChange={e => setPeriod(p => ({...p,[key]:e.target.value}))}
+                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.85rem', outline:'none', boxSizing:'border-box' }} />
+                  </div>
+                ))}
               </div>
             ))}
           </div>
-        ))}
-      </div>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}>
+            {saving?'保存中…':'保存'}
+          </button>
+          {notice && <span style={{ marginLeft:12, fontSize:'0.8rem', color:notice.includes('失敗')?'#dc2626':'#059669', fontWeight:600 }}>{notice}</span>}
+        </>)}
 
-      {sectionTitle('役職別 月次目標', '成績ページの昇降格ラインにも使用されます')}
-      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden', marginBottom:28 }}>
-        {roleTargetRows.map((row, i) => (
-          <div key={row.role_name} style={{ display:'flex', alignItems:'center', gap:14, padding:'10px 18px', borderBottom:i<roleTargetRows.length-1?'1px solid #f8fafc':'none' }}>
-            <span style={{ flex:1, fontSize:'0.85rem', fontWeight:600, color:'#374151' }}>{row.role_name}</span>
-            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <input type="number" min="0" step="10"
-                value={row.monthly_target>0?Math.round(row.monthly_target/10000):''}
-                onChange={e => setRoleTarget(row.role_name, e.target.value)} placeholder="0"
-                style={{ width:90, padding:'5px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.88rem', textAlign:'right', outline:'none' }} />
-              <span style={{ fontSize:'0.78rem', color:'#64748b' }}>万円 / 月</span>
+        {section === 'kpi' && (<>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginBottom:4 }}>役職・KPI目標</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:20 }}>役職別目標は成績ページの昇降格ラインにも使用されます</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, maxWidth:800 }}>
+            {/* 役職別目標 */}
+            <div>
+              <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#374151', marginBottom:10 }}>役職別 月次目標</div>
+              <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+                {roleTargetRows.map((row,i) => (
+                  <div key={row.role_name} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 14px', borderBottom:i<roleTargetRows.length-1?'1px solid #f8fafc':'none' }}>
+                    <span style={{ flex:1, fontSize:'0.83rem', fontWeight:600, color:'#374151' }}>{row.role_name}</span>
+                    <input type="number" min="0" step="10"
+                      value={row.monthly_target>0?Math.round(row.monthly_target/10000):''}
+                      onChange={e => setRoleTarget(row.role_name, e.target.value)} placeholder="0"
+                      style={{ width:80, padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.85rem', textAlign:'right', outline:'none' }} />
+                    <span style={{ fontSize:'0.72rem', color:'#64748b' }}>万/月</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* 担当者別 */}
+            <div>
+              <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#374151', marginBottom:10 }}>担当者別 役職割り当て</div>
+              <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+                {TARGET_REPS.map((rep,i) => {
+                  const [fam, given] = rep.split(/[\s　]/);
+                  const roleName = repRoles[rep]?.role_name || '';
+                  const overrideRaw = repRoles[rep]?.monthly_target_override;
+                  const overrideWan = overrideRaw ? Math.round(Number(overrideRaw)/10000) : '';
+                  const effective = getEffective(rep);
+                  return (
+                    <div key={rep} style={{ padding:'9px 14px', borderBottom:i<TARGET_REPS.length-1?'1px solid #f8fafc':'none' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                        <span style={{ width:22, height:22, borderRadius:5, background:'#eef2ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.62rem', fontWeight:800, color:'#4f46e5', flexShrink:0 }}>{fam?.[0]}</span>
+                        <span style={{ fontWeight:700, color:'#4f46e5', fontSize:'0.72rem' }}>{fam}</span>
+                        <span style={{ color:'#374151', fontSize:'0.82rem' }}>{given}</span>
+                        {effective > 0 && <span style={{ marginLeft:'auto', fontSize:'0.72rem', fontWeight:700, color:'#1e40af' }}>{Math.round(effective/10000)}万</span>}
+                      </div>
+                      <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                        <select value={roleName} onChange={e => setRepRole(rep, e.target.value)}
+                          style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none' }}>
+                          {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 未選択 —'}</option>)}
+                        </select>
+                        <input type="number" min="0" step="10" value={overrideWan}
+                          onChange={e => setOverride(rep, e.target.value)} placeholder="手動"
+                          style={{ width:60, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', textAlign:'right', outline:'none' }} />
+                        <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>万</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 14px', background:'#f8fafc', borderTop:'1px solid #f1f5f9' }}>
+                  <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:600 }}>合計</span>
+                  <span style={{ fontSize:'0.85rem', fontWeight:800, color:teamTotal>0?'#1e40af':'#cbd5e1' }}>{teamTotal>0?`${Math.round(teamTotal/10000)}万`:'未設定'}</span>
+                </div>
+              </div>
             </div>
           </div>
-        ))}
-      </div>
+          <div style={{ marginTop:20 }}>
+            <button onClick={handleSave} disabled={saving}
+              style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}>
+              {saving?'保存中…':'保存'}
+            </button>
+            {notice && <span style={{ marginLeft:12, fontSize:'0.8rem', color:notice.includes('失敗')?'#dc2626':'#059669', fontWeight:600 }}>{notice}</span>}
+          </div>
+        </>)}
 
-      {sectionTitle('担当者別 役職・KPI目標', '役職未選択は「役職無し」として扱います。例外時のみ手動上書きを使用してください。')}
-      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden', marginBottom:16 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 130px 130px 80px', gap:10, padding:'8px 18px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9' }}>
-          {['担当者','役職','手動上書き','実効目標'].map(h => (
-            <span key={h} style={{ fontSize:'0.7rem', color:'#94a3b8', fontWeight:600 }}>{h}</span>
-          ))}
-        </div>
-        {TARGET_REPS.map((rep, i) => {
-          const [fam, given] = rep.split(/[\s　]/);
-          const roleName = repRoles[rep]?.role_name || '';
-          const overrideRaw = repRoles[rep]?.monthly_target_override;
-          const overrideWan = overrideRaw ? Math.round(Number(overrideRaw)/10000) : '';
-          const effective = getEffective(rep);
-          const fromOverride = !!overrideRaw;
-          return (
-            <div key={rep} style={{ display:'grid', gridTemplateColumns:'1fr 130px 130px 80px', gap:10, padding:'10px 18px', borderBottom:i<TARGET_REPS.length-1?'1px solid #f8fafc':'none', alignItems:'center' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <span style={{ width:24, height:24, borderRadius:6, background:'#eef2ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', fontWeight:800, color:'#4f46e5' }}>{fam?.[0]}</span>
-                <span><span style={{ fontWeight:700, color:'#4f46e5', fontSize:'0.7rem' }}>{fam}</span><span style={{ color:'#374151', fontSize:'0.82rem', marginLeft:3 }}>{given}</span></span>
-              </div>
-              <select value={roleName} onChange={e => setRepRole(rep, e.target.value)}
-                style={{ padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', color:'#0f172a', outline:'none' }}>
-                {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 未選択 —'}</option>)}
-              </select>
-              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <input type="number" min="0" step="10" value={overrideWan}
-                  onChange={e => setOverride(rep, e.target.value)} placeholder={effective>0?`${Math.round(effective/10000)}万`:''}
-                  style={{ width:80, padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', textAlign:'right', outline:'none' }} />
-                <span style={{ fontSize:'0.7rem', color:'#94a3b8' }}>万</span>
-              </div>
-              <div style={{ textAlign:'right' }}>
-                {effective>0
-                  ? <span style={{ fontSize:'0.82rem', fontWeight:700, color:fromOverride?'#7c3aed':'#1e40af' }}>{Math.round(effective/10000)}万</span>
-                  : <span style={{ fontSize:'0.78rem', color:'#cbd5e1' }}>—</span>}
-              </div>
-            </div>
-          );
-        })}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 18px', background:'#f8fafc', borderTop:'1px solid #f1f5f9' }}>
-          <span style={{ fontSize:'0.78rem', color:'#64748b', fontWeight:600 }}>チーム月次目標合計</span>
-          <span style={{ fontSize:'0.92rem', fontWeight:800, color:teamTotal>0?'#1e40af':'#cbd5e1' }}>
-            {teamTotal>0?`${Math.round(teamTotal/10000)}万円`:'未設定'}
-          </span>
-        </div>
-      </div>
+        {section === 'fields' && (<>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginBottom:4 }}>カスタムフィールド</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:16 }}>顧客・案件フォームに独自項目を追加できます</div>
+          <CustomFieldsManager />
+        </>)}
 
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:36 }}>
-        <button onClick={handleSave} disabled={saving}
-          style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:saving?'default':'pointer' }}>
-          {saving?'保存中…':'保存'}
-        </button>
-        {notice && <span style={{ fontSize:'0.8rem', color:notice.includes('失敗')?'#dc2626':'#059669', fontWeight:600 }}>{notice}</span>}
+        {section === 'options' && (<>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginBottom:4 }}>選択肢管理</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:16 }}>フォームのプルダウン項目の選択肢を編集できます。編集後は「保存」を押してください。</div>
+          <FieldOptionsManager />
+        </>)}
       </div>
-
-      {sectionTitle('カスタムフィールド', '顧客・案件フォームに自由に項目を追加できます。追加したフィールドは各詳細画面の編集フォームに表示されます。')}
-      <CustomFieldsManager />
     </div>
   );
 }
@@ -479,8 +600,6 @@ export default function CRM() {
   const tab = searchParams.get('tab') || 'dashboard';
   const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
   const [canViewPerf, setCanViewPerf] = useState(null);
-  const outlet = useOutlet();
-  const onCustomerDetail = !!useMatch('/crm/customers/:id');
 
   useEffect(() => {
     api.crmPerformanceAccess()
@@ -500,40 +619,33 @@ export default function CRM() {
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
       {/* タブバー */}
       <div style={{ display:'flex', borderBottom:'1px solid #e5e7eb', background:'#fff', paddingLeft:8, flexShrink:0 }}>
-        {tabs.map(t => {
-          const active = onCustomerDetail ? t.key === 'customers' : t.key === tab;
-          return (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              style={{ padding:'10px 20px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem',
-                fontWeight: active?700:400, color:active?'#1d4ed8':'#6b7280',
-                borderBottom: active?'2px solid #1d4ed8':'2px solid transparent', transition:'color 0.15s' }}>
-              {t.label}
-            </button>
-          );
-        })}
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{ padding:'10px 20px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem',
+              fontWeight: tab===t.key?700:400, color:tab===t.key?'#1d4ed8':'#6b7280',
+              borderBottom: tab===t.key?'2px solid #1d4ed8':'2px solid transparent', transition:'color 0.15s' }}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {/* タブコンテンツ */}
       <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {/* 顧客詳細（ネストルート）はタブを保持したまま表示 */}
-        {outlet && <div style={{ flex:1, overflow:'auto' }}>{outlet}</div>}
+        {tab === 'dashboard'  && <div style={{ flex:1, overflow:'auto' }}><CrmDashboard /></div>}
+        {tab === 'customers'  && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><CustomerList /></div>}
+        {tab === 'yomi'       && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>}
 
-        {!outlet && tab === 'dashboard'   && <div style={{ flex:1, overflow:'auto' }}><CrmDashboard /></div>}
-        {!outlet && tab === 'customers'  && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><CustomerList /></div>}
-        {!outlet && tab === 'yomi'       && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>}
-
-        {!outlet && tab === 'performance' && canViewPerf && (
+        {tab === 'performance' && canViewPerf && (
           <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>
         )}
-        {!outlet && tab === 'performance' && canViewPerf === false && (
+        {tab === 'performance' && canViewPerf === false && (
           <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#94a3b8', flexDirection:'column', gap:8 }}>
             <div style={{ fontSize:'1.5rem' }}>🔒</div>
             <div style={{ fontWeight:700, color:'#374151' }}>アクセス権限がありません</div>
             <div style={{ fontSize:'0.82rem' }}>管理者またはBC Sub Manager以上のみ閲覧できます</div>
           </div>
         )}
-
-        {!outlet && tab === 'settings' && <div style={{ flex:1, overflow:'auto' }}><CrmSettings /></div>}
+        {tab === 'settings' && <CrmSettings />}
       </div>
     </div>
   );

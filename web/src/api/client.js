@@ -242,6 +242,8 @@ export const api = {
     return crmFetch(`/dashboard/monthly-trend${qs ? '?' + qs : ''}`);
   },
   crmDashboardRecentActivities: (limit = 8) => crmFetch(`/dashboard/recent-activities?limit=${limit}`),
+  crmFieldOptions:       ()              => crmFetch('/field-options'),
+  crmUpdateFieldOptions: (name, options) => crmFetch(`/field-options/${name}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ options }) }),
   crmCustomFields:       (entity) => crmFetch(`/custom-fields${entity ? '?entity='+entity : ''}`),
   crmCreateCustomField:  (body)   => crmFetch('/custom-fields', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }),
   crmUpdateCustomField:  (id, b)  => crmFetch(`/custom-fields/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) }),

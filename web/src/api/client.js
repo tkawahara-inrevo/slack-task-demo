@@ -327,6 +327,10 @@ export const api = {
   crmDeleteCalcDef: (defId) => crmFetch(`/calc-defs/${defId}`, { method: 'DELETE' }),
 
   // Analytics
+  analyticsPeriodSummary: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/analytics/period-summary${qs ? '?' + qs : ''}`);
+  },
   analyticsMemberCompletion: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/analytics/member-completion${qs ? '?' + qs : ''}`);

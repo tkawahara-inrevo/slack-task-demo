@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
+import FloatingTasks from './pages/FloatingTasks'
 import TaskDetail from './pages/TaskDetail'
 import TaskCreate from './pages/TaskCreate'
 import Unauthorized from './pages/Unauthorized'
@@ -36,8 +37,11 @@ import './App.css'
 
 function App() {
   return (
-    <Layout>
-      <Routes>
+    <Routes>
+      <Route path="/floating" element={<FloatingTasks />} />
+      <Route path="*" element={
+        <Layout>
+          <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/tasks/new" element={<TaskCreate />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
@@ -74,8 +78,10 @@ function App() {
         <Route path="/rpo/mytasks" element={<RpoMyTasks />} />
         <Route path="/rpo/:id" element={<ClientDetail />} />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Layout>
+          </Routes>
+        </Layout>
+      } />
+    </Routes>
   )
 }
 

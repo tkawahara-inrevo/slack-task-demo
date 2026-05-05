@@ -33,6 +33,7 @@ function ProgressRing({ rate }) {
 }
 
 function AnalyticsTab({ members, usergroups }) {
+  const [periodSummary, setPeriodSummary] = useState(null);
   const [memberData, setMemberData] = useState(null);
   const [dueData, setDueData] = useState(null);
   const [projectData, setProjectData] = useState(null);
@@ -44,10 +45,12 @@ function AnalyticsTab({ members, usergroups }) {
       api.analyticsMemberCompletion(),
       api.analyticsDueCompliance(),
       api.analyticsProjectProgress(),
-    ]).then(([m, d, p]) => {
+      api.analyticsPeriodSummary({ scope: 'self' }),
+    ]).then(([m, d, p, ps]) => {
       setMemberData(m.members || []);
       setDueData(d.weeks || []);
       setProjectData(p.projects || []);
+      setPeriodSummary(ps);
     }).catch(console.error);
   }, []);
 
@@ -66,6 +69,30 @@ function AnalyticsTab({ members, usergroups }) {
   if (!memberData) return <div style={{ textAlign:'center', padding:'40px 0', color:'#94a3b8' }}>読み込み中…</div>;
 
   const selStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', outline:'none' };
+
+  const PeriodCard = ({ label, data }) => {
+    if (!data) return null;
+    const metrics = [
+      { label: '作成', value: data.created, unit: '件', color: '#6366f1' },
+      { label: '完了', value: data.completed, unit: '件', color: '#10b981' },
+      { label: '消化率', value: data.completion_rate ?? '—', unit: data.completion_rate != null ? '%' : '', color: data.completion_rate >= 80 ? '#10b981' : data.completion_rate >= 50 ? '#f59e0b' : '#dc2626' },
+      { label: '遵守率', value: data.compliance_rate ?? '—', unit: data.compliance_rate != null ? '%' : '', color: data.compliance_rate >= 80 ? '#10b981' : data.compliance_rate >= 50 ? '#f59e0b' : '#dc2626' },
+      { label: '平均処理', value: data.avg_days, unit: '日', color: '#64748b' },
+    ];
+    return (
+      <div style={{ background:'#f8fafc', borderRadius:10, padding:'14px 16px' }}>
+        <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#64748b', marginBottom:12 }}>{label}</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8 }}>
+          {metrics.map(m => (
+            <div key={m.label} style={{ textAlign:'center' }}>
+              <div style={{ fontSize:'1.4rem', fontWeight:900, color:m.color, lineHeight:1 }}>{m.value}<span style={{ fontSize:'0.7rem', fontWeight:500 }}>{m.unit}</span></div>
+              <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:3 }}>{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
   const card = (children, style={}) => <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'16px 20px', ...style }}>{children}</div>;
   const sh = (label) => <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a', marginBottom:12 }}>{label}</div>;
   const maxTotal = Math.max(1, ...memberData.map(m => m.total));
@@ -97,6 +124,15 @@ function AnalyticsTab({ members, usergroups }) {
         )}
         {filterLoading && <span style={{ fontSize:'0.75rem', color:'#94a3b8' }}>更新中…</span>}
       </div>
+
+      {/* 自分の期間別サマリー */}
+      {periodSummary && card(<>
+        {sh('自分のタスクサマリー')}
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <PeriodCard label="直近7日" data={periodSummary.d7} />
+          <PeriodCard label="直近30日" data={periodSummary.d30} />
+        </div>
+      </>)}
 
       {/* メンバー別完了率 */}
       {card(<>
@@ -728,7 +764,18 @@ export default function Dashboard() {
 
       {/* マイタスク一覧（デフォルト表示） */}
       {card(<>
-        {sh('マイタスク', `進行中・保留 ${activeTasks.length}件`)}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+          <div>
+            <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a' }}>マイタスク</div>
+            <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
+          </div>
+          <button
+            onClick={() => window.open('/floating', 'taskhub-float', 'width=380,height=640,resizable=yes,scrollbars=yes')}
+            style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:7, background:'#fff', color:'#64748b', fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
+            title="ポップアップで開く">
+            ↗ ポップアップ
+          </button>
+        </div>
         {activeTasks.length === 0 ? (
           <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'16px 0' }}>
             アクティブなタスクはありません

@@ -207,6 +207,17 @@ function YomiPanel({ full = false }) {
       </div>
       <div style={{ flex:1, overflowY:'auto', padding:'12px 20px' }}>
         {full ? (
+          filterStaff ? (
+            /* 担当者絞り込み時: 案件カードを全幅グリッドで展開 */
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:10 }}>
+              {entries.flatMap(([, sDeals]) => sDeals).map(d => (
+                <div key={d.id} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+                  <DealCard d={d} />
+                </div>
+              ))}
+            </div>
+          ) : (
+          /* 全員表示: 担当者カードのグリッド */
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(360px, 1fr))', gap:14 }}>
             {entries.map(([staff, sDeals]) => (
               <div key={staff} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
@@ -223,6 +234,7 @@ function YomiPanel({ full = false }) {
               </div>
             ))}
           </div>
+          )
         ) : (
           entries.map(([staff, sDeals]) => (
             <div key={staff} style={{ marginBottom:10, background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', overflow:'hidden' }}>

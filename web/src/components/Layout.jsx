@@ -135,6 +135,15 @@ export default function Layout({ children }) {
   const location = useLocation();
 
   useEffect(() => {
+    // URLに ?auth=TOKEN があれば自動でセッション引き継ぎ（Slack → ネイティブブラウザ）
+    const params = new URLSearchParams(window.location.search);
+    const authToken = params.get('auth');
+    if (authToken) {
+      // トークンをサーバーに渡してセッションcookieを取得し、URLをクリーン
+      const redirect = encodeURIComponent(window.location.pathname);
+      window.location.replace(`/api/auth/adopt?token=${authToken}&redirect=${redirect}`);
+      return; // リダイレクト中なので以降は実行しない
+    }
     api.me().then(setUser).catch(() => {});
     api.rpoAccess().then(r => setRpoAccess(!!r.canAccess)).catch(() => setRpoAccess(false));
   }, []);

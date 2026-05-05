@@ -468,15 +468,40 @@ function registerDashboardApi(deps) {
       maxAge: SESSION_COOKIE_MAX_AGE,
       secure: process.env.NODE_ENV === "production",
     });
-    res.redirect("/dashboard");
+    // URLにトークンを埋め込んでリダイレクト
+    // → ネイティブブラウザで同じURLを開いたとき自動でセッションを引き継げる
+    const crypto = require('crypto');
+    const adoptToken = crypto.randomBytes(20).toString('hex');
+    transferTokens.set(adoptToken, { teamId: result.teamId, userId: result.userId, sessionId: result.sessionId, expires: Date.now() + 600000 }); // 10分
+    res.redirect(`/dashboard?auth=${adoptToken}`);
   });
 
   // ================================
-  // セッション移行（Slack in-app browser → native browser）
+  // セッション移行（URLトークン経由の自動引き継ぎ）
   // ================================
   const transferTokens = new Map(); // token → { teamId, userId, sessionId, expires }
+  // 定期クリーンアップ
+  setInterval(() => { for (const [k, v] of transferTokens) if (v.expires < Date.now()) transferTokens.delete(k); }, 60000);
 
-  // ワンタイムトークン発行
+  // URLトークンからセッション自動取得（ネイティブブラウザで同じURLを開いたとき）
+  expressApp.get('/api/auth/adopt', async (req, res) => {
+    const { token, redirect = '/dashboard' } = req.query;
+    const data = transferTokens.get(token);
+    if (!data || data.expires < Date.now()) {
+      // トークン無効 → 通常のログインフローへ
+      return res.redirect('/dashboard');
+    }
+    // 既存セッションを再利用（新ブラウザにも同じセッションを付与）
+    res.cookie('dashboard_session', data.sessionId, {
+      httpOnly: true, sameSite: 'lax',
+      maxAge: SESSION_COOKIE_MAX_AGE,
+      secure: process.env.NODE_ENV === 'production',
+    });
+    // トークンは消費しない（複数ブラウザで開ける）
+    res.redirect(decodeURIComponent(redirect));
+  });
+
+  // ワンタイムトークン発行（手動ボタン用・残しておく）
   expressApp.post('/api/auth/transfer-token', authMiddleware, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;

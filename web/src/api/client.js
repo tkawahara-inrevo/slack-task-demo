@@ -261,7 +261,7 @@ export const api = {
   crmCreateCustomField:  (body)   => crmFetch('/custom-fields', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }),
   crmUpdateCustomField:  (id, b)  => crmFetch(`/custom-fields/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) }),
   crmDeleteCustomField:  (id)     => crmFetch(`/custom-fields/${id}`, { method:'DELETE' }),
-  authTransferToken:    () => apiFetch('/api/auth/transfer-token', { method:'POST' }),
+  authTransferToken:    () => fetch('/api/auth/transfer-token', { method:'POST', credentials:'include' }).then(r => r.json()),
   crmMyInfo:            () => crmFetch('/my-info'),
   crmPerformanceAccess: () => crmFetch('/performance-access'),
   crmRepRoles: () => crmFetch('/rep-roles'),

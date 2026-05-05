@@ -2182,8 +2182,13 @@ function registerDashboardApi(deps) {
           ...(cursor ? { cursor } : {}),
         });
         rawMessages = rawMessages.concat(result.messages || []);
+        console.log(`[thread] channel=${task.channel_id} ts=${task.message_ts} got=${result.messages?.length} has_more=${result.has_more} cursor=${result.response_metadata?.next_cursor}`);
         cursor = result.response_metadata?.next_cursor || null;
       } while (cursor);
+      // 各メッセージのtsとthread_tsを確認
+      for (const m of rawMessages) {
+        console.log(`[thread msg] ts=${m.ts} thread_ts=${m.thread_ts} user=${m.user} subtype=${m.subtype}`);
+      }
 
       // メッセージ本文中の<@UXXX>メンションも含めて全ユーザーIDを収集
       const mentionRe = /<@([^|>]+)(?:\|[^>]+)?>/g;

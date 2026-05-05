@@ -327,13 +327,13 @@ function SlackText({ text, nameMap, subteamMap }) {
         if (userMention) {
           const uid = userMention[1];
           const raw = userMention[2] || nameMap?.[uid] || null;
-          const name = raw ? raw.split('/')[0].trim() : uid.slice(0, 7) + '…';
+          const name = raw ? raw.split('/')[0].trim() : uid;
           return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
         }
         // 角括弧なしの bare @UXXX 形式
         const bareId = p.match(/^@(U[A-Z0-9]{6,})$/);
         if (bareId) {
-          const name = nameMap?.[bareId[1]] ? nameMap[bareId[1]].split('/')[0].trim() : bareId[1].slice(0, 7) + '…';
+          const name = nameMap?.[bareId[1]] ? nameMap[bareId[1]].split('/')[0].trim() : bareId[1];
           return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
         }
         // サブチームメンション <!subteam^SXXX|@handle> — subteamMapで名前解決

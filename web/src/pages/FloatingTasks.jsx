@@ -13,6 +13,7 @@ const parseTitleLine = (raw) => {
   const lines = raw.split('\n');
   for (const line of lines) {
     const c = line.replace(/<@[^>]+>/g, '').replace(/@\S+/g, '')
+      .replace(/\*([^*]*)\*/g, '$1')  // Slack bold
       .replace(/（[^）]*）/g, '').replace(/fyi\s*:/gi, '').replace(/\s+/g, ' ').trim();
     if (!c) continue;
     const slashes = (c.match(/\//g) || []).length;

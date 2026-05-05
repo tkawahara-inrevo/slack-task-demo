@@ -11,16 +11,46 @@ const STATUS_CFG = {
 // ステータス変更ボタンは進行中・完了のみ
 const STATUS_CHANGE = ['in_progress', 'done'];
 
-const cleanTitle = (title, content) => {
+// タイトル候補から「アドレス行」（名前/英名形式・短い・句読点なし）をスキップして
+// 最初の意味ある行をタイトルとして取得し、その後ろを本文として返す
+const parseTitleAndBody = (title, content) => {
   const raw = title || content || '';
-  return raw
-    .replace(/^(<@[^>]+>\s*)+/g, '')
-    .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')
-    .replace(/^\s+/, '')
-    .split('\n')[0]
-    .slice(0, 100)
-    || '（タイトルなし）';
+  const lines = raw.split('\n');
+  let titleLine = '（タイトルなし）';
+  let titleIdx = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    // メンション・（Cc:）・fyi: を除去してタイトル候補として評価
+    const candidate = lines[i]
+      .replace(/<@[^>]+>/g, '')
+      .replace(/@[\w぀-鿿./]+/g, '')
+      .replace(/（[^）]*）/g, '')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/fyi\s*:/gi, '')
+      .replace(/cc\s*:/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!candidate) continue;
+
+    // 「名前/英名」形式の短いアドレス行はスキップ（例: 煌/Kagari Doi）
+    const isAddressLine =
+      /[一-鿿A-Za-z]+\/[A-Za-z一-鿿 ]+/.test(candidate) &&
+      candidate.length < 35 &&
+      !/[。！？、：]/.test(candidate);
+    if (isAddressLine) continue;
+
+    titleLine = candidate.slice(0, 100);
+    titleIdx = i;
+    break;
+  }
+
+  // 本文：タイトル行の次から最後まで（メンショントリミングなし）
+  const body = lines.slice(titleIdx + 1).join('\n').trim();
+  return { title: titleLine, body };
 };
+
+const cleanTitle = (title, content) => parseTitleAndBody(title, content).title;
 
 // 担当者名をクリーン（@除去・先頭の1名だけ）
 const cleanAssigneeName = (label) => {
@@ -29,14 +59,13 @@ const cleanAssigneeName = (label) => {
   return first.split('/')[0].trim() || first.trim() || null;
 };
 
-// コンテンツ本文（タイトル行を除いた残り）
-// Slackタスクはcontent=nullでtitleに全文が入っているため、title || content を使う
+// 検索プレビュー用本文（メンション除去あり）
 const getContentBody = (rawText) => {
-  const cleaned = (rawText || '')
-    .replace(/^(<@[^>]+>\s*)+/g, '')
-    .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')
-    .replace(/^\s+/, '');
-  return cleaned.split('\n').slice(1).join('\n').trim();
+  const { body } = parseTitleAndBody(rawText, null);
+  return body
+    .replace(/<@[^>]+>/g, '')
+    .replace(/@[\w぀-鿿./]+/g, '')
+    .trim();
 };
 
 const fmtDate = (d) => {
@@ -72,7 +101,8 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const st = STATUS_CFG[status] || { label: status, color: '#94a3b8' };
   const title = cleanTitle(displayTask.title, displayTask.content);
   const overdue = isOverdueTask({ ...displayTask, status });
-  const contentBody = getContentBody(displayTask.title || displayTask.content);
+  // パネル本文：メンショントリミングなし、タイトル行の次から
+  const { body: contentBody } = parseTitleAndBody(displayTask.title || displayTask.content, null);
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||

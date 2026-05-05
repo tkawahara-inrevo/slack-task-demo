@@ -66,14 +66,8 @@ function BrowserTransferButton({ onClose, floating } = {}) {
       const currentPath = window.location.pathname;
       const url = `${window.location.origin}/api/auth/adopt?token=${data.token}&redirect=${encodeURIComponent(currentPath)}`;
       setTransferUrl(url);
-      // iOSネイティブ共有シートを使う → 「Safariで開く」をワンタップで選べる
-      if (navigator.share) {
-        navigator.share({ url }).catch(() => {});
-        setState('idle');
-      } else {
-        setShowModal(true);
-        setState('ready');
-      }
+      setShowModal(true);
+      setState('ready');
     } catch { setState('idle'); }
   };
 
@@ -111,26 +105,19 @@ function BrowserTransferButton({ onClose, floating } = {}) {
           onClick={handleClose}>
           <div style={{ background:'#fff', borderRadius:16, width:'min(480px,94vw)', padding:'20px', boxShadow:'0 -8px 32px rgba(0,0,0,0.2)' }}
             onClick={e => e.stopPropagation()}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-              <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>Safariで開く</div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>ブラウザで開く</div>
               <button onClick={handleClose} style={{ background:'#f1f5f9', border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:'#64748b', fontSize:16 }}>×</button>
             </div>
             {state === 'loading' && (
-              <div style={{ textAlign:'center', padding:'20px', color:'#94a3b8' }}>URLを生成中…</div>
+              <div style={{ textAlign:'center', padding:'20px', color:'#94a3b8' }}>生成中…</div>
             )}
-            {(state === 'ready' || state === 'copied') && (<>
-              <div style={{ fontSize:'0.82rem', color:'#374151', marginBottom:12, lineHeight:1.6 }}>
-                このURLをコピーして、<strong>SafariのURL欄に貼り付け</strong>てください。<br />
-                <span style={{ fontSize:'0.75rem', color:'#94a3b8' }}>※ 有効期限は90秒です</span>
-              </div>
-              <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'10px 12px', fontSize:'0.72rem', color:'#374151', wordBreak:'break-all', lineHeight:1.5, marginBottom:12 }}>
-                {transferUrl}
-              </div>
+            {(state === 'ready' || state === 'copied') && (
               <button onClick={handleCopy}
-                style={{ width:'100%', padding:'12px', background: state === 'copied' ? '#059669' : '#1e40af', color:'#fff', border:'none', borderRadius:10, fontSize:'0.9rem', fontWeight:700, cursor:'pointer' }}>
-                {state === 'copied' ? '✓ コピーしました！ SafariのURL欄に貼り付けてください' : 'URLをコピーする'}
+                style={{ width:'100%', padding:'14px', background: state === 'copied' ? '#059669' : '#1e40af', color:'#fff', border:'none', borderRadius:10, fontSize:'1rem', fontWeight:700, cursor:'pointer' }}>
+                {state === 'copied' ? '✓ コピーしました　ブラウザのURL欄に貼り付けてください' : 'URLをコピー'}
               </button>
-            </>)}
+            )}
           </div>
         </div>
       )}

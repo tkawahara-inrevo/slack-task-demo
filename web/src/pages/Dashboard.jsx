@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 
@@ -368,11 +368,25 @@ function SlackText({ text, nameMap, subteamMap }) {
 function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   const [status, setStatus] = useState(task.status);
   const [fullTask, setFullTask] = useState(null);
-  const [threadData, setThreadData] = useState(null); // { messages, nameMap }
+  const [threadData, setThreadData] = useState(null);
   const [saving, setSaving] = useState(false);
+  // 期日inline編集
+  const [editingDue, setEditingDue] = useState(false);
+  const [editDue, setEditDue] = useState('');
+  // コメント
+  const [comment, setComment] = useState('');
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionMap, setMentionMap] = useState({});
+  const [commentSaving, setCommentSaving] = useState(false);
+  const textareaRef = React.useRef(null);
 
   useEffect(() => {
-    api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
+    api.taskGet?.(task.id).then(r => {
+      const t = r.task || r;
+      setFullTask(t);
+      setEditDue(t.due_date ? t.due_date.slice(0,10) : '');
+    }).catch(() => {});
     api.taskThread?.(task.id)
       .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, subteamMap: r.subteamMap || {}, channel: r.channel || null }))
       .catch(() => setThreadData({ messages: [], nameMap: {}, subteamMap: {}, channel: null }));
@@ -386,6 +400,61 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
       onStatusChange?.(task.id, s);
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
+  };
+
+  const handleDueSave = async (val) => {
+    setEditingDue(false);
+    const current = (fullTask?.due_date || '').slice(0,10);
+    if (val === current) return;
+    try {
+      const r = await api.taskUpdateFields(task.id, { due_date: val || null });
+      setFullTask(r.task || r);
+    } catch (e) { console.error(e); }
+  };
+
+  const mentionCandidates = useMemo(() => {
+    const q = mentionQuery.toLowerCase();
+    const ms = members.filter(m => { const n=(m.displayName||'').split('/')[0].toLowerCase(); return !q||n.includes(q); })
+      .slice(0,8).map(m => ({ type:'user', id:m.assignee_id, label:m.displayName?.split('/')[0].trim() }));
+    const gs = (usergroups||[]).filter(g => !q||g.handle.toLowerCase().includes(q))
+      .slice(0,5).map(g => ({ type:'group', id:g.id, handle:g.handle, label:g.handle }));
+    return [...ms, ...gs];
+  }, [mentionQuery, members, usergroups]);
+
+  const insertMention = (item) => {
+    const insertion = `@${item.label} `;
+    const ta = textareaRef.current;
+    const textBefore = ta ? comment.slice(0, ta.selectionStart) : comment;
+    const atIdx = textBefore.lastIndexOf('@');
+    const before = atIdx >= 0 ? comment.slice(0, atIdx) : comment;
+    const after = ta ? comment.slice(ta.selectionStart) : '';
+    const newVal = before + insertion + after;
+    setComment(newVal);
+    setMentionMap(prev => ({ ...prev, [item.label]: item }));
+    setShowMentions(false); setMentionQuery('');
+    setTimeout(() => { if (ta) { ta.focus(); const p=before.length+insertion.length; ta.setSelectionRange(p,p); }}, 0);
+  };
+
+  const handleCommentChange = (e) => {
+    const val = e.target.value; setComment(val);
+    const before = val.slice(0, e.target.selectionStart);
+    const m = before.match(/@([^@\s]*)$/);
+    if (m) { setMentionQuery(m[1]); setShowMentions(true); } else { setShowMentions(false); setMentionQuery(''); }
+  };
+
+  const handleComment = async () => {
+    if (!comment.trim()) return;
+    setCommentSaving(true);
+    try {
+      let text = comment;
+      for (const [label, item] of Object.entries(mentionMap)) {
+        const esc = label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        text = text.replace(new RegExp(`@${esc}`,'g'), item.type==='group' ? `<!subteam^${item.id}|@${item.handle}>` : `<@${item.id}>`);
+      }
+      await api.taskAddComment(task.id, text.trim());
+      setComment(''); setMentionMap({});
+      api.taskThread?.(task.id).then(r => setThreadData({ messages: r.messages||[], nameMap: r.nameMap||{}, subteamMap: r.subteamMap||{}, channel: r.channel||null })).catch(() => {});
+    } catch (e) { console.error(e); } finally { setCommentSaving(false); }
   };
 
   const displayTask = fullTask || task;
@@ -442,10 +511,19 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
                 <span style={{ fontSize:'0.8rem' }}>👤</span>{assigneeName}
               </span>
             )}
-            {displayTask.due_date && (
-              <span style={{ fontSize:'0.75rem', fontWeight: overdue?700:400, color: overdue?'#dc2626':'#64748b', display:'flex', alignItems:'center', gap:4 }}>
-                <span style={{ fontSize:'0.8rem' }}>📅</span>
-                {fmtDate(displayTask.due_date)}
+            {editingDue ? (
+              <input type="date" autoFocus value={editDue}
+                onChange={e => setEditDue(e.target.value)}
+                onBlur={e => handleDueSave(e.target.value)}
+                onKeyDown={e => { if (e.key==='Enter') handleDueSave(editDue); if (e.key==='Escape') setEditingDue(false); }}
+                style={{ fontSize:'0.75rem', border:'1px solid #3b82f6', borderRadius:6, padding:'2px 8px', outline:'none' }} />
+            ) : (
+              <span onClick={() => setEditingDue(true)} title="クリックで期日変更"
+                style={{ fontSize:'0.75rem', fontWeight: overdue?700:400, color: overdue?'#dc2626':'#64748b',
+                  display:'flex', alignItems:'center', gap:4, cursor:'pointer',
+                  padding:'2px 8px', borderRadius:99, background: overdue?'#fef2f2':'#f8fafc', border:'1px solid #e2e8f0' }}>
+                <span>📅</span>
+                {displayTask.due_date ? fmtDate(displayTask.due_date) : '期日なし'}
                 {overdue && <span style={{ color:'#dc2626' }}>（{daysSince(displayTask.due_date)}日超過）</span>}
               </span>
             )}
@@ -495,7 +573,7 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
         </div>
 
         {/* 本文 + Slackスレッド */}
-        <div style={{ flex:1, overflowY:'auto', padding:'18px 22px', display:'flex', flexDirection:'column', gap:16 }}>
+        <div style={{ flex:1, overflowY:'auto', padding:'18px 22px 8px', display:'flex', flexDirection:'column', gap:16 }}>
           {contentBody ? (
             <div>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:8 }}>内容</div>
@@ -559,6 +637,46 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
               </div>
             );
           })()}
+        </div>
+
+        {/* コメントボックス（固定下部・Slackスタイル） */}
+        <div style={{ borderTop:'1px solid #e2e8f0', background:'#fff', flexShrink:0, position:'relative' }}>
+          {showMentions && mentionCandidates.length > 0 && (
+            <div style={{ position:'absolute', bottom:'100%', left:0, right:0, background:'#fff', border:'1px solid #e2e8f0',
+              borderRadius:'8px 8px 0 0', maxHeight:200, overflowY:'auto', boxShadow:'0 -4px 12px rgba(0,0,0,0.1)', zIndex:10 }}>
+              {mentionCandidates.map(item => (
+                <div key={`${item.type}:${item.id}`} onMouseDown={e => { e.preventDefault(); insertMention(item); }}
+                  style={{ padding:'8px 16px', cursor:'pointer', fontSize:'0.82rem', display:'flex', alignItems:'center', gap:8 }}
+                  onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+                  onMouseLeave={e => e.currentTarget.style.background=''}>
+                  {item.type==='group'
+                    ? <><span style={{ fontSize:'0.68rem', background:'#ede9fe', color:'#6d28d9', padding:'1px 6px', borderRadius:3, fontWeight:600 }}>グループ</span>@{item.label}</>
+                    : <><span style={{ fontSize:'0.68rem', background:'#dbeafe', color:'#1d4ed8', padding:'1px 6px', borderRadius:3, fontWeight:600 }}>メンバー</span>{item.label}</>
+                  }
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ padding:'10px 16px', display:'flex', gap:8, alignItems:'flex-end' }}>
+            <textarea ref={textareaRef} value={comment} onChange={handleCommentChange}
+              placeholder="返信する… （@でメンション）"
+              rows={1}
+              style={{ flex:1, padding:'8px 12px', border:'1px solid #e2e8f0', borderRadius:10, fontSize:'0.85rem',
+                lineHeight:1.5, resize:'none', outline:'none', fontFamily:'inherit', maxHeight:100, overflowY:'auto' }}
+              onKeyDown={e => {
+                if (e.key==='Escape') { setShowMentions(false); return; }
+                if (showMentions && (e.key==='Enter'||e.key==='Tab') && mentionCandidates.length>0) { e.preventDefault(); insertMention(mentionCandidates[0]); return; }
+                if (e.key==='Enter' && !e.shiftKey && !showMentions) { e.preventDefault(); handleComment(); }
+              }}
+            />
+            <button onClick={handleComment} disabled={commentSaving || !comment.trim()}
+              style={{ padding:'8px 14px', border:'none', borderRadius:8, fontSize:'0.82rem', fontWeight:700, flexShrink:0,
+                background: (!comment.trim()||commentSaving) ? '#f1f5f9' : '#2563eb',
+                color: (!comment.trim()||commentSaving) ? '#94a3b8' : '#fff',
+                cursor: (!comment.trim()||commentSaving) ? 'default' : 'pointer' }}>
+              {commentSaving ? '…' : '送信'}
+            </button>
+          </div>
         </div>
       </div>
     </>

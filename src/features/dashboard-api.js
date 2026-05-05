@@ -2732,8 +2732,7 @@ function registerDashboardApi(deps) {
       // ロールレベル定義
       const ROLE_LEVEL = { '': 0, 'member': 0, 'sub_chief': 2, 'chief': 3, 'manager': 4, 'admin': 5 };
 
-      // admin は全体が見えるのでこのAPIは不要（空返却）
-      if (role === 'admin') return res.json({ tasks: [] });
+      // adminも自分のチーム配下のアラートは確認する（全体表示ではなくチーム配下限定）
 
       // 自分のチーム所属とロールを取得
       const myTeamsRes = await dbQuery(

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { api } from '../api/client';
 
 // キャンセルを除外したステータス設定
@@ -248,33 +247,73 @@ export default function Dashboard() {
   const [mySummary, setMySummary] = useState(null);
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
-  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', overdue:false, page:1 });
+  const [dashTeams, setDashTeams] = useState([]);
+  const [myTasks, setMyTasks] = useState([]);
+  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', team:'', overdue:false, page:1 });
   const [filteredTasks, setFilteredTasks] = useState({ tasks:[], total:0 });
   const [filterApplied, setFilterApplied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState(null);
 
   useEffect(() => {
-    Promise.all([
-      api.me(),
-      api.summary({ scope: 'self' }),
-      api.members(),
-      api.projects(),
-    ]).then(([meRes, sumRes, memRes, projRes]) => {
-      setMe(meRes);
-      setMySummary(sumRes.summary);
-      setMembers(memRes.members);
-      setProjects(projRes.projects);
-    }).catch(console.error).finally(() => setLoading(false));
+    api.me()
+      .then(m => Promise.all([
+        Promise.resolve(m),
+        api.summary({ scope: 'self' }),
+        api.members(),
+        api.projects(),
+        api.workloadTeams(),
+        api.tasks({ assignee: m.userId, limit: 100 }),
+      ]))
+      .then(([meRes, sumRes, memRes, projRes, dtRes, myTasksRes]) => {
+        setMe(meRes);
+        setMySummary(sumRes.summary);
+        setMembers(memRes.members);
+        setProjects(projRes.projects);
+        setDashTeams(dtRes.teams || []);
+        setMyTasks(myTasksRes.tasks || []);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   const setF = (patch) => setFilter(f => ({ ...f, ...patch, page:1 }));
+
+  // 自分が属する部署の配下チーム（MKなど複数チームある部署向けフィルター）
+  const myDeptTeams = useMemo(() => {
+    if (!me || !dashTeams.length) return [];
+    const myTeamIds = new Set((me.dashTeams || []).map(t => t.id));
+    const parentIds = new Set();
+    for (const t of dashTeams) {
+      if (!myTeamIds.has(t.id)) continue;
+      if (t.parent_id) parentIds.add(t.parent_id);
+      else parentIds.add(t.id);
+    }
+    return dashTeams.filter(t => t.parent_id && parentIds.has(t.parent_id));
+  }, [me, dashTeams]);
+
+  // 自分のアクティブタスク（完了・キャンセル除外、期限切れ→期限近い順）
+  const activeTasks = useMemo(() =>
+    myTasks
+      .filter(t => t.status !== 'done' && t.status !== 'cancelled')
+      .sort((a, b) => {
+        const aOv = a.due_date && new Date(a.due_date) < new Date();
+        const bOv = b.due_date && new Date(b.due_date) < new Date();
+        if (aOv && !bOv) return -1;
+        if (!aOv && bOv) return 1;
+        if (a.due_date && b.due_date) return new Date(a.due_date) - new Date(b.due_date);
+        if (a.due_date) return -1;
+        if (b.due_date) return 1;
+        return 0;
+      })
+  , [myTasks]);
 
   const applyFilter = async () => {
     const params = { page: filter.page, limit: 50 };
     if (filter.status)   params.status   = filter.status;
     if (filter.assignee) params.assignee = filter.assignee;
     if (filter.project)  params.project  = filter.project;
+    if (filter.team)     params.dashTeam = filter.team;
     if (filter.overdue)  params.overdue  = '1';
     const res = await api.tasks(params);
     setFilteredTasks(res);
@@ -282,34 +321,21 @@ export default function Dashboard() {
   };
 
   const clearFilter = () => {
-    setFilter({ status:'', assignee:'', project:'', overdue:false, page:1 });
+    setFilter({ status:'', assignee:'', project:'', team:'', overdue:false, page:1 });
     setFilterApplied(false);
     setFilteredTasks({ tasks:[], total:0 });
   };
 
   const handleStatusChange = (taskId, newStatus) => {
+    setMyTasks(prev => prev.map(t => t.id===taskId ? {...t, status:newStatus} : t));
     setFilteredTasks(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id===taskId ? {...t, status:newStatus} : t) }));
     if (selectedTask?.id === taskId) setSelectedTask(s => s ? {...s, status:newStatus} : s);
   };
 
-  // 自分のタスク集計（KPI・パイチャート用）
+  const myOverdue = mySummary?._overdue || 0;
   const myTotal = useMemo(() =>
     Object.entries(STATUS_CFG).reduce((s, [k]) => s + (mySummary?.[k] || 0), 0)
   , [mySummary]);
-  const myOverdue = mySummary?._overdue || 0;
-
-  const pieData = useMemo(() => mySummary
-    ? Object.entries(STATUS_CFG).map(([k, c]) => ({ name: c.label, value: mySummary[k]||0, color: c.color })).filter(d => d.value > 0)
-    : [], [mySummary]);
-
-  // 部署メンバーのバーチャート
-  const memberBar = useMemo(() =>
-    members.filter(m => m.total > 0).slice(0, 8).map(m => ({
-      name: (m.displayName || '?').split(/[\s　/]/)[0],
-      進行中: m.in_progress || 0,
-      完了: m.done || 0,
-    }))
-  , [members]);
 
   if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'60vh', color:'#94a3b8' }}>読み込み中…</div>;
 
@@ -322,23 +348,23 @@ export default function Dashboard() {
       {sub && <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>{sub}</div>}
     </div>
   );
-
   const selStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', outline:'none' };
   const myName = me?.displayName?.split(/[\s　/]/)[0] || '';
 
   return (
     <div style={{ padding:'20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap:14 }}>
 
-      {/* KPIカード（自分のタスク） */}
       {myName && (
-        <div style={{ fontSize:'0.78rem', color:'#94a3b8', fontWeight:500 }}>{myName} のタスク</div>
+        <div style={{ fontSize:'0.82rem', color:'#64748b', fontWeight:600 }}>{myName} のタスク</div>
       )}
+
+      {/* KPIカード */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
         {[
-          { label:'自分のタスク', value: myTotal,                 color:'#6366f1' },
-          { label:'進行中',      value: mySummary?.in_progress||0, color:'#3b82f6' },
-          { label:'期限切れ',    value: myOverdue,                color: myOverdue > 0 ? '#dc2626' : '#94a3b8' },
-          { label:'完了',        value: mySummary?.done||0,        color:'#10b981' },
+          { label:'総タスク数', value: myTotal,                  color:'#6366f1' },
+          { label:'進行中',    value: mySummary?.in_progress||0,  color:'#3b82f6' },
+          { label:'期限切れ',  value: myOverdue,                  color: myOverdue > 0 ? '#dc2626' : '#94a3b8' },
+          { label:'完了',      value: mySummary?.done||0,         color:'#10b981' },
         ].map(k => (
           <div key={k.label} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'14px 18px' }}>
             <div style={{ fontSize:'0.72rem', color:'#64748b', fontWeight:500, marginBottom:6 }}>{k.label}</div>
@@ -347,49 +373,23 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* グラフ */}
-      <div style={{ display:'grid', gridTemplateColumns:'260px 1fr', gap:12 }}>
-        {card(<>
-          {sh('自分のステータス分布')}
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <PieChart width={120} height={120}>
-              <Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={54} innerRadius={30} paddingAngle={2}>
-                {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-              </Pie>
-              <Tooltip formatter={(v, n) => [`${v}件`, n]} contentStyle={{ fontSize:11, borderRadius:8 }} />
-            </PieChart>
-            <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
-              {pieData.map(d => (
-                <div key={d.name} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                  <span style={{ width:9, height:9, borderRadius:2, background:d.color, flexShrink:0 }} />
-                  <span style={{ fontSize:'0.75rem', color:'#374151', flex:1 }}>{d.name}</span>
-                  <span style={{ fontSize:'0.78rem', fontWeight:700, color:d.color }}>{d.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>)}
-
-        {card(<>
-          {sh('部署メンバー別タスク数')}
-          {memberBar.length > 0 ? (
-            <ResponsiveContainer width="100%" height={130}>
-              <BarChart data={memberBar} margin={{ top:0, right:0, left:-20, bottom:0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize:10, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize:10, fill:'#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={{ fontSize:11, borderRadius:8 }} />
-                <Bar dataKey="進行中" fill="#3b82f6" radius={[3,3,0,0]} maxBarSize={22} />
-                <Bar dataKey="完了"   fill="#10b981" radius={[3,3,0,0]} maxBarSize={22} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', paddingTop:20 }}>データなし</div>}
-        </>)}
-      </div>
-
-      {/* タスク検索（同部署内） */}
+      {/* マイタスク一覧（デフォルト表示） */}
       {card(<>
-        {sh('タスク検索', '同部署メンバーのタスク')}
+        {sh('マイタスク', `進行中・保留 ${activeTasks.length}件`)}
+        {activeTasks.length === 0 ? (
+          <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'16px 0' }}>
+            アクティブなタスクはありません
+          </div>
+        ) : (
+          activeTasks.map(t => (
+            <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} compact />
+          ))
+        )}
+      </>)}
+
+      {/* 部署タスク検索 */}
+      {card(<>
+        {sh('タスク検索', '同部署のタスクを検索')}
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: filterApplied ? 14 : 0 }}>
           <select value={filter.status} onChange={e => setF({status:e.target.value})} style={selStyle}>
             <option value="">ステータス：すべて</option>
@@ -397,6 +397,13 @@ export default function Dashboard() {
             <option value="done">完了</option>
             <option value="pending">保留</option>
           </select>
+
+          {myDeptTeams.length > 0 && (
+            <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}>
+              <option value="">チーム：すべて</option>
+              {myDeptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
 
           <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
             <option value="">担当者：全員</option>
@@ -443,7 +450,6 @@ export default function Dashboard() {
         )}
       </>)}
 
-      {/* タスクスライドパネル */}
       {selectedTask && (
         <TaskPanel task={selectedTask} members={members} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />
       )}

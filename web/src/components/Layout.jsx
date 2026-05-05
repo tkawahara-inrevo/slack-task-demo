@@ -56,15 +56,21 @@ function BrowserTransferButton({ onClose, floating } = {}) {
 
   const handleGenerate = async () => {
     setState('loading');
-    setShowModal(true);
     onClose?.();
     try {
       const data = await api.authTransferToken();
-      const currentPath = window.location.pathname + window.location.search;
-      const url = `${window.location.origin}/api/auth/transfer?token=${data.token}&redirect=${encodeURIComponent(currentPath)}`;
+      const currentPath = window.location.pathname;
+      const url = `${window.location.origin}/api/auth/adopt?token=${data.token}&redirect=${encodeURIComponent(currentPath)}`;
       setTransferUrl(url);
-      setState('ready');
-    } catch { setState('idle'); setShowModal(false); }
+      // iOSネイティブ共有シートを使う → 「Safariで開く」をワンタップで選べる
+      if (navigator.share) {
+        navigator.share({ url }).catch(() => {});
+        setState('idle');
+      } else {
+        setShowModal(true);
+        setState('ready');
+      }
+    } catch { setState('idle'); }
   };
 
   const handleCopy = () => {

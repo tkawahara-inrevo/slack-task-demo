@@ -2243,6 +2243,7 @@ function registerDashboardApi(deps) {
 
       // ユーザー名・アバター解決: DB優先（dashboard_user_directory）→ getUserDisplayName（キャッシュ/API）
       const userIds = [...allUserIds];
+      console.log(`[thread debug] teamId=${teamId} allUserIds=[${userIds.join(',')}]`);
       const dbRows = userIds.length > 0
         ? (await dbQuery(
             `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
@@ -2252,11 +2253,13 @@ function registerDashboardApi(deps) {
 
       const nameMap = {};
       const avatarMap = {};
+      console.log(`[thread debug] dbRows=[${dbRows.map(r => `${r.user_id}:${r.display_name}`).join(',')}]`);
       // 1) DB に存在する分を先に解決（最も信頼性が高い）
       for (const row of dbRows) {
         if (row.display_name) nameMap[row.user_id] = row.display_name.split('/')[0].trim();
         if (row.avatar_url)   avatarMap[row.user_id] = row.avatar_url;
       }
+      console.log(`[thread debug] nameMap after DB=[${Object.entries(nameMap).map(([k,v])=>`${k}:${v}`).join(',')}]`);
       // 2) DB未登録の分を getUserDisplayName（プリフェッチキャッシュ/users.info）で解決し DB に保存
       const missingIds = userIds.filter(uid => !nameMap[uid]);
       await Promise.all(missingIds.map(async uid => {

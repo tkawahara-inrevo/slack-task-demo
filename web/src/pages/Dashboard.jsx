@@ -30,8 +30,9 @@ const cleanAssigneeName = (label) => {
 };
 
 // コンテンツ本文（タイトル行を除いた残り）
-const getContentBody = (content) => {
-  const cleaned = (content || '')
+// Slackタスクはcontent=nullでtitleに全文が入っているため、title || content を使う
+const getContentBody = (rawText) => {
+  const cleaned = (rawText || '')
     .replace(/^(<@[^>]+>\s*)+/g, '')
     .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')
     .replace(/^\s+/, '');
@@ -71,7 +72,7 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const st = STATUS_CFG[status] || { label: status, color: '#94a3b8' };
   const title = cleanTitle(displayTask.title, displayTask.content);
   const overdue = isOverdueTask({ ...displayTask, status });
-  const contentBody = getContentBody(displayTask.content);
+  const contentBody = getContentBody(displayTask.title || displayTask.content);
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||
@@ -153,12 +154,7 @@ function TaskCard({ t, members, onClick, compact = false }) {
   const overdue = isOverdueTask(t);
   const assigneeName = cleanAssigneeName(t.assignee_label) ||
     members.find(m => m.assignee_id === t.assignee_id)?.displayName?.split('/')[0]?.trim() || null;
-  const contentPreview = (t.content || '')
-    .replace(/^(<@[^>]+>\s*)+/g, '')
-    .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')
-    .replace(/^\s+/, '')
-    .split('\n').slice(1).join(' ')  // タイトル行を除いた部分
-    .slice(0, 80);
+  const contentPreview = getContentBody(t.title || t.content).slice(0, 80);
 
   if (compact) {
     // 最新タスク（シンプル行）

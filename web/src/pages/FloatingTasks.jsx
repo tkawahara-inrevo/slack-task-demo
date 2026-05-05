@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { api } from '../api/client';
 
 const STATUS_CFG = {
@@ -79,30 +79,27 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
   const [fullTask, setFullTask] = useState(null);
   const [threadData, setThreadData] = useState(null);
   const [members, setMembers] = useState([]);
-  const [usergroups, setUsergroups] = useState([]);
   const [saving, setSaving] = useState(false);
-  // 編集フォーム
+  // 期日inline編集
+  const [editingDue, setEditingDue] = useState(false);
   const [editDue, setEditDue] = useState('');
-  const [editAssignee, setEditAssignee] = useState('');
-  const [editGroup, setEditGroup] = useState('');
   // コメント
   const [comment, setComment] = useState('');
+  const [mentionMap, setMentionMap] = useState({}); // displayName → userId
+  const [showMentions, setShowMentions] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
+  const textareaRef = React.useRef(null);
 
   useEffect(() => {
     api.taskGet?.(task.id).then(r => {
       const t = r.task || r;
       setFullTask(t);
       setEditDue(t.due_date ? t.due_date.slice(0, 10) : '');
-      setEditAssignee(t.assignee_id || '');
-      setEditGroup(t.broadcast_group_id || '');
     }).catch(() => {});
     api.taskThread?.(task.id)
       .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
       .catch(() => setThreadData({ messages: [], nameMap: {}, channel: null }));
-    // 担当者・グループ候補を取得
     api.members().then(r => setMembers(r.members || [])).catch(() => {});
-    api.usergroups().then(r => setUsergroups(r.usergroups || [])).catch(() => {});
   }, [task.id]);
 
   const handleStatus = async (s) => {
@@ -111,33 +108,48 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
     catch (e) { console.error(e); } finally { setSaving(false); }
   };
 
-  const handleSaveFields = async () => {
-    setSaving(true);
+  const handleDueSave = async (val) => {
+    setEditingDue(false);
+    if (val === (fullTask?.due_date?.slice(0,10) || '')) return;
     try {
-      const body = {};
-      if (editDue !== (fullTask?.due_date?.slice(0,10) || '')) body.due_date = editDue || null;
-      if (editAssignee !== (fullTask?.assignee_id || '') && fullTask?.task_type !== 'broadcast') body.assignee_id = editAssignee || null;
-      if (Object.keys(body).length) {
-        const r = await api.taskUpdateFields(task.id, body);
-        setFullTask(r.task || r);
-        onTaskUpdate?.(task.id, r.task || r);
-      }
-      // グループ変更（broadcastのみ）
-      if (fullTask?.task_type === 'broadcast' && editGroup && editGroup !== fullTask?.broadcast_group_id) {
-        const r = await api.taskChangeGroup(task.id, editGroup);
-        setFullTask(r.task || r);
-        onTaskUpdate?.(task.id, r.task || r);
-      }
-    } catch (e) { console.error(e); } finally { setSaving(false); }
+      const r = await api.taskUpdateFields(task.id, { due_date: val || null });
+      const t = r.task || r;
+      setFullTask(t);
+      setEditDue(t.due_date ? t.due_date.slice(0,10) : '');
+      onTaskUpdate?.(task.id, t);
+    } catch (e) { console.error(e); }
+  };
+
+  const insertMention = (m) => {
+    const name = m.displayName?.split('/')[0].trim() || m.displayName;
+    const uid = m.assignee_id;
+    const insertion = `@${name} `;
+    const ta = textareaRef.current;
+    if (ta) {
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      const newVal = comment.slice(0, start) + insertion + comment.slice(end);
+      setComment(newVal);
+      setMentionMap(prev => ({ ...prev, [name]: uid }));
+      setTimeout(() => { ta.focus(); ta.setSelectionRange(start + insertion.length, start + insertion.length); }, 0);
+    } else {
+      setComment(c => c + insertion);
+      setMentionMap(prev => ({ ...prev, [name]: uid }));
+    }
+    setShowMentions(false);
   };
 
   const handleComment = async () => {
     if (!comment.trim()) return;
     setCommentSaving(true);
     try {
-      await api.taskAddComment(task.id, comment.trim());
+      // @displayname → <@USERID> に変換
+      let text = comment;
+      for (const [name, uid] of Object.entries(mentionMap)) {
+        text = text.replace(new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), `<@${uid}>`);
+      }
+      await api.taskAddComment(task.id, text.trim());
       setComment('');
-      // スレッド再取得
+      setMentionMap({});
       api.taskThread?.(task.id)
         .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
         .catch(() => {});
@@ -149,6 +161,7 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
   const title = parseTitleLine(d.title || d.content);
   const body = d.content || d.title || '';
   const ov = isOverdue({ ...d, status });
+  const tod = isDueToday({ ...d, status });
   const thread = threadData?.messages || null;
   const nameMap = useMemo(() => {
     const base = { ...(threadData?.nameMap || {}) };
@@ -158,46 +171,55 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
     return base;
   }, [threadData]);
   const slackUrl = d.source_permalink || null;
-  const isBroadcast = d.task_type === 'broadcast';
-  const selSt = { padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none', flex:1 };
+  const dateColor = ov ? '#dc2626' : tod ? '#ea580c' : '#64748b';
 
   return (
     <div style={{ position:'fixed', inset:0, display:'flex', flexDirection:'column', background:'#fff', zIndex:50 }}>
       {/* ヘッダー */}
-      <div style={{ padding:'10px 12px 8px', borderBottom:'1px solid #f1f5f9', background:'#fafafa', flexShrink:0 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:5 }}>
-          <span style={{ fontSize:'0.65rem', fontWeight:700, padding:'2px 7px', borderRadius:99, background:st.color+'18', color:st.color }}>{st.label}</span>
-          <button onClick={onClose} style={{ background:'#f1f5f9', border:'none', borderRadius:6, width:24, height:24, cursor:'pointer', color:'#64748b', fontSize:13 }}>←</button>
+      <div style={{ padding:'9px 12px 7px', borderBottom:'1px solid #f1f5f9', background:'#fafafa', flexShrink:0 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+          <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.62rem', fontWeight:700, padding:'2px 6px', borderRadius:99, background:st.color+'18', color:st.color }}>{st.label}</span>
+            {/* 期日チップ：タップで編集 */}
+            {editingDue ? (
+              <input type="date" autoFocus value={editDue}
+                onChange={e => setEditDue(e.target.value)}
+                onBlur={e => handleDueSave(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleDueSave(editDue); if (e.key === 'Escape') setEditingDue(false); }}
+                style={{ fontSize:'0.7rem', border:'1px solid #3b82f6', borderRadius:6, padding:'2px 6px', outline:'none' }} />
+            ) : (
+              <span onClick={() => setEditingDue(true)} title="タップで期日変更"
+                style={{ fontSize:'0.7rem', fontWeight: ov||tod?700:400, color: d.due_date ? dateColor : '#94a3b8',
+                  cursor:'pointer', padding:'2px 7px', borderRadius:99,
+                  background: ov ? '#fef2f2' : tod ? '#fff7ed' : '#f8fafc',
+                  border: `1px solid ${ov ? '#fca5a5' : tod ? '#fdba74' : '#e2e8f0'}` }}>
+                {d.due_date ? `📅 ${fmtDate(d.due_date)}${ov?' 超過':tod?' 今日':''}` : '📅 期日なし'}
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} style={{ background:'#f1f5f9', border:'none', borderRadius:6, width:24, height:24, cursor:'pointer', color:'#64748b', fontSize:13, flexShrink:0 }}>←</button>
         </div>
-        <div style={{ fontWeight:800, fontSize:'0.88rem', color:'#0f172a', lineHeight:1.4, marginBottom:4 }}>{title}</div>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-          {d.due_date && (
-            <span style={{ fontSize:'0.7rem', fontWeight: ov?700:400, color: ov?'#dc2626':'#64748b' }}>
-              📅 {fmtDate(d.due_date)}{ov ? '（超過）' : ''}
-            </span>
-          )}
+        <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', lineHeight:1.4, marginBottom:3 }}>{title}</div>
+        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
           {threadData?.channel && (
-            <span style={{ fontSize:'0.7rem', color:'#64748b' }}>
-              {threadData.channel.is_private ? '🔒' : '#'}{threadData.channel.name}
-            </span>
+            <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>{threadData.channel.is_private ? '🔒' : '#'}{threadData.channel.name}</span>
           )}
           {slackUrl && (
             <a href={slackUrl} target="_blank" rel="noopener noreferrer"
-              style={{ fontSize:'0.68rem', color:'#3b82f6', textDecoration:'none', fontWeight:600 }}>Slackで開く ↗</a>
+              style={{ fontSize:'0.65rem', color:'#3b82f6', textDecoration:'none' }}>Slackで開く ↗</a>
           )}
         </div>
       </div>
 
       {/* ステータス変更 */}
-      <div style={{ padding:'8px 12px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:7, flexShrink:0 }}>
-        <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>変更</span>
+      <div style={{ padding:'6px 12px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
         {STATUS_CHANGE.map(key => {
           const cfg = STATUS_CFG[key];
           const active = status === key;
           return (
             <button key={key} onClick={() => handleStatus(key)} disabled={saving || active}
               style={{ padding:'3px 12px', borderRadius:99, border:`1.5px solid ${active ? cfg.color : '#e2e8f0'}`,
-                cursor: active ? 'default' : 'pointer', fontSize:'0.75rem', fontWeight: active ? 700 : 500,
+                cursor: active ? 'default' : 'pointer', fontSize:'0.72rem', fontWeight: active ? 700 : 500,
                 background: active ? cfg.color : '#fff', color: active ? '#fff' : '#64748b' }}>
               {cfg.label}
             </button>
@@ -205,98 +227,87 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
         })}
       </div>
 
-      {/* 編集フォーム */}
-      <div style={{ padding:'8px 12px', borderBottom:'1px solid #f1f5f9', display:'flex', flexDirection:'column', gap:6, flexShrink:0 }}>
-        {/* 期限 */}
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <span style={{ fontSize:'0.68rem', color:'#94a3b8', width:52, flexShrink:0 }}>📅 期限</span>
-          <input type="date" value={editDue} onChange={e => setEditDue(e.target.value)} style={selSt} />
-        </div>
-        {/* 担当者 or グループ */}
-        {isBroadcast ? (
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8', width:52, flexShrink:0 }}>👥 グループ</span>
-            <select value={editGroup} onChange={e => setEditGroup(e.target.value)} style={selSt}>
-              <option value="">未設定</option>
-              {usergroups.map(g => <option key={g.id} value={g.id}>@{g.handle}</option>)}
-            </select>
-          </div>
-        ) : (
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8', width:52, flexShrink:0 }}>👤 担当者</span>
-            <select value={editAssignee} onChange={e => setEditAssignee(e.target.value)} style={selSt}>
-              <option value="">未設定</option>
-              {members.map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName?.split('/')[0]}</option>)}
-            </select>
-          </div>
-        )}
-        <button onClick={handleSaveFields} disabled={saving}
-          style={{ padding:'4px 0', background: saving ? '#e2e8f0' : '#1e40af', color: saving ? '#94a3b8' : '#fff',
-            border:'none', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor: saving ? 'default' : 'pointer' }}>
-          {saving ? '保存中…' : '変更を保存'}
-        </button>
-      </div>
-
-      {/* 本文 + コメント + スレッド */}
-      <div style={{ flex:1, overflowY:'auto', padding:'12px' }}>
+      {/* 本文 + スレッド（スクロール） */}
+      <div style={{ flex:1, overflowY:'auto', padding:'10px 12px' }}>
         {body && (
-          <div style={{ fontSize:'0.8rem', color:'#374151', lineHeight:1.75, whiteSpace:'pre-wrap',
-            wordBreak:'break-word', background:'#f8fafc', borderRadius:8, padding:'10px 12px',
-            border:'1px solid #f1f5f9', marginBottom:12 }}>
+          <div style={{ fontSize:'0.78rem', color:'#374151', lineHeight:1.7, whiteSpace:'pre-wrap',
+            wordBreak:'break-word', background:'#f8fafc', borderRadius:8, padding:'9px 11px',
+            border:'1px solid #f1f5f9', marginBottom:10 }}>
             <SlackText text={body} nameMap={nameMap} />
           </div>
         )}
 
-        {/* コメント入力 */}
-        <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:5 }}>コメント（Slackスレッドにも投稿）</div>
-          <textarea value={comment} onChange={e => setComment(e.target.value)}
-            placeholder="コメントを入力…"
-            rows={2}
-            style={{ width:'100%', padding:'7px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.78rem',
-              lineHeight:1.5, resize:'vertical', outline:'none', fontFamily:'inherit', boxSizing:'border-box' }}
-            onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleComment(); }}
-          />
-          <button onClick={handleComment} disabled={commentSaving || !comment.trim()}
-            style={{ marginTop:4, width:'100%', padding:'5px', background: (!comment.trim() || commentSaving) ? '#f1f5f9' : '#1e40af',
-              color: (!comment.trim() || commentSaving) ? '#94a3b8' : '#fff',
-              border:'none', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor: (!comment.trim() || commentSaving) ? 'default' : 'pointer' }}>
-            {commentSaving ? '投稿中…' : '投稿（Ctrl+Enter）'}
-          </button>
-        </div>
-
-        {/* スレッド */}
-        {thread === null && <div style={{ fontSize:'0.72rem', color:'#cbd5e1', textAlign:'center' }}>スレッド読み込み中…</div>}
+        {thread === null && <div style={{ fontSize:'0.7rem', color:'#cbd5e1', textAlign:'center', padding:'8px 0' }}>読み込み中…</div>}
         {thread !== null && thread.length > 0 && (
-          <div>
-            <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:8 }}>
-              スレッド（{thread.length}件）
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              {thread.map(m => {
-                const jaName = (m.displayName || '?').split('/')[0].trim();
-                return (
-                  <div key={m.ts} style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
-                    {m.avatar_url
-                      ? <img src={m.avatar_url} alt={jaName} style={{ width:26, height:26, borderRadius:'50%', flexShrink:0, objectFit:'cover', border: m.is_root ? '2px solid #3b82f6' : '1px solid #e2e8f0' }} />
-                      : <div style={{ width:26, height:26, borderRadius:'50%', background: m.is_root ? '#dbeafe' : '#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.6rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#64748b' }}>{jaName.slice(0,2)}</div>
-                    }
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', alignItems:'baseline', gap:5, marginBottom:2, flexWrap:'wrap' }}>
-                        <span style={{ fontSize:'0.72rem', fontWeight:700, color: m.is_root ? '#1e40af' : '#374151' }}>{jaName}</span>
-                        {m.is_root && <span style={{ fontSize:'0.58rem', background:'#dbeafe', color:'#1d4ed8', padding:'1px 5px', borderRadius:3, fontWeight:600 }}>元メッセージ</span>}
-                        <span style={{ fontSize:'0.6rem', color:'#cbd5e1', marginLeft:'auto' }}>{fmtTs(m.ts)}</span>
-                      </div>
-                      <div style={{ fontSize:'0.78rem', color:'#374151', lineHeight:1.65, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
-                        <SlackText text={m.text} nameMap={nameMap} />
-                      </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:9 }}>
+            {thread.map(m => {
+              const jaName = (m.displayName || '?').split('/')[0].trim();
+              return (
+                <div key={m.ts} style={{ display:'flex', gap:7, alignItems:'flex-start' }}>
+                  {m.avatar_url
+                    ? <img src={m.avatar_url} alt={jaName} style={{ width:24, height:24, borderRadius:'50%', flexShrink:0, objectFit:'cover', border: m.is_root ? '2px solid #3b82f6' : '1px solid #e2e8f0' }} />
+                    : <div style={{ width:24, height:24, borderRadius:'50%', background: m.is_root ? '#dbeafe' : '#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.58rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#64748b' }}>{jaName.slice(0,2)}</div>
+                  }
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'baseline', gap:5, marginBottom:1, flexWrap:'wrap' }}>
+                      <span style={{ fontSize:'0.7rem', fontWeight:700, color: m.is_root ? '#1e40af' : '#374151' }}>{jaName}</span>
+                      {m.is_root && <span style={{ fontSize:'0.56rem', background:'#dbeafe', color:'#1d4ed8', padding:'1px 4px', borderRadius:3, fontWeight:600 }}>元</span>}
+                      <span style={{ fontSize:'0.58rem', color:'#d1d5db', marginLeft:'auto' }}>{fmtTs(m.ts)}</span>
+                    </div>
+                    <div style={{ fontSize:'0.76rem', color:'#374151', lineHeight:1.6, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+                      <SlackText text={m.text} nameMap={nameMap} />
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
           </div>
         )}
+      </div>
+
+      {/* コメント入力（Slackスタイル・固定下部） */}
+      <div style={{ borderTop:'1px solid #e2e8f0', background:'#fff', flexShrink:0, position:'relative' }}>
+        {/* メンション候補 */}
+        {showMentions && members.length > 0 && (
+          <div style={{ position:'absolute', bottom:'100%', left:0, right:0, background:'#fff', border:'1px solid #e2e8f0',
+            borderRadius:'8px 8px 0 0', maxHeight:160, overflowY:'auto', boxShadow:'0 -4px 12px rgba(0,0,0,0.08)' }}>
+            <div style={{ padding:'6px 10px', fontSize:'0.65rem', color:'#94a3b8', borderBottom:'1px solid #f1f5f9' }}>メンション先を選択</div>
+            {members.map(m => (
+              <div key={m.assignee_id} onMouseDown={e => { e.preventDefault(); insertMention(m); }}
+                style={{ padding:'7px 12px', cursor:'pointer', fontSize:'0.78rem', color:'#374151', display:'flex', alignItems:'center', gap:8 }}
+                onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.background=''}>
+                {m.displayName?.split('/')[0]}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ padding:'8px 10px', display:'flex', gap:6, alignItems:'flex-end' }}>
+          <textarea ref={textareaRef} value={comment} onChange={e => setComment(e.target.value)}
+            placeholder="返信する…"
+            rows={1}
+            style={{ flex:1, padding:'7px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.78rem',
+              lineHeight:1.5, resize:'none', outline:'none', fontFamily:'inherit',
+              maxHeight:80, overflowY:'auto' }}
+            onFocus={() => setShowMentions(false)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleComment(); }
+            }}
+          />
+          <button onClick={() => setShowMentions(v => !v)}
+            style={{ padding:'6px 8px', border:'1px solid #e2e8f0', borderRadius:7, background: showMentions ? '#eff6ff' : '#fff',
+              color: showMentions ? '#3b82f6' : '#94a3b8', cursor:'pointer', fontSize:'0.85rem', lineHeight:1, flexShrink:0 }}
+            title="メンション">
+            @
+          </button>
+          <button onClick={handleComment} disabled={commentSaving || !comment.trim()}
+            style={{ padding:'6px 10px', border:'none', borderRadius:7, fontSize:'0.72rem', fontWeight:700, flexShrink:0,
+              background: (!comment.trim() || commentSaving) ? '#f1f5f9' : '#2563eb',
+              color: (!comment.trim() || commentSaving) ? '#94a3b8' : '#fff',
+              cursor: (!comment.trim() || commentSaving) ? 'default' : 'pointer' }}>
+            {commentSaving ? '…' : '送信'}
+          </button>
+        </div>
       </div>
     </div>
   );

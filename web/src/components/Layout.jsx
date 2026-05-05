@@ -45,8 +45,12 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
   );
 }
 
-// モバイルかどうかの判定（ボタン表示に使用）
-const isMobileDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// モバイル・タブレット判定
+// iPadOS 13+ は UA が Mac と同じになるため maxTouchPoints で補完
+const isMobileDevice = typeof navigator !== 'undefined' && (
+  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+  (navigator.userAgent.includes('Mac') && navigator.maxTouchPoints > 1)
+);
 
 // ブラウザ転送ボタン（モバイルナビに常時表示）
 function BrowserTransferButton({ onClose, floating } = {}) {

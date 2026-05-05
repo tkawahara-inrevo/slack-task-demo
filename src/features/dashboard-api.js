@@ -2169,15 +2169,21 @@ function registerDashboardApi(deps) {
       const { teamId } = req.dashboardUser;
       const task = await dbGetTaskById(teamId, req.params.id);
       if (!task) return res.status(404).json({ error: "not_found" });
-      if (!task.channel_id || !task.message_ts) return res.json({ messages: [] });
+      if (!task.channel_id || !task.message_ts) return res.json({ messages: [], nameMap: {} });
 
-      const result = await slackClient.conversations.replies({
-        channel: task.channel_id,
-        ts: task.message_ts,
-        limit: 100,
-      });
-
-      const rawMessages = result.messages || [];
+      // ページネーションで全件取得
+      let rawMessages = [];
+      let cursor;
+      do {
+        const result = await slackClient.conversations.replies({
+          channel: task.channel_id,
+          ts: task.message_ts,
+          limit: 200,
+          ...(cursor ? { cursor } : {}),
+        });
+        rawMessages = rawMessages.concat(result.messages || []);
+        cursor = result.response_metadata?.next_cursor || null;
+      } while (cursor);
 
       // メッセージ本文中の<@UXXX>メンションも含めて全ユーザーIDを収集
       const mentionRe = /<@([^|>]+)(?:\|[^>]+)?>/g;
@@ -2195,15 +2201,28 @@ function registerDashboardApi(deps) {
             [teamId, userIds]
           )).rows
         : [];
-      const userMap = Object.fromEntries(userRows.map(r => [r.user_id, r]));
+      const dbUserMap = Object.fromEntries(userRows.map(r => [r.user_id, r]));
 
-      // フロント用nameMap: user_id → 日本語名（/より前）
+      // DBに存在しないユーザーはSlack APIでフォールバック取得
+      const missingIds = userIds.filter(id => !dbUserMap[id]);
+      for (const uid of missingIds) {
+        try {
+          const info = await slackClient.users.info({ user: uid });
+          const u = info?.user;
+          if (u) {
+            const displayName = u.profile?.display_name || u.real_name || uid;
+            const avatarUrl = u.profile?.image_72 || null;
+            dbUserMap[uid] = { user_id: uid, display_name: displayName, avatar_url: avatarUrl };
+          }
+        } catch { /* 取得失敗はそのまま */ }
+      }
+
       const nameMap = Object.fromEntries(
-        userRows.map(r => [r.user_id, (r.display_name || r.user_id).split('/')[0].trim()])
+        Object.entries(dbUserMap).map(([id, u]) => [id, (u.display_name || id).split('/')[0].trim()])
       );
 
       const messages = rawMessages.map(m => {
-        const u = userMap[m.user] || null;
+        const u = dbUserMap[m.user] || null;
         return {
           ts: m.ts,
           user_id: m.user || null,

@@ -107,6 +107,7 @@ export const api = {
   projects: () => apiFetch('/projects'),
   projectTasks: (id) => apiFetch(`/projects/${id}/tasks`),
   workloadTeams: () => apiFetch('/workload/teams'),
+  teamMembers: (id) => apiFetch(`/teams/${id}/members`),
   workloadUsers: (teamId) => apiFetch(`/workload/users?teamId=${encodeURIComponent(teamId)}`),
   workloadData: (teamId, month) => apiFetch(`/workload?teamId=${encodeURIComponent(teamId)}&month=${encodeURIComponent(month)}`),
   createWorkloadItem: (body) => jsonPost('/workload/items', body),

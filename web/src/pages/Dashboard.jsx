@@ -273,9 +273,10 @@ const isOverdueTask = (t) => t.due_date && new Date(t.due_date) < new Date() && 
 
 // Slackメッセージテキストの簡易フォーマット
 // <@U...>→@日本語名、<!subteam^...>→@グループ名、<!channel/here>→@channel、URLリンク化
+// 角括弧なしの @UXXX 形式も変換
 function SlackText({ text, nameMap }) {
   if (!text) return null;
-  const TOKEN = /(<@[^>]+>|<!subteam\^[^>]+>|<!(?:channel|here|everyone)>|<https?:[^>]+>|https?:\/\/[^\s<>]+)/g;
+  const TOKEN = /(<@[^>]+>|<!subteam\^[^>]+>|<!(?:channel|here|everyone)>|<https?:[^>]+>|https?:\/\/[^\s<>]+|@U[A-Z0-9]{6,})/g;
   const parts = text.split(TOKEN);
   return (
     <>
@@ -285,6 +286,12 @@ function SlackText({ text, nameMap }) {
         if (userMention) {
           const raw = userMention[2] || nameMap?.[userMention[1]] || userMention[1];
           const name = raw.split('/')[0].trim();
+          return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
+        }
+        // 角括弧なしの bare @UXXX 形式
+        const bareId = p.match(/^@(U[A-Z0-9]{6,})$/);
+        if (bareId) {
+          const name = nameMap?.[bareId[1]] ? nameMap[bareId[1]].split('/')[0].trim() : bareId[1].slice(0, 7) + '…';
           return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
         }
         // サブチームメンション <!subteam^SXXX|@handle>
@@ -560,6 +567,7 @@ export default function Dashboard() {
   const [filterApplied, setFilterApplied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState(null);
+  const [teamMemberIds, setTeamMemberIds] = useState(null);
 
   useEffect(() => {
     api.me()
@@ -585,7 +593,16 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const setF = (patch) => setFilter(f => ({ ...f, ...patch, page:1 }));
+  const setF = (patch) => {
+    setFilter(f => ({ ...f, ...patch, page:1 }));
+    if ('team' in patch) {
+      if (patch.team) {
+        api.teamMembers(patch.team).then(r => setTeamMemberIds(new Set(r.memberIds || []))).catch(() => setTeamMemberIds(null));
+      } else {
+        setTeamMemberIds(null);
+      }
+    }
+  };
 
   // チームフィルター用: admin は全チーム、一般は自分の部署配下のみ
   const myDeptTeams = useMemo(() => {
@@ -717,7 +734,6 @@ export default function Dashboard() {
             <option value="">ステータス：すべて</option>
             <option value="in_progress">進行中</option>
             <option value="done">完了</option>
-            <option value="pending">保留</option>
           </select>
 
           {myDeptTeams.length > 0 && (
@@ -729,7 +745,8 @@ export default function Dashboard() {
 
           <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
             <option value="">担当者：全員</option>
-            {members.map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
+            {(teamMemberIds ? members.filter(m => teamMemberIds.has(m.assignee_id)) : members)
+              .map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
           </select>
 
           {projects.length > 0 && (

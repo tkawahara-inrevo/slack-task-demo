@@ -1567,7 +1567,18 @@ function registerDashboardApi(deps) {
     }
   });
 
-  // --- Team members ---
+  // --- Team members (public read, for assignee filter) ---
+  expressApp.get("/api/dashboard/teams/:id/members", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const members = await dbListDashTeamMembers(teamId, req.params.id);
+      res.json({ memberIds: members.map(m => m.user_id) });
+    } catch (e) {
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- Team members (admin) ---
   expressApp.get("/api/dashboard/admin/teams/:id/members", authWithRole, chiefOrAbove, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;

@@ -43,7 +43,7 @@ function DealDetailModal({ deal, onClose, onMemoSave }) {
   };
 
   const openCustomer = () => {
-    window.open(`/crm/customers/${deal.customer_id}`, '_blank', 'noopener');
+    window.open(`/dashboard/crm/customers/${deal.customer_id}`, '_blank', 'noopener');
   };
 
   return (
@@ -139,24 +139,58 @@ function YomiPanel({ full = false }) {
   const DealCard = ({ d, compact = false }) => {
     const cfg = YOMI_CFG_PANEL[d.yomi] || { color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' };
     const amt = Number(d.monthly_fee || d.initial_fee || 0) * 1.1;
-    const memo = memoCache[d.id] || d.sales_memo || '';
+    const memo = memoCache[d.id] ?? d.sales_memo ?? '';
     const daysSince = Math.floor((Date.now() - new Date(d.updated_at)) / 86400000);
     const stale = daysSince >= 14;
+    const [localMemo, setLocalMemo] = useState(memo);
+    const [memoFocused, setMemoFocused] = useState(false);
+    const [savingInline, setSavingInline] = useState(false);
+
+    const saveInlineMemo = async () => {
+      if (localMemo === memo) { setMemoFocused(false); return; }
+      setSavingInline(true);
+      try {
+        await api.crmUpdateDeal(d.id, { salesMemo: localMemo });
+        setMemoCache(p => ({ ...p, [d.id]: localMemo }));
+      } catch (e) { console.error(e); }
+      finally { setSavingInline(false); setMemoFocused(false); }
+    };
+
+    const badges = (
+      <div style={{ display:'flex', gap:5, marginTop: compact?3:4, alignItems:'center', flexWrap:'wrap' }}>
+        <span style={{ fontSize: compact?'0.68rem':'0.73rem', fontWeight:700, padding: compact?'1px 7px':'2px 9px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{d.yomi}</span>
+        {d.contract_type && <span style={{ fontSize:'0.68rem', color:'#6366f1', background:'#eef2ff', borderRadius:4, padding:'1px 6px', fontWeight:600 }}>{d.contract_type}</span>}
+        {stale && <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:700 }}>{daysSince}日未更新</span>}
+      </div>
+    );
+
+    const inlineMemo = (
+      <div onClick={e => e.stopPropagation()} style={{ marginTop:7 }}>
+        <textarea
+          value={localMemo}
+          onChange={e => setLocalMemo(e.target.value)}
+          onFocus={() => setMemoFocused(true)}
+          onBlur={saveInlineMemo}
+          onKeyDown={e => { if (e.key === 'Escape') { setLocalMemo(memo); setMemoFocused(false); } }}
+          placeholder="メモを入力…"
+          rows={memoFocused ? 3 : 1}
+          style={{ width:'100%', boxSizing:'border-box', padding:'5px 8px', fontSize:'0.75rem', border:`1px solid ${memoFocused?'#6366f1':'#e2e8f0'}`, borderRadius:6, outline:'none', resize:'none', lineHeight:1.5, color: localMemo?'#374151':'#94a3b8', background: memoFocused?'#fff':'#f8fafc', transition:'all 0.15s' }} />
+        {memoFocused && (
+          <div style={{ fontSize:'0.62rem', color:'#94a3b8', marginTop:2 }}>
+            {savingInline ? '保存中…' : 'Enterで改行 / フォーカスを外すと保存'}
+          </div>
+        )}
+      </div>
+    );
 
     if (compact) {
       return (
-        <div onClick={() => setSelectedDeal(d)} style={{ padding:'10px 14px', borderBottom:'1px solid #f8fafc', cursor:'pointer', transition:'background 0.1s' }}
-          onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
-          onMouseLeave={e => e.currentTarget.style.background=''}>
+        <div style={{ padding:'10px 14px', borderBottom:'1px solid #f8fafc' }}>
           <div style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
-              <div style={{ display:'flex', gap:6, marginTop:3, alignItems:'center', flexWrap:'wrap' }}>
-                <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'1px 8px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{d.yomi}</span>
-                {d.contract_type && <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>{d.contract_type}</span>}
-                {stale && <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:600 }}>{daysSince}日未更新</span>}
-              </div>
-              {memo && <div style={{ fontSize:'0.72rem', color:'#64748b', marginTop:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{memo}</div>}
+              <div onClick={() => setSelectedDeal(d)} style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}>{d.customer_name}</div>
+              {badges}
+              {inlineMemo}
             </div>
             <div style={{ textAlign:'right', flexShrink:0 }}>
               {amt > 0 && <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#059669' }}>{fmt(amt)}</div>}
@@ -167,23 +201,16 @@ function YomiPanel({ full = false }) {
     }
 
     return (
-      <div onClick={() => setSelectedDeal(d)}
-        style={{ padding:'14px 16px', borderBottom:'1px solid #f1f5f9', cursor:'pointer', transition:'background 0.1s' }}
-        onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
-        onMouseLeave={e => e.currentTarget.style.background=''}>
+      <div style={{ padding:'14px 16px', borderBottom:'1px solid #f1f5f9' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontWeight:800, fontSize:'0.92rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
-            <div style={{ display:'flex', gap:6, marginTop:4, alignItems:'center', flexWrap:'wrap' }}>
-              <span style={{ fontSize:'0.75rem', fontWeight:700, padding:'2px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{d.yomi}</span>
-              {d.contract_type && <span style={{ fontSize:'0.72rem', color:'#6366f1', background:'#eef2ff', borderRadius:5, padding:'1px 7px', fontWeight:600 }}>{d.contract_type}</span>}
-              {stale && <span style={{ fontSize:'0.68rem', color:'#dc2626', fontWeight:700 }}>{daysSince}日未更新</span>}
-            </div>
-            {memo && <div style={{ fontSize:'0.75rem', color:'#64748b', marginTop:5, lineHeight:1.5, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{memo}</div>}
+            <div onClick={() => setSelectedDeal(d)} style={{ fontWeight:800, fontSize:'0.92rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}>{d.customer_name}</div>
+            {badges}
+            {inlineMemo}
           </div>
           <div style={{ textAlign:'right', flexShrink:0 }}>
             {amt > 0 && <div style={{ fontWeight:800, fontSize:'0.88rem', color:'#059669' }}>{fmt(amt)}</div>}
-            <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:2 }}>クリックで詳細</div>
+            <div onClick={() => setSelectedDeal(d)} style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:2, cursor:'pointer' }}>詳細 →</div>
           </div>
         </div>
       </div>

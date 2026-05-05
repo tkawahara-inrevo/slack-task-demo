@@ -2162,15 +2162,31 @@ function registerDashboardApi(deps) {
         limit: 100,
       });
 
-      const messages = await Promise.all(
-        (result.messages || []).map(async (m) => ({
+      const rawMessages = result.messages || [];
+
+      // ユニークなユーザーIDをまとめてDBから取得（アバター・表示名）
+      const userIds = [...new Set(rawMessages.map(m => m.user).filter(Boolean))];
+      const userRows = userIds.length > 0
+        ? (await dbQuery(
+            `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url
+             FROM dashboard_user_directory
+             WHERE team_id=$1 AND user_id = ANY($2)`,
+            [teamId, userIds]
+          )).rows
+        : [];
+      const userMap = Object.fromEntries(userRows.map(r => [r.user_id, r]));
+
+      const messages = rawMessages.map(m => {
+        const u = userMap[m.user] || null;
+        return {
           ts: m.ts,
           user_id: m.user || null,
-          displayName: m.user ? await getUserDisplayName(teamId, m.user) : 'Bot',
+          displayName: u?.display_name || m.user || 'Bot',
+          avatar_url: u?.avatar_url || null,
           text: m.text || '',
           is_root: m.ts === task.message_ts,
-        }))
-      );
+        };
+      });
 
       res.json({ messages });
     } catch (e) {

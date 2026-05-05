@@ -203,31 +203,51 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
             <div style={{ fontSize:'0.75rem', color:'#cbd5e1', textAlign:'center' }}>スレッド読み込み中…</div>
           )}
           {thread !== null && thread.length > 0 && (() => {
-            const nameMap = Object.fromEntries(thread.filter(m => m.user_id).map(m => [m.user_id, m.displayName?.split(/[\s　/]/)[0] || m.user_id]));
+            // user_id → 日本語名のマップ（メンション変換用）
+            const nameMap = Object.fromEntries(
+              thread.filter(m => m.user_id).map(m => [
+                m.user_id,
+                (m.displayName || '').split('/')[0].trim() || m.user_id,
+              ])
+            );
             return (
               <div>
                 <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:10 }}>
                   Slackスレッド（{thread.length}件）
                 </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                  {thread.map((m, i) => (
-                    <div key={m.ts} style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
-                      <div style={{ width:30, height:30, borderRadius:'50%', background: m.is_root ? '#dbeafe' : '#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.7rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#64748b' }}>
-                        {(m.displayName || '?').split(/[\s　/]/)[0].slice(0, 2)}
-                      </div>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:3 }}>
-                          <span style={{ fontSize:'0.78rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#374151' }}>
-                            {m.displayName?.split('/')[0]?.trim() || '?'}
-                          </span>
-                          {m.is_root && <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>元メッセージ</span>}
+                <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                  {thread.map(m => {
+                    const jaName = (m.displayName || '?').split('/')[0].trim();
+                    const initials = jaName.slice(0, 2);
+                    return (
+                      <div key={m.ts} style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+                        {/* アバター */}
+                        {m.avatar_url ? (
+                          <img src={m.avatar_url} alt={jaName}
+                            style={{ width:32, height:32, borderRadius:'50%', flexShrink:0, objectFit:'cover', border: m.is_root ? '2px solid #3b82f6' : '1px solid #e2e8f0' }} />
+                        ) : (
+                          <div style={{ width:32, height:32, borderRadius:'50%', background: m.is_root ? '#dbeafe' : '#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.68rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#64748b', border: m.is_root ? '2px solid #3b82f6' : '1px solid #e2e8f0' }}>
+                            {initials}
+                          </div>
+                        )}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:3 }}>
+                            <span style={{ fontSize:'0.78rem', fontWeight:700, color: m.is_root ? '#1e40af' : '#374151' }}>
+                              {jaName}
+                            </span>
+                            {m.is_root && (
+                              <span style={{ fontSize:'0.62rem', background:'#dbeafe', color:'#1d4ed8', padding:'1px 6px', borderRadius:4, fontWeight:600 }}>
+                                元メッセージ
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize:'0.82rem', color:'#374151', lineHeight:1.75, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+                            <SlackText text={m.text} nameMap={nameMap} />
+                          </div>
                         </div>
-                        <div style={{ fontSize:'0.82rem', color:'#374151', lineHeight:1.7, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
-                          <SlackText text={m.text} nameMap={nameMap} />
-                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );

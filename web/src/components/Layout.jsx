@@ -45,87 +45,78 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
   );
 }
 
-// in-app browser検出
-// iOS WKWebView: iPhone/iPad が含まれるが Safari/ が含まれない
-// Android WebView: wv フラグ
-// URL param: ?from_slack=1 で強制表示（テスト・共有用）
-function detectInAppBrowser() {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent;
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('from_slack') === '1') return true;
-  // Slack明示パターン
-  if (/SlackWebClient|Slack\//.test(ua)) return true;
-  // iOS WebView (Safari/ が含まれない)
-  if (/iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua)) return true;
-  // Android WebView
-  if (/Android/.test(ua) && /wv/.test(ua)) return true;
-  return false;
-}
-const isSlackBrowser = detectInAppBrowser();
+// モバイルかどうかの判定（ボタン表示に使用）
+const isMobileDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-function SlackBrowserBanner() {
+// ブラウザ転送ボタン（モバイルナビに常時表示）
+function BrowserTransferButton() {
   const [state, setState] = useState('idle'); // idle | loading | ready | copied
   const [transferUrl, setTransferUrl] = useState('');
+  const [showModal, setShowModal] = useState(false);
 
   const handleGenerate = async () => {
     setState('loading');
+    setShowModal(true);
     try {
       const data = await api.authTransferToken();
       const currentPath = window.location.pathname + window.location.search;
       const url = `${window.location.origin}/api/auth/transfer?token=${data.token}&redirect=${encodeURIComponent(currentPath)}`;
       setTransferUrl(url);
       setState('ready');
-    } catch { setState('idle'); }
+    } catch { setState('idle'); setShowModal(false); }
   };
 
   const handleCopy = () => {
-    navigator.clipboard?.writeText(transferUrl).then(() => {
-      setState('copied');
-      setTimeout(() => setState('ready'), 2500);
-    }).catch(() => {
-      // fallback
-      const el = document.createElement('textarea');
-      el.value = transferUrl; document.body.appendChild(el); el.select();
-      document.execCommand('copy'); document.body.removeChild(el);
-      setState('copied'); setTimeout(() => setState('ready'), 2500);
-    });
+    const copy = (text) => {
+      navigator.clipboard?.writeText(text).catch(() => {
+        const el = document.createElement('textarea');
+        el.value = text; document.body.appendChild(el); el.select();
+        document.execCommand('copy'); document.body.removeChild(el);
+      });
+    };
+    copy(transferUrl);
+    setState('copied');
+    setTimeout(() => setState('ready'), 3000);
   };
 
+  const handleClose = () => { setShowModal(false); setState('idle'); setTransferUrl(''); };
+
   return (
-    <div style={{ background:'#f59e0b', padding:'10px 16px', display:'flex', alignItems:'flex-start', gap:10, flexWrap:'wrap' }}>
-      <div style={{ flex:1, minWidth:200 }}>
-        <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>アプリ内ブラウザで開いています</div>
-        <div style={{ fontSize:'0.75rem', color:'#3b2a00', marginTop:2 }}>
-          セッションを引き継いでSafari/Chromeで開けます
-        </div>
-        {state === 'ready' && (
-          <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(0,0,0,0.1)', borderRadius:6, fontSize:'0.7rem', color:'#1a1a1a', wordBreak:'break-all', lineHeight:1.4 }}>
-            {transferUrl}
+    <>
+      <button onClick={handleGenerate}
+        style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)', borderRadius:7, color:'#fff', fontSize:'0.75rem', fontWeight:600, padding:'5px 10px', cursor:'pointer', whiteSpace:'nowrap' }}>
+        🔗 Safariで開く
+      </button>
+
+      {showModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:2000, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:'0 0 20px' }}
+          onClick={handleClose}>
+          <div style={{ background:'#fff', borderRadius:16, width:'min(480px,94vw)', padding:'20px', boxShadow:'0 -8px 32px rgba(0,0,0,0.2)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>Safariで開く</div>
+              <button onClick={handleClose} style={{ background:'#f1f5f9', border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:'#64748b', fontSize:16 }}>×</button>
+            </div>
+            {state === 'loading' && (
+              <div style={{ textAlign:'center', padding:'20px', color:'#94a3b8' }}>URLを生成中…</div>
+            )}
+            {(state === 'ready' || state === 'copied') && (<>
+              <div style={{ fontSize:'0.82rem', color:'#374151', marginBottom:12, lineHeight:1.6 }}>
+                このURLをコピーして、<strong>SafariのURL欄に貼り付け</strong>てください。<br />
+                <span style={{ fontSize:'0.75rem', color:'#94a3b8' }}>※ 有効期限は90秒です</span>
+              </div>
+              <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'10px 12px', fontSize:'0.72rem', color:'#374151', wordBreak:'break-all', lineHeight:1.5, marginBottom:12 }}>
+                {transferUrl}
+              </div>
+              <button onClick={handleCopy}
+                style={{ width:'100%', padding:'12px', background: state === 'copied' ? '#059669' : '#1e40af', color:'#fff', border:'none', borderRadius:10, fontSize:'0.9rem', fontWeight:700, cursor:'pointer' }}>
+                {state === 'copied' ? '✓ コピーしました！ SafariのURL欄に貼り付けてください' : 'URLをコピーする'}
+              </button>
+            </>)}
           </div>
-        )}
-      </div>
-      <div style={{ display:'flex', gap:6, flexShrink:0, alignItems:'center' }}>
-        {state === 'idle' && (
-          <button onClick={handleGenerate}
-            style={{ padding:'6px 14px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:7, fontSize:'0.8rem', fontWeight:700, cursor:'pointer' }}>
-            ブラウザで開く準備
-          </button>
-        )}
-        {state === 'loading' && (
-          <span style={{ fontSize:'0.78rem', color:'#3b2a00' }}>生成中…</span>
-        )}
-        {state === 'ready' && (
-          <button onClick={handleCopy}
-            style={{ padding:'6px 14px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:7, fontSize:'0.8rem', fontWeight:700, cursor:'pointer' }}>
-            URLをコピー
-          </button>
-        )}
-        {state === 'copied' && (
-          <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#1a1a1a' }}>✓ コピーしました！SafariのURL欄に貼り付けてください</span>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -176,6 +167,7 @@ export default function Layout({ children }) {
 
           {user && (
             <div className="global-nav-user">
+              {isMobileDevice && <BrowserTransferButton />}
               {user.displayName}
               {user.role === 'admin' && <span className="nav-role-badge">admin</span>}
             </div>
@@ -220,7 +212,6 @@ export default function Layout({ children }) {
           </div>
         )}
       </nav>
-      {isSlackBrowser && <SlackBrowserBanner />}
       <div className="global-content">
         {children}
       </div>

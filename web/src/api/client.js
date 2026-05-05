@@ -176,6 +176,8 @@ export const api = {
   taskThread: (id) => apiFetch(`/tasks/${id}/thread`),
   taskUpdateFields: (id, body) => apiFetch(`/tasks/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }),
   taskChangeGroup: (id, group_id) => apiFetch(`/tasks/${id}/group`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ group_id }) }),
+  taskNotifyOverdue: (id) => apiFetch(`/tasks/${id}/notify-overdue`, { method:'POST' }),
+  taskIncompleteTargets: (id) => apiFetch(`/tasks/${id}/incomplete-targets`),
   taskSetStatus: (id, status) => apiFetch(`/tasks/${id}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

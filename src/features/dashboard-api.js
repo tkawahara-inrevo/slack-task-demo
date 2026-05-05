@@ -2407,6 +2407,73 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // --- POST /tasks/:id/notify-overdue (期限切れ通知をSlackスレッドに投稿) ---
+  expressApp.post("/api/dashboard/tasks/:id/notify-overdue", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const task = await dbGetTaskById(teamId, req.params.id);
+      if (!task) return res.status(404).json({ error: "not_found" });
+      if (!task.channel_id || !task.message_ts) return res.status(400).json({ error: "no_slack_thread" });
+
+      const senderName = await getUserDisplayName(teamId, userId).then(n => n.split('/')[0].trim()).catch(() => '管理者');
+      const dueStr = task.due_date ? new Date(task.due_date).toLocaleDateString('ja-JP') : '不明';
+
+      // スレッドルートのtsを取得
+      let threadTs = task.message_ts;
+      try {
+        const r = await slackClient.conversations.replies({ channel: task.channel_id, ts: task.message_ts, limit: 1 });
+        if (r.messages?.[0]?.thread_ts && r.messages[0].thread_ts !== task.message_ts) threadTs = r.messages[0].thread_ts;
+      } catch {}
+
+      await slackClient.chat.postMessage({
+        channel: task.channel_id,
+        thread_ts: threadTs,
+        text: `⚠ *期限切れのお知らせ* (by ${senderName})\nこのタスクは期限（${dueStr}）を過ぎています。\nご確認・対応をお願いします。`,
+      });
+
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("dashboard POST /tasks/:id/notify-overdue error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- GET /tasks/:id/incomplete-targets (broadcast 未完了者一覧) ---
+  expressApp.get("/api/dashboard/tasks/:id/incomplete-targets", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const task = await dbGetTaskById(teamId, req.params.id);
+      if (!task) return res.status(404).json({ error: "not_found" });
+
+      // 全ターゲット
+      const allRes = await dbQuery(
+        `SELECT user_id FROM task_targets WHERE team_id=$1 AND task_id=$2`,
+        [teamId, req.params.id]
+      );
+      // 完了済み
+      const doneRes = await dbQuery(
+        `SELECT user_id FROM task_completions WHERE team_id=$1 AND task_id=$2`,
+        [teamId, req.params.id]
+      );
+      const doneSet = new Set(doneRes.rows.map(r => r.user_id));
+      const incomplete = allRes.rows.filter(r => !doneSet.has(r.user_id));
+
+      const users = await Promise.all(incomplete.map(async r => {
+        const name = await getUserDisplayName(teamId, r.user_id).catch(() => r.user_id);
+        const avatarRes = await dbQuery(
+          `SELECT profile_json->>'image_72' AS avatar FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2`,
+          [teamId, r.user_id]
+        );
+        return { user_id: r.user_id, displayName: name, avatar_url: avatarRes.rows[0]?.avatar || null };
+      }));
+
+      res.json({ users, total: allRes.rows.length, incomplete: incomplete.length });
+    } catch (e) {
+      console.error("dashboard GET /tasks/:id/incomplete-targets error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // --- POST /tasks/:id/complete-self (broadcast タスクを自分のみ完了) ---
   expressApp.post("/api/dashboard/tasks/:id/complete-self", authWithRole, async (req, res) => {
     try {

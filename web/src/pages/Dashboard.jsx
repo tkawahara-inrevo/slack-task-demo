@@ -755,6 +755,9 @@ export default function Dashboard() {
   const [tab, setTab] = useState('tasks');
   const [me, setMe] = useState(null);
   const [teamOverdue, setTeamOverdue] = useState([]);
+  const [alertSelected, setAlertSelected] = useState(new Set());
+  const [alertNotifying, setAlertNotifying] = useState(false);
+  const [incompleteModal, setIncompleteModal] = useState(null); // { task, users, total, incomplete }
   const [mySummary, setMySummary] = useState(null);
   const [members, setMembers] = useState([]);
   const [usergroups, setUsergroups] = useState([]);
@@ -965,9 +968,30 @@ export default function Dashboard() {
       {/* チームアラート（期限切れ）── マイタスクの下 */}
       {teamOverdue.length > 0 && (
         <div style={{ background:'#fef2f2', borderRadius:12, border:'1px solid #fca5a5', padding:'12px 16px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, flexWrap:'wrap' }}>
             <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#dc2626' }}>⚠ チーム 期限切れタスク</span>
             <span style={{ fontSize:'0.72rem', background:'#dc2626', color:'#fff', borderRadius:99, padding:'1px 8px', fontWeight:700 }}>{teamOverdue.length}件</span>
+            <div style={{ marginLeft:'auto', display:'flex', gap:6, alignItems:'center' }}>
+              {alertSelected.size > 0 && (
+                <button
+                  onClick={async () => {
+                    setAlertNotifying(true);
+                    await Promise.all([...alertSelected].map(id => api.taskNotifyOverdue(id).catch(() => {})));
+                    setAlertNotifying(false);
+                    setAlertSelected(new Set());
+                  }}
+                  disabled={alertNotifying}
+                  style={{ padding:'4px 12px', background: alertNotifying ? '#e2e8f0' : '#dc2626', color:'#fff', border:'none', borderRadius:7, fontSize:'0.75rem', fontWeight:700, cursor: alertNotifying ? 'default' : 'pointer' }}>
+                  {alertNotifying ? '投稿中…' : `${alertSelected.size}件に通知を投稿`}
+                </button>
+              )}
+              <label style={{ fontSize:'0.72rem', color:'#dc2626', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+                <input type="checkbox"
+                  checked={alertSelected.size === teamOverdue.length && teamOverdue.length > 0}
+                  onChange={e => setAlertSelected(e.target.checked ? new Set(teamOverdue.map(t => t.id)) : new Set())} />
+                全選択
+              </label>
+            </div>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {teamOverdue.map(t => {
@@ -984,21 +1008,75 @@ export default function Dashboard() {
                 }
                 return rawTitle.slice(0, 60);
               })();
+              const checked = alertSelected.has(t.id);
               return (
-                <div key={t.id} onClick={() => setSelectedTask(t)}
-                  style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 10px', background:'#fff', borderRadius:8, border:'1px solid #fecaca', cursor:'pointer' }}
-                  onMouseEnter={e => e.currentTarget.style.background='#fff7f7'}
-                  onMouseLeave={e => e.currentTarget.style.background='#fff'}>
-                  <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#dc2626', background:'#fee2e2', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>
+                <div key={t.id}
+                  style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background: checked ? '#fff7f7' : '#fff', borderRadius:8, border:`1px solid ${checked ? '#fca5a5' : '#fecaca'}` }}>
+                  <input type="checkbox" checked={checked}
+                    onChange={e => { const s = new Set(alertSelected); e.target.checked ? s.add(t.id) : s.delete(t.id); setAlertSelected(s); }}
+                    style={{ cursor:'pointer', flexShrink:0 }} />
+                  <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#dc2626', background:'#fee2e2', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap', cursor:'pointer' }}
+                    onClick={() => setSelectedTask(t)}>
                     {t.assigneeName}
                   </span>
-                  <span style={{ fontSize:'0.8rem', color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  <span style={{ fontSize:'0.8rem', color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}
+                    onClick={() => setSelectedTask(t)}>
                     {titleLine}
                   </span>
                   <span style={{ fontSize:'0.7rem', color:'#dc2626', fontWeight:700, whiteSpace:'nowrap' }}>{days}日超過</span>
+                  {t.task_type === 'broadcast' && (
+                    <button
+                      onClick={() => {
+                        api.taskIncompleteTargets(t.id)
+                          .then(r => setIncompleteModal({ task: t, ...r }))
+                          .catch(() => {});
+                      }}
+                      style={{ fontSize:'0.65rem', padding:'2px 8px', border:'1px solid #fca5a5', borderRadius:5, background:'#fff', color:'#dc2626', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}>
+                      未完了者
+                    </button>
+                  )}
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* 未完了者モーダル */}
+      {incompleteModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={() => setIncompleteModal(null)}>
+          <div style={{ background:'#fff', borderRadius:14, width:'min(440px,90vw)', maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'16px 20px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>未完了者一覧</div>
+                <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginTop:2 }}>
+                  {incompleteModal.total}名中 {incompleteModal.incomplete}名が未完了
+                </div>
+              </div>
+              <button onClick={() => setIncompleteModal(null)}
+                style={{ background:'#f1f5f9', border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:'#64748b', fontSize:16 }}>×</button>
+            </div>
+            <div style={{ overflowY:'auto', padding:'12px 16px', display:'flex', flexDirection:'column', gap:8 }}>
+              {incompleteModal.users.length === 0 ? (
+                <div style={{ textAlign:'center', color:'#94a3b8', padding:'20px 0', fontSize:'0.85rem' }}>全員完了済み</div>
+              ) : (
+                incompleteModal.users.map(u => (
+                  <div key={u.user_id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', background:'#fef2f2', borderRadius:8, border:'1px solid #fecaca' }}>
+                    {u.avatar_url
+                      ? <img src={u.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%', objectFit:'cover', flexShrink:0 }} />
+                      : <div style={{ width:32, height:32, borderRadius:'50%', background:'#fee2e2', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.7rem', fontWeight:700, color:'#dc2626' }}>
+                          {(u.displayName||'?').split('/')[0].slice(0,2)}
+                        </div>
+                    }
+                    <span style={{ fontSize:'0.85rem', fontWeight:600, color:'#374151' }}>
+                      {(u.displayName||'').split('/')[0].trim()}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}

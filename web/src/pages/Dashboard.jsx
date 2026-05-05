@@ -21,9 +21,10 @@ const parseTitleAndBody = (title, content) => {
 
   for (let i = 0; i < lines.length; i++) {
     // メンション・（Cc:）・fyi: を除去してタイトル候補として評価
+    // @\S+ でハイフン含むチャンネル名(@hr-direction等)も除去
     const candidate = lines[i]
       .replace(/<@[^>]+>/g, '')
-      .replace(/@[\w぀-鿿./]+/g, '')
+      .replace(/@\S+/g, '')
       .replace(/（[^）]*）/g, '')
       .replace(/\([^)]*\)/g, '')
       .replace(/fyi\s*:/gi, '')
@@ -64,7 +65,7 @@ const getContentBody = (rawText) => {
   const { body } = parseTitleAndBody(rawText, null);
   return body
     .replace(/<@[^>]+>/g, '')
-    .replace(/@[\w぀-鿿./]+/g, '')
+    .replace(/@\S+/g, '')
     .trim();
 };
 

@@ -414,7 +414,7 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
 
   const mentionCandidates = useMemo(() => {
     const q = mentionQuery.toLowerCase();
-    const ms = members.filter(m => { const n=(m.displayName||'').split('/')[0].toLowerCase(); return !q||n.includes(q); })
+    const ms = members.filter(m => { const full=(m.displayName||'').toLowerCase(); return !q||full.includes(q); })
       .slice(0,8).map(m => ({ type:'user', id:m.assignee_id, label:m.displayName?.split('/')[0].trim() }));
     const gs = (usergroups||[]).filter(g => !q||g.handle.toLowerCase().includes(q))
       .slice(0,5).map(g => ({ type:'group', id:g.id, handle:g.handle, label:g.handle }));

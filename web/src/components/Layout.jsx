@@ -135,15 +135,33 @@ export default function Layout({ children }) {
   const location = useLocation();
 
   useEffect(() => {
-    // URLに ?auth=TOKEN があれば自動でセッション引き継ぎ（Slack → ネイティブブラウザ）
     const params = new URLSearchParams(window.location.search);
     const authToken = params.get('auth');
+
     if (authToken) {
-      // トークンをサーバーに渡してセッションcookieを取得し、URLをクリーン
-      const redirect = encodeURIComponent(window.location.pathname);
-      window.location.replace(`/api/auth/adopt?token=${authToken}&redirect=${redirect}`);
-      return; // リダイレクト中なので以降は実行しない
+      // URLからトークンをすぐ消す（見た目をきれいに）
+      window.history.replaceState({}, '', window.location.pathname);
+
+      // まず現在のセッションが有効か確認
+      fetch('/api/dashboard/me', { credentials: 'include' })
+        .then(r => {
+          if (r.ok) {
+            // Slackブラウザ：既にcookieがある → そのまま使う
+            api.me().then(setUser).catch(() => {});
+            api.rpoAccess().then(res => setRpoAccess(!!res.canAccess)).catch(() => setRpoAccess(false));
+          } else {
+            // Safari等：cookieなし → adopt でセッションをもらう
+            const redirect = encodeURIComponent(window.location.pathname);
+            window.location.replace(`/api/auth/adopt?token=${authToken}&redirect=${redirect}`);
+          }
+        })
+        .catch(() => {
+          const redirect = encodeURIComponent(window.location.pathname);
+          window.location.replace(`/api/auth/adopt?token=${authToken}&redirect=${redirect}`);
+        });
+      return;
     }
+
     api.me().then(setUser).catch(() => {});
     api.rpoAccess().then(r => setRpoAccess(!!r.canAccess)).catch(() => setRpoAccess(false));
   }, []);

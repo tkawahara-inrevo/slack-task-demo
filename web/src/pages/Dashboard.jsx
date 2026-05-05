@@ -568,11 +568,15 @@ function TaskCard({ t, members, onClick }) {
         overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
         {title}
       </div>
-      {/* 内容プレビュー */}
-      {preview && (
+      {/* 内容プレビュー or 手動作成ラベル */}
+      {preview ? (
         <div style={{ fontSize:'0.75rem', color:'#64748b', lineHeight:1.5,
           overflow:'hidden', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
           {preview}
+        </div>
+      ) : (
+        <div style={{ fontSize:'0.68rem', color:'#94a3b8', background:'#f8fafc', borderRadius:4, padding:'3px 8px', display:'inline-block' }}>
+          手動作成
         </div>
       )}
 

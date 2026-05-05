@@ -2219,65 +2219,44 @@ function registerDashboardApi(deps) {
         for (const match of (m.text || '').matchAll(mentionRe)) allUserIds.add(match[1]);
       }
 
-      const userIds = [...allUserIds];
-      const userRows = userIds.length > 0
+      // getUserDisplayName（キャッシュ付き・Bolt app.client使用）で一括解決
+      const nameEntries = await Promise.all(
+        [...allUserIds].map(async (uid) => {
+          const name = await getUserDisplayName(teamId, uid).catch(() => null);
+          return [uid, name ? name.split('/')[0].trim() : uid.slice(0, 7) + '…'];
+        })
+      );
+      const nameMap = Object.fromEntries(nameEntries);
+
+      // アバターURLはDB（dashboard_user_directory）から取得
+      const avatarRows = allUserIds.size > 0
         ? (await dbQuery(
-            `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url
-             FROM dashboard_user_directory
-             WHERE team_id=$1 AND user_id = ANY($2)`,
-            [teamId, userIds]
+            `SELECT user_id, profile_json->>'image_72' AS avatar_url FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
+            [teamId, [...allUserIds]]
           )).rows
         : [];
-      const dbUserMap = Object.fromEntries(userRows.map(r => [r.user_id, r]));
+      const avatarMap = Object.fromEntries(avatarRows.map(r => [r.user_id, r.avatar_url]));
 
-      // DBに存在しないユーザーはSlack APIでフォールバック取得（並列化）
-      const missingIds = userIds.filter(id => !dbUserMap[id]);
-      await Promise.all(missingIds.map(async (uid) => {
-        try {
-          const info = await slackClient.users.info({ user: uid });
-          const u = info?.user;
-          if (u) {
-            dbUserMap[uid] = {
-              user_id: uid,
-              display_name: u.profile?.display_name || u.real_name || uid,
-              avatar_url: u.profile?.image_72 || null,
-            };
-          }
-        } catch { /* 取得失敗: IDをそのまま保持 */ }
-      }));
-
-      // Botメッセージの bot_profile から名前・アイコンを補完
+      // Botメッセージの bot_profile を補完
+      const botDisplayMap = {};
       for (const m of rawMessages) {
         if (!m.user && m.bot_id && m.bot_profile) {
-          const botKey = `bot:${m.bot_id}`;
-          if (!dbUserMap[botKey]) {
-            dbUserMap[botKey] = {
-              user_id: botKey,
-              display_name: m.bot_profile.name || 'Bot',
-              avatar_url: m.bot_profile.icons?.image_72 || m.bot_profile.icons?.image_48 || null,
-            };
-          }
+          botDisplayMap[`bot:${m.bot_id}`] = {
+            name: m.bot_profile.name || 'Bot',
+            avatar: m.bot_profile.icons?.image_72 || m.bot_profile.icons?.image_48 || null,
+          };
         }
-      }
-
-      // nameMap: 解決できなかったIDは先頭7文字だけ表示
-      const nameMap = Object.fromEntries(
-        Object.entries(dbUserMap).map(([id, u]) => [id, (u.display_name || id).split('/')[0].trim()])
-      );
-      // 未解決IDのフォールバック（nameMapに入っていないID）
-      for (const uid of allUserIds) {
-        if (!nameMap[uid]) nameMap[uid] = uid.slice(0, 7) + '…';
       }
 
       const rootTs = rawMessages[0]?.ts;
       const messages = rawMessages.map(m => {
         const botKey = !m.user && m.bot_id ? `bot:${m.bot_id}` : null;
-        const u = dbUserMap[m.user] || (botKey ? dbUserMap[botKey] : null);
+        const botInfo = botKey ? botDisplayMap[botKey] : null;
         return {
           ts: m.ts,
           user_id: m.user || botKey || null,
-          displayName: u?.display_name || (m.bot_profile?.name) || m.user || 'Bot',
-          avatar_url: u?.avatar_url || null,
+          displayName: m.user ? (nameMap[m.user] || m.user) : (botInfo?.name || 'Bot'),
+          avatar_url: m.user ? (avatarMap[m.user] || null) : (botInfo?.avatar || null),
           text: m.text || '',
           is_root: m.ts === rootTs,
         };

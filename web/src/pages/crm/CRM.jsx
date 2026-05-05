@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useBreakpoint } from '../../hooks/useWindowWidth';
 import CustomerList from './CustomerList';
 import SalesPerformance from './SalesPerformance';
 import CrmDashboard from './CrmDashboard';
@@ -801,6 +802,7 @@ export default function CRM() {
   const tab = searchParams.get('tab') || 'dashboard';
   const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
   const [canViewPerf, setCanViewPerf] = useState(null);
+  const { isMobile } = useBreakpoint();
 
   useEffect(() => {
     api.crmPerformanceAccess()
@@ -819,10 +821,10 @@ export default function CRM() {
   return (
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
       {/* タブバー */}
-      <div style={{ display:'flex', borderBottom:'1px solid #e5e7eb', background:'#fff', paddingLeft:8, flexShrink:0 }}>
+      <div style={{ display:'flex', borderBottom:'1px solid #e5e7eb', background:'#fff', paddingLeft:8, flexShrink:0, overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ padding:'10px 20px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem',
+            style={{ padding: isMobile ? '8px 14px' : '10px 20px', border:'none', background:'none', cursor:'pointer', fontSize: isMobile ? '0.8rem' : '0.88rem', whiteSpace:'nowrap',
               fontWeight: tab===t.key?700:400, color:tab===t.key?'#1d4ed8':'#6b7280',
               borderBottom: tab===t.key?'2px solid #1d4ed8':'2px solid transparent', transition:'color 0.15s' }}>
             {t.label}

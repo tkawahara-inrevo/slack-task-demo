@@ -74,7 +74,7 @@ function AnalyticsTab({ members, usergroups }) {
     if (!data) return null;
     const cr = data.compliance_rate;
     const metrics = [
-      { label: '担当中',   value: data.active,    unit: '件', color: '#6366f1' },
+      { label: '新規割当', value: data.assigned,   unit: '件', color: '#6366f1' },
       { label: '期間完了', value: data.completed,  unit: '件', color: '#10b981' },
       { label: '遵守率',   value: cr ?? '—',       unit: cr != null ? '%' : '', color: cr == null ? '#94a3b8' : cr >= 80 ? '#10b981' : cr >= 50 ? '#f59e0b' : '#dc2626' },
       { label: '平均処理', value: data.avg_days,   unit: '日', color: '#64748b' },
@@ -325,8 +325,9 @@ function SlackText({ text, nameMap, subteamMap }) {
         // ユーザーメンション <@UXXX> or <@UXXX|name>
         const userMention = p.match(/^<@([^|>]+)(?:\|([^>]+))?>$/);
         if (userMention) {
-          const raw = userMention[2] || nameMap?.[userMention[1]] || userMention[1];
-          const name = raw.split('/')[0].trim();
+          const uid = userMention[1];
+          const raw = userMention[2] || nameMap?.[uid] || null;
+          const name = raw ? raw.split('/')[0].trim() : uid.slice(0, 7) + '…';
           return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
         }
         // 角括弧なしの bare @UXXX 形式
@@ -535,6 +536,7 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
 // ── タスクカード（グリッドレイアウト共通） ──────────────────────────
 function TaskCard({ t, members, onClick }) {
   const title = cleanTitle(t.title, t.content);
+  const preview = getContentBody(t.title || t.content).slice(0, 120);
   const st = STATUS_CFG[t.status] || { label: t.status, color: '#94a3b8' };
   const overdue = isOverdueTask(t);
   const assigneeName = cleanAssigneeName(t.assignee_label) ||
@@ -563,9 +565,16 @@ function TaskCard({ t, members, onClick }) {
 
       {/* タイトル */}
       <div style={{ fontWeight:600, fontSize:'0.85rem', color:'#0f172a', lineHeight:1.45,
-        overflow:'hidden', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
+        overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
         {title}
       </div>
+      {/* 内容プレビュー */}
+      {preview && (
+        <div style={{ fontSize:'0.75rem', color:'#64748b', lineHeight:1.5,
+          overflow:'hidden', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
+          {preview}
+        </div>
+      )}
 
       {/* メタ情報 */}
       <div style={{ display:'flex', flexDirection:'column', gap:3, marginTop:'auto' }}>
@@ -597,7 +606,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState([]);
   const [dashTeams, setDashTeams] = useState([]);
   const [myTasks, setMyTasks] = useState([]);
-  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', team:'', overdue:false, page:1 });
+  const [filter, setFilter] = useState({ status:'in_progress', assignee:'', project:'', dept:'', team:'', overdue:false, page:1 });
   const [filteredTasks, setFilteredTasks] = useState({ tasks:[], total:0 });
   const [filterApplied, setFilterApplied] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -629,29 +638,42 @@ export default function Dashboard() {
   }, []);
 
   const setF = (patch) => {
-    setFilter(f => ({ ...f, ...patch, page:1 }));
-    if ('team' in patch) {
-      if (patch.team) {
-        api.teamMembers(patch.team).then(r => setTeamMemberIds(new Set(r.memberIds || []))).catch(() => setTeamMemberIds(null));
+    setFilter(f => {
+      const next = { ...f, ...patch, page:1 };
+      // 部署が変わったらチームと担当者もリセット
+      if ('dept' in patch) { next.team = ''; next.assignee = ''; }
+      if ('team' in patch) next.assignee = '';
+      return next;
+    });
+    const teamId = 'team' in patch ? patch.team : ('dept' in patch ? null : undefined);
+    if (teamId !== undefined) {
+      if (teamId) {
+        api.teamMembers(teamId).then(r => setTeamMemberIds(new Set(r.memberIds || []))).catch(() => setTeamMemberIds(null));
       } else {
         setTeamMemberIds(null);
       }
     }
   };
 
-  // チームフィルター用: admin は全チーム、一般は自分の部署配下のみ
-  const myDeptTeams = useMemo(() => {
+  // 親チーム（部署レベル）: admin は全トップレベル、一般は自分の部署のみ
+  const deptTeams = useMemo(() => {
     if (!me || !dashTeams.length) return [];
-    if (me.role === 'admin') return dashTeams;
+    const topLevel = dashTeams.filter(t => !t.parent_id);
+    if (me.role === 'admin') return topLevel;
     const myTeamIds = new Set((me.dashTeams || []).map(t => t.id));
-    const parentIds = new Set();
+    const myParentIds = new Set();
     for (const t of dashTeams) {
       if (!myTeamIds.has(t.id)) continue;
-      if (t.parent_id) parentIds.add(t.parent_id);
-      else parentIds.add(t.id);
+      if (t.parent_id) myParentIds.add(t.parent_id);
+      else myParentIds.add(t.id);
     }
-    return dashTeams.filter(t => t.parent_id && parentIds.has(t.parent_id));
+    return topLevel.filter(t => myParentIds.has(t.id));
   }, [me, dashTeams]);
+
+  // 選択中部署の子チーム
+  const childTeams = useMemo(() =>
+    filter.dept ? dashTeams.filter(t => t.parent_id === filter.dept) : []
+  , [dashTeams, filter.dept]);
 
   // 自分のアクティブタスク（完了・キャンセル除外、期限切れ→期限近い順）
   const activeTasks = useMemo(() =>
@@ -674,7 +696,9 @@ export default function Dashboard() {
     if (filter.status)   params.status   = filter.status;
     if (filter.assignee) params.assignee = filter.assignee;
     if (filter.project)  params.project  = filter.project;
+    // 子チーム > 親部署の優先順位
     if (filter.team)     params.dashTeam = filter.team;
+    else if (filter.dept) params.dashTeam = filter.dept;
     if (filter.overdue)  params.overdue  = '1';
     const res = await api.tasks(params);
     setFilteredTasks(res);
@@ -682,7 +706,7 @@ export default function Dashboard() {
   };
 
   const clearFilter = () => {
-    setFilter({ status:'', assignee:'', project:'', team:'', overdue:false, page:1 });
+    setFilter({ status:'in_progress', assignee:'', project:'', dept:'', team:'', overdue:false, page:1 });
     setFilterApplied(false);
     setFilteredTasks({ tasks:[], total:0 });
   };
@@ -755,7 +779,7 @@ export default function Dashboard() {
             <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
           </div>
           <button
-            onClick={() => window.open('/floating', 'taskhub-float', 'width=380,height=640,resizable=yes,scrollbars=yes')}
+            onClick={() => window.open('/dashboard/floating', 'taskhub-float', 'width=380,height=640,resizable=yes,scrollbars=yes')}
             style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:7, background:'#fff', color:'#64748b', fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
             title="ポップアップで開く">
             ↗ ポップアップ
@@ -784,10 +808,16 @@ export default function Dashboard() {
             <option value="done">完了</option>
           </select>
 
-          {myDeptTeams.length > 0 && (
+          {deptTeams.length > 0 && (
+            <select value={filter.dept} onChange={e => setF({dept:e.target.value})} style={selStyle}>
+              <option value="">部署：すべて</option>
+              {deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+          {childTeams.length > 0 && (
             <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}>
               <option value="">チーム：すべて</option>
-              {myDeptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {childTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           )}
 

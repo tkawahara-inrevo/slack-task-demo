@@ -2638,17 +2638,11 @@ function registerDashboardApi(deps) {
       const { teamId, userId } = req.dashboardUser;
       const targetUser = req.query.scope === 'self' ? userId : null;
 
-      // 現在の担当中タスク数（スナップショット）
-      const activeRes = await dbQuery(
-        `SELECT COUNT(*)::int AS active FROM tasks WHERE team_id=$1 AND assignee_id=$2 AND status NOT IN ('done','cancelled')`,
-        [teamId, targetUser || userId]
-      );
-      const active = activeRes.rows[0]?.active || 0;
-
       const getStats = async (days) => {
         const params = [teamId, targetUser || userId];
         const q = `
           SELECT
+            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '${days} days')::int AS assigned,
             COUNT(*) FILTER (WHERE status='done' AND completed_at >= NOW() - INTERVAL '${days} days')::int AS completed,
             COUNT(*) FILTER (WHERE status='done' AND completed_at >= NOW() - INTERVAL '${days} days'
                              AND due_date IS NOT NULL AND completed_at::date <= due_date)::int AS on_time,
@@ -2662,7 +2656,7 @@ function registerDashboardApi(deps) {
         const row = r.rows[0] || {};
         const on_time = row.on_time || 0, with_due = row.with_due || 0;
         return {
-          active,
+          assigned: row.assigned || 0,
           completed: row.completed || 0,
           compliance_rate: with_due > 0 ? Math.round(on_time / with_due * 100) : null,
           avg_days: row.avg_days || 0,

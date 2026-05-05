@@ -2148,6 +2148,37 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // --- GET /tasks/:id/thread (Slack thread messages) ---
+  expressApp.get("/api/dashboard/tasks/:id/thread", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const task = await dbGetTaskById(teamId, req.params.id);
+      if (!task) return res.status(404).json({ error: "not_found" });
+      if (!task.channel_id || !task.message_ts) return res.json({ messages: [] });
+
+      const result = await slackClient.conversations.replies({
+        channel: task.channel_id,
+        ts: task.message_ts,
+        limit: 100,
+      });
+
+      const messages = await Promise.all(
+        (result.messages || []).map(async (m) => ({
+          ts: m.ts,
+          user_id: m.user || null,
+          displayName: m.user ? await getUserDisplayName(teamId, m.user) : 'Bot',
+          text: m.text || '',
+          is_root: m.ts === task.message_ts,
+        }))
+      );
+
+      res.json({ messages });
+    } catch (e) {
+      console.error("dashboard GET /tasks/:id/thread error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // --- PUT /tasks/:id (update fields) ---
   expressApp.put("/api/dashboard/tasks/:id", authWithRole, async (req, res) => {
     try {

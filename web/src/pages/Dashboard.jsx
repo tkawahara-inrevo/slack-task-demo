@@ -76,15 +76,41 @@ const fmtDate = (d) => {
 const daysSince = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
 const isOverdueTask = (t) => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done' && t.status !== 'cancelled';
 
+// Slackメッセージテキストの簡易フォーマット（<@U...>→@名前、URLリンク化）
+function SlackText({ text, nameMap }) {
+  if (!text) return null;
+  const parts = text.split(/(<@[^>]+>|<https?:[^>]+>|https?:\/\/\S+)/g);
+  return (
+    <>
+      {parts.map((p, i) => {
+        const mention = p.match(/^<@([^|>]+)(?:\|([^>]+))?>$/);
+        if (mention) {
+          const name = mention[2] || nameMap?.[mention[1]] || mention[1];
+          return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
+        }
+        const linkTag = p.match(/^<(https?:[^|>]+)(?:\|([^>]+))?>$/);
+        if (linkTag) {
+          return <a key={i} href={linkTag[1]} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6' }}>{linkTag[2] || linkTag[1]}</a>;
+        }
+        if (/^https?:\/\/\S+$/.test(p)) {
+          return <a key={i} href={p} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6' }}>{p}</a>;
+        }
+        return <span key={i}>{p}</span>;
+      })}
+    </>
+  );
+}
+
 // ── タスクスライドパネル ──────────────────────────────────────────
 function TaskPanel({ task, members, onClose, onStatusChange }) {
   const [status, setStatus] = useState(task.status);
   const [fullTask, setFullTask] = useState(null);
+  const [thread, setThread] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    // 詳細情報を取得
     api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
+    api.taskThread?.(task.id).then(r => setThread(r.messages || [])).catch(() => setThread([]));
   }, [task.id]);
 
   const handleStatus = async (s) => {
@@ -159,8 +185,8 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
           })}
         </div>
 
-        {/* コンテンツ本文（タイトル行の次以降） */}
-        <div style={{ flex:1, overflowY:'auto', padding:'18px 22px' }}>
+        {/* 本文 + Slackスレッド */}
+        <div style={{ flex:1, overflowY:'auto', padding:'18px 22px', display:'flex', flexDirection:'column', gap:16 }}>
           {contentBody ? (
             <div>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:8 }}>内容</div>
@@ -169,8 +195,43 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
               </div>
             </div>
           ) : (
-            <div style={{ color:'#cbd5e1', fontSize:'0.82rem', textAlign:'center', paddingTop:20 }}>（本文なし）</div>
+            <div style={{ color:'#cbd5e1', fontSize:'0.82rem', textAlign:'center', paddingTop:4 }}>（本文なし）</div>
           )}
+
+          {/* Slackスレッド */}
+          {thread === null && (
+            <div style={{ fontSize:'0.75rem', color:'#cbd5e1', textAlign:'center' }}>スレッド読み込み中…</div>
+          )}
+          {thread !== null && thread.length > 0 && (() => {
+            const nameMap = Object.fromEntries(thread.filter(m => m.user_id).map(m => [m.user_id, m.displayName?.split(/[\s　/]/)[0] || m.user_id]));
+            return (
+              <div>
+                <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:10 }}>
+                  Slackスレッド（{thread.length}件）
+                </div>
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  {thread.map((m, i) => (
+                    <div key={m.ts} style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+                      <div style={{ width:30, height:30, borderRadius:'50%', background: m.is_root ? '#dbeafe' : '#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.7rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#64748b' }}>
+                        {(m.displayName || '?').split(/[\s　/]/)[0].slice(0, 2)}
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:3 }}>
+                          <span style={{ fontSize:'0.78rem', fontWeight:700, color: m.is_root ? '#1d4ed8' : '#374151' }}>
+                            {m.displayName?.split('/')[0]?.trim() || '?'}
+                          </span>
+                          {m.is_root && <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>元メッセージ</span>}
+                        </div>
+                        <div style={{ fontSize:'0.82rem', color:'#374151', lineHeight:1.7, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+                          <SlackText text={m.text} nameMap={nameMap} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </>

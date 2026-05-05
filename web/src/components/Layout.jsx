@@ -193,7 +193,6 @@ export default function Layout({ children }) {
               <NavLink key={to} to={to} end={end} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>{label}</NavLink>
             ))}
             <DropdownNav label="ヒトトレ" matchPaths={['/crm', '/rpo']} items={hitotoreItems} />
-            <NavLink to="/analytics" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>分析</NavLink>
             {adminLink && <NavLink to={adminLink} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>Corp</NavLink>}
           </div>
 
@@ -228,8 +227,6 @@ export default function Layout({ children }) {
                 {label}
               </NavLink>
             ))}
-            <NavLink to="/analytics" className={({ isActive }) => isActive ? 'mobile-nav-link active' : 'mobile-nav-link'}
-              onClick={() => setMobileOpen(false)}>分析</NavLink>
             {adminLink && (
               <NavLink to={adminLink} className={({ isActive }) => isActive ? 'mobile-nav-link active' : 'mobile-nav-link'}
                 onClick={() => setMobileOpen(false)}>Corp</NavLink>

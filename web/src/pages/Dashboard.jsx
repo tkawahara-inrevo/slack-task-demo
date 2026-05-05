@@ -1,5 +1,198 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+
+// ── 分析タブ用コンポーネント ──────────────────────────────────────
+const STATUS_COLORS = { done:'#10b981', in_progress:'#3b82f6', pending:'#f59e0b', cancelled:'#94a3b8', overdue:'#dc2626' };
+
+function AnalyticsBar({ value, max, color, label }) {
+  const pct = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+      {label && <span style={{ fontSize:'0.7rem', color:'#64748b', width:36, flexShrink:0 }}>{label}</span>}
+      <div style={{ flex:1, height:6, background:'#f1f5f9', borderRadius:3, overflow:'hidden' }}>
+        <div style={{ width:`${pct}%`, height:'100%', background:color, borderRadius:3 }} />
+      </div>
+      <span style={{ fontSize:'0.7rem', color:'#64748b', width:24, textAlign:'right' }}>{value}</span>
+    </div>
+  );
+}
+
+function ProgressRing({ rate }) {
+  const r = 32, c = 2 * Math.PI * r;
+  const color = rate >= 80 ? '#10b981' : rate >= 50 ? '#f59e0b' : '#dc2626';
+  return (
+    <svg width="80" height="80" viewBox="0 0 80 80">
+      <circle cx="40" cy="40" r={r} fill="none" stroke="#f1f5f9" strokeWidth="7" />
+      <circle cx="40" cy="40" r={r} fill="none" stroke={color} strokeWidth="7"
+        strokeDasharray={c} strokeDashoffset={c - (rate/100)*c}
+        strokeLinecap="round" transform="rotate(-90 40 40)" />
+      <text x="40" y="40" textAnchor="middle" dominantBaseline="central" fontSize="14" fontWeight="700" fill={color}>{rate}%</text>
+    </svg>
+  );
+}
+
+function AnalyticsTab({ members, usergroups }) {
+  const [memberData, setMemberData] = useState(null);
+  const [dueData, setDueData] = useState(null);
+  const [projectData, setProjectData] = useState(null);
+  const [filter, setFilter] = useState({ assignee:'', usergroup:'' });
+  const [filterLoading, setFilterLoading] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      api.analyticsMemberCompletion(),
+      api.analyticsDueCompliance(),
+      api.analyticsProjectProgress(),
+    ]).then(([m, d, p]) => {
+      setMemberData(m.members || []);
+      setDueData(d.weeks || []);
+      setProjectData(p.projects || []);
+    }).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (!memberData) return;
+    setFilterLoading(true);
+    const params = {};
+    if (filter.assignee) params.assignee = filter.assignee;
+    if (filter.usergroup) params.usergroup = filter.usergroup;
+    Promise.all([api.analyticsMemberCompletion(params), api.analyticsDueCompliance(params)])
+      .then(([m, d]) => { setMemberData(m.members || []); setDueData(d.weeks || []); })
+      .catch(console.error)
+      .finally(() => setFilterLoading(false));
+  }, [filter]);
+
+  if (!memberData) return <div style={{ textAlign:'center', padding:'40px 0', color:'#94a3b8' }}>読み込み中…</div>;
+
+  const selStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', outline:'none' };
+  const card = (children, style={}) => <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'16px 20px', ...style }}>{children}</div>;
+  const sh = (label) => <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a', marginBottom:12 }}>{label}</div>;
+  const maxTotal = Math.max(1, ...memberData.map(m => m.total));
+  const filteredMembers = members.filter(m => {
+    if (!filter.usergroup) return true;
+    const ug = usergroups.find(g => g.id === filter.usergroup);
+    return ug?.memberIds?.includes(m.assignee_id);
+  });
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      {/* フィルター */}
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+        {usergroups.length > 0 && (
+          <select value={filter.usergroup} onChange={e => setFilter(f => ({...f, usergroup:e.target.value, assignee:''}))} style={selStyle}>
+            <option value="">チーム：すべて</option>
+            {usergroups.map(g => <option key={g.id} value={g.id}>@{g.handle}</option>)}
+          </select>
+        )}
+        <select value={filter.assignee} onChange={e => setFilter(f => ({...f, assignee:e.target.value}))} style={selStyle}>
+          <option value="">担当者：全員</option>
+          {filteredMembers.map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
+        </select>
+        {(filter.assignee || filter.usergroup) && (
+          <button onClick={() => setFilter({assignee:'', usergroup:''})}
+            style={{ padding:'6px 12px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', color:'#64748b', cursor:'pointer' }}>
+            クリア
+          </button>
+        )}
+        {filterLoading && <span style={{ fontSize:'0.75rem', color:'#94a3b8' }}>更新中…</span>}
+      </div>
+
+      {/* メンバー別完了率 */}
+      {card(<>
+        {sh('メンバー別完了率')}
+        {memberData.length === 0 ? (
+          <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'12px 0' }}>データなし</div>
+        ) : (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:12 }}>
+            {memberData.map(m => (
+              <div key={m.assignee_id} style={{ background:'#f8fafc', borderRadius:10, padding:'12px 14px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                  <ProgressRing rate={m.completion_rate} />
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>{m.displayName?.split('/')[0]}</div>
+                    <div style={{ fontSize:'0.7rem', color:'#94a3b8' }}>全 {m.total} タスク</div>
+                  </div>
+                </div>
+                <AnalyticsBar value={m.done}        max={maxTotal} color={STATUS_COLORS.done}       label="完了" />
+                <AnalyticsBar value={m.in_progress} max={maxTotal} color={STATUS_COLORS.in_progress} label="進行中" />
+                <AnalyticsBar value={m.pending}     max={maxTotal} color={STATUS_COLORS.pending}     label="保留" />
+                {m.overdue > 0 && <AnalyticsBar value={m.overdue} max={maxTotal} color={STATUS_COLORS.overdue} label="期限切れ" />}
+              </div>
+            ))}
+          </div>
+        )}
+      </>)}
+
+      {/* 期限遵守率の推移 */}
+      {dueData && card(<>
+        {sh('期限遵守率の推移（週別・過去12週）')}
+        {dueData.length === 0 ? (
+          <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'12px 0' }}>データなし</div>
+        ) : (
+          <div style={{ display:'flex', alignItems:'flex-end', gap:4, height:120, paddingBottom:20, position:'relative' }}>
+            {dueData.map((w, i) => {
+              const rate = w.compliance_rate ?? 0;
+              const color = rate >= 80 ? STATUS_COLORS.done : rate >= 50 ? STATUS_COLORS.pending : STATUS_COLORS.overdue;
+              return (
+                <div key={i} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+                  <div style={{ width:'100%', background:color, borderRadius:'3px 3px 0 0', height:`${rate}%`, minHeight: rate > 0 ? 2 : 0, transition:'height 0.2s' }}
+                    title={`${rate}% (${w.on_time}/${w.with_due})`} />
+                  <span style={{ fontSize:'0.55rem', color:'#94a3b8', transform:'rotate(-45deg)', whiteSpace:'nowrap', marginTop:2 }}>
+                    {w.week_start?.slice(5,10).replace('-','/')}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display:'flex', gap:12, marginTop:4 }}>
+          {[['期限内完了', STATUS_COLORS.done], ['要改善', STATUS_COLORS.pending], ['期限超過', STATUS_COLORS.overdue]].map(([l,c]) => (
+            <span key={l} style={{ display:'flex', alignItems:'center', gap:4, fontSize:'0.7rem', color:'#64748b' }}>
+              <span style={{ width:8, height:8, borderRadius:2, background:c, display:'inline-block' }} />{l}
+            </span>
+          ))}
+        </div>
+      </>)}
+
+      {/* プロジェクト別進捗 */}
+      {projectData && card(<>
+        {sh('プロジェクト別進捗')}
+        {projectData.length === 0 ? (
+          <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'12px 0' }}>プロジェクトなし</div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {projectData.map(p => (
+              <Link key={p.project_id} to={`/projects/${p.project_id}`} style={{ textDecoration:'none' }}>
+                <div style={{ background:'#f8fafc', borderRadius:10, padding:'10px 14px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <span style={{ fontSize:'0.85rem', fontWeight:600, color:'#0f172a' }}>{p.project_name}</span>
+                    <span style={{ fontSize:'0.82rem', fontWeight:700, color: p.progress_rate >= 80 ? '#10b981' : '#64748b' }}>{p.progress_rate}%</span>
+                  </div>
+                  <div style={{ height:6, background:'#e2e8f0', borderRadius:3, overflow:'hidden', display:'flex' }}>
+                    {p.total > 0 && <>
+                      <div style={{ width:`${(p.done/p.total)*100}%`, background:STATUS_COLORS.done }} />
+                      <div style={{ width:`${(p.in_progress/p.total)*100}%`, background:STATUS_COLORS.in_progress }} />
+                      <div style={{ width:`${(p.pending/p.total)*100}%`, background:STATUS_COLORS.pending }} />
+                    </>}
+                  </div>
+                  <div style={{ display:'flex', gap:10, marginTop:4 }}>
+                    {[['完了', p.done, STATUS_COLORS.done], ['進行中', p.in_progress, STATUS_COLORS.in_progress], ['保留', p.pending, STATUS_COLORS.pending]].map(([l,v,c]) => (
+                      <span key={l} style={{ fontSize:'0.68rem', color:c }}>
+                        {l} {v}
+                      </span>
+                    ))}
+                    {p.overdue > 0 && <span style={{ fontSize:'0.68rem', color:STATUS_COLORS.overdue }}>期限切れ {p.overdue}</span>}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
 
 // キャンセルを除外したステータス設定
 const STATUS_CFG = {
@@ -354,9 +547,11 @@ function TaskCard({ t, members, onClick, compact = false }) {
 
 // ── メインダッシュボード ──────────────────────────────────────────
 export default function Dashboard() {
+  const [tab, setTab] = useState('tasks');
   const [me, setMe] = useState(null);
   const [mySummary, setMySummary] = useState(null);
   const [members, setMembers] = useState([]);
+  const [usergroups, setUsergroups] = useState([]);
   const [projects, setProjects] = useState([]);
   const [dashTeams, setDashTeams] = useState([]);
   const [myTasks, setMyTasks] = useState([]);
@@ -375,14 +570,16 @@ export default function Dashboard() {
         api.projects(),
         api.workloadTeams(),
         api.tasks({ assignee: m.userId, limit: 100 }),
+        api.usergroups(),
       ]))
-      .then(([meRes, sumRes, memRes, projRes, dtRes, myTasksRes]) => {
+      .then(([meRes, sumRes, memRes, projRes, dtRes, myTasksRes, ugRes]) => {
         setMe(meRes);
         setMySummary(sumRes.summary);
         setMembers(memRes.members);
         setProjects(projRes.projects);
         setDashTeams(dtRes.teams || []);
         setMyTasks(myTasksRes.tasks || []);
+        setUsergroups(ugRes.usergroups || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -462,12 +659,25 @@ export default function Dashboard() {
   const selStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', outline:'none' };
   const myName = me?.displayName?.split(/[\s　/]/)[0] || '';
 
+  const tabBtnStyle = (active) => ({
+    padding:'6px 20px', border:'none', borderRadius:8, cursor:'pointer', fontSize:'0.85rem', fontWeight: active ? 700 : 500,
+    background: active ? '#1e40af' : 'transparent', color: active ? '#fff' : '#64748b', transition:'all 0.12s',
+  });
+
   return (
     <div style={{ padding:'20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap:14 }}>
 
-      {myName && (
-        <div style={{ fontSize:'0.82rem', color:'#64748b', fontWeight:600 }}>{myName} のタスク</div>
-      )}
+      {/* ヘッダー + タブ */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
+        {myName && <div style={{ fontSize:'0.82rem', color:'#64748b', fontWeight:600 }}>{myName} のタスク</div>}
+        <div style={{ display:'flex', gap:4, background:'#f1f5f9', borderRadius:10, padding:3 }}>
+          <button style={tabBtnStyle(tab==='tasks')}   onClick={() => setTab('tasks')}>マイタスク</button>
+          <button style={tabBtnStyle(tab==='analytics')} onClick={() => setTab('analytics')}>分析</button>
+        </div>
+      </div>
+
+      {tab === 'analytics' && <AnalyticsTab members={members} usergroups={usergroups} />}
+      {tab === 'tasks' && <>
 
       {/* KPIカード */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
@@ -564,6 +774,7 @@ export default function Dashboard() {
       {selectedTask && (
         <TaskPanel task={selectedTask} members={members} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />
       )}
+      </>}
     </div>
   );
 }

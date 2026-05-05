@@ -2225,14 +2225,20 @@ function registerDashboardApi(deps) {
         rawMessages = await fetchReplies(firstMsg.thread_ts);
       }
 
-      // メッセージ本文中のユーザーIDを収集
-      // Botメッセージはblock kitのfallback textに @UXXX（角括弧なし）で格納される場合があるため両形式を抽出
+      // メッセージ本文・blocksからユーザーIDを収集
+      // ワークフロー/Block Kitメッセージは text(fallback)に表示名が入りIDは blocks内に格納される
       const mentionRe = /<@([^|>]+)(?:\|[^>]+)?>/g;
       const bareMentionRe = /@(U[A-Z0-9]{6,})/g;
       const allUserIds = new Set(rawMessages.map(m => m.user).filter(Boolean));
       for (const m of rawMessages) {
+        // text フィールドから
         for (const match of (m.text || '').matchAll(mentionRe)) allUserIds.add(match[1]);
         for (const match of (m.text || '').matchAll(bareMentionRe)) allUserIds.add(match[1]);
+        // blocks フィールドから (workflow/rich_text の user_id を抽出)
+        if (m.blocks) {
+          const blocksJson = JSON.stringify(m.blocks);
+          for (const match of blocksJson.matchAll(/"user_id":"([^"]+)"/g)) allUserIds.add(match[1]);
+        }
       }
 
       // ユーザー名解決: getUserDisplayName（起動時プリフェッチキャッシュ優先 → users.info → フォールバック）

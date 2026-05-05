@@ -1,4 +1,4 @@
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 
@@ -41,6 +41,75 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Slackのin-app browserかどうかを検出
+const isSlackBrowser = typeof navigator !== 'undefined' &&
+  /SlackWebClient|Slack\//.test(navigator.userAgent);
+
+function SlackBrowserBanner() {
+  const [state, setState] = useState('idle'); // idle | loading | ready | copied
+  const [transferUrl, setTransferUrl] = useState('');
+
+  const handleGenerate = async () => {
+    setState('loading');
+    try {
+      const data = await api.authTransferToken();
+      const currentPath = window.location.pathname + window.location.search;
+      const url = `${window.location.origin}/api/auth/transfer?token=${data.token}&redirect=${encodeURIComponent(currentPath)}`;
+      setTransferUrl(url);
+      setState('ready');
+    } catch { setState('idle'); }
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(transferUrl).then(() => {
+      setState('copied');
+      setTimeout(() => setState('ready'), 2500);
+    }).catch(() => {
+      // fallback
+      const el = document.createElement('textarea');
+      el.value = transferUrl; document.body.appendChild(el); el.select();
+      document.execCommand('copy'); document.body.removeChild(el);
+      setState('copied'); setTimeout(() => setState('ready'), 2500);
+    });
+  };
+
+  return (
+    <div style={{ background:'#f59e0b', padding:'10px 16px', display:'flex', alignItems:'flex-start', gap:10, flexWrap:'wrap' }}>
+      <div style={{ flex:1, minWidth:200 }}>
+        <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>Slackブラウザで開いています</div>
+        <div style={{ fontSize:'0.75rem', color:'#3b2a00', marginTop:2 }}>
+          セッションを引き継いでSafari/Chromeで開けます
+        </div>
+        {state === 'ready' && (
+          <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(0,0,0,0.1)', borderRadius:6, fontSize:'0.7rem', color:'#1a1a1a', wordBreak:'break-all', lineHeight:1.4 }}>
+            {transferUrl}
+          </div>
+        )}
+      </div>
+      <div style={{ display:'flex', gap:6, flexShrink:0, alignItems:'center' }}>
+        {state === 'idle' && (
+          <button onClick={handleGenerate}
+            style={{ padding:'6px 14px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:7, fontSize:'0.8rem', fontWeight:700, cursor:'pointer' }}>
+            ブラウザで開く準備
+          </button>
+        )}
+        {state === 'loading' && (
+          <span style={{ fontSize:'0.78rem', color:'#3b2a00' }}>生成中…</span>
+        )}
+        {state === 'ready' && (
+          <button onClick={handleCopy}
+            style={{ padding:'6px 14px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:7, fontSize:'0.8rem', fontWeight:700, cursor:'pointer' }}>
+            URLをコピー
+          </button>
+        )}
+        {state === 'copied' && (
+          <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#1a1a1a' }}>✓ コピーしました！SafariのURL欄に貼り付けてください</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -136,6 +205,7 @@ export default function Layout({ children }) {
           </div>
         )}
       </nav>
+      {isSlackBrowser && <SlackBrowserBanner />}
       <div className="global-content">
         {children}
       </div>

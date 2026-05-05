@@ -472,6 +472,42 @@ function registerDashboardApi(deps) {
   });
 
   // ================================
+  // セッション移行（Slack in-app browser → native browser）
+  // ================================
+  const transferTokens = new Map(); // token → { teamId, userId, sessionId, expires }
+
+  // ワンタイムトークン発行
+  expressApp.post('/api/auth/transfer-token', authMiddleware, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const sessionId = req.cookies?.dashboard_session || (req.headers.authorization || '').replace('Bearer ', '');
+      const crypto = require('crypto');
+      const token = crypto.randomBytes(24).toString('hex');
+      transferTokens.set(token, { teamId, userId, sessionId, expires: Date.now() + 90000 }); // 90秒
+      // 古いトークンの掃除
+      for (const [k, v] of transferTokens) { if (v.expires < Date.now()) transferTokens.delete(k); }
+      res.json({ token });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // トークン引き換え → セッションcookieを発行してリダイレクト
+  expressApp.get('/api/auth/transfer', async (req, res) => {
+    const { token, redirect = '/dashboard/crm' } = req.query;
+    const data = transferTokens.get(token);
+    if (!data || data.expires < Date.now()) {
+      return res.send('<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h2>リンクの有効期限が切れています</h2><p>アプリに戻って再度お試しください。</p></body></html>');
+    }
+    transferTokens.delete(token);
+    // 既存セッションを再利用
+    res.cookie('dashboard_session', data.sessionId, {
+      httpOnly: true, sameSite: 'lax',
+      maxAge: SESSION_COOKIE_MAX_AGE,
+      secure: process.env.NODE_ENV === 'production',
+    });
+    res.redirect(redirect);
+  });
+
+  // ================================
   // General APIs (role-aware)
   // ================================
 

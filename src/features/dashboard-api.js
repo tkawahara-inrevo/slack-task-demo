@@ -1567,12 +1567,17 @@ function registerDashboardApi(deps) {
     }
   });
 
-  // --- Team members (public read, for assignee filter) ---
+  // --- Team members (public read, for assignee filter, includes sub-teams) ---
   expressApp.get("/api/dashboard/teams/:id/members", authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const members = await dbListDashTeamMembers(teamId, req.params.id);
-      res.json({ memberIds: members.map(m => m.user_id) });
+      const subtreeIds = await dbGetDashTeamSubtree(teamId, req.params.id);
+      const allTeamIds = [req.params.id, ...subtreeIds];
+      const rows = await dbQuery(
+        `SELECT DISTINCT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id = ANY($2)`,
+        [teamId, allTeamIds]
+      );
+      res.json({ memberIds: rows.rows.map(r => r.user_id) });
     } catch (e) {
       res.status(500).json({ error: "internal" });
     }
@@ -2627,19 +2632,23 @@ function registerDashboardApi(deps) {
     }
   });
 
-  // --- GET /analytics/period-summary (直近7日・1か月の個人/チームサマリー) ---
+  // --- GET /analytics/period-summary ---
   expressApp.get("/api/dashboard/analytics/period-summary", authWithRole, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
-      const selfOnly = req.query.scope === 'self';
+      const targetUser = req.query.scope === 'self' ? userId : null;
+
+      // 現在の担当中タスク数（スナップショット）
+      const activeRes = await dbQuery(
+        `SELECT COUNT(*)::int AS active FROM tasks WHERE team_id=$1 AND assignee_id=$2 AND status NOT IN ('done','cancelled')`,
+        [teamId, targetUser || userId]
+      );
+      const active = activeRes.rows[0]?.active || 0;
 
       const getStats = async (days) => {
-        const params = [teamId];
-        let cond = '';
-        if (selfOnly) { cond = 'AND assignee_id = $2'; params.push(userId); }
+        const params = [teamId, targetUser || userId];
         const q = `
           SELECT
-            COUNT(*) FILTER (WHERE created_at  >= NOW() - INTERVAL '${days} days')::int AS created,
             COUNT(*) FILTER (WHERE status='done' AND completed_at >= NOW() - INTERVAL '${days} days')::int AS completed,
             COUNT(*) FILTER (WHERE status='done' AND completed_at >= NOW() - INTERVAL '${days} days'
                              AND due_date IS NOT NULL AND completed_at::date <= due_date)::int AS on_time,
@@ -2647,18 +2656,14 @@ function registerDashboardApi(deps) {
                              AND due_date IS NOT NULL)::int AS with_due,
             COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/86400)
               FILTER (WHERE status='done' AND completed_at >= NOW() - INTERVAL '${days} days')), 0)::int AS avg_days
-          FROM tasks
-          WHERE team_id = $1 ${cond}
-            AND (created_at >= NOW() - INTERVAL '${days} days'
-              OR (status='done' AND completed_at >= NOW() - INTERVAL '${days} days'))
+          FROM tasks WHERE team_id=$1 AND assignee_id=$2
         `;
         const r = await dbQuery(q, params);
         const row = r.rows[0] || {};
-        const created = row.created || 0, completed = row.completed || 0;
         const on_time = row.on_time || 0, with_due = row.with_due || 0;
         return {
-          created, completed,
-          completion_rate: created > 0 ? Math.round(completed / created * 100) : null,
+          active,
+          completed: row.completed || 0,
           compliance_rate: with_due > 0 ? Math.round(on_time / with_due * 100) : null,
           avg_days: row.avg_days || 0,
         };

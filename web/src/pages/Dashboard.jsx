@@ -72,17 +72,17 @@ function AnalyticsTab({ members, usergroups }) {
 
   const PeriodCard = ({ label, data }) => {
     if (!data) return null;
+    const cr = data.compliance_rate;
     const metrics = [
-      { label: '作成', value: data.created, unit: '件', color: '#6366f1' },
-      { label: '完了', value: data.completed, unit: '件', color: '#10b981' },
-      { label: '消化率', value: data.completion_rate ?? '—', unit: data.completion_rate != null ? '%' : '', color: data.completion_rate >= 80 ? '#10b981' : data.completion_rate >= 50 ? '#f59e0b' : '#dc2626' },
-      { label: '遵守率', value: data.compliance_rate ?? '—', unit: data.compliance_rate != null ? '%' : '', color: data.compliance_rate >= 80 ? '#10b981' : data.compliance_rate >= 50 ? '#f59e0b' : '#dc2626' },
-      { label: '平均処理', value: data.avg_days, unit: '日', color: '#64748b' },
+      { label: '担当中',   value: data.active,    unit: '件', color: '#6366f1' },
+      { label: '期間完了', value: data.completed,  unit: '件', color: '#10b981' },
+      { label: '遵守率',   value: cr ?? '—',       unit: cr != null ? '%' : '', color: cr == null ? '#94a3b8' : cr >= 80 ? '#10b981' : cr >= 50 ? '#f59e0b' : '#dc2626' },
+      { label: '平均処理', value: data.avg_days,   unit: '日', color: '#64748b' },
     ];
     return (
       <div style={{ background:'#f8fafc', borderRadius:10, padding:'14px 16px' }}>
         <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#64748b', marginBottom:12 }}>{label}</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
           {metrics.map(m => (
             <div key={m.label} style={{ textAlign:'center' }}>
               <div style={{ fontSize:'1.4rem', fontWeight:900, color:m.color, lineHeight:1 }}>{m.value}<span style={{ fontSize:'0.7rem', fontWeight:500 }}>{m.unit}</span></div>
@@ -532,70 +532,55 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   );
 }
 
-// ── タスクカード行（検索結果・最新タスク共通） ──────────────────────
-function TaskCard({ t, members, onClick, compact = false }) {
+// ── タスクカード（グリッドレイアウト共通） ──────────────────────────
+function TaskCard({ t, members, onClick }) {
   const title = cleanTitle(t.title, t.content);
   const st = STATUS_CFG[t.status] || { label: t.status, color: '#94a3b8' };
   const overdue = isOverdueTask(t);
   const assigneeName = cleanAssigneeName(t.assignee_label) ||
     members.find(m => m.assignee_id === t.assignee_id)?.displayName?.split('/')[0]?.trim() || null;
-  const contentPreview = getContentBody(t.title || t.content).slice(0, 80);
-  // broadcastタスクの個人完了バッジ
   const selfDone = t.task_type === 'broadcast' && t.self_completed;
 
-  if (compact) {
-    return (
-      <div onClick={onClick} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0', borderBottom:'1px solid #f1f5f9', cursor:'pointer' }}
-        onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
-        onMouseLeave={e => e.currentTarget.style.background=''}>
-        <span style={{ width:8, height:8, borderRadius:'50%', background: selfDone ? '#10b981' : st.color, flexShrink:0 }} />
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:'0.85rem', fontWeight:600, color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{title}</div>
-          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1, display:'flex', alignItems:'center', gap:6 }}>
-            {assigneeName || <span style={{ color:'#e2e8f0' }}>担当者未設定</span>}
-            {t.task_type === 'broadcast' && (
-              <span style={{ fontSize:'0.62rem', padding:'1px 5px', borderRadius:3, background: selfDone ? '#d1fae5' : '#fef3c7', color: selfDone ? '#065f46' : '#92400e', fontWeight:600 }}>
-                {selfDone ? '自分完了済' : '一斉配信'}
-              </span>
-            )}
-          </div>
-        </div>
-        <div style={{ textAlign:'right', flexShrink:0 }}>
-          <span style={{ fontSize:'0.7rem', fontWeight:600, padding:'2px 8px', borderRadius:20, background:st.color+'18', color:st.color }}>{st.label}</span>
-          {t.due_date && <div style={{ fontSize:'0.65rem', marginTop:2, color: overdue?'#dc2626':'#94a3b8', fontWeight: overdue?700:400 }}>{overdue ? `${daysSince(t.due_date)}日超過` : fmtDate(t.due_date)}</div>}
-        </div>
-      </div>
-    );
-  }
-
-  // 検索結果（カードスタイル）
   return (
     <div onClick={onClick}
-      style={{ background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', padding:'12px 16px', cursor:'pointer', transition:'box-shadow 0.15s, border-color 0.15s' }}
-      onMouseEnter={e => { e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'; e.currentTarget.style.borderColor='#c7d2fe'; }}
+      style={{ background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', padding:'12px 14px', cursor:'pointer',
+        transition:'box-shadow 0.15s, border-color 0.15s', display:'flex', flexDirection:'column', gap:8,
+        borderLeft: `3px solid ${selfDone ? '#10b981' : st.color}` }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow='0 3px 10px rgba(0,0,0,0.08)'; e.currentTarget.style.borderColor='#c7d2fe'; }}
       onMouseLeave={e => { e.currentTarget.style.boxShadow='none'; e.currentTarget.style.borderColor='#e2e8f0'; }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10, marginBottom:6 }}>
-        <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a', flex:1, minWidth:0, lineHeight:1.4 }}>{title}</div>
-        <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'3px 10px', borderRadius:99, background:st.color+'18', color:st.color, flexShrink:0, whiteSpace:'nowrap' }}>{st.label}</span>
+
+      {/* ステータスバッジ */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:6 }}>
+        <span style={{ fontSize:'0.68rem', fontWeight:700, padding:'2px 8px', borderRadius:20,
+          background:st.color+'18', color:st.color, whiteSpace:'nowrap' }}>{st.label}</span>
+        {t.task_type === 'broadcast' && (
+          <span style={{ fontSize:'0.62rem', padding:'1px 6px', borderRadius:3,
+            background: selfDone ? '#d1fae5' : '#fef3c7', color: selfDone ? '#065f46' : '#92400e', fontWeight:600 }}>
+            {selfDone ? '自分完了済' : '一斉配信'}
+          </span>
+        )}
       </div>
-      {contentPreview && (
-        <div style={{ fontSize:'0.75rem', color:'#64748b', lineHeight:1.5, marginBottom:8, overflow:'hidden', textOverflow:'ellipsis', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
-          {contentPreview}
-        </div>
-      )}
-      <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
+
+      {/* タイトル */}
+      <div style={{ fontWeight:600, fontSize:'0.85rem', color:'#0f172a', lineHeight:1.45,
+        overflow:'hidden', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
+        {title}
+      </div>
+
+      {/* メタ情報 */}
+      <div style={{ display:'flex', flexDirection:'column', gap:3, marginTop:'auto' }}>
         {assigneeName && (
-          <span style={{ fontSize:'0.72rem', color:'#94a3b8', display:'flex', alignItems:'center', gap:3 }}>
+          <span style={{ fontSize:'0.7rem', color:'#94a3b8', display:'flex', alignItems:'center', gap:3 }}>
             👤 {assigneeName}
           </span>
         )}
         {t.due_date && (
-          <span style={{ fontSize:'0.72rem', fontWeight: overdue?700:400, color: overdue?'#dc2626':'#94a3b8', display:'flex', alignItems:'center', gap:3 }}>
-            📅 {fmtDate(t.due_date)}{overdue && ` （${daysSince(t.due_date)}日超過）`}
+          <span style={{ fontSize:'0.7rem', fontWeight: overdue?700:400, color: overdue?'#dc2626':'#94a3b8', display:'flex', alignItems:'center', gap:3 }}>
+            📅 {fmtDate(t.due_date)}{overdue && ` (${daysSince(t.due_date)}日超過)`}
           </span>
         )}
         {t.project_name && (
-          <span style={{ fontSize:'0.72rem', color:'#6366f1' }}>📁 {t.project_name}</span>
+          <span style={{ fontSize:'0.7rem', color:'#6366f1' }}>📁 {t.project_name}</span>
         )}
       </div>
     </div>
@@ -781,9 +766,11 @@ export default function Dashboard() {
             アクティブなタスクはありません
           </div>
         ) : (
-          activeTasks.map(t => (
-            <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} compact />
-          ))
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
+            {activeTasks.map(t => (
+              <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
+            ))}
+          </div>
         )}
       </>)}
 
@@ -840,7 +827,7 @@ export default function Dashboard() {
           ) : (
             <>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginBottom:10 }}>{filteredTasks.total}件</div>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
                 {filteredTasks.tasks.map(t => (
                   <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
                 ))}

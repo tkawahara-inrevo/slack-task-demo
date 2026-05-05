@@ -2171,23 +2171,29 @@ function registerDashboardApi(deps) {
       if (!task) return res.status(404).json({ error: "not_found" });
       if (!task.channel_id || !task.message_ts) return res.json({ messages: [], nameMap: {} });
 
-      // ページネーションで全件取得
-      let rawMessages = [];
-      let cursor;
-      do {
-        const result = await slackClient.conversations.replies({
-          channel: task.channel_id,
-          ts: task.message_ts,
-          limit: 200,
-          ...(cursor ? { cursor } : {}),
-        });
-        rawMessages = rawMessages.concat(result.messages || []);
-        console.log(`[thread] channel=${task.channel_id} ts=${task.message_ts} got=${result.messages?.length} has_more=${result.has_more} cursor=${result.response_metadata?.next_cursor}`);
-        cursor = result.response_metadata?.next_cursor || null;
-      } while (cursor);
-      // 各メッセージのtsとthread_tsを確認
-      for (const m of rawMessages) {
-        console.log(`[thread msg] ts=${m.ts} thread_ts=${m.thread_ts} user=${m.user} subtype=${m.subtype}`);
+      // ページネーションで全件取得するヘルパー
+      const fetchReplies = async (ts) => {
+        let msgs = [];
+        let cur;
+        do {
+          const r = await slackClient.conversations.replies({
+            channel: task.channel_id,
+            ts,
+            limit: 200,
+            ...(cur ? { cursor: cur } : {}),
+          });
+          msgs = msgs.concat(r.messages || []);
+          cur = r.response_metadata?.next_cursor || null;
+        } while (cur);
+        return msgs;
+      };
+
+      let rawMessages = await fetchReplies(task.message_ts);
+
+      // message_tsが返信のtsだった場合、thread_tsで再フェッチしてスレッド全体を取得
+      const firstMsg = rawMessages[0];
+      if (firstMsg?.thread_ts && firstMsg.thread_ts !== task.message_ts) {
+        rawMessages = await fetchReplies(firstMsg.thread_ts);
       }
 
       // メッセージ本文中の<@UXXX>メンションも含めて全ユーザーIDを収集
@@ -2226,6 +2232,7 @@ function registerDashboardApi(deps) {
         Object.entries(dbUserMap).map(([id, u]) => [id, (u.display_name || id).split('/')[0].trim()])
       );
 
+      const rootTs = rawMessages[0]?.ts;
       const messages = rawMessages.map(m => {
         const u = dbUserMap[m.user] || null;
         return {
@@ -2234,7 +2241,7 @@ function registerDashboardApi(deps) {
           displayName: u?.display_name || m.user || 'Bot',
           avatar_url: u?.avatar_url || null,
           text: m.text || '',
-          is_root: m.ts === task.message_ts,
+          is_root: m.ts === rootTs,
         };
       });
 

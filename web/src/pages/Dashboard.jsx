@@ -22,6 +22,22 @@ const cleanTitle = (title, content) => {
     || '（タイトルなし）';
 };
 
+// 担当者名をクリーン（@除去・先頭の1名だけ）
+const cleanAssigneeName = (label) => {
+  if (!label) return null;
+  const first = label.trim().replace(/^@/, '').split(/\s+@/)[0];
+  return first.split('/')[0].trim() || first.trim() || null;
+};
+
+// コンテンツ本文（タイトル行を除いた残り）
+const getContentBody = (content) => {
+  const cleaned = (content || '')
+    .replace(/^(<@[^>]+>\s*)+/g, '')
+    .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')
+    .replace(/^\s+/, '');
+  return cleaned.split('\n').slice(1).join('\n').trim();
+};
+
 const fmtDate = (d) => {
   if (!d) return '—';
   const dt = new Date(d);
@@ -55,15 +71,11 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const st = STATUS_CFG[status] || { label: status, color: '#94a3b8' };
   const title = cleanTitle(displayTask.title, displayTask.content);
   const overdue = isOverdueTask({ ...displayTask, status });
+  const contentBody = getContentBody(displayTask.content);
 
-  // 担当者名を解決
-  const assigneeName = displayTask.assignee_label ||
-    members.find(m => m.assignee_id === displayTask.assignee_id)?.displayName || null;
-
-  const cleanContent = (c) => (c || '')
-    .replace(/^(<@[^>]+>\s*)+/g, '')
-    .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')
-    .replace(/^\s+/, '');
+  // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
+  const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||
+    members.find(m => m.assignee_id === displayTask.assignee_id)?.displayName?.split('/')[0]?.trim() || null;
 
   return (
     <>
@@ -116,18 +128,17 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
           })}
         </div>
 
-        {/* コンテンツ */}
+        {/* コンテンツ本文（タイトル行の次以降） */}
         <div style={{ flex:1, overflowY:'auto', padding:'18px 22px' }}>
-          {displayTask.content && cleanContent(displayTask.content) !== title && (
+          {contentBody ? (
             <div>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:8 }}>内容</div>
               <div style={{ fontSize:'0.85rem', color:'#374151', lineHeight:1.9, whiteSpace:'pre-wrap', wordBreak:'break-word', background:'#f8fafc', borderRadius:10, padding:'14px 16px', border:'1px solid #f1f5f9' }}>
-                {cleanContent(displayTask.content)}
+                {contentBody}
               </div>
             </div>
-          )}
-          {!displayTask.content && (
-            <div style={{ color:'#cbd5e1', fontSize:'0.82rem', textAlign:'center', paddingTop:20 }}>内容なし</div>
+          ) : (
+            <div style={{ color:'#cbd5e1', fontSize:'0.82rem', textAlign:'center', paddingTop:20 }}>（本文なし）</div>
           )}
         </div>
       </div>
@@ -140,8 +151,8 @@ function TaskCard({ t, members, onClick, compact = false }) {
   const title = cleanTitle(t.title, t.content);
   const st = STATUS_CFG[t.status] || { label: t.status, color: '#94a3b8' };
   const overdue = isOverdueTask(t);
-  const assigneeName = t.assignee_label ||
-    members.find(m => m.assignee_id === t.assignee_id)?.displayName || null;
+  const assigneeName = cleanAssigneeName(t.assignee_label) ||
+    members.find(m => m.assignee_id === t.assignee_id)?.displayName?.split('/')[0]?.trim() || null;
   const contentPreview = (t.content || '')
     .replace(/^(<@[^>]+>\s*)+/g, '')
     .replace(/^(@[\w./　　-鿿]+\s*)+/g, '')

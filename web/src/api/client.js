@@ -168,6 +168,7 @@ export const api = {
   // Task CRUD
   taskDetail: (id) => apiFetch(`/tasks/${id}`),
   taskUpdate: (id, body) => jsonPut(`/tasks/${id}`, body),
+  taskGet: (id) => apiFetch(`/tasks/${id}`),
   taskSetStatus: (id, status) => apiFetch(`/tasks/${id}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

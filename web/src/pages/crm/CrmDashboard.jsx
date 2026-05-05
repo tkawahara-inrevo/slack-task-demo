@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useBreakpoint } from '../../hooks/useWindowWidth';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine, LabelList } from 'recharts';
 import { api } from '../../api/client';
 
@@ -164,7 +163,6 @@ function Drilldown({ rep, type, start, end, onClose }) {
 }
 
 export default function CrmDashboard() {
-  const { isMobile, isTablet } = useBreakpoint();
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -304,7 +302,7 @@ export default function CrmDashboard() {
   );
 
   return (
-    <div style={{ padding: isMobile ? '10px 12px' : '14px 18px', background:'#f1f5f9', minHeight:'100%', display:'flex', flexDirection:'column', gap:10 }}>
+    <div style={{ padding:'14px 18px', background:'#f1f5f9', minHeight:'100%', display:'flex', flexDirection:'column', gap:10 }}>
 
       {/* ── フィルターバー ── */}
       <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
@@ -352,7 +350,7 @@ export default function CrmDashboard() {
       </div>
 
       {/* ── KPIカード 5枚 ── */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : isTablet ? 'repeat(3,1fr)' : 'repeat(5,1fr)', gap:10 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
         {/* 入金額 — green */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #059669' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
@@ -438,7 +436,7 @@ export default function CrmDashboard() {
       </div>
 
       {/* ── メイン2カラム ── */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap:10, flex:1 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, flex:1 }}>
 
         {/* 左カラム */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
@@ -453,7 +451,7 @@ export default function CrmDashboard() {
               <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>6名　クリックでドリルダウン</span>
             </div>
             <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem', minWidth: isMobile ? 360 : 'auto' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
                 <thead>
                   <tr style={{ background:'#f8fafc' }}>
                     {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (

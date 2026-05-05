@@ -49,7 +49,7 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
 const isMobileDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 // ブラウザ転送ボタン（モバイルナビに常時表示）
-function BrowserTransferButton({ onClose } = {}) {
+function BrowserTransferButton({ onClose, floating } = {}) {
   const [state, setState] = useState('idle'); // idle | loading | ready | copied
   const [transferUrl, setTransferUrl] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -84,10 +84,17 @@ function BrowserTransferButton({ onClose } = {}) {
 
   return (
     <>
-      <button onClick={handleGenerate}
-        style={{ width:'100%', background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:9, color:'#fff', fontSize:'0.85rem', fontWeight:600, padding:'10px 16px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}>
-        🔗 <span>Safariで開く（セッション引き継ぎ）</span>
-      </button>
+      {floating ? (
+        <button onClick={handleGenerate}
+          style={{ background:'#1e40af', border:'none', borderRadius:50, color:'#fff', fontSize:'0.8rem', fontWeight:700, padding:'10px 16px', cursor:'pointer', boxShadow:'0 4px 16px rgba(30,64,175,0.5)', display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
+          🔗 Safariで開く
+        </button>
+      ) : (
+        <button onClick={handleGenerate}
+          style={{ width:'100%', background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:9, color:'#fff', fontSize:'0.85rem', fontWeight:600, padding:'10px 16px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}>
+          🔗 <span>Safariで開く（セッション引き継ぎ）</span>
+        </button>
+      )}
 
       {showModal && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:2000, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:'0 0 20px' }}
@@ -221,6 +228,12 @@ export default function Layout({ children }) {
       <div className="global-content">
         {children}
       </div>
+      {/* モバイル: フローティングSafariボタン */}
+      {user && isMobileDevice && (
+        <div style={{ position:'fixed', bottom:20, right:16, zIndex:500 }}>
+          <BrowserTransferButton floating />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { useBreakpoint } from '../../hooks/useWindowWidth';
 import { api } from '../../api/client';
 
 const YOMI_ORDER = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
@@ -463,7 +462,7 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
   const editModal = editing && (
     <div className="modal-overlay" onClick={()=>{ clearTimeout(autoSaveTimer.current); setEditing(false); }}>
       <div className="modal-content" onClick={e=>e.stopPropagation()}
-        style={{ maxWidth: isMobile ? '100vw' : 820, width: isMobile ? '100vw' : '90vw', padding:0, overflow:'hidden', display:'flex', flexDirection:'column', maxHeight: isMobile ? '100dvh' : '92vh', borderRadius: isMobile ? 0 : 16, margin: isMobile ? 0 : undefined }}>
+        style={{ maxWidth:820, width:'90vw', padding:0, overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'92vh', borderRadius:16 }}>
 
         {/* ── グラデーションヘッダー ── */}
         <div style={{ background:'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', padding:'16px 22px', flexShrink:0 }}>

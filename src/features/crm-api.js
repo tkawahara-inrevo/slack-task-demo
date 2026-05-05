@@ -655,12 +655,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       if (type === 'payments') {
         const { rows } = await dbQuery(`
-          SELECT payment_date, company, plan, incentive_amount, amount
-          FROM kintone_payments
-          WHERE staff=$1
-            AND payment_date BETWEEN $2::date AND $3::date
-            AND incentive_amount > 0
-          ORDER BY payment_date DESC
+          SELECT kp.payment_date, kp.company, kp.plan, kp.incentive_amount, kp.amount,
+            CASE WHEN kp.plan LIKE '%月額%' THEN (
+              SELECT COUNT(*)::int FROM kintone_payments kp2
+              WHERE kp2.company = kp.company
+                AND kp2.payment_date <= kp.payment_date
+            ) ELSE NULL END AS month_num
+          FROM kintone_payments kp
+          WHERE kp.staff=$1
+            AND kp.payment_date BETWEEN $2::date AND $3::date
+            AND kp.incentive_amount > 0
+          ORDER BY kp.payment_date DESC
         `, [rep, start, end]);
         res.json({ rows });
       } else if (type === 'won') {

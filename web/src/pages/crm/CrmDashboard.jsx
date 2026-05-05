@@ -125,10 +125,17 @@ function Drilldown({ rep, type, start, end, onClose }) {
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</div>
                     {r.plan && (
-                      <span style={{ fontSize:'0.62rem', background:'#eff6ff', color:'#1e40af', borderRadius:4, padding:'1px 7px', marginTop:3, display:'inline-block', fontWeight:600 }}>{r.plan}</span>
+                      <span style={{ fontSize:'0.62rem', background:'#eff6ff', color:'#1e40af', borderRadius:4, padding:'1px 7px', marginTop:3, display:'inline-block', fontWeight:600 }}>
+                        {r.plan?.includes('月額') && r.month_num ? `月額（${r.month_num}ヶ月目）` : r.plan}
+                      </span>
                     )}
                   </div>
-                  <div style={{ fontWeight:800, color:'#059669', fontSize:'0.9rem', flexShrink:0 }}>{fmtMYen(r.incentive_amount)}</div>
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <div style={{ fontWeight:800, color:'#059669', fontSize:'0.9rem' }}>{fmtMYen(r.incentive_amount)}</div>
+                    {r.amount > 0 && r.amount !== r.incentive_amount && (
+                      <div style={{ fontSize:'0.62rem', color:'#94a3b8', marginTop:1 }}>入金 {fmtMYen(r.amount)}</div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

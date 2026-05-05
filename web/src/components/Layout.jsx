@@ -49,7 +49,7 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
 const isMobileDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 // ブラウザ転送ボタン（モバイルナビに常時表示）
-function BrowserTransferButton() {
+function BrowserTransferButton({ onClose } = {}) {
   const [state, setState] = useState('idle'); // idle | loading | ready | copied
   const [transferUrl, setTransferUrl] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -57,6 +57,7 @@ function BrowserTransferButton() {
   const handleGenerate = async () => {
     setState('loading');
     setShowModal(true);
+    onClose?.();
     try {
       const data = await api.authTransferToken();
       const currentPath = window.location.pathname + window.location.search;
@@ -84,8 +85,8 @@ function BrowserTransferButton() {
   return (
     <>
       <button onClick={handleGenerate}
-        style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)', borderRadius:7, color:'#fff', fontSize:'0.75rem', fontWeight:600, padding:'5px 10px', cursor:'pointer', whiteSpace:'nowrap' }}>
-        🔗 Safariで開く
+        style={{ width:'100%', background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:9, color:'#fff', fontSize:'0.85rem', fontWeight:600, padding:'10px 16px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}>
+        🔗 <span>Safariで開く（セッション引き継ぎ）</span>
       </button>
 
       {showModal && (
@@ -167,7 +168,6 @@ export default function Layout({ children }) {
 
           {user && (
             <div className="global-nav-user">
-              {isMobileDevice && <BrowserTransferButton />}
               {user.displayName}
               {user.role === 'admin' && <span className="nav-role-badge">admin</span>}
             </div>
@@ -203,8 +203,14 @@ export default function Layout({ children }) {
               <NavLink to={adminLink} className={({ isActive }) => isActive ? 'mobile-nav-link active' : 'mobile-nav-link'}
                 onClick={() => setMobileOpen(false)}>Corp</NavLink>
             )}
+            {/* Safariで開くボタン（モバイルメニュー内） */}
             {user && (
-              <div style={{ padding: '10px 20px', fontSize: 13, color: '#9ba1ad', borderTop: '1px solid #2d3139', marginTop: 4 }}>
+              <div style={{ padding: '12px 16px', borderTop: '1px solid #2d3139', marginTop: 4 }}>
+                <BrowserTransferButton onClose={() => setMobileOpen(false)} />
+              </div>
+            )}
+            {user && (
+              <div style={{ padding: '10px 20px', fontSize: 13, color: '#9ba1ad', borderTop: '1px solid #2d3139' }}>
                 {user.displayName}
                 {user.role === 'admin' && <span className="nav-role-badge" style={{ marginLeft: 8 }}>admin</span>}
               </div>

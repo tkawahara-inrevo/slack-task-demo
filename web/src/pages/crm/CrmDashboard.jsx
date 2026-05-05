@@ -452,40 +452,8 @@ export default function CrmDashboard() {
               </div>
               <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>6名　クリックでドリルダウン</span>
             </div>
-            {isMobile ? (
-              /* モバイル: カードリスト形式 */
-              <div>
-                {reps.map((r, ri) => {
-                  const color = REP_COLORS[ri % REP_COLORS.length];
-                  const repTarget     = repTargetMap[r.rep] || 0;
-                  const repTermTarget = period === 'term' ? repTarget * termMonths : repTarget;
-                  const repAchieve    = (repTermTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTermTarget * 100) : null;
-                  const [fam, given]  = r.rep.split(/[\s　]/);
-                  return (
-                    <div key={r.rep} style={{ padding:'10px 14px', borderBottom:'1px solid #f8fafc', display:'flex', alignItems:'center', gap:10 }}>
-                      <span style={{ width:28, height:28, borderRadius:7, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800,
-                        background: r.isOther ? '#f1f5f9' : `${color}22`, color: r.isOther ? '#94a3b8' : color }}>
-                        {r.isOther ? '他' : (fam?.[0] || '?')}
-                      </span>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontWeight:700, fontSize:'0.82rem', color:'#0f172a' }}>{r.isOther ? 'その他' : `${fam} ${given||''}`}</div>
-                        <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
-                          受注 {r.wonCount}件 / 初回商談 {r.meetingCount}件
-                        </div>
-                      </div>
-                      <div style={{ textAlign:'right', flexShrink:0 }}>
-                        <div style={{ fontSize:'0.82rem', fontWeight:700, color:'#0891b2' }}>{fmtM(r.incentiveAmount || 0)}</div>
-                        {repAchieve != null && (
-                          <div style={{ fontSize:'0.72rem', fontWeight:700, marginTop:1, color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              /* デスクトップ: フルテーブル */
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+            <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem', minWidth: isMobile ? 360 : 'auto' }}>
                 <thead>
                   <tr style={{ background:'#f8fafc' }}>
                     {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
@@ -553,7 +521,7 @@ export default function CrmDashboard() {
                   })}
                 </tbody>
               </table>
-            )}
+            </div>
           </div>
 
           {/* アラート — 常に表示 */}

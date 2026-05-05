@@ -167,7 +167,8 @@ export default function CustomerList() {
           <div style={{ textAlign:'center', padding:40, color:'#94a3b8', fontSize:'0.85rem' }}>顧客がありません</div>
         ) : (
           <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem' }}>
+            <div className="table-scroll">
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem', minWidth:500 }}>
               <thead>
                 <tr style={{ background:'#f8fafc', borderBottom:'1px solid #e2e8f0' }}>
                   {['会社名','担当者','業界','商談','最新ヨミ','最終更新'].map((h, i) => (
@@ -216,6 +217,7 @@ export default function CustomerList() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 

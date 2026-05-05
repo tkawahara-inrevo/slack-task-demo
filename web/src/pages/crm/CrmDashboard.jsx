@@ -452,7 +452,8 @@ export default function CrmDashboard() {
               </div>
               <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>6名　クリックでドリルダウン</span>
             </div>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+            <div className="table-scroll">
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem', minWidth:460 }}>
               <thead>
                 <tr style={{ background:'#f8fafc' }}>
                   {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
@@ -527,6 +528,7 @@ export default function CrmDashboard() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* アラート — 常に表示 */}

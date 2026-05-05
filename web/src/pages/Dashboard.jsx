@@ -101,8 +101,8 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const st = STATUS_CFG[status] || { label: status, color: '#94a3b8' };
   const title = cleanTitle(displayTask.title, displayTask.content);
   const overdue = isOverdueTask({ ...displayTask, status });
-  // パネル本文：メンショントリミングなし、タイトル行の次から
-  const { body: contentBody } = parseTitleAndBody(displayTask.title || displayTask.content, null);
+  // パネル本文：contentがあればそのまま、Slackタスク(content=null)はtitleから抽出
+  const contentBody = displayTask.content?.trim() || parseTitleAndBody(displayTask.title, null).body;
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||
@@ -247,8 +247,7 @@ export default function Dashboard() {
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [dashTeams, setDashTeams] = useState([]);
-  const [recentTasks, setRecentTasks] = useState([]);
-  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', dashDept:'', dashTeam:'', overdue:false, sort:'', page:1 });
+  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', dashDept:'', dashTeam:'', overdue:false, page:1 });
   const [filteredTasks, setFilteredTasks] = useState({ tasks:[], total:0 });
   const [filterApplied, setFilterApplied] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -258,13 +257,11 @@ export default function Dashboard() {
     Promise.all([
       api.summary(), api.members(), api.projects(),
       api.workloadTeams(),
-      api.tasks({ limit: 8, sort: 'created_desc' }),
-    ]).then(([sum, mem, proj, dt, recent]) => {
+    ]).then(([sum, mem, proj, dt]) => {
       setSummary(sum.summary);
       setMembers(mem.members);
       setProjects(proj.projects);
       setDashTeams(dt.teams || []);
-      setRecentTasks(recent.tasks || []);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
@@ -287,20 +284,18 @@ export default function Dashboard() {
     if (filter.dashTeam) params.dashTeam = filter.dashTeam;
     else if (filter.dashDept) params.dashTeam = filter.dashDept;
     if (filter.overdue) params.overdue = '1';
-    if (filter.sort) params.sort = filter.sort;
     const res = await api.tasks(params);
     setFilteredTasks(res);
     setFilterApplied(true);
   };
 
   const clearFilter = () => {
-    setFilter({ status:'', assignee:'', project:'', dashDept:'', dashTeam:'', overdue:false, sort:'', page:1 });
+    setFilter({ status:'', assignee:'', project:'', dashDept:'', dashTeam:'', overdue:false, page:1 });
     setFilterApplied(false);
     setFilteredTasks({ tasks:[], total:0 });
   };
 
   const handleStatusChange = (taskId, newStatus) => {
-    setRecentTasks(prev => prev.map(t => t.id===taskId ? {...t, status:newStatus} : t));
     setFilteredTasks(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id===taskId ? {...t, status:newStatus} : t) }));
     if (selectedTask?.id === taskId) setSelectedTask(s => s ? {...s, status:newStatus} : s);
   };
@@ -429,12 +424,6 @@ export default function Dashboard() {
             </select>
           )}
 
-          <select value={filter.sort} onChange={e => setF({sort:e.target.value})} style={selStyle}>
-            <option value="">並び順：作成日</option>
-            <option value="due_date_asc">期限：近い順</option>
-            <option value="due_date_desc">期限：遠い順</option>
-          </select>
-
           <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:'0.8rem', color:'#374151', cursor:'pointer' }}>
             <input type="checkbox" checked={filter.overdue} onChange={e => setF({overdue:e.target.checked})} />
             期限切れのみ
@@ -466,18 +455,6 @@ export default function Dashboard() {
             </>
           )
         )}
-      </>)}
-
-      {/* 最新タスク（フィルター適用時は非表示） */}
-      {!filterApplied && card(<>
-        {sh('最新タスク', '直近8件')}
-        {recentTasks.length === 0
-          ? <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'12px 0' }}>タスクがありません</div>
-          : recentTasks.map((t, i) => (
-            <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} compact
-              borderBottom={i < recentTasks.length - 1} />
-          ))
-        }
       </>)}
 
       {/* タスクスライドパネル */}

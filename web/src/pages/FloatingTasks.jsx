@@ -359,6 +359,9 @@ export default function FloatingTasks() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [teamOverdue, setTeamOverdue] = useState([]);
   const [showTeamAlert, setShowTeamAlert] = useState(false);
+  const [alertSelected, setAlertSelected] = useState(new Set());
+  const [alertNotifying, setAlertNotifying] = useState(false);
+  const [incompleteModal, setIncompleteModal] = useState(null);
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
@@ -483,8 +486,29 @@ export default function FloatingTasks() {
       {/* チームアラートリスト */}
       {showTeamAlert && teamOverdue.length > 0 && (
         <div style={{ background:'#fef2f2', borderBottom:'1px solid #fca5a5', padding:'8px 12px', flexShrink:0 }}>
-          <div style={{ fontSize:'0.68rem', fontWeight:700, color:'#dc2626', marginBottom:6 }}>⚠ チーム 期限切れ（{teamOverdue.length}件）</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:140, overflowY:'auto' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:6, flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.68rem', fontWeight:700, color:'#dc2626' }}>⚠ 期限切れ（{teamOverdue.length}件）</span>
+            {alertSelected.size > 0 && (
+              <button
+                onClick={async () => {
+                  setAlertNotifying(true);
+                  await Promise.all([...alertSelected].map(id => api.taskNotifyOverdue(id).catch(() => {})));
+                  setAlertNotifying(false);
+                  setAlertSelected(new Set());
+                }}
+                disabled={alertNotifying}
+                style={{ fontSize:'0.62rem', padding:'2px 8px', background: alertNotifying ? '#e2e8f0' : '#dc2626', color:'#fff', border:'none', borderRadius:5, fontWeight:700, cursor: alertNotifying ? 'default' : 'pointer' }}>
+                {alertNotifying ? '投稿中…' : `${alertSelected.size}件に通知`}
+              </button>
+            )}
+            <label style={{ fontSize:'0.62rem', color:'#dc2626', cursor:'pointer', display:'flex', alignItems:'center', gap:3, marginLeft:'auto' }}>
+              <input type="checkbox"
+                checked={alertSelected.size === teamOverdue.length && teamOverdue.length > 0}
+                onChange={e => setAlertSelected(e.target.checked ? new Set(teamOverdue.map(t => t.id)) : new Set())} />
+              全選択
+            </label>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:160, overflowY:'auto' }}>
             {teamOverdue.map(t => {
               const days = Math.floor((Date.now() - new Date(t.due_date)) / 86400000);
               const titleLine = (() => {
@@ -496,17 +520,58 @@ export default function FloatingTasks() {
                 }
                 return (t.title||'').slice(0,40);
               })();
+              const checked = alertSelected.has(t.id);
               return (
-                <div key={t.id}
-                  style={{ display:'flex', gap:8, alignItems:'center', background:'#fff', borderRadius:6,
-                    padding:'4px 8px', border:'1px solid #fecaca', cursor:'pointer', fontSize:'0.72rem' }}
-                  onMouseDown={() => setSelectedTask(t)}>
-                  <span style={{ color:'#dc2626', fontWeight:700, whiteSpace:'nowrap', flexShrink:0 }}>{t.assigneeName}</span>
-                  <span style={{ color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{titleLine}</span>
+                <div key={t.id} style={{ display:'flex', gap:6, alignItems:'center', background: checked ? '#fff7f7' : '#fff', borderRadius:6, padding:'4px 8px', border:`1px solid ${checked ? '#fca5a5' : '#fecaca'}`, fontSize:'0.72rem' }}>
+                  <input type="checkbox" checked={checked}
+                    onChange={e => { const s = new Set(alertSelected); e.target.checked ? s.add(t.id) : s.delete(t.id); setAlertSelected(s); }}
+                    style={{ cursor:'pointer', flexShrink:0 }} />
+                  <span onMouseDown={() => setSelectedTask(t)} style={{ color:'#dc2626', fontWeight:700, whiteSpace:'nowrap', flexShrink:0, cursor:'pointer' }}>{t.assigneeName}</span>
+                  <span onMouseDown={() => setSelectedTask(t)} style={{ color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}>{titleLine}</span>
                   <span style={{ color:'#dc2626', fontWeight:600, whiteSpace:'nowrap', flexShrink:0 }}>{days}日超</span>
+                  {t.task_type === 'broadcast' && (
+                    <button
+                      onMouseDown={e => { e.preventDefault(); api.taskIncompleteTargets(t.id).then(r => setIncompleteModal({ task:t, ...r })).catch(() => {}); }}
+                      style={{ fontSize:'0.58rem', padding:'1px 5px', border:'1px solid #fca5a5', borderRadius:4, background:'#fff', color:'#dc2626', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}>
+                      未完了者
+                    </button>
+                  )}
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* 未完了者モーダル */}
+      {incompleteModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:100, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onMouseDown={() => setIncompleteModal(null)}>
+          <div style={{ background:'#fff', borderRadius:12, width:'min(340px,92vw)', maxHeight:'70vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(0,0,0,0.2)' }}
+            onMouseDown={e => e.stopPropagation()}>
+            <div style={{ padding:'12px 16px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>未完了者</div>
+                <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:1 }}>{incompleteModal.total}名中 {incompleteModal.incomplete}名未完了</div>
+              </div>
+              <button onMouseDown={() => setIncompleteModal(null)} style={{ background:'#f1f5f9', border:'none', borderRadius:6, width:26, height:26, cursor:'pointer', color:'#64748b', fontSize:14 }}>×</button>
+            </div>
+            <div style={{ overflowY:'auto', padding:'10px 14px', display:'flex', flexDirection:'column', gap:6 }}>
+              {incompleteModal.users.length === 0
+                ? <div style={{ textAlign:'center', color:'#94a3b8', padding:'16px 0', fontSize:'0.82rem' }}>全員完了済み</div>
+                : incompleteModal.users.map(u => (
+                  <div key={u.user_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', background:'#fef2f2', borderRadius:7, border:'1px solid #fecaca' }}>
+                    {u.avatar_url
+                      ? <img src={u.avatar_url} alt="" style={{ width:28, height:28, borderRadius:'50%', objectFit:'cover', flexShrink:0 }} />
+                      : <div style={{ width:28, height:28, borderRadius:'50%', background:'#fee2e2', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.65rem', fontWeight:700, color:'#dc2626' }}>
+                          {(u.displayName||'?').split('/')[0].slice(0,2)}
+                        </div>
+                    }
+                    <span style={{ fontSize:'0.8rem', fontWeight:600, color:'#374151' }}>{(u.displayName||'').split('/')[0].trim()}</span>
+                  </div>
+                ))
+              }
+            </div>
           </div>
         </div>
       )}

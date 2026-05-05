@@ -244,11 +244,11 @@ function TaskCard({ t, members, onClick, compact = false }) {
 
 // ── メインダッシュボード ──────────────────────────────────────────
 export default function Dashboard() {
-  const [summary, setSummary] = useState(null);
+  const [me, setMe] = useState(null);
+  const [mySummary, setMySummary] = useState(null);
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
-  const [dashTeams, setDashTeams] = useState([]);
-  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', dashDept:'', dashTeam:'', overdue:false, page:1 });
+  const [filter, setFilter] = useState({ status:'', assignee:'', project:'', overdue:false, page:1 });
   const [filteredTasks, setFilteredTasks] = useState({ tasks:[], total:0 });
   const [filterApplied, setFilterApplied] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -256,42 +256,33 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      api.summary(), api.members(), api.projects(),
-      api.workloadTeams(),
-    ]).then(([sum, mem, proj, dt]) => {
-      setSummary(sum.summary);
-      setMembers(mem.members);
-      setProjects(proj.projects);
-      setDashTeams(dt.teams || []);
+      api.me(),
+      api.summary({ scope: 'self' }),
+      api.members(),
+      api.projects(),
+    ]).then(([meRes, sumRes, memRes, projRes]) => {
+      setMe(meRes);
+      setMySummary(sumRes.summary);
+      setMembers(memRes.members);
+      setProjects(projRes.projects);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
   const setF = (patch) => setFilter(f => ({ ...f, ...patch, page:1 }));
 
-  const deptTeams  = useMemo(() => dashTeams.filter(t => !t.parent_id), [dashTeams]);
-  const childTeamsOf = useMemo(() => {
-    const map = {};
-    for (const t of dashTeams) {
-      if (t.parent_id) { if (!map[t.parent_id]) map[t.parent_id] = []; map[t.parent_id].push(t); }
-    }
-    return map;
-  }, [dashTeams]);
-
   const applyFilter = async () => {
     const params = { page: filter.page, limit: 50 };
-    if (filter.status) params.status = filter.status;
+    if (filter.status)   params.status   = filter.status;
     if (filter.assignee) params.assignee = filter.assignee;
-    if (filter.project) params.project = filter.project;
-    if (filter.dashTeam) params.dashTeam = filter.dashTeam;
-    else if (filter.dashDept) params.dashTeam = filter.dashDept;
-    if (filter.overdue) params.overdue = '1';
+    if (filter.project)  params.project  = filter.project;
+    if (filter.overdue)  params.overdue  = '1';
     const res = await api.tasks(params);
     setFilteredTasks(res);
     setFilterApplied(true);
   };
 
   const clearFilter = () => {
-    setFilter({ status:'', assignee:'', project:'', dashDept:'', dashTeam:'', overdue:false, page:1 });
+    setFilter({ status:'', assignee:'', project:'', overdue:false, page:1 });
     setFilterApplied(false);
     setFilteredTasks({ tasks:[], total:0 });
   };
@@ -301,13 +292,17 @@ export default function Dashboard() {
     if (selectedTask?.id === taskId) setSelectedTask(s => s ? {...s, status:newStatus} : s);
   };
 
-  // キャンセルを除外したKPI・グラフ
-  const pieData = useMemo(() => summary
-    ? Object.entries(STATUS_CFG).map(([k, c]) => ({ name: c.label, value: summary[k]||0, color: c.color })).filter(d => d.value > 0)
-    : [], [summary]);
-  const totalTasks = pieData.reduce((s, d) => s + d.value, 0);
-  const overdueCount = useMemo(() => members.reduce((s, m) => s + (m.overdue||0), 0), [members]);
+  // 自分のタスク集計（KPI・パイチャート用）
+  const myTotal = useMemo(() =>
+    Object.entries(STATUS_CFG).reduce((s, [k]) => s + (mySummary?.[k] || 0), 0)
+  , [mySummary]);
+  const myOverdue = mySummary?._overdue || 0;
 
+  const pieData = useMemo(() => mySummary
+    ? Object.entries(STATUS_CFG).map(([k, c]) => ({ name: c.label, value: mySummary[k]||0, color: c.color })).filter(d => d.value > 0)
+    : [], [mySummary]);
+
+  // 部署メンバーのバーチャート
   const memberBar = useMemo(() =>
     members.filter(m => m.total > 0).slice(0, 8).map(m => ({
       name: (m.displayName || '?').split(/[\s　/]/)[0],
@@ -329,17 +324,21 @@ export default function Dashboard() {
   );
 
   const selStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', outline:'none' };
+  const myName = me?.displayName?.split(/[\s　/]/)[0] || '';
 
   return (
     <div style={{ padding:'20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap:14 }}>
 
-      {/* KPIカード */}
+      {/* KPIカード（自分のタスク） */}
+      {myName && (
+        <div style={{ fontSize:'0.78rem', color:'#94a3b8', fontWeight:500 }}>{myName} のタスク</div>
+      )}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
         {[
-          { label:'総タスク数', value: totalTasks,            color:'#6366f1' },
-          { label:'進行中',    value: summary?.in_progress||0, color:'#3b82f6' },
-          { label:'期限切れ',  value: overdueCount,           color: overdueCount > 0 ? '#dc2626' : '#94a3b8' },
-          { label:'完了',      value: summary?.done||0,        color:'#10b981' },
+          { label:'自分のタスク', value: myTotal,                 color:'#6366f1' },
+          { label:'進行中',      value: mySummary?.in_progress||0, color:'#3b82f6' },
+          { label:'期限切れ',    value: myOverdue,                color: myOverdue > 0 ? '#dc2626' : '#94a3b8' },
+          { label:'完了',        value: mySummary?.done||0,        color:'#10b981' },
         ].map(k => (
           <div key={k.label} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'14px 18px' }}>
             <div style={{ fontSize:'0.72rem', color:'#64748b', fontWeight:500, marginBottom:6 }}>{k.label}</div>
@@ -351,7 +350,7 @@ export default function Dashboard() {
       {/* グラフ */}
       <div style={{ display:'grid', gridTemplateColumns:'260px 1fr', gap:12 }}>
         {card(<>
-          {sh('ステータス分布')}
+          {sh('自分のステータス分布')}
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
             <PieChart width={120} height={120}>
               <Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={54} innerRadius={30} paddingAngle={2}>
@@ -372,7 +371,7 @@ export default function Dashboard() {
         </>)}
 
         {card(<>
-          {sh('メンバー別タスク数', 'タスクのある担当者')}
+          {sh('部署メンバー別タスク数')}
           {memberBar.length > 0 ? (
             <ResponsiveContainer width="100%" height={130}>
               <BarChart data={memberBar} margin={{ top:0, right:0, left:-20, bottom:0 }}>
@@ -388,9 +387,9 @@ export default function Dashboard() {
         </>)}
       </div>
 
-      {/* フィルター検索 */}
+      {/* タスク検索（同部署内） */}
       {card(<>
-        {sh('タスク検索')}
+        {sh('タスク検索', '同部署メンバーのタスク')}
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: filterApplied ? 14 : 0 }}>
           <select value={filter.status} onChange={e => setF({status:e.target.value})} style={selStyle}>
             <option value="">ステータス：すべて</option>
@@ -398,20 +397,6 @@ export default function Dashboard() {
             <option value="done">完了</option>
             <option value="pending">保留</option>
           </select>
-
-          {/* 部署を担当者より先に */}
-          {deptTeams.length > 0 && (
-            <select value={filter.dashDept} onChange={e => setF({dashDept:e.target.value, dashTeam:''})} style={selStyle}>
-              <option value="">部署：すべて</option>
-              {deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          )}
-          {filter.dashDept && childTeamsOf[filter.dashDept]?.length > 0 && (
-            <select value={filter.dashTeam} onChange={e => setF({dashTeam:e.target.value})} style={selStyle}>
-              <option value="">チーム：すべて</option>
-              {childTeamsOf[filter.dashDept].map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          )}
 
           <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
             <option value="">担当者：全員</option>

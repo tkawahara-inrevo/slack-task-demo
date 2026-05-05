@@ -91,7 +91,10 @@ function crmDelete(path) {
 export const api = {
   // General
   me: () => apiFetch('/me'),
-  summary: () => apiFetch('/summary'),
+  summary: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/summary${qs ? '?' + qs : ''}`);
+  },
   tasks: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/tasks?${qs}`);

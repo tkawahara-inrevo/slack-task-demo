@@ -546,10 +546,28 @@ function registerDashboardApi(deps) {
     }
   });
 
-  // --- /summary (team-scoped for non-admin) ---
+  // --- /summary (team-scoped for non-admin; scope=self for personal view) ---
   expressApp.get("/api/dashboard/summary", authWithRole, async (req, res) => {
     try {
       const { teamId, userId, role } = req.dashboardUser;
+
+      if (req.query.scope === "self") {
+        const [statusRes, overdueRes] = await Promise.all([
+          dbQuery(
+            `SELECT status, COUNT(*)::int AS count FROM tasks WHERE team_id=$1 AND assignee_id=$2 AND status != 'cancelled' GROUP BY status`,
+            [teamId, userId]
+          ),
+          dbQuery(
+            `SELECT COUNT(*)::int AS overdue FROM tasks WHERE team_id=$1 AND assignee_id=$2 AND due_date < CURRENT_DATE AND status NOT IN ('done','cancelled')`,
+            [teamId, userId]
+          ),
+        ]);
+        const summary = {};
+        for (const row of statusRes.rows) summary[row.status] = parseInt(row.count, 10);
+        summary._overdue = parseInt(overdueRes.rows[0]?.overdue || 0, 10);
+        return res.json({ summary });
+      }
+
       let scopeWhere = "";
       let params = [teamId];
 

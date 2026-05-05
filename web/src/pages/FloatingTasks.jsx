@@ -208,6 +208,7 @@ export default function FloatingTasks() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('active');
+  const [hideSelfDone, setHideSelfDone] = useState(true);
   const [selectedTask, setSelectedTask] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -258,10 +259,17 @@ export default function FloatingTasks() {
   };
 
   const filtered = tasks.filter(t => {
-    if (filter === 'active') return t.status !== 'done' && t.status !== 'cancelled';
+    if (filter === 'active') {
+      if (t.status === 'done' || t.status === 'cancelled') return false;
+      if (hideSelfDone && t.self_completed) return false;
+      return true;
+    }
     if (filter === 'done') return t.status === 'done';
     return t.status !== 'cancelled';
   }).sort((a, b) => {
+    // self_completed は下に
+    if (a.self_completed && !b.self_completed) return 1;
+    if (!a.self_completed && b.self_completed) return -1;
     const aOv = isOverdue(a), bOv = isOverdue(b);
     const aT = isDueToday(a), bT = isDueToday(b);
     if (aOv && !bOv) return -1;
@@ -287,6 +295,14 @@ export default function FloatingTasks() {
         </div>
         <div style={{ display:'flex', gap:6, alignItems:'center' }}>
           <span style={{ fontSize:'0.65rem', color:'#6b7280' }}>{updatedStr}</span>
+          {filter === 'active' && (
+            <button onClick={() => setHideSelfDone(v => !v)}
+              style={{ fontSize:'0.62rem', padding:'2px 7px', border:`1px solid ${hideSelfDone ? '#10b981' : '#4b5563'}`, borderRadius:4,
+                background: hideSelfDone ? '#d1fae5' : 'rgba(255,255,255,0.1)', color: hideSelfDone ? '#065f46' : '#9ba1ad', cursor:'pointer' }}
+              title="自分完了済みを非表示/表示">
+              {hideSelfDone ? '完了済み非表示' : '完了済み表示'}
+            </button>
+          )}
           <span style={{ fontSize:'0.7rem', color:'#9ba1ad' }}>{filtered.length}件</span>
           <button onClick={() => load(false)} style={{ background:'none', border:'none', color:'#9ba1ad', cursor:'pointer', fontSize:14, padding:'2px 4px' }} title="今すぐ更新">↻</button>
         </div>
@@ -316,17 +332,20 @@ export default function FloatingTasks() {
             const st = STATUS_CFG[t.status] || { label: t.status, color: '#94a3b8' };
             const ov = isOverdue(t);
             const tod = isDueToday(t);
+            const selfDone = !!t.self_completed;
             const dateColor = ov ? '#dc2626' : tod ? '#ea580c' : '#94a3b8';
             const dateFw = (ov || tod) ? 700 : 400;
+            const borderColor = selfDone ? '#10b981' : ov ? '#dc2626' : tod ? '#ea580c' : 'transparent';
             return (
               <div key={t.id}
-                style={{ padding:'9px 12px', borderBottom:'1px solid #f1f5f9', cursor:'pointer', background:'#fff',
-                  borderLeft: ov ? '3px solid #dc2626' : tod ? '3px solid #ea580c' : '3px solid transparent' }}
-                onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
-                onMouseLeave={e => e.currentTarget.style.background='#fff'}
+                style={{ padding:'9px 12px', borderBottom:'1px solid #f1f5f9', cursor:'pointer',
+                  background: selfDone ? '#f0fdf4' : '#fff',
+                  borderLeft: `3px solid ${borderColor}`, opacity: selfDone ? 0.75 : 1 }}
+                onMouseEnter={e => e.currentTarget.style.background= selfDone ? '#dcfce7' : '#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.background= selfDone ? '#f0fdf4' : '#fff'}
                 onClick={() => setSelectedTask(t)}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
-                  <div style={{ fontSize:'0.8rem', fontWeight:600, color:'#0f172a', lineHeight:1.35, flex:1, minWidth:0,
+                  <div style={{ fontSize:'0.8rem', fontWeight:600, color: selfDone ? '#64748b' : '#0f172a', lineHeight:1.35, flex:1, minWidth:0,
                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                     {title}
                   </div>
@@ -336,19 +355,26 @@ export default function FloatingTasks() {
                   </span>
                 </div>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:3 }}>
-                  {t.due_date ? (
-                    <span style={{ fontSize:'0.68rem', color: dateColor, fontWeight: dateFw }}>
-                      📅 {fmtDate(t.due_date)}{ov ? ' 超過' : tod ? ' 今日' : ''}
-                    </span>
-                  ) : <span />}
-                  <button
-                    onClick={e => { e.stopPropagation(); if (t.status !== 'done') { api.taskSetStatus(t.id, 'done').then(() => handleStatusChange(t.id, 'done')).catch(console.error); } }}
-                    style={{ fontSize:'0.62rem', padding:'2px 7px', border:'1px solid #d1d5db', borderRadius:4,
-                      background:'#fff', color: t.status === 'done' ? '#94a3b8' : '#64748b',
-                      cursor: t.status === 'done' ? 'default' : 'pointer', opacity: t.status === 'done' ? 0.5 : 1 }}
-                    disabled={t.status === 'done'}>
-                    {t.status === 'done' ? '完了済' : '完了'}
-                  </button>
+                  <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    {t.due_date && (
+                      <span style={{ fontSize:'0.68rem', color: dateColor, fontWeight: dateFw }}>
+                        📅 {fmtDate(t.due_date)}{ov ? ' 超過' : tod ? ' 今日' : ''}
+                      </span>
+                    )}
+                    {selfDone && (
+                      <span style={{ fontSize:'0.62rem', color:'#059669', fontWeight:700 }}>✓ 自分完了済み</span>
+                    )}
+                  </div>
+                  {!selfDone && (
+                    <button
+                      onClick={e => { e.stopPropagation(); if (t.status !== 'done') { api.taskSetStatus(t.id, 'done').then(() => handleStatusChange(t.id, 'done')).catch(console.error); } }}
+                      style={{ fontSize:'0.62rem', padding:'2px 7px', border:'1px solid #d1d5db', borderRadius:4,
+                        background:'#fff', color: t.status === 'done' ? '#94a3b8' : '#64748b',
+                        cursor: t.status === 'done' ? 'default' : 'pointer', opacity: t.status === 'done' ? 0.5 : 1 }}
+                      disabled={t.status === 'done'}>
+                      {t.status === 'done' ? '完了済' : '完了'}
+                    </button>
+                  )}
                 </div>
               </div>
             );

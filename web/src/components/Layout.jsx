@@ -45,9 +45,24 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
   );
 }
 
-// Slackのin-app browserかどうかを検出
-const isSlackBrowser = typeof navigator !== 'undefined' &&
-  /SlackWebClient|Slack\//.test(navigator.userAgent);
+// in-app browser検出
+// iOS WKWebView: iPhone/iPad が含まれるが Safari/ が含まれない
+// Android WebView: wv フラグ
+// URL param: ?from_slack=1 で強制表示（テスト・共有用）
+function detectInAppBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('from_slack') === '1') return true;
+  // Slack明示パターン
+  if (/SlackWebClient|Slack\//.test(ua)) return true;
+  // iOS WebView (Safari/ が含まれない)
+  if (/iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua)) return true;
+  // Android WebView
+  if (/Android/.test(ua) && /wv/.test(ua)) return true;
+  return false;
+}
+const isSlackBrowser = detectInAppBrowser();
 
 function SlackBrowserBanner() {
   const [state, setState] = useState('idle'); // idle | loading | ready | copied
@@ -80,7 +95,7 @@ function SlackBrowserBanner() {
   return (
     <div style={{ background:'#f59e0b', padding:'10px 16px', display:'flex', alignItems:'flex-start', gap:10, flexWrap:'wrap' }}>
       <div style={{ flex:1, minWidth:200 }}>
-        <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>Slackブラウザで開いています</div>
+        <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#1a1a1a' }}>アプリ内ブラウザで開いています</div>
         <div style={{ fontSize:'0.75rem', color:'#3b2a00', marginTop:2 }}>
           セッションを引き継いでSafari/Chromeで開けます
         </div>

@@ -587,9 +587,10 @@ export default function Dashboard() {
 
   const setF = (patch) => setFilter(f => ({ ...f, ...patch, page:1 }));
 
-  // 自分が属する部署の配下チーム（MKなど複数チームある部署向けフィルター）
+  // チームフィルター用: admin は全チーム、一般は自分の部署配下のみ
   const myDeptTeams = useMemo(() => {
     if (!me || !dashTeams.length) return [];
+    if (me.role === 'admin') return dashTeams;
     const myTeamIds = new Set((me.dashTeams || []).map(t => t.id));
     const parentIds = new Set();
     for (const t of dashTeams) {

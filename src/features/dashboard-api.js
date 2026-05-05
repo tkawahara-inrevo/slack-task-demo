@@ -2214,31 +2214,53 @@ function registerDashboardApi(deps) {
         : [];
       const dbUserMap = Object.fromEntries(userRows.map(r => [r.user_id, r]));
 
-      // DBに存在しないユーザーはSlack APIでフォールバック取得
+      // DBに存在しないユーザーはSlack APIでフォールバック取得（並列化）
       const missingIds = userIds.filter(id => !dbUserMap[id]);
-      for (const uid of missingIds) {
+      await Promise.all(missingIds.map(async (uid) => {
         try {
           const info = await slackClient.users.info({ user: uid });
           const u = info?.user;
           if (u) {
-            const displayName = u.profile?.display_name || u.real_name || uid;
-            const avatarUrl = u.profile?.image_72 || null;
-            dbUserMap[uid] = { user_id: uid, display_name: displayName, avatar_url: avatarUrl };
+            dbUserMap[uid] = {
+              user_id: uid,
+              display_name: u.profile?.display_name || u.real_name || uid,
+              avatar_url: u.profile?.image_72 || null,
+            };
           }
-        } catch { /* 取得失敗はそのまま */ }
+        } catch { /* 取得失敗: IDをそのまま保持 */ }
+      }));
+
+      // Botメッセージの bot_profile から名前・アイコンを補完
+      for (const m of rawMessages) {
+        if (!m.user && m.bot_id && m.bot_profile) {
+          const botKey = `bot:${m.bot_id}`;
+          if (!dbUserMap[botKey]) {
+            dbUserMap[botKey] = {
+              user_id: botKey,
+              display_name: m.bot_profile.name || 'Bot',
+              avatar_url: m.bot_profile.icons?.image_72 || m.bot_profile.icons?.image_48 || null,
+            };
+          }
+        }
       }
 
+      // nameMap: 解決できなかったIDは先頭7文字だけ表示
       const nameMap = Object.fromEntries(
         Object.entries(dbUserMap).map(([id, u]) => [id, (u.display_name || id).split('/')[0].trim()])
       );
+      // 未解決IDのフォールバック（nameMapに入っていないID）
+      for (const uid of allUserIds) {
+        if (!nameMap[uid]) nameMap[uid] = uid.slice(0, 7) + '…';
+      }
 
       const rootTs = rawMessages[0]?.ts;
       const messages = rawMessages.map(m => {
-        const u = dbUserMap[m.user] || null;
+        const botKey = !m.user && m.bot_id ? `bot:${m.bot_id}` : null;
+        const u = dbUserMap[m.user] || (botKey ? dbUserMap[botKey] : null);
         return {
           ts: m.ts,
-          user_id: m.user || null,
-          displayName: u?.display_name || m.user || 'Bot',
+          user_id: m.user || botKey || null,
+          displayName: u?.display_name || (m.bot_profile?.name) || m.user || 'Bot',
           avatar_url: u?.avatar_url || null,
           text: m.text || '',
           is_root: m.ts === rootTs,

@@ -394,9 +394,17 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   const overdue = isOverdueTask({ ...displayTask, status });
   // パネル本文：一切加工しない（content優先、なければtitle全文）
   const contentBody = displayTask.content || displayTask.title || '';
-  // バックエンドから返ってきたnameMap（本文・スレッド両方で使用）
-  const nameMap = threadData?.nameMap || {};
+  // nameMap: サーバー側マップ + messages配列のuser_id→displayNameを補完（確実な変換のため）
   const thread = threadData?.messages || null;
+  const nameMap = useMemo(() => {
+    const base = { ...(threadData?.nameMap || {}) };
+    for (const m of thread || []) {
+      if (m.user_id && m.displayName && !base[m.user_id]) {
+        base[m.user_id] = m.displayName.split('/')[0].trim();
+      }
+    }
+    return base;
+  }, [threadData]);
   const channel = threadData?.channel || null;
 
   // Slack deep link: source_permalink があればそれを使う、なければ構築

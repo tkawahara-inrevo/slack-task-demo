@@ -1,0 +1,18 @@
+{
+  "name": "TaskHub マイタスク",
+  "short_name": "TaskHub",
+  "description": "INREVO タスク管理",
+  "start_url": "/dashboard/floating",
+  "scope": "/dashboard/",
+  "display": "standalone",
+  "background_color": "#1e2127",
+  "theme_color": "#1e2127",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

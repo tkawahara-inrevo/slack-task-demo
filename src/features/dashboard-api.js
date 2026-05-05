@@ -2225,11 +2225,14 @@ function registerDashboardApi(deps) {
         rawMessages = await fetchReplies(firstMsg.thread_ts);
       }
 
-      // メッセージ本文中の<@UXXX>メンションも含めて全ユーザーIDを収集
+      // メッセージ本文中のユーザーIDを収集
+      // Botメッセージはblock kitのfallback textに @UXXX（角括弧なし）で格納される場合があるため両形式を抽出
       const mentionRe = /<@([^|>]+)(?:\|[^>]+)?>/g;
+      const bareMentionRe = /@(U[A-Z0-9]{6,})/g;
       const allUserIds = new Set(rawMessages.map(m => m.user).filter(Boolean));
       for (const m of rawMessages) {
         for (const match of (m.text || '').matchAll(mentionRe)) allUserIds.add(match[1]);
+        for (const match of (m.text || '').matchAll(bareMentionRe)) allUserIds.add(match[1]);
       }
 
       // ユーザー名解決: getUserDisplayName（起動時プリフェッチキャッシュ優先 → users.info → フォールバック）

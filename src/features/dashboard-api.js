@@ -707,7 +707,8 @@ function registerDashboardApi(deps) {
         dbQuery(`SELECT COUNT(*)::int AS total FROM tasks t ${joinClause} WHERE ${where}`, params),
         dbQuery(
           `SELECT t.id, t.title, t.status, t.due_date, t.assignee_id, t.assignee_label,
-                  t.requester_user_id, t.task_type, t.created_at, t.completed_count, t.total_count
+                  t.requester_user_id, t.task_type, t.created_at, t.completed_count, t.total_count,
+                  (t.message_ts IS NOT NULL) AS from_slack
            FROM tasks t ${joinClause}
            WHERE ${where}
            ORDER BY ${
@@ -2231,14 +2232,33 @@ function registerDashboardApi(deps) {
         for (const match of (m.text || '').matchAll(mentionRe)) allUserIds.add(match[1]);
       }
 
-      // getUserDisplayName（キャッシュ付き・Bolt app.client使用）で一括解決
-      const nameEntries = await Promise.all(
-        [...allUserIds].map(async (uid) => {
-          const name = await getUserDisplayName(teamId, uid).catch(() => null);
-          return [uid, name ? name.split('/')[0].trim() : uid.slice(0, 7) + '…'];
-        })
+      // 1) DBから一括取得
+      const userIds = [...allUserIds];
+      const dbRows = userIds.length > 0
+        ? (await dbQuery(
+            `SELECT user_id, display_name FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
+            [teamId, userIds]
+          )).rows
+        : [];
+      const dbMap = Object.fromEntries(dbRows.map(r => [r.user_id, r.display_name]));
+
+      // 2) DB未登録ユーザーはSlack APIで解決し、DBに保存
+      const missingIds = userIds.filter(id => !dbMap[id]);
+      await Promise.all(missingIds.map(async (uid) => {
+        try {
+          const info = await slackClient.users.info({ user: uid });
+          const u = info?.user;
+          if (u) {
+            await dbUpsertDashboardUserDirectoryMember(teamId, u).catch(() => {});
+            const profile = u.profile || {};
+            dbMap[uid] = profile.display_name_normalized || profile.display_name || u.real_name || null;
+          }
+        } catch { /* 外部ユーザー等取得不可 */ }
+      }));
+
+      const nameMap = Object.fromEntries(
+        userIds.map(uid => [uid, dbMap[uid] ? (dbMap[uid]).split('/')[0].trim() : uid.slice(0, 7) + '…'])
       );
-      const nameMap = Object.fromEntries(nameEntries);
 
       // アバターURLはDB（dashboard_user_directory）から取得
       const avatarRows = allUserIds.size > 0

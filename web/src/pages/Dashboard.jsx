@@ -124,12 +124,14 @@ function SlackText({ text, nameMap }) {
 function TaskPanel({ task, members, onClose, onStatusChange }) {
   const [status, setStatus] = useState(task.status);
   const [fullTask, setFullTask] = useState(null);
-  const [thread, setThread] = useState(null);
+  const [threadData, setThreadData] = useState(null); // { messages, nameMap }
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
-    api.taskThread?.(task.id).then(r => setThread(r.messages || [])).catch(() => setThread([]));
+    api.taskThread?.(task.id)
+      .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {} }))
+      .catch(() => setThreadData({ messages: [], nameMap: {} }));
   }, [task.id]);
 
   const handleStatus = async (s) => {
@@ -148,10 +150,9 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const overdue = isOverdueTask({ ...displayTask, status });
   // パネル本文：一切加工しない（content優先、なければtitle全文）
   const contentBody = displayTask.content || displayTask.title || '';
-  // スレッドから構築したuser_id→日本語名マップ（本文・スレッド共通で使用）
-  const nameMap = thread
-    ? Object.fromEntries(thread.filter(m => m.user_id).map(m => [m.user_id, (m.displayName || '').split('/')[0].trim()]))
-    : {};
+  // バックエンドから返ってきたnameMap（本文・スレッド両方で使用）
+  const nameMap = threadData?.nameMap || {};
+  const thread = threadData?.messages || null;
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||
@@ -289,18 +290,24 @@ function TaskCard({ t, members, onClick, compact = false }) {
   const assigneeName = cleanAssigneeName(t.assignee_label) ||
     members.find(m => m.assignee_id === t.assignee_id)?.displayName?.split('/')[0]?.trim() || null;
   const contentPreview = getContentBody(t.title || t.content).slice(0, 80);
+  // broadcastタスクの個人完了バッジ
+  const selfDone = t.task_type === 'broadcast' && t.self_completed;
 
   if (compact) {
-    // 最新タスク（シンプル行）
     return (
       <div onClick={onClick} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0', borderBottom:'1px solid #f1f5f9', cursor:'pointer' }}
         onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
         onMouseLeave={e => e.currentTarget.style.background=''}>
-        <span style={{ width:8, height:8, borderRadius:'50%', background:st.color, flexShrink:0 }} />
+        <span style={{ width:8, height:8, borderRadius:'50%', background: selfDone ? '#10b981' : st.color, flexShrink:0 }} />
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:'0.85rem', fontWeight:600, color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{title}</div>
-          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
-            {assigneeName ? assigneeName : <span style={{ color:'#e2e8f0' }}>担当者未設定</span>}
+          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1, display:'flex', alignItems:'center', gap:6 }}>
+            {assigneeName || <span style={{ color:'#e2e8f0' }}>担当者未設定</span>}
+            {t.task_type === 'broadcast' && (
+              <span style={{ fontSize:'0.62rem', padding:'1px 5px', borderRadius:3, background: selfDone ? '#d1fae5' : '#fef3c7', color: selfDone ? '#065f46' : '#92400e', fontWeight:600 }}>
+                {selfDone ? '自分完了済' : '一斉配信'}
+              </span>
+            )}
           </div>
         </div>
         <div style={{ textAlign:'right', flexShrink:0 }}>

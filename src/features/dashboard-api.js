@@ -733,6 +733,21 @@ function registerDashboardApi(deps) {
         }),
       );
 
+      // assignee 単一指定: broadcast タスクの個人完了状態を付与（マイタスク一覧用）
+      if (assignee && !assignees) {
+        const broadcastIds = tasksWithNames.filter(t => t.task_type === 'broadcast').map(t => t.id);
+        if (broadcastIds.length > 0) {
+          const compRes = await dbQuery(
+            `SELECT task_id::text AS task_id FROM task_completions WHERE team_id=$1 AND user_id=$2 AND task_id::text = ANY($3)`,
+            [teamId, assignee, broadcastIds]
+          );
+          const doneSet = new Set(compRes.rows.map(r => r.task_id));
+          for (const t of tasksWithNames) {
+            if (t.task_type === 'broadcast') t.self_completed = doneSet.has(t.id);
+          }
+        }
+      }
+
       // ガント用: broadcast タスクに対象メンバーの user_id と完了済み user_id を付与
       if (assignees?.length) {
         const broadcastIds = tasksWithNames.filter(t => t.task_type === 'broadcast').map(t => t.id);
@@ -2164,8 +2179,14 @@ function registerDashboardApi(deps) {
 
       const rawMessages = result.messages || [];
 
-      // ユニークなユーザーIDをまとめてDBから取得（アバター・表示名）
-      const userIds = [...new Set(rawMessages.map(m => m.user).filter(Boolean))];
+      // メッセージ本文中の<@UXXX>メンションも含めて全ユーザーIDを収集
+      const mentionRe = /<@([^|>]+)(?:\|[^>]+)?>/g;
+      const allUserIds = new Set(rawMessages.map(m => m.user).filter(Boolean));
+      for (const m of rawMessages) {
+        for (const match of (m.text || '').matchAll(mentionRe)) allUserIds.add(match[1]);
+      }
+
+      const userIds = [...allUserIds];
       const userRows = userIds.length > 0
         ? (await dbQuery(
             `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url
@@ -2175,6 +2196,11 @@ function registerDashboardApi(deps) {
           )).rows
         : [];
       const userMap = Object.fromEntries(userRows.map(r => [r.user_id, r]));
+
+      // フロント用nameMap: user_id → 日本語名（/より前）
+      const nameMap = Object.fromEntries(
+        userRows.map(r => [r.user_id, (r.display_name || r.user_id).split('/')[0].trim()])
+      );
 
       const messages = rawMessages.map(m => {
         const u = userMap[m.user] || null;
@@ -2188,7 +2214,7 @@ function registerDashboardApi(deps) {
         };
       });
 
-      res.json({ messages });
+      res.json({ messages, nameMap });
     } catch (e) {
       console.error("dashboard GET /tasks/:id/thread error:", e);
       res.status(500).json({ error: "internal" });

@@ -2727,16 +2727,22 @@ function registerDashboardApi(deps) {
   // --- GET /team-overdue (配下メンバーの期限切れタスク) ---
   expressApp.get("/api/dashboard/team-overdue", authWithRole, async (req, res) => {
     try {
-      const { teamId, userId, role } = req.dashboardUser;
+      const { teamId, userId } = req.dashboardUser;
 
-      // ロールレベル定義
       const ROLE_LEVEL = { '': 0, 'member': 0, 'sub_chief': 2, 'chief': 3, 'manager': 4, 'admin': 5 };
+      const HR_ID = 'b97f72bb-a6ad-4dcc-8154-42995dcd1c0a';
+      // HRの直下チーム（役割別）
+      const HR_NAMED_TEAMS = ['Strategy Team', 'Management Team', 'Creative Team', 'Analytics Team', 'Direction Team'];
+      // CSライン（自分のみ）
+      const HR_SELF_ONLY = ['Customer Success Team', 'Operation Team'];
+      // チームXX（HR直下の個人チーム）
+      const HR_TEAM_XX_PREFIX = 'チーム'; // 名前でHR直下チームXXを判別
+      // 特定人物が追加で見るチーム
+      const BROAD_TEAMS = ['Creative Team', 'Analytics Team', 'Direction Team', 'Operation Team'];
 
-      // adminも自分のチーム配下のアラートは確認する（全体表示ではなくチーム配下限定）
-
-      // 自分のチーム所属とロールを取得
+      // 自分のチーム所属とロールを取得（チーム名・親IDも）
       const myTeamsRes = await dbQuery(
-        `SELECT m.dash_team_id, m.role, t.parent_id
+        `SELECT m.dash_team_id, m.role, t.parent_id, t.name
          FROM dash_team_members m
          JOIN dash_teams t ON t.id = m.dash_team_id AND t.team_id = m.team_id
          WHERE m.team_id = $1 AND m.user_id = $2`,
@@ -2744,32 +2750,94 @@ function registerDashboardApi(deps) {
       );
       if (myTeamsRes.rows.length === 0) return res.json({ tasks: [] });
 
+      // HR配下かどうか確認
+      const isHRMember = myTeamsRes.rows.some(t =>
+        t.parent_id === HR_ID ||
+        HR_NAMED_TEAMS.includes(t.name) ||
+        HR_SELF_ONLY.includes(t.name)
+      );
+
       const targetUserIds = new Set();
 
-      for (const myTeam of myTeamsRes.rows) {
-        const myLevel = ROLE_LEVEL[myTeam.role || ''] ?? 0;
-        const isParent = !myTeam.parent_id;
+      if (isHRMember) {
+        // ── HR独自ルール ──
+        for (const myTeam of myTeamsRes.rows) {
+          const name = myTeam.name;
+          const myLevel = ROLE_LEVEL[myTeam.role || ''] ?? 0;
 
-        if (isParent) {
-          // 親チームメンバーは子チーム全員のタスクを確認できる
-          const childRes = await dbQuery(
-            `SELECT DISTINCT m.user_id FROM dash_team_members m
-             JOIN dash_teams t ON t.id = m.dash_team_id AND t.team_id = m.team_id
-             WHERE m.team_id = $1 AND t.parent_id = $2 AND m.user_id != $3`,
-            [teamId, myTeam.dash_team_id, userId]
-          );
-          for (const row of childRes.rows) targetUserIds.add(row.user_id);
+          // CS/Operationは自分のみ（アラート不要）
+          if (HR_SELF_ONLY.includes(name)) continue;
+
+          // Strategy/Management/Creative/Analytics/Direction: 自チームのみ
+          if (HR_NAMED_TEAMS.includes(name)) {
+            const membersRes = await dbQuery(
+              `SELECT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id=$2 AND user_id != $3`,
+              [teamId, myTeam.dash_team_id, userId]
+            );
+            for (const r of membersRes.rows) targetUserIds.add(r.user_id);
+          }
+
+          // チームXX（HR直下、名前が"チーム"で始まる）
+          if (myTeam.parent_id === HR_ID && name.startsWith(HR_TEAM_XX_PREFIX)) {
+            if (myLevel >= ROLE_LEVEL['sub_chief']) {
+              // chief/sub_chief: 自チームメンバーのタスクを見る
+              const membersRes = await dbQuery(
+                `SELECT user_id FROM dash_team_members WHERE team_id=$1 AND dash_team_id=$2 AND user_id != $3`,
+                [teamId, myTeam.dash_team_id, userId]
+              );
+              for (const r of membersRes.rows) targetUserIds.add(r.user_id);
+            }
+            // member: 自分のみ（追加しない）
+          }
         }
 
-        if (myLevel > 0) {
-          // 同チームの自分より下のロールのメンバー
-          const lowerRes = await dbQuery(
-            `SELECT user_id, role FROM dash_team_members WHERE team_id = $1 AND dash_team_id = $2 AND user_id != $3`,
-            [teamId, myTeam.dash_team_id, userId]
+        // 特例：Management の長野・長岐、Strategy の富永 → Creative/Analytics/Direction/Operation も追加
+        const inManagement = myTeamsRes.rows.some(t => t.name === 'Management Team');
+        const inStrategy = myTeamsRes.rows.some(t => t.name === 'Strategy Team');
+        if (inManagement || inStrategy) {
+          const specialCheck = await dbQuery(
+            `SELECT m.user_id FROM dash_team_members m
+             JOIN dashboard_user_directory d ON d.team_id=m.team_id AND d.user_id=m.user_id
+             JOIN dash_teams t ON t.id=m.dash_team_id AND t.team_id=m.team_id
+             WHERE m.team_id=$1 AND m.user_id=$2
+               AND t.name = ANY($3)
+               AND (d.display_name LIKE '%長野%' OR d.display_name LIKE '%長岐%' OR d.display_name LIKE '%富永%')`,
+            [teamId, userId, inManagement ? ['Management Team'] : ['Strategy Team']]
           );
-          for (const row of lowerRes.rows) {
-            const theirLevel = ROLE_LEVEL[row.role || ''] ?? 0;
-            if (theirLevel < myLevel) targetUserIds.add(row.user_id);
+          if (specialCheck.rows.length > 0) {
+            const broadRes = await dbQuery(
+              `SELECT DISTINCT m.user_id FROM dash_team_members m
+               JOIN dash_teams t ON t.id=m.dash_team_id AND t.team_id=m.team_id
+               WHERE m.team_id=$1 AND t.name = ANY($2) AND m.user_id != $3`,
+              [teamId, BROAD_TEAMS, userId]
+            );
+            for (const r of broadRes.rows) targetUserIds.add(r.user_id);
+          }
+        }
+
+      } else {
+        // ── 標準ルール ──
+        for (const myTeam of myTeamsRes.rows) {
+          const myLevel = ROLE_LEVEL[myTeam.role || ''] ?? 0;
+          const isParent = !myTeam.parent_id;
+
+          if (isParent) {
+            const childRes = await dbQuery(
+              `SELECT DISTINCT m.user_id FROM dash_team_members m
+               JOIN dash_teams t ON t.id=m.dash_team_id AND t.team_id=m.team_id
+               WHERE m.team_id=$1 AND t.parent_id=$2 AND m.user_id != $3`,
+              [teamId, myTeam.dash_team_id, userId]
+            );
+            for (const r of childRes.rows) targetUserIds.add(r.user_id);
+          }
+          if (myLevel > 0) {
+            const lowerRes = await dbQuery(
+              `SELECT user_id, role FROM dash_team_members WHERE team_id=$1 AND dash_team_id=$2 AND user_id != $3`,
+              [teamId, myTeam.dash_team_id, userId]
+            );
+            for (const r of lowerRes.rows) {
+              if ((ROLE_LEVEL[r.role || ''] ?? 0) < myLevel) targetUserIds.add(r.user_id);
+            }
           }
         }
       }
@@ -2779,11 +2847,10 @@ function registerDashboardApi(deps) {
       const overdueRes = await dbQuery(
         `SELECT t.id, t.title, t.status, t.due_date, t.assignee_id, t.task_type, t.created_at
          FROM tasks t
-         WHERE t.team_id = $1 AND t.assignee_id = ANY($2)
+         WHERE t.team_id=$1 AND t.assignee_id = ANY($2)
            AND t.due_date < CURRENT_DATE AND t.status NOT IN ('done','cancelled')
-           AND (t.task_type IS NULL OR t.task_type = 'personal')
-         ORDER BY t.due_date ASC, t.assignee_id
-         LIMIT 50`,
+           AND (t.task_type IS NULL OR t.task_type='personal')
+         ORDER BY t.due_date ASC, t.assignee_id LIMIT 50`,
         [teamId, [...targetUserIds]]
       );
 

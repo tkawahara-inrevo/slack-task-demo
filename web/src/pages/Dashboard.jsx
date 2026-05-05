@@ -913,48 +913,6 @@ export default function Dashboard() {
       {tab === 'analytics' && <AnalyticsTab members={members} usergroups={usergroups} />}
       {tab === 'tasks' && <>
 
-      {/* チームアラート（期限切れ） */}
-      {teamOverdue.length > 0 && (
-        <div style={{ background:'#fef2f2', borderRadius:12, border:'1px solid #fca5a5', padding:'12px 16px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-            <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#dc2626' }}>⚠ チーム 期限切れタスク</span>
-            <span style={{ fontSize:'0.72rem', background:'#dc2626', color:'#fff', borderRadius:99, padding:'1px 8px', fontWeight:700 }}>{teamOverdue.length}件</span>
-          </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            {teamOverdue.map(t => {
-              const days = Math.floor((Date.now() - new Date(t.due_date)) / 86400000);
-              const rawTitle = t.title || '';
-              const titleLine = (() => {
-                for (const line of rawTitle.split('\n')) {
-                  const c = line.replace(/<@[^>]+>/g, '').replace(/@\S+/g, '').replace(/（[^）]*）/g, '').replace(/\s+/g, ' ').trim();
-                  if (!c) continue;
-                  const slashes = (c.match(/\//g) || []).length;
-                  const isAddr = !/[。！？、：]/.test(c) && /[一-鿿]+\/[A-Za-z]/.test(c) && (c.length < 40 || slashes >= 2);
-                  if (isAddr) continue;
-                  return c.slice(0, 60);
-                }
-                return rawTitle.slice(0, 60);
-              })();
-              return (
-                <div key={t.id} onClick={() => setSelectedTask(t)}
-                  style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 10px', background:'#fff', borderRadius:8,
-                    border:'1px solid #fecaca', cursor:'pointer' }}
-                  onMouseEnter={e => e.currentTarget.style.background='#fff7f7'}
-                  onMouseLeave={e => e.currentTarget.style.background='#fff'}>
-                  <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#dc2626', background:'#fee2e2', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>
-                    {t.assigneeName}
-                  </span>
-                  <span style={{ fontSize:'0.8rem', color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {titleLine}
-                  </span>
-                  <span style={{ fontSize:'0.7rem', color:'#dc2626', fontWeight:700, whiteSpace:'nowrap' }}>{days}日超過</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* KPIカード */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
         {[
@@ -1003,6 +961,47 @@ export default function Dashboard() {
           </div>
         )}
       </>)}
+
+      {/* チームアラート（期限切れ）── マイタスクの下 */}
+      {teamOverdue.length > 0 && (
+        <div style={{ background:'#fef2f2', borderRadius:12, border:'1px solid #fca5a5', padding:'12px 16px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#dc2626' }}>⚠ チーム 期限切れタスク</span>
+            <span style={{ fontSize:'0.72rem', background:'#dc2626', color:'#fff', borderRadius:99, padding:'1px 8px', fontWeight:700 }}>{teamOverdue.length}件</span>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            {teamOverdue.map(t => {
+              const days = Math.floor((Date.now() - new Date(t.due_date)) / 86400000);
+              const rawTitle = t.title || '';
+              const titleLine = (() => {
+                for (const line of rawTitle.split('\n')) {
+                  const c = line.replace(/<@[^>]+>/g, '').replace(/@\S+/g, '').replace(/（[^）]*）/g, '').replace(/\s+/g, ' ').trim();
+                  if (!c) continue;
+                  const slashes = (c.match(/\//g) || []).length;
+                  const isAddr = !/[。！？、：]/.test(c) && /[一-鿿]+\/[A-Za-z]/.test(c) && (c.length < 40 || slashes >= 2);
+                  if (isAddr) continue;
+                  return c.slice(0, 60);
+                }
+                return rawTitle.slice(0, 60);
+              })();
+              return (
+                <div key={t.id} onClick={() => setSelectedTask(t)}
+                  style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 10px', background:'#fff', borderRadius:8, border:'1px solid #fecaca', cursor:'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background='#fff7f7'}
+                  onMouseLeave={e => e.currentTarget.style.background='#fff'}>
+                  <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#dc2626', background:'#fee2e2', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>
+                    {t.assigneeName}
+                  </span>
+                  <span style={{ fontSize:'0.8rem', color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {titleLine}
+                  </span>
+                  <span style={{ fontSize:'0.7rem', color:'#dc2626', fontWeight:700, whiteSpace:'nowrap' }}>{days}日超過</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 部署タスク検索 */}
       {card(<>

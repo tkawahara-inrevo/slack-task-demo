@@ -84,8 +84,10 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
   const [editingDue, setEditingDue] = useState(false);
   const [editDue, setEditDue] = useState('');
   // コメント
+  const [usergroups, setUsergroups] = useState([]);
   const [comment, setComment] = useState('');
-  const [mentionMap, setMentionMap] = useState({}); // displayName → userId
+  const [mentionMap, setMentionMap] = useState({}); // displayName → {type,id}
+  const [mentionQuery, setMentionQuery] = useState('');
   const [showMentions, setShowMentions] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
   const textareaRef = React.useRef(null);
@@ -100,6 +102,7 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
       .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
       .catch(() => setThreadData({ messages: [], nameMap: {}, channel: null }));
     api.members().then(r => setMembers(r.members || [])).catch(() => {});
+    api.usergroups().then(r => setUsergroups(r.usergroups || [])).catch(() => {});
   }, [task.id]);
 
   const handleStatus = async (s) => {
@@ -120,32 +123,59 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
     } catch (e) { console.error(e); }
   };
 
-  const insertMention = (m) => {
-    const name = m.displayName?.split('/')[0].trim() || m.displayName;
-    const uid = m.assignee_id;
-    const insertion = `@${name} `;
+  const insertMention = (item) => {
+    const insertion = `@${item.label} `;
     const ta = textareaRef.current;
-    if (ta) {
-      const start = ta.selectionStart, end = ta.selectionEnd;
-      const newVal = comment.slice(0, start) + insertion + comment.slice(end);
-      setComment(newVal);
-      setMentionMap(prev => ({ ...prev, [name]: uid }));
-      setTimeout(() => { ta.focus(); ta.setSelectionRange(start + insertion.length, start + insertion.length); }, 0);
-    } else {
-      setComment(c => c + insertion);
-      setMentionMap(prev => ({ ...prev, [name]: uid }));
-    }
+    // @query 部分を挿入テキストで置換
+    const textBeforeCursor = ta ? comment.slice(0, ta.selectionStart) : comment;
+    const atIdx = textBeforeCursor.lastIndexOf('@');
+    const before = atIdx >= 0 ? comment.slice(0, atIdx) : comment;
+    const after = ta ? comment.slice(ta.selectionStart) : '';
+    const newVal = before + insertion + after;
+    setComment(newVal);
+    setMentionMap(prev => ({ ...prev, [item.label]: item }));
     setShowMentions(false);
+    setMentionQuery('');
+    setTimeout(() => {
+      if (ta) { ta.focus(); const pos = before.length + insertion.length; ta.setSelectionRange(pos, pos); }
+    }, 0);
   };
+
+  // @入力検知
+  const handleCommentChange = (e) => {
+    const val = e.target.value;
+    setComment(val);
+    const cursor = e.target.selectionStart;
+    const before = val.slice(0, cursor);
+    const atMatch = before.match(/@([^@\s]*)$/);
+    if (atMatch) { setMentionQuery(atMatch[1]); setShowMentions(true); }
+    else { setShowMentions(false); setMentionQuery(''); }
+  };
+
+  // @query でフィルタリング（メンバー＋グループ）
+  const mentionCandidates = useMemo(() => {
+    const q = mentionQuery.toLowerCase();
+    const ms = members.filter(m => {
+      const name = (m.displayName || '').split('/')[0].toLowerCase();
+      return !q || name.includes(q);
+    }).slice(0, 8).map(m => ({ type:'user', id:m.assignee_id, label:m.displayName?.split('/')[0].trim() }));
+    const gs = usergroups.filter(g => !q || g.handle.toLowerCase().includes(q) || (g.name||'').toLowerCase().includes(q))
+      .slice(0, 5).map(g => ({ type:'group', id:g.id, handle:g.handle, label:g.handle }));
+    return [...ms, ...gs];
+  }, [mentionQuery, members, usergroups]);
 
   const handleComment = async () => {
     if (!comment.trim()) return;
     setCommentSaving(true);
     try {
-      // @displayname → <@USERID> に変換
+      // @label を Slack形式に変換
       let text = comment;
-      for (const [name, uid] of Object.entries(mentionMap)) {
-        text = text.replace(new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), `<@${uid}>`);
+      for (const [label, item] of Object.entries(mentionMap)) {
+        const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const slackMention = item.type === 'group'
+          ? `<!subteam^${item.id}|@${item.handle}>`
+          : `<@${item.id}>`;
+        text = text.replace(new RegExp(`@${escaped}`, 'g'), slackMention);
       }
       await api.taskAddComment(task.id, text.trim());
       setComment('');
@@ -267,31 +297,36 @@ function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
 
       {/* コメント入力（Slackスタイル・固定下部） */}
       <div style={{ borderTop:'1px solid #e2e8f0', background:'#fff', flexShrink:0, position:'relative' }}>
-        {/* メンション候補 */}
-        {showMentions && members.length > 0 && (
+        {/* メンション候補（オートコンプリート） */}
+        {showMentions && mentionCandidates.length > 0 && (
           <div style={{ position:'absolute', bottom:'100%', left:0, right:0, background:'#fff', border:'1px solid #e2e8f0',
-            borderRadius:'8px 8px 0 0', maxHeight:160, overflowY:'auto', boxShadow:'0 -4px 12px rgba(0,0,0,0.08)' }}>
-            <div style={{ padding:'6px 10px', fontSize:'0.65rem', color:'#94a3b8', borderBottom:'1px solid #f1f5f9' }}>メンション先を選択</div>
-            {members.map(m => (
-              <div key={m.assignee_id} onMouseDown={e => { e.preventDefault(); insertMention(m); }}
-                style={{ padding:'7px 12px', cursor:'pointer', fontSize:'0.78rem', color:'#374151', display:'flex', alignItems:'center', gap:8 }}
+            borderRadius:'8px 8px 0 0', maxHeight:180, overflowY:'auto', boxShadow:'0 -4px 12px rgba(0,0,0,0.1)' }}>
+            {mentionCandidates.map(item => (
+              <div key={`${item.type}:${item.id}`} onMouseDown={e => { e.preventDefault(); insertMention(item); }}
+                style={{ padding:'7px 12px', cursor:'pointer', fontSize:'0.78rem', display:'flex', alignItems:'center', gap:8 }}
                 onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
                 onMouseLeave={e => e.currentTarget.style.background=''}>
-                {m.displayName?.split('/')[0]}
+                {item.type === 'group'
+                  ? <><span style={{ fontSize:'0.65rem', background:'#ede9fe', color:'#6d28d9', padding:'1px 5px', borderRadius:3, fontWeight:600 }}>グループ</span>@{item.label}</>
+                  : <><span style={{ fontSize:'0.65rem', background:'#dbeafe', color:'#1d4ed8', padding:'1px 5px', borderRadius:3, fontWeight:600 }}>メンバー</span>{item.label}</>
+                }
               </div>
             ))}
           </div>
         )}
         <div style={{ padding:'8px 10px', display:'flex', gap:6, alignItems:'flex-end' }}>
-          <textarea ref={textareaRef} value={comment} onChange={e => setComment(e.target.value)}
-            placeholder="返信する…"
+          <textarea ref={textareaRef} value={comment} onChange={handleCommentChange}
+            placeholder="返信する… （@で メンション）"
             rows={1}
             style={{ flex:1, padding:'7px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.78rem',
               lineHeight:1.5, resize:'none', outline:'none', fontFamily:'inherit',
               maxHeight:80, overflowY:'auto' }}
-            onFocus={() => setShowMentions(false)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleComment(); }
+              if (e.key === 'Escape') { setShowMentions(false); return; }
+              if (showMentions && (e.key === 'Enter' || e.key === 'Tab') && mentionCandidates.length > 0) {
+                e.preventDefault(); insertMention(mentionCandidates[0]); return;
+              }
+              if (e.key === 'Enter' && !e.shiftKey && !showMentions) { e.preventDefault(); handleComment(); }
             }}
           />
           <button onClick={() => setShowMentions(v => !v)}
@@ -322,6 +357,8 @@ export default function FloatingTasks() {
   const [hideSelfDone, setHideSelfDone] = useState(true);
   const [selectedTask, setSelectedTask] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [teamOverdue, setTeamOverdue] = useState([]);
+  const [showTeamAlert, setShowTeamAlert] = useState(false);
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
@@ -335,7 +372,11 @@ export default function FloatingTasks() {
       if (!silent) setLoading(false);
     } else {
       api.me()
-        .then(m => { setMe(m); return doLoad(m.userId); })
+        .then(m => {
+          setMe(m);
+          api.teamOverdue().then(r => setTeamOverdue(r.tasks || [])).catch(() => {});
+          return doLoad(m.userId);
+        })
         .catch(console.error)
         .finally(() => setLoading(false));
     }
@@ -414,6 +455,14 @@ export default function FloatingTasks() {
               {hideSelfDone ? '完了済み非表示' : '完了済み表示'}
             </button>
           )}
+          {teamOverdue.length > 0 && (
+            <button onClick={() => setShowTeamAlert(v => !v)}
+              style={{ fontSize:'0.62rem', padding:'2px 7px', border:'none', borderRadius:4,
+                background:'#dc2626', color:'#fff', fontWeight:700, cursor:'pointer' }}
+              title="チーム期限切れタスク">
+              ⚠ {teamOverdue.length}
+            </button>
+          )}
           <span style={{ fontSize:'0.7rem', color:'#9ba1ad' }}>{filtered.length}件</span>
           <button onClick={() => load(false)} style={{ background:'none', border:'none', color:'#9ba1ad', cursor:'pointer', fontSize:14, padding:'2px 4px' }} title="今すぐ更新">↻</button>
         </div>
@@ -430,6 +479,37 @@ export default function FloatingTasks() {
           </button>
         ))}
       </div>
+
+      {/* チームアラートリスト */}
+      {showTeamAlert && teamOverdue.length > 0 && (
+        <div style={{ background:'#fef2f2', borderBottom:'1px solid #fca5a5', padding:'8px 12px', flexShrink:0 }}>
+          <div style={{ fontSize:'0.68rem', fontWeight:700, color:'#dc2626', marginBottom:6 }}>⚠ チーム 期限切れ（{teamOverdue.length}件）</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:140, overflowY:'auto' }}>
+            {teamOverdue.map(t => {
+              const days = Math.floor((Date.now() - new Date(t.due_date)) / 86400000);
+              const titleLine = (() => {
+                for (const line of (t.title||'').split('\n')) {
+                  const c = line.replace(/<@[^>]+>/g,'').replace(/@\S+/g,'').replace(/（[^）]*）/g,'').replace(/\s+/g,' ').trim();
+                  if (!c) continue;
+                  if (!/[。！？、：]/.test(c) && /[一-鿿]+\/[A-Za-z]/.test(c)) continue;
+                  return c.slice(0,40);
+                }
+                return (t.title||'').slice(0,40);
+              })();
+              return (
+                <div key={t.id}
+                  style={{ display:'flex', gap:8, alignItems:'center', background:'#fff', borderRadius:6,
+                    padding:'4px 8px', border:'1px solid #fecaca', cursor:'pointer', fontSize:'0.72rem' }}
+                  onMouseDown={() => setSelectedTask(t)}>
+                  <span style={{ color:'#dc2626', fontWeight:700, whiteSpace:'nowrap', flexShrink:0 }}>{t.assigneeName}</span>
+                  <span style={{ color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{titleLine}</span>
+                  <span style={{ color:'#dc2626', fontWeight:600, whiteSpace:'nowrap', flexShrink:0 }}>{days}日超</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* タスク一覧 */}
       <div style={{ flex:1, overflowY:'auto' }}>

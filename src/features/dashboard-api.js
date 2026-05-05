@@ -2724,6 +2724,82 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // --- GET /team-overdue (配下メンバーの期限切れタスク) ---
+  expressApp.get("/api/dashboard/team-overdue", authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+
+      // ロールレベル定義
+      const ROLE_LEVEL = { '': 0, 'member': 0, 'sub_chief': 2, 'chief': 3, 'manager': 4, 'admin': 5 };
+
+      // admin は全体が見えるのでこのAPIは不要（空返却）
+      if (role === 'admin') return res.json({ tasks: [] });
+
+      // 自分のチーム所属とロールを取得
+      const myTeamsRes = await dbQuery(
+        `SELECT m.dash_team_id, m.role, t.parent_id
+         FROM dash_team_members m
+         JOIN dash_teams t ON t.id = m.dash_team_id AND t.team_id = m.team_id
+         WHERE m.team_id = $1 AND m.user_id = $2`,
+        [teamId, userId]
+      );
+      if (myTeamsRes.rows.length === 0) return res.json({ tasks: [] });
+
+      const targetUserIds = new Set();
+
+      for (const myTeam of myTeamsRes.rows) {
+        const myLevel = ROLE_LEVEL[myTeam.role || ''] ?? 0;
+        const isParent = !myTeam.parent_id;
+
+        if (isParent) {
+          // 親チームメンバーは子チーム全員のタスクを確認できる
+          const childRes = await dbQuery(
+            `SELECT DISTINCT m.user_id FROM dash_team_members m
+             JOIN dash_teams t ON t.id = m.dash_team_id AND t.team_id = m.team_id
+             WHERE m.team_id = $1 AND t.parent_id = $2 AND m.user_id != $3`,
+            [teamId, myTeam.dash_team_id, userId]
+          );
+          for (const row of childRes.rows) targetUserIds.add(row.user_id);
+        }
+
+        if (myLevel > 0) {
+          // 同チームの自分より下のロールのメンバー
+          const lowerRes = await dbQuery(
+            `SELECT user_id, role FROM dash_team_members WHERE team_id = $1 AND dash_team_id = $2 AND user_id != $3`,
+            [teamId, myTeam.dash_team_id, userId]
+          );
+          for (const row of lowerRes.rows) {
+            const theirLevel = ROLE_LEVEL[row.role || ''] ?? 0;
+            if (theirLevel < myLevel) targetUserIds.add(row.user_id);
+          }
+        }
+      }
+
+      if (targetUserIds.size === 0) return res.json({ tasks: [] });
+
+      const overdueRes = await dbQuery(
+        `SELECT t.id, t.title, t.status, t.due_date, t.assignee_id, t.task_type, t.created_at
+         FROM tasks t
+         WHERE t.team_id = $1 AND t.assignee_id = ANY($2)
+           AND t.due_date < CURRENT_DATE AND t.status NOT IN ('done','cancelled')
+           AND (t.task_type IS NULL OR t.task_type = 'personal')
+         ORDER BY t.due_date ASC, t.assignee_id
+         LIMIT 50`,
+        [teamId, [...targetUserIds]]
+      );
+
+      const tasks = await Promise.all(overdueRes.rows.map(async t => ({
+        ...t,
+        assigneeName: await getUserDisplayName(teamId, t.assignee_id).then(n => n.split('/')[0].trim()).catch(() => t.assignee_id),
+      })));
+
+      res.json({ tasks });
+    } catch (e) {
+      console.error("dashboard GET /team-overdue error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // --- GET /analytics/period-summary ---
   expressApp.get("/api/dashboard/analytics/period-summary", authWithRole, async (req, res) => {
     try {

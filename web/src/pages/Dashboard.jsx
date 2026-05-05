@@ -512,13 +512,6 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
             <div style={{ fontSize:'0.75rem', color:'#cbd5e1', textAlign:'center' }}>スレッド読み込み中…</div>
           )}
           {thread !== null && thread.length > 0 && (() => {
-            // user_id → 日本語名のマップ（メンション変換用）
-            const nameMap = Object.fromEntries(
-              thread.filter(m => m.user_id).map(m => [
-                m.user_id,
-                (m.displayName || '').split('/')[0].trim() || m.user_id,
-              ])
-            );
             return (
               <div>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>

@@ -29,14 +29,13 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.me(), api.summary(), api.members(), api.projects(), api.workloadTeams(), api.crmPipelineSummary(), api.personalFilters()])
-      .then(([me, sum, mem, proj, dt, pipe, pf]) => {
+    Promise.all([api.me(), api.summary(), api.members(), api.projects(), api.workloadTeams(), api.personalFilters()])
+      .then(([me, sum, mem, proj, dt, pf]) => {
         setUser(me);
         setSummary(sum.summary);
         setMembers(mem.members);
         setProjects(proj.projects);
         setDashTeams(dt.teams || []);
-        setPipeline(pipe.summary || []);
         setPersonalFilters(pf.filters || []);
       })
       .catch(console.error)

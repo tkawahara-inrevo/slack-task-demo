@@ -26,89 +26,82 @@ const YOMI_CFG_PANEL = {
 function DealDetailModal({ deal, onClose, onMemoSave }) {
   const [memo, setMemo] = useState(deal.sales_memo || '');
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const cfg = YOMI_CFG_PANEL[deal.yomi] || { color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' };
   const amt = Number(deal.monthly_fee || deal.initial_fee || 0) * 1.1;
   const daysSince = Math.floor((Date.now() - new Date(deal.updated_at)) / 86400000);
 
   const handleSave = async () => {
     setSaving(true);
-    try { await api.crmUpdateDeal(deal.id, { salesMemo: memo }); onMemoSave(deal.id, memo); }
-    catch (e) { console.error(e); }
+    try {
+      await api.crmUpdateDeal(deal.id, { salesMemo: memo });
+      onMemoSave(deal.id, memo);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) { console.error(e); }
     finally { setSaving(false); }
+  };
+
+  const openCustomer = () => {
+    window.open(`/crm/customers/${deal.customer_id}`, '_blank', 'noopener');
   };
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
       onClick={onClose}>
-      <div style={{ background:'#fff', borderRadius:16, width:'min(560px,92vw)', maxHeight:'85vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.25)' }}
+      <div style={{ background:'#fff', borderRadius:16, width:'min(520px,92vw)', maxHeight:'82vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.25)' }}
         onClick={e => e.stopPropagation()}>
+
         {/* ヘッダー */}
         <div style={{ padding:'16px 20px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-          <div>
-            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-              <span style={{ fontSize:'0.78rem', fontWeight:700, padding:'3px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{deal.yomi}</span>
-              {deal.contract_type && <span style={{ fontSize:'0.72rem', color:'#6366f1', background:'#eef2ff', borderRadius:5, padding:'2px 8px', fontWeight:600 }}>{deal.contract_type}</span>}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, flexWrap:'wrap' }}>
+              <span style={{ fontSize:'0.75rem', fontWeight:700, padding:'3px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{deal.yomi}</span>
+              {deal.contract_type && <span style={{ fontSize:'0.7rem', color:'#6366f1', background:'#eef2ff', borderRadius:5, padding:'2px 7px', fontWeight:600 }}>{deal.contract_type}</span>}
+              {amt > 0 && <span style={{ fontSize:'0.7rem', fontWeight:700, color:'#059669' }}>{fmt(amt)}</span>}
+              <span style={{ fontSize:'0.68rem', color: daysSince >= 14 ? '#dc2626' : '#94a3b8', marginLeft:'auto' }}>
+                {daysSince === 0 ? '今日更新' : `${daysSince}日前更新`}
+              </span>
             </div>
-            <div style={{ fontWeight:800, fontSize:'1.05rem', color:'#0f172a' }}>{deal.customer_name}</div>
-            <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginTop:2 }}>{deal.name}</div>
+            <div style={{ fontWeight:800, fontSize:'1.05rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{deal.customer_name}</div>
+            <div style={{ fontSize:'0.73rem', color:'#94a3b8', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{deal.name}</div>
           </div>
-          <button onClick={onClose} style={{ width:28, height:28, borderRadius:8, background:'#f1f5f9', border:'none', cursor:'pointer', color:'#64748b', fontSize:16 }}>×</button>
+          <button onClick={onClose} style={{ width:28, height:28, borderRadius:8, background:'#f1f5f9', border:'none', cursor:'pointer', color:'#64748b', fontSize:16, flexShrink:0, marginLeft:10 }}>×</button>
         </div>
 
-        <div style={{ overflowY:'auto', padding:'16px 20px', display:'flex', flexDirection:'column', gap:14 }}>
-          {/* 金額・担当 */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-            {amt > 0 && (
-              <div style={{ padding:'10px 14px', background:'#f8fafc', borderRadius:10, border:'1px solid #f1f5f9' }}>
-                <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:3 }}>{deal.monthly_fee > 0 ? '月額' : '初期費用'}</div>
-                <div style={{ fontWeight:800, fontSize:'1rem', color:'#059669' }}>{fmt(amt)}</div>
-              </div>
-            )}
-            <div style={{ padding:'10px 14px', background:'#f8fafc', borderRadius:10, border:'1px solid #f1f5f9' }}>
-              <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:3 }}>最終更新</div>
-              <div style={{ fontWeight:600, fontSize:'0.85rem', color: daysSince >= 14 ? '#dc2626' : '#374151' }}>
-                {daysSince === 0 ? '今日' : `${daysSince}日前`}
-              </div>
-            </div>
-          </div>
-
+        <div style={{ overflowY:'auto', padding:'16px 20px', display:'flex', flexDirection:'column', gap:12 }}>
           {/* 次回アクション */}
           {deal.next_action_date && (
             <div style={{ padding:'10px 14px', background:'#fef9c3', borderRadius:10, border:'1px solid #fcd34d' }}>
-              <div style={{ fontSize:'0.65rem', color:'#92400e', fontWeight:600, marginBottom:2 }}>次回アクション</div>
-              <div style={{ fontSize:'0.82rem', fontWeight:600, color:'#78350f' }}>{deal.next_action_date}</div>
-              {deal.next_action_content && <div style={{ fontSize:'0.75rem', color:'#92400e', marginTop:2 }}>{deal.next_action_content}</div>}
+              <div style={{ fontSize:'0.65rem', color:'#92400e', fontWeight:700, marginBottom:2 }}>次回アクション</div>
+              <div style={{ fontSize:'0.85rem', fontWeight:700, color:'#78350f' }}>{deal.next_action_date}</div>
+              {deal.next_action_content && <div style={{ fontSize:'0.78rem', color:'#92400e', marginTop:3 }}>{deal.next_action_content}</div>}
             </div>
           )}
 
-          {/* メモ */}
+          {/* 商談メモ */}
           <div>
             <div style={{ fontSize:'0.72rem', fontWeight:700, color:'#374151', marginBottom:6 }}>商談メモ</div>
-            <textarea value={memo} onChange={e => setMemo(e.target.value)} rows={5}
+            <textarea value={memo} onChange={e => setMemo(e.target.value)} rows={6}
               placeholder="メモを入力…"
               style={{ width:'100%', boxSizing:'border-box', padding:'10px 12px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.85rem', outline:'none', resize:'vertical', lineHeight:1.7 }}
               onFocus={e => e.target.style.borderColor='#6366f1'}
               onBlur={e => e.target.style.borderColor='#e2e8f0'} />
           </div>
-
-          {/* 案件メモ（別フィールド） */}
-          {deal.memo && deal.memo !== memo && (
-            <div style={{ padding:'10px 14px', background:'#f8fafc', borderRadius:10, border:'1px solid #f1f5f9' }}>
-              <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:4 }}>案件詳細メモ</div>
-              <div style={{ fontSize:'0.8rem', color:'#374151', whiteSpace:'pre-wrap', lineHeight:1.7 }}>{deal.memo}</div>
-            </div>
-          )}
         </div>
 
-        <div style={{ padding:'12px 20px', borderTop:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <a href={`/crm/customers/${deal.customer_id}`}
-            style={{ fontSize:'0.78rem', color:'#6366f1', textDecoration:'none', fontWeight:600 }}>
-            → 顧客詳細を開く
-          </a>
-          <button onClick={handleSave} disabled={saving}
-            style={{ padding:'7px 20px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
-            {saving ? '保存中…' : 'メモを保存'}
+        <div style={{ padding:'12px 20px', borderTop:'1px solid #f1f5f9', display:'flex', gap:8, alignItems:'center' }}>
+          <button onClick={openCustomer}
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}>
+            <span style={{ fontSize:'0.85rem' }}>↗</span> 顧客詳細（別タブ）
           </button>
+          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }}>
+            {saved && <span style={{ fontSize:'0.75rem', color:'#059669', fontWeight:600 }}>保存しました</span>}
+            <button onClick={handleSave} disabled={saving}
+              style={{ padding:'7px 20px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
+              {saving ? '保存中…' : 'メモを保存'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -121,6 +114,7 @@ function YomiPanel({ full = false }) {
   const [loading, setLoading] = useState(true);
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [memoCache, setMemoCache] = useState({});
+  const [filterStaff, setFilterStaff] = useState('');
 
   useEffect(() => {
     api.crmYomiKanri().then(r => {
@@ -134,10 +128,12 @@ function YomiPanel({ full = false }) {
   if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;
   if (!yomiKanri) return null;
 
-  const entries = Object.entries(yomiKanri.byStaff)
+  const allEntries = Object.entries(yomiKanri.byStaff)
     .filter(([name, d]) => d.length > 0 && !YOMI_EXCLUDED.some(ex => name.includes(ex.split(' ')[0])))
     .sort((a,b) => b[1].length - a[1].length);
 
+  const staffOptions = allEntries.map(([name]) => name);
+  const entries = filterStaff ? allEntries.filter(([name]) => name === filterStaff) : allEntries;
   const totalFiltered = entries.reduce((s,[,d]) => s + d.length, 0);
 
   const DealCard = ({ d, compact = false }) => {
@@ -196,9 +192,18 @@ function YomiPanel({ full = false }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#f8fafc' }}>
-      <div style={{ padding:'12px 20px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0 }}>
-        <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>ヨミ管理</div>
-        <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>C以上 進行中 {totalFiltered}件</div>
+      <div style={{ padding:'10px 20px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0, display:'flex', alignItems:'center', gap:12 }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>ヨミ管理</div>
+          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>C以上 進行中 {totalFiltered}件</div>
+        </div>
+        <select value={filterStaff} onChange={e => setFilterStaff(e.target.value)}
+          style={{ marginLeft:'auto', padding:'5px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', background:'#fff', color:'#374151', outline:'none', cursor:'pointer' }}>
+          <option value="">全員</option>
+          {staffOptions.map(name => (
+            <option key={name} value={name}>{name.split('/')[0].trim()}</option>
+          ))}
+        </select>
       </div>
       <div style={{ flex:1, overflowY:'auto', padding:'12px 20px' }}>
         {full ? (

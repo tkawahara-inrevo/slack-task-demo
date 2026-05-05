@@ -174,6 +174,8 @@ export const api = {
   taskUpdate: (id, body) => jsonPut(`/tasks/${id}`, body),
   taskGet: (id) => apiFetch(`/tasks/${id}`),
   taskThread: (id) => apiFetch(`/tasks/${id}/thread`),
+  taskUpdateFields: (id, body) => apiFetch(`/tasks/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }),
+  taskChangeGroup: (id, group_id) => apiFetch(`/tasks/${id}/group`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ group_id }) }),
   taskSetStatus: (id, status) => apiFetch(`/tasks/${id}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

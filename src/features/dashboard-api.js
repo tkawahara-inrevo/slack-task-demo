@@ -2434,6 +2434,25 @@ function registerDashboardApi(deps) {
 
       await dbInsertTaskComment(teamId, req.params.id, userId, comment.trim());
 
+      // Slackスレッドへ投稿（Bot名義）
+      if (task.channel_id && task.message_ts) {
+        try {
+          const senderName = await getUserDisplayName(teamId, userId).catch(() => userId);
+          const jaName = senderName.split('/')[0].trim();
+          // thread_tsが異なる場合（message_tsが返信のts）は実際のrootを取得
+          let threadTs = task.message_ts;
+          const replies = await slackClient.conversations.replies({ channel: task.channel_id, ts: task.message_ts, limit: 1 }).catch(() => null);
+          if (replies?.messages?.[0]?.thread_ts && replies.messages[0].thread_ts !== task.message_ts) {
+            threadTs = replies.messages[0].thread_ts;
+          }
+          await slackClient.chat.postMessage({
+            channel: task.channel_id,
+            thread_ts: threadTs,
+            text: `[TaskHub コメント by ${jaName}]\n${comment.trim()}`,
+          });
+        } catch (e) { console.error("Failed to post comment to Slack:", e.message); }
+      }
+
       const comments = await dbListTaskComments(teamId, req.params.id, 100);
       const commentsWithNames = await Promise.all(
         comments.map(async (c) => ({
@@ -2444,6 +2463,54 @@ function registerDashboardApi(deps) {
       res.json({ comments: commentsWithNames });
     } catch (e) {
       console.error("dashboard POST /tasks/:id/comments error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // --- PATCH /tasks/:id/group (broadcast タスクのグループ変更) ---
+  expressApp.patch("/api/dashboard/tasks/:id/group", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { group_id } = req.body || {};
+      if (!group_id) return res.status(400).json({ error: "group_id_required" });
+
+      const task = await dbGetTaskById(teamId, req.params.id);
+      if (!task) return res.status(404).json({ error: "not_found" });
+      if (task.task_type !== 'broadcast') return res.status(400).json({ error: "not_broadcast_task" });
+
+      // グループのハンドル名を取得
+      const subteamMap = await getSubteamIdMap(teamId).catch(() => new Map());
+      const handle = subteamMap.get(group_id);
+      if (!handle) return res.status(400).json({ error: "invalid_group" });
+
+      // 新しいグループのメンバーを取得
+      const memberIds = await getUsergroupMembers(teamId, group_id);
+
+      // task_targets を差し替え
+      await dbDeleteTaskTargets(teamId, req.params.id);
+      if (memberIds.length > 0) await dbInsertTaskTargets(teamId, req.params.id, memberIds);
+
+      // 新メンバーのうち完了済みの数を再計算
+      const compRes = memberIds.length > 0
+        ? await dbQuery(`SELECT COUNT(*)::int AS c FROM task_completions WHERE team_id=$1 AND task_id=$2 AND user_id = ANY($3)`, [teamId, req.params.id, memberIds])
+        : { rows: [{ c: 0 }] };
+      const completedCount = compRes.rows[0]?.c || 0;
+
+      // タスクを更新
+      await dbQuery(
+        `UPDATE tasks SET broadcast_group_id=$3, broadcast_group_handle=$4, assignee_label=$5, total_count=$6, completed_count=$7, updated_at=now() WHERE team_id=$1 AND id=$2`,
+        [teamId, req.params.id, group_id, handle, `@${handle}`, memberIds.length, completedCount]
+      );
+
+      const updated = await dbGetTaskById(teamId, req.params.id);
+      // Slackカード更新
+      if (updated?.channel_id && updated?.message_ts) {
+        const blocks = await buildThreadCardBlocks({ teamId, task: updated }).catch(() => null);
+        if (blocks) await upsertThreadCard(slackClient, { teamId, channelId: updated.channel_id, parentTs: updated.message_ts, blocks }).catch(() => {});
+      }
+      res.json({ task: updated });
+    } catch (e) {
+      console.error("dashboard PATCH /tasks/:id/group error:", e);
       res.status(500).json({ error: "internal" });
     }
   });

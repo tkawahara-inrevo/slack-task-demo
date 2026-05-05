@@ -74,27 +74,74 @@ const fmtTs = (ts) => {
 };
 
 // ── タスク詳細パネル（ポップアップ内） ──────────────────────────────
-function TaskDetailPanel({ task, onClose, onStatusChange }) {
+function TaskDetailPanel({ task, onClose, onStatusChange, onTaskUpdate }) {
   const [status, setStatus] = useState(task.status);
   const [fullTask, setFullTask] = useState(null);
   const [threadData, setThreadData] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [usergroups, setUsergroups] = useState([]);
   const [saving, setSaving] = useState(false);
+  // 編集フォーム
+  const [editDue, setEditDue] = useState('');
+  const [editAssignee, setEditAssignee] = useState('');
+  const [editGroup, setEditGroup] = useState('');
+  // コメント
+  const [comment, setComment] = useState('');
+  const [commentSaving, setCommentSaving] = useState(false);
 
   useEffect(() => {
-    api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
+    api.taskGet?.(task.id).then(r => {
+      const t = r.task || r;
+      setFullTask(t);
+      setEditDue(t.due_date ? t.due_date.slice(0, 10) : '');
+      setEditAssignee(t.assignee_id || '');
+      setEditGroup(t.broadcast_group_id || '');
+    }).catch(() => {});
     api.taskThread?.(task.id)
       .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
       .catch(() => setThreadData({ messages: [], nameMap: {}, channel: null }));
+    // 担当者・グループ候補を取得
+    api.members().then(r => setMembers(r.members || [])).catch(() => {});
+    api.usergroups().then(r => setUsergroups(r.usergroups || [])).catch(() => {});
   }, [task.id]);
 
   const handleStatus = async (s) => {
     setSaving(true);
+    try { await api.taskSetStatus(task.id, s); setStatus(s); onStatusChange?.(task.id, s); }
+    catch (e) { console.error(e); } finally { setSaving(false); }
+  };
+
+  const handleSaveFields = async () => {
+    setSaving(true);
     try {
-      await api.taskSetStatus(task.id, s);
-      setStatus(s);
-      onStatusChange?.(task.id, s);
-    } catch (e) { console.error(e); }
-    finally { setSaving(false); }
+      const body = {};
+      if (editDue !== (fullTask?.due_date?.slice(0,10) || '')) body.due_date = editDue || null;
+      if (editAssignee !== (fullTask?.assignee_id || '') && fullTask?.task_type !== 'broadcast') body.assignee_id = editAssignee || null;
+      if (Object.keys(body).length) {
+        const r = await api.taskUpdateFields(task.id, body);
+        setFullTask(r.task || r);
+        onTaskUpdate?.(task.id, r.task || r);
+      }
+      // グループ変更（broadcastのみ）
+      if (fullTask?.task_type === 'broadcast' && editGroup && editGroup !== fullTask?.broadcast_group_id) {
+        const r = await api.taskChangeGroup(task.id, editGroup);
+        setFullTask(r.task || r);
+        onTaskUpdate?.(task.id, r.task || r);
+      }
+    } catch (e) { console.error(e); } finally { setSaving(false); }
+  };
+
+  const handleComment = async () => {
+    if (!comment.trim()) return;
+    setCommentSaving(true);
+    try {
+      await api.taskAddComment(task.id, comment.trim());
+      setComment('');
+      // スレッド再取得
+      api.taskThread?.(task.id)
+        .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
+        .catch(() => {});
+    } catch (e) { console.error(e); } finally { setCommentSaving(false); }
   };
 
   const d = fullTask || task;
@@ -111,6 +158,8 @@ function TaskDetailPanel({ task, onClose, onStatusChange }) {
     return base;
   }, [threadData]);
   const slackUrl = d.source_permalink || null;
+  const isBroadcast = d.task_type === 'broadcast';
+  const selSt = { padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none', flex:1 };
 
   return (
     <div style={{ position:'fixed', inset:0, display:'flex', flexDirection:'column', background:'#fff', zIndex:50 }}>
@@ -156,7 +205,39 @@ function TaskDetailPanel({ task, onClose, onStatusChange }) {
         })}
       </div>
 
-      {/* 本文 + スレッド */}
+      {/* 編集フォーム */}
+      <div style={{ padding:'8px 12px', borderBottom:'1px solid #f1f5f9', display:'flex', flexDirection:'column', gap:6, flexShrink:0 }}>
+        {/* 期限 */}
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <span style={{ fontSize:'0.68rem', color:'#94a3b8', width:52, flexShrink:0 }}>📅 期限</span>
+          <input type="date" value={editDue} onChange={e => setEditDue(e.target.value)} style={selSt} />
+        </div>
+        {/* 担当者 or グループ */}
+        {isBroadcast ? (
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize:'0.68rem', color:'#94a3b8', width:52, flexShrink:0 }}>👥 グループ</span>
+            <select value={editGroup} onChange={e => setEditGroup(e.target.value)} style={selSt}>
+              <option value="">未設定</option>
+              {usergroups.map(g => <option key={g.id} value={g.id}>@{g.handle}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize:'0.68rem', color:'#94a3b8', width:52, flexShrink:0 }}>👤 担当者</span>
+            <select value={editAssignee} onChange={e => setEditAssignee(e.target.value)} style={selSt}>
+              <option value="">未設定</option>
+              {members.map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName?.split('/')[0]}</option>)}
+            </select>
+          </div>
+        )}
+        <button onClick={handleSaveFields} disabled={saving}
+          style={{ padding:'4px 0', background: saving ? '#e2e8f0' : '#1e40af', color: saving ? '#94a3b8' : '#fff',
+            border:'none', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor: saving ? 'default' : 'pointer' }}>
+          {saving ? '保存中…' : '変更を保存'}
+        </button>
+      </div>
+
+      {/* 本文 + コメント + スレッド */}
       <div style={{ flex:1, overflowY:'auto', padding:'12px' }}>
         {body && (
           <div style={{ fontSize:'0.8rem', color:'#374151', lineHeight:1.75, whiteSpace:'pre-wrap',
@@ -165,6 +246,24 @@ function TaskDetailPanel({ task, onClose, onStatusChange }) {
             <SlackText text={body} nameMap={nameMap} />
           </div>
         )}
+
+        {/* コメント入力 */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:5 }}>コメント（Slackスレッドにも投稿）</div>
+          <textarea value={comment} onChange={e => setComment(e.target.value)}
+            placeholder="コメントを入力…"
+            rows={2}
+            style={{ width:'100%', padding:'7px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.78rem',
+              lineHeight:1.5, resize:'vertical', outline:'none', fontFamily:'inherit', boxSizing:'border-box' }}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleComment(); }}
+          />
+          <button onClick={handleComment} disabled={commentSaving || !comment.trim()}
+            style={{ marginTop:4, width:'100%', padding:'5px', background: (!comment.trim() || commentSaving) ? '#f1f5f9' : '#1e40af',
+              color: (!comment.trim() || commentSaving) ? '#94a3b8' : '#fff',
+              border:'none', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor: (!comment.trim() || commentSaving) ? 'default' : 'pointer' }}>
+            {commentSaving ? '投稿中…' : '投稿（Ctrl+Enter）'}
+          </button>
+        </div>
 
         {/* スレッド */}
         {thread === null && <div style={{ fontSize:'0.72rem', color:'#cbd5e1', textAlign:'center' }}>スレッド読み込み中…</div>}
@@ -388,6 +487,10 @@ export default function FloatingTasks() {
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
           onStatusChange={handleStatusChange}
+          onTaskUpdate={(id, updated) => {
+            setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updated } : t));
+            setSelectedTask(s => s ? { ...s, ...updated } : s);
+          }}
         />
       )}
     </div>

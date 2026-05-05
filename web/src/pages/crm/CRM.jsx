@@ -117,12 +117,21 @@ function YomiPanel({ full = false }) {
   const [filterStaff, setFilterStaff] = useState('');
 
   useEffect(() => {
-    api.crmYomiKanri().then(r => {
-      setYomiKanri(r);
-      const init = {};
-      Object.values(r.byStaff).flat().forEach(d => { init[d.id] = d.sales_memo || ''; });
-      setMemoCache(init);
-    }).catch(() => {}).finally(() => setLoading(false));
+    Promise.all([api.crmYomiKanri(), api.crmMyInfo()])
+      .then(([r, me]) => {
+        setYomiKanri(r);
+        const init = {};
+        Object.values(r.byStaff).flat().forEach(d => { init[d.id] = d.sales_memo || ''; });
+        setMemoCache(init);
+        // 自分の名前がスタッフ一覧に含まれていればデフォルトフィルタにセット
+        if (me.displayName) {
+          const myName = me.displayName;
+          const matched = Object.keys(r.byStaff).find(name =>
+            name.includes(myName) || myName.includes(name.split('/')[0].trim())
+          );
+          if (matched) setFilterStaff(matched);
+        }
+      }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;

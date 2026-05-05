@@ -769,6 +769,22 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── 現在のユーザー情報（名前・役職）──────────────────────────────
+  expressApp.get('/api/crm/my-info', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const { rows } = await dbQuery(
+        `SELECT display_name, real_name, profile_json->>'title' AS title
+         FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2`,
+        [teamId, userId]
+      );
+      const row = rows[0] || {};
+      // 表示名の日本語部分のみ抽出（例: "板金 慎太郎/Shintaro" → "板金 慎太郎"）
+      const displayName = (row.display_name || row.real_name || '').split('/')[0].trim();
+      res.json({ displayName, title: row.title || '' });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── 成績ページ閲覧可否（admin / BC管理職以上）──────────────────
   expressApp.get('/api/crm/performance-access', authWithRole, async (req, res) => {
     try {

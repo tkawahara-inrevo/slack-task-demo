@@ -503,17 +503,12 @@ function registerDashboardApi(deps) {
     }
   });
 
-  // ワンタイムトークン発行（手動ボタン用・残しておく）
+  // セッションID返却（adoptエンドポイントがDBで検証できるよう、セッションIDをそのまま返す）
   expressApp.post('/api/auth/transfer-token', authMiddleware, async (req, res) => {
     try {
-      const { teamId, userId } = req.dashboardUser;
       const sessionId = req.cookies?.dashboard_session || (req.headers.authorization || '').replace('Bearer ', '');
-      const crypto = require('crypto');
-      const token = crypto.randomBytes(24).toString('hex');
-      transferTokens.set(token, { teamId, userId, sessionId, expires: Date.now() + 90000 }); // 90秒
-      // 古いトークンの掃除
-      for (const [k, v] of transferTokens) { if (v.expires < Date.now()) transferTokens.delete(k); }
-      res.json({ token });
+      if (!sessionId) return res.status(401).json({ error: 'no session' });
+      res.json({ token: sessionId });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
 

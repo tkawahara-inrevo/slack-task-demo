@@ -167,8 +167,7 @@ export default function CustomerList() {
           <div style={{ textAlign:'center', padding:40, color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>
         ) : customers.length === 0 ? (
           <div style={{ textAlign:'center', padding:40, color:'#94a3b8', fontSize:'0.85rem' }}>顧客がありません</div>
-        ) : (
-          {isMobile ? (
+        ) : isMobile ? (
             /* モバイル: カードリスト */
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               {customers.map(c => {
@@ -253,8 +252,8 @@ export default function CustomerList() {
                 </tbody>
               </table>
             </div>
-          )}
-        )}
+          )
+        }
 
         {/* ページネーション */}
         {total > LIMIT && (

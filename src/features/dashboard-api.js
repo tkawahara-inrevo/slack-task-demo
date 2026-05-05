@@ -2185,7 +2185,19 @@ function registerDashboardApi(deps) {
       const { teamId } = req.dashboardUser;
       const task = await dbGetTaskById(teamId, req.params.id);
       if (!task) return res.status(404).json({ error: "not_found" });
-      if (!task.channel_id || !task.message_ts) return res.json({ messages: [], nameMap: {} });
+      if (!task.channel_id || !task.message_ts) return res.json({ messages: [], nameMap: {}, channel: null });
+
+      // チャンネル情報を取得
+      let channel = null;
+      try {
+        const chInfo = await slackClient.conversations.info({ channel: task.channel_id });
+        const ch = chInfo?.channel;
+        channel = {
+          id: task.channel_id,
+          name: ch?.name || ch?.name_normalized || task.channel_id,
+          is_private: !!ch?.is_private,
+        };
+      } catch { channel = { id: task.channel_id, name: task.channel_id, is_private: false }; }
 
       // ページネーションで全件取得するヘルパー
       const fetchReplies = async (ts) => {
@@ -2262,7 +2274,7 @@ function registerDashboardApi(deps) {
         };
       });
 
-      res.json({ messages, nameMap });
+      res.json({ messages, nameMap, channel });
     } catch (e) {
       console.error("dashboard GET /tasks/:id/thread error:", e);
       res.status(500).json({ error: "internal" });

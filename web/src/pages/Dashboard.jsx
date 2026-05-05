@@ -374,8 +374,8 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   useEffect(() => {
     api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
     api.taskThread?.(task.id)
-      .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {} }))
-      .catch(() => setThreadData({ messages: [], nameMap: {} }));
+      .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
+      .catch(() => setThreadData({ messages: [], nameMap: {}, channel: null }));
   }, [task.id]);
 
   const handleStatus = async (s) => {
@@ -397,6 +397,13 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   // バックエンドから返ってきたnameMap（本文・スレッド両方で使用）
   const nameMap = threadData?.nameMap || {};
   const thread = threadData?.messages || null;
+  const channel = threadData?.channel || null;
+
+  // Slack deep link: source_permalink があればそれを使う、なければ構築
+  const slackUrl = displayTask.source_permalink ||
+    (displayTask.channel_id && displayTask.message_ts
+      ? `https://app.slack.com/client/${displayTask.channel_id}`
+      : null);
   // subteamId → handle のマップ（ユーザーグループ名表示用）
   const subteamMap = useMemo(() =>
     Object.fromEntries((usergroups || []).map(g => [g.id, g.handle || g.name || g.id]))
@@ -438,7 +445,28 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
                 <span>📁</span>{displayTask.project_name}
               </span>
             )}
+            {channel && (
+              <span style={{ fontSize:'0.75rem', color:'#64748b', display:'flex', alignItems:'center', gap:4 }}>
+                <span>{channel.is_private ? '🔒' : '#'}</span>{channel.name}
+              </span>
+            )}
           </div>
+          {slackUrl && (
+            <div style={{ marginTop:10 }}>
+              <a href={slackUrl} target="_blank" rel="noopener noreferrer"
+                style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'5px 12px',
+                  background:'#fff', border:'1px solid #e2e8f0', borderRadius:7, textDecoration:'none',
+                  color:'#374151', fontSize:'0.78rem', fontWeight:600 }}>
+                <svg width="14" height="14" viewBox="0 0 122 122" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M25.7 77.5a12.8 12.8 0 1 1-25.6 0 12.8 12.8 0 0 1 25.6 0zm-6.4-38.2a12.8 12.8 0 1 0 0-25.6 12.8 12.8 0 0 0 0 25.6z" fill="#E01E5A"/>
+                  <path d="M83.9 19.1a12.8 12.8 0 1 1 0 25.6 12.8 12.8 0 0 1 0-25.6zm6.4 58.4a12.8 12.8 0 1 0 25.6 0 12.8 12.8 0 0 0-25.6 0z" fill="#36C5F0"/>
+                  <path d="M19.3 57.7a12.8 12.8 0 1 1 0 25.6 12.8 12.8 0 0 1 0-25.6zm64.6 6.4a12.8 12.8 0 1 0 25.6 0 12.8 12.8 0 0 0-25.6 0z" fill="#2EB67D"/>
+                  <path d="M57.7 102.7a12.8 12.8 0 1 1 25.6 0 12.8 12.8 0 0 1-25.6 0zM64.1 19.1a12.8 12.8 0 1 0 0-25.6 12.8 12.8 0 0 0 0 25.6z" fill="#ECB22E"/>
+                </svg>
+                Slackで開く
+              </a>
+            </div>
+          )}
         </div>
 
         {/* ステータス変更（進行中・完了のみ） */}
@@ -484,8 +512,10 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
             );
             return (
               <div>
-                <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:10 }}>
-                  Slackスレッド（{thread.length}件）
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                  <span style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600 }}>
+                    Slackスレッド（{thread.length}件）{channel ? ` · ${channel.is_private ? '🔒' : '#'}${channel.name}` : ''}
+                  </span>
                 </div>
                 <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
                   {thread.map(m => {

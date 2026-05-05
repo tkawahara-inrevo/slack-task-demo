@@ -6,6 +6,7 @@ const STATUS_CFG = {
   done:        { label: '完了',   color: '#10b981' },
   pending:     { label: '保留',   color: '#f59e0b' },
 };
+const STATUS_CHANGE = ['in_progress', 'done'];
 
 const parseTitleLine = (raw) => {
   if (!raw) return '（タイトルなし）';
@@ -26,16 +27,99 @@ const parseTitleLine = (raw) => {
 const fmtDate = (d) => {
   if (!d) return null;
   const dt = new Date(d);
-  return `${dt.getMonth()+1}/${dt.getDate()}`;
+  return `${dt.getFullYear()}/${dt.getMonth()+1}/${dt.getDate()}`;
 };
 
 const isOverdue = (t) => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done' && t.status !== 'cancelled';
 
+// ── タスク詳細パネル（ポップアップ内） ──────────────────────────────
+function TaskDetailPanel({ task, onClose, onStatusChange }) {
+  const [status, setStatus] = useState(task.status);
+  const [fullTask, setFullTask] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
+  }, [task.id]);
+
+  const handleStatus = async (s) => {
+    setSaving(true);
+    try {
+      await api.taskSetStatus(task.id, s);
+      setStatus(s);
+      onStatusChange?.(task.id, s);
+    } catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  };
+
+  const d = fullTask || task;
+  const st = STATUS_CFG[status] || { label: status, color: '#94a3b8' };
+  const title = parseTitleLine(d.title || d.content);
+  const body = d.content || d.title || '';
+  const ov = isOverdue({ ...d, status });
+
+  return (
+    <div style={{ position:'fixed', inset:0, display:'flex', flexDirection:'column', background:'#fff', zIndex:50 }}>
+      {/* ヘッダー */}
+      <div style={{ padding:'12px 14px 10px', borderBottom:'1px solid #f1f5f9', background:'#fafafa' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
+          <span style={{ fontSize:'0.68rem', fontWeight:700, padding:'2px 8px', borderRadius:99,
+            background:st.color+'18', color:st.color }}>{st.label}</span>
+          <button onClick={onClose}
+            style={{ background:'#f1f5f9', border:'none', borderRadius:6, width:26, height:26, cursor:'pointer', color:'#64748b', fontSize:14 }}>
+            ←
+          </button>
+        </div>
+        <div style={{ fontWeight:800, fontSize:'0.92rem', color:'#0f172a', lineHeight:1.45, marginBottom:6 }}>{title}</div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          {d.due_date && (
+            <span style={{ fontSize:'0.72rem', fontWeight: ov?700:400, color: ov?'#dc2626':'#64748b' }}>
+              📅 {fmtDate(d.due_date)}{ov ? '（超過）' : ''}
+            </span>
+          )}
+          {d.project_name && <span style={{ fontSize:'0.72rem', color:'#6366f1' }}>📁 {d.project_name}</span>}
+        </div>
+      </div>
+
+      {/* ステータス変更 */}
+      <div style={{ padding:'10px 14px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+        <span style={{ fontSize:'0.7rem', color:'#94a3b8' }}>変更</span>
+        {STATUS_CHANGE.map(key => {
+          const cfg = STATUS_CFG[key];
+          const active = status === key;
+          return (
+            <button key={key} onClick={() => handleStatus(key)} disabled={saving || active}
+              style={{ padding:'4px 14px', borderRadius:99, border:`1.5px solid ${active ? cfg.color : '#e2e8f0'}`,
+                cursor: active ? 'default' : 'pointer', fontSize:'0.78rem', fontWeight: active ? 700 : 500,
+                background: active ? cfg.color : '#fff', color: active ? '#fff' : '#64748b' }}>
+              {cfg.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 本文 */}
+      <div style={{ flex:1, overflowY:'auto', padding:'14px' }}>
+        {body ? (
+          <div style={{ fontSize:'0.82rem', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap',
+            wordBreak:'break-word', background:'#f8fafc', borderRadius:8, padding:'12px', border:'1px solid #f1f5f9' }}>
+            {body}
+          </div>
+        ) : (
+          <div style={{ color:'#cbd5e1', fontSize:'0.8rem', textAlign:'center', paddingTop:20 }}>（本文なし）</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── メイン ──────────────────────────────────────────────────────────
 export default function FloatingTasks() {
   const [me, setMe] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('active'); // active | all | done
+  const [filter, setFilter] = useState('active');
+  const [selectedTask, setSelectedTask] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -48,9 +132,9 @@ export default function FloatingTasks() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleStatusChange = async (id, status) => {
-    await api.taskSetStatus(id, status).catch(console.error);
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+  const handleStatusChange = (id, newStatus) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t));
+    if (selectedTask?.id === id) setSelectedTask(s => s ? { ...s, status: newStatus } : s);
   };
 
   const filtered = tasks.filter(t => {
@@ -67,18 +151,10 @@ export default function FloatingTasks() {
     return new Date(b.created_at) - new Date(a.created_at);
   });
 
-  const openInMain = (id) => {
-    const target = window.opener || window.parent;
-    if (target && target !== window) {
-      try { target.location.href = `/?task=${id}`; target.focus(); return; } catch {}
-    }
-    window.open(`/?task=${id}`, '_blank');
-  };
-
   return (
-    <div style={{ fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', background:'#f8fafc', minHeight:'100vh', display:'flex', flexDirection:'column' }}>
+    <div style={{ fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', background:'#f8fafc', height:'100vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
       {/* ヘッダー */}
-      <div style={{ background:'#1e2127', color:'#fff', padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:10 }}>
+      <div style={{ background:'#1e2127', color:'#fff', padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
         <div style={{ fontWeight:700, fontSize:'0.88rem' }}>
           {me ? `${me.displayName?.split(/[\s　/]/)[0]} のタスク` : 'マイタスク'}
         </div>
@@ -89,7 +165,7 @@ export default function FloatingTasks() {
       </div>
 
       {/* タブ */}
-      <div style={{ display:'flex', background:'#fff', borderBottom:'1px solid #e2e8f0' }}>
+      <div style={{ display:'flex', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0 }}>
         {[['active','進行中・保留'],['done','完了'],['all','すべて']].map(([v,l]) => (
           <button key={v} onClick={() => setFilter(v)}
             style={{ flex:1, padding:'7px 0', border:'none', background:'none', cursor:'pointer', fontSize:'0.75rem',
@@ -116,7 +192,7 @@ export default function FloatingTasks() {
                 style={{ padding:'10px 14px', borderBottom:'1px solid #f1f5f9', cursor:'pointer', background:'#fff' }}
                 onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
                 onMouseLeave={e => e.currentTarget.style.background='#fff'}
-                onClick={() => openInMain(t.id)}>
+                onClick={() => setSelectedTask(t)}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
                   <div style={{ fontSize:'0.82rem', fontWeight:600, color:'#0f172a', lineHeight:1.4, flex:1, minWidth:0,
                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
@@ -133,19 +209,28 @@ export default function FloatingTasks() {
                       📅 {fmtDate(t.due_date)}{ov ? ' 超過' : ''}
                     </span>
                   ) : <span />}
-                  {t.status !== 'done' && (
-                    <button onClick={e => { e.stopPropagation(); handleStatusChange(t.id, 'done'); }}
-                      style={{ fontSize:'0.65rem', padding:'2px 8px', border:'1px solid #d1d5db', borderRadius:4,
-                        background:'#fff', color:'#64748b', cursor:'pointer' }}>
-                      完了にする
-                    </button>
-                  )}
+                  <button onClick={e => { e.stopPropagation(); if (t.status !== 'done') { api.taskSetStatus(t.id, 'done').then(() => handleStatusChange(t.id, 'done')).catch(console.error); } }}
+                    style={{ fontSize:'0.65rem', padding:'2px 8px', border:'1px solid #d1d5db', borderRadius:4,
+                      background:'#fff', color: t.status === 'done' ? '#94a3b8' : '#64748b', cursor: t.status === 'done' ? 'default' : 'pointer',
+                      opacity: t.status === 'done' ? 0.5 : 1 }}
+                    disabled={t.status === 'done'}>
+                    {t.status === 'done' ? '完了済' : '完了にする'}
+                  </button>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {/* タスク詳細パネル（ポップアップ内） */}
+      {selectedTask && (
+        <TaskDetailPanel
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onStatusChange={handleStatusChange}
+        />
+      )}
     </div>
   );
 }

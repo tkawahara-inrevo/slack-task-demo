@@ -2241,35 +2241,42 @@ function registerDashboardApi(deps) {
         }
       }
 
-      // ユーザー名解決: getUserDisplayName（起動時プリフェッチキャッシュ優先 → users.info → フォールバック）
-      // DB(dashboard_user_directory)も一括引きしてアバターURLを補完
+      // ユーザー名・アバター解決: DB優先（dashboard_user_directory）→ getUserDisplayName（キャッシュ/API）
       const userIds = [...allUserIds];
-      const [nameEntries, dbRows] = await Promise.all([
-        Promise.all(userIds.map(async uid => {
-          const name = await getUserDisplayName(teamId, uid).catch(() => uid);
-          return [uid, name.split('/')[0].trim()];
-        })),
-        userIds.length > 0
-          ? dbQuery(
-              `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
-              [teamId, userIds]
-            ).then(r => r.rows)
-          : Promise.resolve([]),
-      ]);
-      const nameMap = Object.fromEntries(nameEntries);
-      const avatarMap = Object.fromEntries(dbRows.map(r => [r.user_id, r.avatar_url]));
+      const dbRows = userIds.length > 0
+        ? (await dbQuery(
+            `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
+            [teamId, userIds]
+          ).then(r => r.rows))
+        : [];
 
-      // DB未登録ユーザーを非同期でバックグラウンド保存（次回以降DBから高速解決）
-      const dbSet = new Set(dbRows.map(r => r.user_id));
-      const missingIds = userIds.filter(id => !dbSet.has(id));
-      if (missingIds.length > 0) {
-        Promise.all(missingIds.map(async uid => {
-          try {
-            const info = await slackClient.users.info({ user: uid });
-            if (info?.user) await dbUpsertDashboardUserDirectoryMember(teamId, info.user).catch(() => {});
-          } catch {}
-        })).catch(() => {});
+      const nameMap = {};
+      const avatarMap = {};
+      // 1) DB に存在する分を先に解決（最も信頼性が高い）
+      for (const row of dbRows) {
+        if (row.display_name) nameMap[row.user_id] = row.display_name.split('/')[0].trim();
+        if (row.avatar_url)   avatarMap[row.user_id] = row.avatar_url;
       }
+      // 2) DB未登録の分を getUserDisplayName（プリフェッチキャッシュ/users.info）で解決し DB に保存
+      const missingIds = userIds.filter(uid => !nameMap[uid]);
+      await Promise.all(missingIds.map(async uid => {
+        try {
+          const info = await slackClient.users.info({ user: uid });
+          const u = info?.user;
+          if (u) {
+            await dbUpsertDashboardUserDirectoryMember(teamId, u).catch(() => {});
+            const profile = u.profile || {};
+            const name = profile.display_name_normalized || profile.display_name || u.real_name || null;
+            if (name) nameMap[uid] = name.split('/')[0].trim();
+            const avatar = profile.image_72 || null;
+            if (avatar) avatarMap[uid] = avatar;
+          }
+        } catch {
+          // users.info 失敗 → getUserDisplayName のキャッシュを試みる
+          const cached = await getUserDisplayName(teamId, uid).catch(() => null);
+          if (cached && cached !== uid) nameMap[uid] = cached.split('/')[0].trim();
+        }
+      }));
 
       // ユーザーグループ名: 起動時キャッシュから解決（API呼び出しなし）
       const subteamIdMap = await getSubteamIdMap(teamId).catch(() => new Map());

@@ -305,19 +305,43 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
   const [form, setForm] = useState({ ...deal, ...deal.data });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
+  const [conflict, setConflict] = useState(null); // { serverUpdatedAt }
   const autoSaveTimer = useRef(null);
+  const baseUpdatedAt = useRef(deal.updated_at); // 取得時の updated_at を記録
 
   const set = (key, val) => setForm(p => ({ ...p, [key]: val }));
 
-  const save = async (f = form) => {
+  const save = async (f = form, forceOverwrite = false) => {
     setSaving(true);
+    setConflict(null);
     try {
       const bantData = { budget:f.budget, authority:f.authority, needs:f.needs, timeframe:f.timeframe, bantMemo:f.bantMemo };
-      const r = await api.crmUpdateDeal(deal.id, { ...f, data: bantData });
+      const body = { ...f, data: bantData, updatedAt: forceOverwrite ? undefined : baseUpdatedAt.current, force: forceOverwrite };
+      const r = await api.crmUpdateDeal(deal.id, body);
       onUpdate(r.deal);
+      baseUpdatedAt.current = r.deal.updated_at; // 成功したら最新の updated_at に更新
       setSavedAt(new Date().toLocaleTimeString('ja-JP'));
-    } catch { alert('保存に失敗しました'); }
+    } catch (err) {
+      if (err?.status === 409) {
+        setConflict({ serverUpdatedAt: err.serverUpdatedAt });
+        clearTimeout(autoSaveTimer.current);
+      } else {
+        alert('保存に失敗しました');
+      }
+    }
     finally { setSaving(false); }
+  };
+
+  const handleForceOverwrite = () => { setConflict(null); save(form, true); };
+  const handleReloadLatest = async () => {
+    try {
+      const r = await api.crmGetCustomer(deal.customer_id || '');
+      const latest = (r.deals || []).find(d => d.id === deal.id);
+      if (latest) { setForm({ ...latest, ...latest.data }); onUpdate(latest); baseUpdatedAt.current = latest.updated_at; }
+    } catch {}
+    setConflict(null);
+    clearTimeout(autoSaveTimer.current);
+    setEditing(false);
   };
 
   const scheduleAutoSave = (f) => {
@@ -513,6 +537,27 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
             </div>
           </div>
         </div>
+
+        {/* ── 競合バナー ── */}
+        {conflict && (
+          <div style={{ background:'#fef3c7', borderBottom:'1px solid #fcd34d', padding:'10px 22px', flexShrink:0, display:'flex', alignItems:'center', gap:12 }}>
+            <span style={{ fontSize:'1rem' }}>⚠️</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:700, fontSize:'0.83rem', color:'#78350f' }}>他のユーザーがこのデータを更新しました</div>
+              <div style={{ fontSize:'0.75rem', color:'#92400e', marginTop:1 }}>あなたの編集内容はそのまま残っています。どちらを保存しますか？</div>
+            </div>
+            <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+              <button onClick={handleReloadLatest}
+                style={{ padding:'5px 14px', border:'1px solid #d97706', borderRadius:7, background:'#fff', color:'#92400e', fontSize:'0.78rem', fontWeight:600, cursor:'pointer' }}>
+                最新を取得して閉じる
+              </button>
+              <button onClick={handleForceOverwrite}
+                style={{ padding:'5px 14px', border:'none', borderRadius:7, background:'#d97706', color:'#fff', fontSize:'0.78rem', fontWeight:700, cursor:'pointer' }}>
+                自分の内容で上書き保存
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── フォームエリア ── */}
         <div style={{ flex:1, overflowY:'auto', background:'#f8fafc' }}>
@@ -751,6 +796,8 @@ export default function CustomerDetail() {
   const [custForm, setCustForm] = useState({});
   const [custSaving, setCustSaving] = useState(false);
   const [custSavedAt, setCustSavedAt] = useState(null);
+  const [custConflict, setCustConflict] = useState(null);
+  const custBaseUpdatedAt = useRef(null);
   const [showDealModal, setShowDealModal] = useState(false);
   const [dealForm, setDealForm] = useState({ name:'', yomi:'アポ化前' });
   const [saving, setSaving] = useState(false);
@@ -771,6 +818,7 @@ export default function CustomerDetail() {
     ]).then(([r, mr, tr, cr]) => {
       setCustomer(r.customer);
       setCustForm(r.customer);
+      custBaseUpdatedAt.current = r.customer.updated_at;
       setDeals(r.deals || []);
       setContacts(cr.contacts || []);
       if (mr.meta) setMeta(mr.meta);
@@ -811,26 +859,30 @@ export default function CustomerDetail() {
     setContacts(prev => prev.filter(c => c.id !== contactId));
   };
 
-  const handleSaveCustomer = async () => {
+  const handleSaveCustomer = async (forceOverwrite = false) => {
     setCustSaving(true);
+    setCustConflict(null);
     try {
       const r = await api.crmUpdateCustomer(id, {
         name: custForm.name, industry: custForm.industry, prefecture: custForm.prefecture,
         employeeCount: custForm.employee_count, website: custForm.website, memo: custForm.memo,
-        inflowDate: custForm.inflow_date || null,
-        inflowSource: custForm.inflow_source || null,
-        nameShort: custForm.name_short || null,
-        competitors: custForm.competitors || [],
+        inflowDate: custForm.inflow_date || null, inflowSource: custForm.inflow_source || null,
+        nameShort: custForm.name_short || null, competitors: custForm.competitors || [],
         businessDescription: custForm.business_description || null,
-        postalCode: custForm.postal_code || null,
-        address: custForm.address || null,
-        serviceLpUrl1: custForm.service_lp_url1 || null,
-        serviceLpUrl2: custForm.service_lp_url2 || null,
+        postalCode: custForm.postal_code || null, address: custForm.address || null,
+        serviceLpUrl1: custForm.service_lp_url1 || null, serviceLpUrl2: custForm.service_lp_url2 || null,
         data: custForm.data || {},
+        updatedAt: forceOverwrite ? undefined : custBaseUpdatedAt.current,
+        force: forceOverwrite,
       });
       setCustomer(r.customer);
+      custBaseUpdatedAt.current = r.customer.updated_at;
       setCustSavedAt(new Date().toLocaleTimeString('ja-JP'));
-    } catch { alert('保存に失敗しました'); }
+    } catch (err) {
+      if (err?.status === 409) {
+        setCustConflict({ serverUpdatedAt: err.serverUpdatedAt });
+      } else { alert('保存に失敗しました'); }
+    }
     finally { setCustSaving(false); }
   };
 
@@ -1075,6 +1127,20 @@ export default function CustomerDetail() {
               )}
             </div>
 
+            {custConflict && (
+              <div style={{ background:'#fef3c7', borderTop:'1px solid #fcd34d', padding:'10px 24px', display:'flex', alignItems:'center', gap:10 }}>
+                <span>⚠️</span>
+                <div style={{ flex:1, fontSize:'0.8rem', color:'#78350f', fontWeight:600 }}>他のユーザーが更新しました。編集内容は保持されています。</div>
+                <button onClick={() => { setEditingCustomer(false); setCustConflict(null); window.location.reload(); }}
+                  style={{ padding:'4px 12px', border:'1px solid #d97706', borderRadius:6, background:'#fff', color:'#92400e', fontSize:'0.75rem', fontWeight:600, cursor:'pointer' }}>
+                  最新を取得
+                </button>
+                <button onClick={() => handleSaveCustomer(true)}
+                  style={{ padding:'4px 12px', border:'none', borderRadius:6, background:'#d97706', color:'#fff', fontSize:'0.75rem', fontWeight:700, cursor:'pointer' }}>
+                  上書き保存
+                </button>
+              </div>
+            )}
             <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <span style={{ fontSize:'0.75rem', color:'#9ca3af' }}>
                 {customer.updated_at ? `最終更新: ${formatUpdatedAt(customer.updated_at)}` : ''}
@@ -1083,7 +1149,7 @@ export default function CustomerDetail() {
                 <button style={{ padding:'8px 20px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#6b7280', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
                   onClick={() => setEditingCustomer(false)}>キャンセル</button>
                 <button style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}
-                  onClick={handleSaveCustomer} disabled={custSaving}>
+                  onClick={() => handleSaveCustomer()} disabled={custSaving}>
                   {custSaving ? '保存中...' : '✓ 保存して閉じる'}
                 </button>
               </div>

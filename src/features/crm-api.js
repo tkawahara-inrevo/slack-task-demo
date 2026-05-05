@@ -222,17 +222,29 @@ function registerCrmApi({ expressApp, authWithRole }) {
         name, industry, prefecture, employeeCount, website, memo,
         inflowDate, inflowSource, nameShort, competitors, businessDescription,
         postalCode, address, serviceLpUrl1, serviceLpUrl2,
+        updatedAt, force, data,
       } = req.body || {};
+
+      // オプティミスティックロック
+      if (updatedAt && !force) {
+        const { rows: [cur] } = await dbQuery(`SELECT updated_at FROM customers WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]);
+        if (cur && new Date(cur.updated_at).getTime() !== new Date(updatedAt).getTime()) {
+          return res.status(409).json({ error:'conflict', message:'他のユーザーがこのデータを更新しました', serverUpdatedAt: cur.updated_at });
+        }
+      }
+
       const { rows: [row] } = await dbQuery(`
         UPDATE customers SET
           name=$3, industry=$4, prefecture=$5, employee_count=$6, website=$7, memo=$8,
           inflow_date=$9, inflow_source=$10, name_short=$11, competitors=$12,
           business_description=$13, postal_code=$14, address=$15, service_lp_url1=$16, service_lp_url2=$17,
+          data=COALESCE($18::jsonb, data),
           updated_at=now()
         WHERE id=$1 AND team_id=$2 RETURNING *
       `, [req.params.id, teamId, name, industry||null, prefecture||null, employeeCount||null, website||null, memo||null,
           inflowDate||null, inflowSource||null, nameShort||null, JSON.stringify(competitors||[]),
-          businessDescription||null, postalCode||null, address||null, serviceLpUrl1||null, serviceLpUrl2||null]);
+          businessDescription||null, postalCode||null, address||null, serviceLpUrl1||null, serviceLpUrl2||null,
+          data ? JSON.stringify(data) : null]);
       if (!row) return res.status(404).json({ error: 'not_found' });
       res.json({ customer: row });
     } catch (e) {
@@ -918,11 +930,25 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { teamId } = req.dashboardUser;
       const { name, yomi, contractType, paymentType, salesUserId, naUserId,
               initialFee, monthlyFee, contractMonths, hiringTarget, employmentType,
-              lostReason, status, memo, data, firstMeetingDate } = req.body || {};
+              lostReason, status, memo, data, firstMeetingDate,
+              updatedAt, force } = req.body || {};
       const { rows: [existing] } = await dbQuery(
         `SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]
       );
       if (!existing) return res.status(404).json({ error: 'not_found' });
+
+      // オプティミスティックロック：updatedAt が渡されていて force でなければ競合チェック
+      if (updatedAt && !force) {
+        const serverTs = new Date(existing.updated_at).getTime();
+        const clientTs = new Date(updatedAt).getTime();
+        if (serverTs !== clientTs) {
+          return res.status(409).json({
+            error: 'conflict',
+            message: '他のユーザーがこのデータを更新しました',
+            serverUpdatedAt: existing.updated_at,
+          });
+        }
+      }
 
       const newYomi = yomi ?? existing.yomi;
       const newStatus = newYomi === '受注' ? 'won' : newYomi === '失注' ? 'lost' : (status || existing.status);

@@ -13,6 +13,13 @@ async function apiFetch(path, opts = {}) {
     throw new Error('Unauthorized');
   }
   if (res.status === 403) throw new Error('Forbidden');
+  if (res.status === 409) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.message || 'Conflict');
+    err.status = 409;
+    err.serverUpdatedAt = body.serverUpdatedAt;
+    throw err;
+  }
   if (!res.ok) {
     let msg = `API error: ${res.status}`;
     try { const body = await res.json(); if (body.message) msg = body.message; } catch {}

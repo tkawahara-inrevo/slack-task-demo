@@ -374,8 +374,8 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   useEffect(() => {
     api.taskGet?.(task.id).then(r => setFullTask(r.task || r)).catch(() => {});
     api.taskThread?.(task.id)
-      .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, channel: r.channel || null }))
-      .catch(() => setThreadData({ messages: [], nameMap: {}, channel: null }));
+      .then(r => setThreadData({ messages: r.messages || [], nameMap: r.nameMap || {}, subteamMap: r.subteamMap || {}, channel: r.channel || null }))
+      .catch(() => setThreadData({ messages: [], nameMap: {}, subteamMap: {}, channel: null }));
   }, [task.id]);
 
   const handleStatus = async (s) => {
@@ -404,10 +404,11 @@ function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
     (displayTask.channel_id && displayTask.message_ts
       ? `https://app.slack.com/client/${displayTask.channel_id}`
       : null);
-  // subteamId → handle のマップ（ユーザーグループ名表示用）
-  const subteamMap = useMemo(() =>
-    Object.fromEntries((usergroups || []).map(g => [g.id, g.handle || g.name || g.id]))
-  , [usergroups]);
+  // subteamId → handle: サーバー側キャッシュ（高精度）＋フロント側usergroups（フォールバック）
+  const subteamMap = useMemo(() => ({
+    ...Object.fromEntries((usergroups || []).map(g => [g.id, g.handle || g.name || g.id])),
+    ...(threadData?.subteamMap || {}),
+  }), [usergroups, threadData?.subteamMap]);
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||

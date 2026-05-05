@@ -2232,42 +2232,40 @@ function registerDashboardApi(deps) {
         for (const match of (m.text || '').matchAll(mentionRe)) allUserIds.add(match[1]);
       }
 
-      // 1) DBから一括取得
+      // ユーザー名解決: getUserDisplayName（起動時プリフェッチキャッシュ優先 → users.info → フォールバック）
+      // DB(dashboard_user_directory)も一括引きしてアバターURLを補完
       const userIds = [...allUserIds];
-      const dbRows = userIds.length > 0
-        ? (await dbQuery(
-            `SELECT user_id, display_name FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
-            [teamId, userIds]
-          )).rows
-        : [];
-      const dbMap = Object.fromEntries(dbRows.map(r => [r.user_id, r.display_name]));
+      const [nameEntries, dbRows] = await Promise.all([
+        Promise.all(userIds.map(async uid => {
+          const name = await getUserDisplayName(teamId, uid).catch(() => uid);
+          return [uid, name.split('/')[0].trim()];
+        })),
+        userIds.length > 0
+          ? dbQuery(
+              `SELECT user_id, display_name, profile_json->>'image_72' AS avatar_url FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
+              [teamId, userIds]
+            ).then(r => r.rows)
+          : Promise.resolve([]),
+      ]);
+      const nameMap = Object.fromEntries(nameEntries);
+      const avatarMap = Object.fromEntries(dbRows.map(r => [r.user_id, r.avatar_url]));
 
-      // 2) DB未登録ユーザーはSlack APIで解決し、DBに保存
-      const missingIds = userIds.filter(id => !dbMap[id]);
-      await Promise.all(missingIds.map(async (uid) => {
-        try {
-          const info = await slackClient.users.info({ user: uid });
-          const u = info?.user;
-          if (u) {
-            await dbUpsertDashboardUserDirectoryMember(teamId, u).catch(() => {});
-            const profile = u.profile || {};
-            dbMap[uid] = profile.display_name_normalized || profile.display_name || u.real_name || null;
-          }
-        } catch { /* 外部ユーザー等取得不可 */ }
-      }));
+      // DB未登録ユーザーを非同期でバックグラウンド保存（次回以降DBから高速解決）
+      const dbSet = new Set(dbRows.map(r => r.user_id));
+      const missingIds = userIds.filter(id => !dbSet.has(id));
+      if (missingIds.length > 0) {
+        Promise.all(missingIds.map(async uid => {
+          try {
+            const info = await slackClient.users.info({ user: uid });
+            if (info?.user) await dbUpsertDashboardUserDirectoryMember(teamId, info.user).catch(() => {});
+          } catch {}
+        })).catch(() => {});
+      }
 
-      const nameMap = Object.fromEntries(
-        userIds.map(uid => [uid, dbMap[uid] ? (dbMap[uid]).split('/')[0].trim() : uid.slice(0, 7) + '…'])
-      );
-
-      // アバターURLはDB（dashboard_user_directory）から取得
-      const avatarRows = allUserIds.size > 0
-        ? (await dbQuery(
-            `SELECT user_id, profile_json->>'image_72' AS avatar_url FROM dashboard_user_directory WHERE team_id=$1 AND user_id = ANY($2)`,
-            [teamId, [...allUserIds]]
-          )).rows
-        : [];
-      const avatarMap = Object.fromEntries(avatarRows.map(r => [r.user_id, r.avatar_url]));
+      // ユーザーグループ名: 起動時キャッシュから解決（API呼び出しなし）
+      const subteamIdMap = await getSubteamIdMap(teamId).catch(() => new Map());
+      // フロント用: { subteamId → handle }
+      const subteamMap = Object.fromEntries(subteamIdMap);
 
       // Botメッセージの bot_profile を補完
       const botDisplayMap = {};
@@ -2294,7 +2292,7 @@ function registerDashboardApi(deps) {
         };
       });
 
-      res.json({ messages, nameMap, channel });
+      res.json({ messages, nameMap, subteamMap, channel });
     } catch (e) {
       console.error("dashboard GET /tasks/:id/thread error:", e);
       res.status(500).json({ error: "internal" });

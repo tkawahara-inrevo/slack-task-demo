@@ -102,8 +102,8 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const st = STATUS_CFG[status] || { label: status, color: '#94a3b8' };
   const title = cleanTitle(displayTask.title, displayTask.content);
   const overdue = isOverdueTask({ ...displayTask, status });
-  // パネル本文：contentがあればそのまま、Slackタスク(content=null)はtitleから抽出
-  const contentBody = displayTask.content?.trim() || parseTitleAndBody(displayTask.title, null).body;
+  // パネル本文：一切加工しない（content優先、なければtitle全文）
+  const contentBody = displayTask.content || displayTask.title || '';
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||

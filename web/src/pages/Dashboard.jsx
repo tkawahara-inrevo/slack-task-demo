@@ -33,11 +33,13 @@ const parseTitleAndBody = (title, content) => {
 
     if (!candidate) continue;
 
-    // 「名前/英名」形式の短いアドレス行はスキップ（例: 煌/Kagari Doi）
+    // 「名前/英名」形式のアドレス行をスキップ
+    // 複数人（真有/Mayu 満奈実/Manami...）も対象：スラッシュが2個以上かつ日英文字・スペース・スラッシュだけ
+    const slashCount = (candidate.match(/\//g) || []).length;
     const isAddressLine =
-      /[一-鿿A-Za-z]+\/[A-Za-z一-鿿 ]+/.test(candidate) &&
-      candidate.length < 35 &&
-      !/[。！？、：]/.test(candidate);
+      !/[。！？、：「」\d（）()]/.test(candidate) &&
+      /[一-鿿]+\/[A-Za-z]/.test(candidate) &&
+      (candidate.length < 40 || (slashCount >= 2 && /^[぀-鿿＀-￯a-zA-Z \/]+$/.test(candidate)));
     if (isAddressLine) continue;
 
     titleLine = candidate.slice(0, 100);
@@ -76,24 +78,41 @@ const fmtDate = (d) => {
 const daysSince = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
 const isOverdueTask = (t) => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done' && t.status !== 'cancelled';
 
-// Slackメッセージテキストの簡易フォーマット（<@U...>→@名前、URLリンク化）
+// Slackメッセージテキストの簡易フォーマット
+// <@U...>→@日本語名、<!subteam^...>→@グループ名、<!channel/here>→@channel、URLリンク化
 function SlackText({ text, nameMap }) {
   if (!text) return null;
-  const parts = text.split(/(<@[^>]+>|<https?:[^>]+>|https?:\/\/\S+)/g);
+  const TOKEN = /(<@[^>]+>|<!subteam\^[^>]+>|<!(?:channel|here|everyone)>|<https?:[^>]+>|https?:\/\/[^\s<>]+)/g;
+  const parts = text.split(TOKEN);
   return (
     <>
       {parts.map((p, i) => {
-        const mention = p.match(/^<@([^|>]+)(?:\|([^>]+))?>$/);
-        if (mention) {
-          const name = mention[2] || nameMap?.[mention[1]] || mention[1];
+        // ユーザーメンション <@UXXX> or <@UXXX|name>
+        const userMention = p.match(/^<@([^|>]+)(?:\|([^>]+))?>$/);
+        if (userMention) {
+          const raw = userMention[2] || nameMap?.[userMention[1]] || userMention[1];
+          const name = raw.split('/')[0].trim();
           return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
         }
+        // サブチームメンション <!subteam^SXXX|@handle>
+        const subteam = p.match(/^<!subteam\^[^|>]+(?:\|([^>]+))?>$/);
+        if (subteam) {
+          const handle = (subteam[1] || 'グループ').replace(/^@/, '');
+          return <span key={i} style={{ color:'#8b5cf6', fontWeight:600 }}>@{handle}</span>;
+        }
+        // <!channel> <!here> <!everyone>
+        if (/^<!(channel|here|everyone)>$/i.test(p)) {
+          const word = p.replace(/[<>!]/g, '');
+          return <span key={i} style={{ color:'#f59e0b', fontWeight:600 }}>@{word}</span>;
+        }
+        // リンク <https://...> or <https://...|label>
         const linkTag = p.match(/^<(https?:[^|>]+)(?:\|([^>]+))?>$/);
         if (linkTag) {
-          return <a key={i} href={linkTag[1]} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6' }}>{linkTag[2] || linkTag[1]}</a>;
+          return <a key={i} href={linkTag[1]} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6', wordBreak:'break-all' }}>{linkTag[2] || linkTag[1]}</a>;
         }
-        if (/^https?:\/\/\S+$/.test(p)) {
-          return <a key={i} href={p} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6' }}>{p}</a>;
+        // 生URL
+        if (/^https?:\/\//.test(p)) {
+          return <a key={i} href={p} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6', wordBreak:'break-all' }}>{p}</a>;
         }
         return <span key={i}>{p}</span>;
       })}
@@ -129,6 +148,10 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   const overdue = isOverdueTask({ ...displayTask, status });
   // パネル本文：一切加工しない（content優先、なければtitle全文）
   const contentBody = displayTask.content || displayTask.title || '';
+  // スレッドから構築したuser_id→日本語名マップ（本文・スレッド共通で使用）
+  const nameMap = thread
+    ? Object.fromEntries(thread.filter(m => m.user_id).map(m => [m.user_id, (m.displayName || '').split('/')[0].trim()]))
+    : {};
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||
@@ -191,7 +214,7 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
             <div>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:8 }}>内容</div>
               <div style={{ fontSize:'0.85rem', color:'#374151', lineHeight:1.9, whiteSpace:'pre-wrap', wordBreak:'break-word', background:'#f8fafc', borderRadius:10, padding:'14px 16px', border:'1px solid #f1f5f9' }}>
-                {contentBody}
+                <SlackText text={contentBody} nameMap={nameMap} />
               </div>
             </div>
           ) : (

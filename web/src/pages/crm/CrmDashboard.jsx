@@ -307,7 +307,7 @@ export default function CrmDashboard() {
     <div style={{ padding: isMobile ? '10px 12px' : '14px 18px', background:'#f1f5f9', minHeight:'100%', display:'flex', flexDirection:'column', gap:10 }}>
 
       {/* ── フィルターバー ── */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
         <div style={{ display:'flex', background:'#fff', borderRadius:8, padding:3, border:'1px solid #e2e8f0' }}>
           {[['custom','指定月'], ['term','今期']].map(([v, l]) => (
             <button key={v} onClick={() => { setPeriod(v); load(salesUser, v, customMonth); }}
@@ -452,83 +452,108 @@ export default function CrmDashboard() {
               </div>
               <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>6名　クリックでドリルダウン</span>
             </div>
-            <div className="table-scroll">
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem', minWidth:460 }}>
-              <thead>
-                <tr style={{ background:'#f8fafc' }}>
-                  {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
-                    <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+            {isMobile ? (
+              /* モバイル: カードリスト形式 */
+              <div>
                 {reps.map((r, ri) => {
-                  const color       = REP_COLORS[ri % REP_COLORS.length];
-                  const repWinRate  = r.meetingCount > 0 ? Math.round(r.wonCount / r.meetingCount * 100) : 0;
-                  const repTarget      = repTargetMap[r.rep] || 0;
-                  const repTermTarget  = period === 'term' ? repTarget * termMonths : repTarget;
-                  const repAchieve     = (repTermTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTermTarget * 100) : null;
-                  const [fam, given] = r.rep.split(/[\s　]/);
+                  const color = REP_COLORS[ri % REP_COLORS.length];
+                  const repTarget     = repTargetMap[r.rep] || 0;
+                  const repTermTarget = period === 'term' ? repTarget * termMonths : repTarget;
+                  const repAchieve    = (repTermTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTermTarget * 100) : null;
+                  const [fam, given]  = r.rep.split(/[\s　]/);
                   return (
-                    <tr key={r.rep} style={{ borderBottom:'1px solid #f8fafc', transition:'background 0.1s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                      onMouseLeave={e => e.currentTarget.style.background = ''}>
-                      <td style={{ padding:'9px 14px' }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                          <span style={{ width:24, height:24, borderRadius:6, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', fontWeight:800,
-                            background: r.isOther ? '#f1f5f9' : `${color}22`, color: r.isOther ? '#94a3b8' : color }}>
-                            {r.isOther ? '他' : (fam?.[0] || '?')}
-                          </span>
-                          <div>
-                            {r.isOther
-                              ? <span style={{ color:'#94a3b8' }}>その他</span>
-                              : <>
-                                  <span style={{ fontWeight:700, color, fontSize:'0.68rem' }}>{fam}</span>
-                                  <span style={{ color:'#374151', fontSize:'0.8rem', marginLeft:3 }}>{given || ''}</span>
-                                </>
-                            }
-                          </div>
+                    <div key={r.rep} style={{ padding:'10px 14px', borderBottom:'1px solid #f8fafc', display:'flex', alignItems:'center', gap:10 }}>
+                      <span style={{ width:28, height:28, borderRadius:7, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800,
+                        background: r.isOther ? '#f1f5f9' : `${color}22`, color: r.isOther ? '#94a3b8' : color }}>
+                        {r.isOther ? '他' : (fam?.[0] || '?')}
+                      </span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontWeight:700, fontSize:'0.82rem', color:'#0f172a' }}>{r.isOther ? 'その他' : `${fam} ${given||''}`}</div>
+                        <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
+                          受注 {r.wonCount}件 / 初回商談 {r.meetingCount}件
                         </div>
-                      </td>
-                      <td style={{ padding:'9px 10px', textAlign:'right', color: r.isOther ? '#94a3b8' : '#374151', fontSize:'0.8rem' }}>
-                        {fmtM(r.paymentAmount)}
-                      </td>
-                      <td style={{ padding:'9px 10px', textAlign:'right' }}>
-                        {r.isOther
-                          ? <span style={{ color:'#94a3b8' }}>{fmtM(r.incentiveAmount || 0)}</span>
-                          : <button onClick={() => setDrill({ rep:r.rep, type:'payments' })}
-                              style={{ background:'none', border:'none', cursor:'pointer', fontWeight:700, color:'#0891b2', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #0891b2' }}>
-                              {fmtM(r.incentiveAmount || 0)}
-                            </button>}
-                      </td>
-                      <td style={{ padding:'9px 14px', textAlign:'right' }}>
-                        {r.isOther
-                          ? <span style={{ color:'#94a3b8' }}>{r.wonCount}件</span>
-                          : <button onClick={() => setDrill({ rep:r.rep, type:'won' })}
-                              style={{ background:'none', border:'none', cursor:'pointer', fontWeight:600, color:'#1e40af', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #1e40af' }}>
-                              {r.wonCount}件
-                            </button>}
-                      </td>
-                      <td style={{ padding:'9px 14px', textAlign:'right', color:'#374151' }}>{r.meetingCount}件</td>
-                      <td style={{ padding:'9px 14px', textAlign:'right' }}>
-                        <span style={{ fontWeight:600, color: repWinRate >= 30 ? '#059669' : repWinRate >= 15 ? '#d97706' : '#94a3b8' }}>
-                          {repWinRate}%
-                        </span>
-                      </td>
-                      <td style={{ padding:'9px 14px', textAlign:'right' }}>
-                        {repAchieve != null
-                          ? <div>
-                              <span style={{ fontWeight:700, fontSize:'0.82rem', color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</span>
-                              <div style={{ fontSize:'0.58rem', color:'#94a3b8', marginTop:1 }}>{repRoleInferred[r.rep] || ''}</div>
-                            </div>
-                          : <span style={{ color:'#cbd5e1' }}>—</span>}
-                      </td>
-                    </tr>
+                      </div>
+                      <div style={{ textAlign:'right', flexShrink:0 }}>
+                        <div style={{ fontSize:'0.82rem', fontWeight:700, color:'#0891b2' }}>{fmtM(r.incentiveAmount || 0)}</div>
+                        {repAchieve != null && (
+                          <div style={{ fontSize:'0.72rem', fontWeight:700, marginTop:1, color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</div>
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-            </div>
+              </div>
+            ) : (
+              /* デスクトップ: フルテーブル */
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+                <thead>
+                  <tr style={{ background:'#f8fafc' }}>
+                    {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
+                      <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reps.map((r, ri) => {
+                    const color       = REP_COLORS[ri % REP_COLORS.length];
+                    const repWinRate  = r.meetingCount > 0 ? Math.round(r.wonCount / r.meetingCount * 100) : 0;
+                    const repTarget      = repTargetMap[r.rep] || 0;
+                    const repTermTarget  = period === 'term' ? repTarget * termMonths : repTarget;
+                    const repAchieve     = (repTermTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTermTarget * 100) : null;
+                    const [fam, given] = r.rep.split(/[\s　]/);
+                    return (
+                      <tr key={r.rep} style={{ borderBottom:'1px solid #f8fafc', transition:'background 0.1s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}>
+                        <td style={{ padding:'9px 14px' }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <span style={{ width:24, height:24, borderRadius:6, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', fontWeight:800,
+                              background: r.isOther ? '#f1f5f9' : `${color}22`, color: r.isOther ? '#94a3b8' : color }}>
+                              {r.isOther ? '他' : (fam?.[0] || '?')}
+                            </span>
+                            <div>
+                              {r.isOther
+                                ? <span style={{ color:'#94a3b8' }}>その他</span>
+                                : <><span style={{ fontWeight:700, color, fontSize:'0.68rem' }}>{fam}</span><span style={{ color:'#374151', fontSize:'0.8rem', marginLeft:3 }}>{given || ''}</span></>
+                              }
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding:'9px 10px', textAlign:'right', color: r.isOther ? '#94a3b8' : '#374151', fontSize:'0.8rem' }}>{fmtM(r.paymentAmount)}</td>
+                        <td style={{ padding:'9px 10px', textAlign:'right' }}>
+                          {r.isOther
+                            ? <span style={{ color:'#94a3b8' }}>{fmtM(r.incentiveAmount || 0)}</span>
+                            : <button onClick={() => setDrill({ rep:r.rep, type:'payments' })}
+                                style={{ background:'none', border:'none', cursor:'pointer', fontWeight:700, color:'#0891b2', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #0891b2' }}>
+                                {fmtM(r.incentiveAmount || 0)}
+                              </button>}
+                        </td>
+                        <td style={{ padding:'9px 14px', textAlign:'right' }}>
+                          {r.isOther
+                            ? <span style={{ color:'#94a3b8' }}>{r.wonCount}件</span>
+                            : <button onClick={() => setDrill({ rep:r.rep, type:'won' })}
+                                style={{ background:'none', border:'none', cursor:'pointer', fontWeight:600, color:'#1e40af', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #1e40af' }}>
+                                {r.wonCount}件
+                              </button>}
+                        </td>
+                        <td style={{ padding:'9px 14px', textAlign:'right', color:'#374151' }}>{r.meetingCount}件</td>
+                        <td style={{ padding:'9px 14px', textAlign:'right' }}>
+                          <span style={{ fontWeight:600, color: repWinRate >= 30 ? '#059669' : repWinRate >= 15 ? '#d97706' : '#94a3b8' }}>{repWinRate}%</span>
+                        </td>
+                        <td style={{ padding:'9px 14px', textAlign:'right' }}>
+                          {repAchieve != null
+                            ? <div>
+                                <span style={{ fontWeight:700, fontSize:'0.82rem', color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</span>
+                                <div style={{ fontSize:'0.58rem', color:'#94a3b8', marginTop:1 }}>{repRoleInferred[r.rep] || ''}</div>
+                              </div>
+                            : <span style={{ color:'#cbd5e1' }}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
 
           {/* アラート — 常に表示 */}

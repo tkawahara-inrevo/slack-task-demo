@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
+import { useBreakpoint } from '../../hooks/useWindowWidth';
 
 const YOMI_CFG = {
   'S 90％': { color:'#7c3aed', bg:'#f5f3ff' },
@@ -20,6 +21,7 @@ const YOMI_ORDER = ['S 90％','A 70％','B 50％','C 30％','D 15％','E 5％','
 const daysSince = (dt) => Math.floor((Date.now() - new Date(dt)) / 86400000);
 
 export default function CustomerList() {
+  const { isMobile } = useBreakpoint();
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [meta, setMeta] = useState(null);
@@ -166,59 +168,92 @@ export default function CustomerList() {
         ) : customers.length === 0 ? (
           <div style={{ textAlign:'center', padding:40, color:'#94a3b8', fontSize:'0.85rem' }}>顧客がありません</div>
         ) : (
-          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div className="table-scroll">
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem', minWidth:500 }}>
-              <thead>
-                <tr style={{ background:'#f8fafc', borderBottom:'1px solid #e2e8f0' }}>
-                  {['会社名','担当者','業界','商談','最新ヨミ','最終更新'].map((h, i) => (
-                    <th key={h} style={{ padding:'9px 14px', textAlign: i >= 2 ? 'center' : 'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {customers.map(c => {
-                  const yomiCfg = YOMI_CFG[c.latest_yomi] || { color:'#cbd5e1', bg:'transparent' };
-                  const days = daysSince(c.updated_at);
-                  const stale = days >= 14;
-                  return (
-                    <tr key={c.id} onClick={() => navigate(`/crm/customers/${c.id}`)}
-                      style={{ borderBottom:'1px solid #f1f5f9', cursor:'pointer', transition:'background 0.1s' }}
-                      onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
-                      onMouseLeave={e => e.currentTarget.style.background=''}>
-                      <td style={{ padding:'10px 14px' }}>
-                        <div style={{ fontWeight:700, color:'#0f172a', fontSize:'0.85rem' }}>{c.name}</div>
-                        {c.prefecture && <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:1 }}>{c.prefecture}</div>}
-                      </td>
-                      <td style={{ padding:'10px 14px' }}>
-                        {c.latest_sales_person
-                          ? <span style={{ fontSize:'0.75rem', color:'#374151' }}>{c.latest_sales_person.split(/[\s　]/)[0]}</span>
-                          : <span style={{ color:'#cbd5e1', fontSize:'0.75rem' }}>—</span>}
-                      </td>
-                      <td style={{ padding:'10px 14px', textAlign:'center', color:'#64748b', fontSize:'0.78rem' }}>{c.industry || '—'}</td>
-                      <td style={{ padding:'10px 14px', textAlign:'center' }}>
-                        <span style={{ fontWeight:600, color: c.deal_count > 0 ? '#1e40af' : '#cbd5e1', fontSize:'0.82rem' }}>{c.deal_count || 0}</span>
-                        <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>件</span>
-                      </td>
-                      <td style={{ padding:'10px 14px', textAlign:'center' }}>
-                        {c.latest_yomi
-                          ? <span style={{ fontSize:'0.72rem', fontWeight:700, padding:'2px 10px', borderRadius:20, background:yomiCfg.bg, color:yomiCfg.color, whiteSpace:'nowrap' }}>
-                              {c.latest_yomi}
-                            </span>
-                          : <span style={{ color:'#cbd5e1', fontSize:'0.72rem' }}>—</span>}
-                      </td>
-                      <td style={{ padding:'10px 14px', textAlign:'center' }}>
-                        <span style={{ fontSize:'0.72rem', color: stale ? '#dc2626' : '#94a3b8', fontWeight: stale ? 700 : 400 }}>
+          {isMobile ? (
+            /* モバイル: カードリスト */
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {customers.map(c => {
+                const yomiCfg = YOMI_CFG[c.latest_yomi] || { color:'#94a3b8', bg:'#f8fafc' };
+                const days = daysSince(c.updated_at);
+                const stale = days >= 14;
+                return (
+                  <div key={c.id} onClick={() => navigate(`/crm/customers/${c.id}`)}
+                    style={{ background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', padding:'12px 14px', cursor:'pointer' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontWeight:700, color:'#0f172a', fontSize:'0.9rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</div>
+                        <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginTop:2 }}>
+                          {[c.prefecture, c.industry, c.latest_sales_person?.split(/[\s　]/)[0]].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      <div style={{ flexShrink:0, textAlign:'right' }}>
+                        {c.latest_yomi && (
+                          <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 8px', borderRadius:20, background:yomiCfg.bg, color:yomiCfg.color, whiteSpace:'nowrap', display:'block' }}>
+                            {c.latest_yomi}
+                          </span>
+                        )}
+                        <div style={{ fontSize:'0.65rem', color: stale ? '#dc2626' : '#94a3b8', marginTop:3, fontWeight: stale ? 700 : 400 }}>
                           {days === 0 ? '今日' : `${days}日前`}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          ) : (
+            /* デスクトップ: テーブル */
+            <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem' }}>
+                <thead>
+                  <tr style={{ background:'#f8fafc', borderBottom:'1px solid #e2e8f0' }}>
+                    {['会社名','担当者','業界','商談','最新ヨミ','最終更新'].map((h, i) => (
+                      <th key={h} style={{ padding:'9px 14px', textAlign: i >= 2 ? 'center' : 'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.map(c => {
+                    const yomiCfg = YOMI_CFG[c.latest_yomi] || { color:'#cbd5e1', bg:'transparent' };
+                    const days = daysSince(c.updated_at);
+                    const stale = days >= 14;
+                    return (
+                      <tr key={c.id} onClick={() => navigate(`/crm/customers/${c.id}`)}
+                        style={{ borderBottom:'1px solid #f1f5f9', cursor:'pointer', transition:'background 0.1s' }}
+                        onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+                        onMouseLeave={e => e.currentTarget.style.background=''}>
+                        <td style={{ padding:'10px 14px' }}>
+                          <div style={{ fontWeight:700, color:'#0f172a', fontSize:'0.85rem' }}>{c.name}</div>
+                          {c.prefecture && <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:1 }}>{c.prefecture}</div>}
+                        </td>
+                        <td style={{ padding:'10px 14px' }}>
+                          {c.latest_sales_person
+                            ? <span style={{ fontSize:'0.75rem', color:'#374151' }}>{c.latest_sales_person.split(/[\s　]/)[0]}</span>
+                            : <span style={{ color:'#cbd5e1', fontSize:'0.75rem' }}>—</span>}
+                        </td>
+                        <td style={{ padding:'10px 14px', textAlign:'center', color:'#64748b', fontSize:'0.78rem' }}>{c.industry || '—'}</td>
+                        <td style={{ padding:'10px 14px', textAlign:'center' }}>
+                          <span style={{ fontWeight:600, color: c.deal_count > 0 ? '#1e40af' : '#cbd5e1', fontSize:'0.82rem' }}>{c.deal_count || 0}</span>
+                          <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>件</span>
+                        </td>
+                        <td style={{ padding:'10px 14px', textAlign:'center' }}>
+                          {c.latest_yomi
+                            ? <span style={{ fontSize:'0.72rem', fontWeight:700, padding:'2px 10px', borderRadius:20, background:yomiCfg.bg, color:yomiCfg.color, whiteSpace:'nowrap' }}>
+                                {c.latest_yomi}
+                              </span>
+                            : <span style={{ color:'#cbd5e1', fontSize:'0.72rem' }}>—</span>}
+                        </td>
+                        <td style={{ padding:'10px 14px', textAlign:'center' }}>
+                          <span style={{ fontSize:'0.72rem', color: stale ? '#dc2626' : '#94a3b8', fontWeight: stale ? 700 : 400 }}>
+                            {days === 0 ? '今日' : `${days}日前`}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         )}
 
         {/* ページネーション */}

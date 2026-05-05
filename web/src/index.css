@@ -2851,3 +2851,11 @@ section h2 {
 @media (min-width: 641px) {
   .mobile-menu-btn { display: none !important; }
 }
+
+/* タブレット向け (641px-1100px) */
+@media (min-width: 641px) and (max-width: 1100px) {
+  .global-nav-inner { padding: 0 16px; }
+  .global-nav-brand { margin-right: 16px; }
+  .nav-link { padding: 0 10px; font-size: 12px; }
+  .global-content { padding: 16px; }
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useBreakpoint } from '../../hooks/useWindowWidth';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine, LabelList } from 'recharts';
 import { api } from '../../api/client';
 
@@ -163,6 +164,7 @@ function Drilldown({ rep, type, start, end, onClose }) {
 }
 
 export default function CrmDashboard() {
+  const { isTablet } = useBreakpoint();
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -350,7 +352,7 @@ export default function CrmDashboard() {
       </div>
 
       {/* ── KPIカード 5枚 ── */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
+      <div style={{ display:'grid', gridTemplateColumns: isTablet ? 'repeat(3,1fr)' : 'repeat(5,1fr)', gap:10 }}>
         {/* 入金額 — green */}
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #059669' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>

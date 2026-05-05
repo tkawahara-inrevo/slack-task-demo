@@ -822,7 +822,7 @@ export default function CRM() {
       <div style={{ display:'flex', borderBottom:'1px solid #e5e7eb', background:'#fff', paddingLeft:8, flexShrink:0, overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ padding:'10px 20px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem', whiteSpace:'nowrap',
+            style={{ padding:'10px 16px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem', whiteSpace:'nowrap', flexShrink:0,
               fontWeight: tab===t.key?700:400, color:tab===t.key?'#1d4ed8':'#6b7280',
               borderBottom: tab===t.key?'2px solid #1d4ed8':'2px solid transparent', transition:'color 0.15s' }}>
             {t.label}

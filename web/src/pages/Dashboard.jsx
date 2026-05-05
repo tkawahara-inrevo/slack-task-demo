@@ -271,10 +271,15 @@ const fmtDate = (d) => {
 const daysSince = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
 const isOverdueTask = (t) => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done' && t.status !== 'cancelled';
 
+const fmtSlackTs = (ts) => {
+  if (!ts) return '';
+  const d = new Date(parseFloat(ts) * 1000);
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+};
+
 // Slackメッセージテキストの簡易フォーマット
-// <@U...>→@日本語名、<!subteam^...>→@グループ名、<!channel/here>→@channel、URLリンク化
-// 角括弧なしの @UXXX 形式も変換
-function SlackText({ text, nameMap }) {
+// subteamMap: { [subteamId]: 'handle or name' } でユーザーグループ名を解決
+function SlackText({ text, nameMap, subteamMap }) {
   if (!text) return null;
   const TOKEN = /(<@[^>]+>|<!subteam\^[^>]+>|<!(?:channel|here|everyone)>|<https?:[^>]+>|https?:\/\/[^\s<>]+|@U[A-Z0-9]{6,})/g;
   const parts = text.split(TOKEN);
@@ -294,10 +299,12 @@ function SlackText({ text, nameMap }) {
           const name = nameMap?.[bareId[1]] ? nameMap[bareId[1]].split('/')[0].trim() : bareId[1].slice(0, 7) + '…';
           return <span key={i} style={{ color:'#3b82f6', fontWeight:600 }}>@{name}</span>;
         }
-        // サブチームメンション <!subteam^SXXX|@handle>
-        const subteam = p.match(/^<!subteam\^[^|>]+(?:\|([^>]+))?>$/);
-        if (subteam) {
-          const handle = (subteam[1] || 'グループ').replace(/^@/, '');
+        // サブチームメンション <!subteam^SXXX|@handle> — subteamMapで名前解決
+        const subteamMatch = p.match(/^<!subteam\^([^|>]+)(?:\|([^>]+))?>$/);
+        if (subteamMatch) {
+          const subteamId = subteamMatch[1];
+          const labelInMsg = subteamMatch[2]?.replace(/^@/, '');
+          const handle = subteamMap?.[subteamId] || labelInMsg || subteamId.slice(0, 8) + '…';
           return <span key={i} style={{ color:'#8b5cf6', fontWeight:600 }}>@{handle}</span>;
         }
         // <!channel> <!here> <!everyone>
@@ -321,7 +328,7 @@ function SlackText({ text, nameMap }) {
 }
 
 // ── タスクスライドパネル ──────────────────────────────────────────
-function TaskPanel({ task, members, onClose, onStatusChange }) {
+function TaskPanel({ task, members, usergroups, onClose, onStatusChange }) {
   const [status, setStatus] = useState(task.status);
   const [fullTask, setFullTask] = useState(null);
   const [threadData, setThreadData] = useState(null); // { messages, nameMap }
@@ -353,6 +360,10 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
   // バックエンドから返ってきたnameMap（本文・スレッド両方で使用）
   const nameMap = threadData?.nameMap || {};
   const thread = threadData?.messages || null;
+  // subteamId → handle のマップ（ユーザーグループ名表示用）
+  const subteamMap = useMemo(() =>
+    Object.fromEntries((usergroups || []).map(g => [g.id, g.handle || g.name || g.id]))
+  , [usergroups]);
 
   // 担当者名を解決（cleanAssigneeNameでクリーン → なければmembersでルックアップ）
   const assigneeName = cleanAssigneeName(displayTask.assignee_label) ||
@@ -415,7 +426,7 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
             <div>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', fontWeight:600, marginBottom:8 }}>内容</div>
               <div style={{ fontSize:'0.85rem', color:'#374151', lineHeight:1.9, whiteSpace:'pre-wrap', wordBreak:'break-word', background:'#f8fafc', borderRadius:10, padding:'14px 16px', border:'1px solid #f1f5f9' }}>
-                <SlackText text={contentBody} nameMap={nameMap} />
+                <SlackText text={contentBody} nameMap={nameMap} subteamMap={subteamMap} />
               </div>
             </div>
           ) : (
@@ -455,7 +466,7 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
                           </div>
                         )}
                         <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:3 }}>
+                          <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:3, flexWrap:'wrap' }}>
                             <span style={{ fontSize:'0.78rem', fontWeight:700, color: m.is_root ? '#1e40af' : '#374151' }}>
                               {jaName}
                             </span>
@@ -464,9 +475,12 @@ function TaskPanel({ task, members, onClose, onStatusChange }) {
                                 元メッセージ
                               </span>
                             )}
+                            <span style={{ fontSize:'0.65rem', color:'#cbd5e1', marginLeft:'auto' }}>
+                              {fmtSlackTs(m.ts)}
+                            </span>
                           </div>
                           <div style={{ fontSize:'0.82rem', color:'#374151', lineHeight:1.75, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
-                            <SlackText text={m.text} nameMap={nameMap} />
+                            <SlackText text={m.text} nameMap={nameMap} subteamMap={subteamMap} />
                           </div>
                         </div>
                       </div>
@@ -790,7 +804,7 @@ export default function Dashboard() {
       </>)}
 
       {selectedTask && (
-        <TaskPanel task={selectedTask} members={members} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />
+        <TaskPanel task={selectedTask} members={members} usergroups={usergroups} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />
       )}
       </>}
     </div>

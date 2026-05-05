@@ -815,7 +815,14 @@ export default function Dashboard() {
             <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
           </div>
           <button
-            onClick={() => window.open('/dashboard/floating', 'taskhub-float', 'width=380,height=640,resizable=yes,scrollbars=yes')}
+            onClick={() => {
+              const w = localStorage.getItem('float_w') || 380;
+              const h = localStorage.getItem('float_h') || 640;
+              const x = localStorage.getItem('float_x');
+              const y = localStorage.getItem('float_y');
+              const pos = x && y ? `,left=${x},top=${y}` : '';
+              window.open('/dashboard/floating', 'taskhub-float', `width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`);
+            }}
             style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:7, background:'#fff', color:'#64748b', fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
             title="ポップアップで開く">
             ↗ ポップアップ

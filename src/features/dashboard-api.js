@@ -468,12 +468,8 @@ function registerDashboardApi(deps) {
       maxAge: SESSION_COOKIE_MAX_AGE,
       secure: process.env.NODE_ENV === "production",
     });
-    // URLにトークンを埋め込んでリダイレクト
-    // → ネイティブブラウザで同じURLを開いたとき自動でセッションを引き継げる
-    const crypto = require('crypto');
-    const adoptToken = crypto.randomBytes(20).toString('hex');
-    transferTokens.set(adoptToken, { teamId: result.teamId, userId: result.userId, sessionId: result.sessionId, expires: Date.now() + 600000 }); // 10分
-    res.redirect(`/dashboard?auth=${adoptToken}`);
+    // セッションIDをURLに乗せてリダイレクト（ネイティブブラウザで同じURLを開くと自動認証）
+    res.redirect(`/dashboard?auth=${result.sessionId}`);
   });
 
   // ================================
@@ -483,22 +479,28 @@ function registerDashboardApi(deps) {
   // 定期クリーンアップ
   setInterval(() => { for (const [k, v] of transferTokens) if (v.expires < Date.now()) transferTokens.delete(k); }, 60000);
 
-  // URLトークンからセッション自動取得（ネイティブブラウザで同じURLを開いたとき）
+  // セッションIDをURLから受け取り、DBで検証してcookieをセット（ネイティブブラウザへの引き継ぎ）
   expressApp.get('/api/auth/adopt', async (req, res) => {
-    const { token, redirect = '/dashboard' } = req.query;
-    const data = transferTokens.get(token);
-    if (!data || data.expires < Date.now()) {
-      // トークン無効 → 通常のログインフローへ
-      return res.redirect('/dashboard');
+    try {
+      const { token, redirect = '/dashboard' } = req.query;
+      if (!token) return res.redirect('/dashboard');
+      // DBでセッションが存在するか検証
+      const { rows } = await dbQuery(
+        'SELECT team_id, user_id FROM dashboard_sessions WHERE session_id = $1',
+        [token]
+      );
+      if (!rows[0]) return res.redirect('/dashboard');
+      // 有効なセッションIDをcookieとしてセット
+      res.cookie('dashboard_session', token, {
+        httpOnly: true, sameSite: 'lax',
+        maxAge: SESSION_COOKIE_MAX_AGE,
+        secure: process.env.NODE_ENV === 'production',
+      });
+      res.redirect(decodeURIComponent(redirect));
+    } catch (e) {
+      console.error('[auth/adopt error]', e);
+      res.redirect('/dashboard');
     }
-    // 既存セッションを再利用（新ブラウザにも同じセッションを付与）
-    res.cookie('dashboard_session', data.sessionId, {
-      httpOnly: true, sameSite: 'lax',
-      maxAge: SESSION_COOKIE_MAX_AGE,
-      secure: process.env.NODE_ENV === 'production',
-    });
-    // トークンは消費しない（複数ブラウザで開ける）
-    res.redirect(decodeURIComponent(redirect));
   });
 
   // ワンタイムトークン発行（手動ボタン用・残しておく）

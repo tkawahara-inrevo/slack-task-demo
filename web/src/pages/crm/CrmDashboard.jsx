@@ -156,7 +156,9 @@ function Drilldown({ rep, type, start, end, onClose }) {
                   </div>
                   {(r.initial_fee > 0 || r.monthly_fee > 0) && (
                     <span style={{ fontSize:'0.72rem', color:'#059669', fontWeight:700, flexShrink:0 }}>
-                      {r.monthly_fee > 0 ? `月${fmtM(r.monthly_fee)}` : fmtM(r.initial_fee)}
+                      {r.contract_type?.includes('月額')
+                        ? (r.monthly_fee > 0 ? `月${fmtM(r.monthly_fee)}` : fmtM(r.initial_fee))
+                        : fmtM(r.initial_fee || r.monthly_fee)}
                     </span>
                   )}
                   <span style={{ fontSize:'0.65rem', background:'#dcfce7', color:'#059669', borderRadius:4, padding:'2px 8px', fontWeight:700, flexShrink:0 }}>受注</span>

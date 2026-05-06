@@ -434,7 +434,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         LIMIT 1
       `, [teamId, userId, `%${bcTeamName}%`]);
       const isBC = bcRes.rows.length > 0;
-      const isBCManager = isBC && ['manager','sub_manager','sub_chief','chief','expert','sub_expert'].includes(role);
+      const isBCManager = isBC && ['manager','sub_manager'].includes(role);
 
       const tabAccess = {};
       for (const [tab, rule] of Object.entries(cfg.tabs)) {

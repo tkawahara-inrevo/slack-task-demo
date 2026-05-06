@@ -12,7 +12,7 @@ const TAB_LABELS = {
 const ACCESS_OPTIONS = [
   { value: 'all',         label: '全員',              desc: '役職・部署問わず全員がアクセス可' },
   { value: 'bc_all',      label: 'BC所属のみ',        desc: 'BCチーム所属なら役職問わずアクセス可' },
-  { value: 'bc_manager',  label: 'BC管理職のみ',      desc: 'BCチーム所属 かつ Sub Chief以上' },
+  { value: 'bc_manager',  label: 'BC管理職のみ',      desc: 'BCチーム所属 かつ Sub Manager以上' },
   { value: 'bc_and_above',label: 'BC所属（スコープ制限あり）', desc: 'BC管理職は全件、それ以外は自分のデータのみ表示' },
   { value: 'none',        label: 'アクセス不可',      desc: '（管理者を除く）誰もアクセスできない' },
 ];
@@ -112,7 +112,7 @@ export default function CrmPermissions() {
       {/* スコープ説明 */}
       <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10, padding:'12px 16px', marginBottom:20, fontSize:'0.78rem', color:'#1e40af' }}>
         <strong>「BC所属（スコープ制限あり）」について</strong><br />
-        BC所属の管理職（Sub Chief以上）は全データを閲覧できます。管理職以外のBC所属メンバーは、自分が担当している案件のデータのみ表示されます。
+        BC所属のSub Manager以上は全データを閲覧できます。それ以外のBC所属メンバー（役職なし・Sub Chief・Chief）は、自分が担当している案件のデータのみ表示されます。
       </div>
 
       <div style={{ display:'flex', justifyContent:'flex-end' }}>

@@ -768,12 +768,51 @@ function RulesTab({ groups, teams }) {
     </div>
   );
 
-  const tabCfg = {
-    role: { color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd' },
-    dept: { color: '#0891b2', bg: '#ecfeff', border: '#67e8f9' },
-    auto: { color: '#059669', bg: '#f0fdf4', border: '#6ee7b7' },
+  const roleCfg = { color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd' };
+
+  // 部署ツリーカード（部署ルール + 共通条件を統合）
+  const DeptTreeCard = ({ team, isParent }) => {
+    const PARENT_COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899'];
+    const parentIdx = topLevelTeams.findIndex(t => t.id === (isParent ? team.id : team.parent_id));
+    const parentColor = PARENT_COLORS[parentIdx % PARENT_COLORS.length] || '#0891b2';
+    const childColor = '#64748b';
+    const color = isParent ? parentColor : childColor;
+
+    return (
+      <div style={{
+        border: `1.5px solid ${isParent ? color + '55' : '#e2e8f0'}`,
+        borderLeft: `3px solid ${color}`,
+        borderRadius: isParent ? 10 : 8,
+        background: isParent ? color + '08' : '#fafafa',
+        padding: '10px 14px',
+      }}>
+        <div style={{ fontWeight: isParent ? 800 : 600, fontSize: isParent ? '0.9rem' : '0.82rem', color, marginBottom: 8 }}>
+          {!isParent && <span style={{ color: '#d1d5db', marginRight: 6 }}>└</span>}
+          {team.name}
+        </div>
+
+        {/* 部署グループ */}
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 4 }}>
+            部署グループ
+            <span style={{ marginLeft: 6, fontSize: '0.62rem' }}>（この部署に所属したら入るグループ）</span>
+          </div>
+          <GroupTags rowName={team.name} category="dept" deptName={null} color={color} />
+        </div>
+
+        {/* 自動付与グループ（旧 共通条件・部署名） */}
+        {autoRows.some(r => r.name === team.name) && (
+          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 6, marginTop: 4 }}>
+            <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 4 }}>
+              自動付与
+              <span style={{ marginLeft: 6, fontSize: '0.62rem' }}>（入社・異動時に自動で追加）</span>
+            </div>
+            <GroupTags rowName={team.name} category="auto" deptName={null} color="#059669" />
+          </div>
+        )}
+      </div>
+    );
   };
-  const cfg = tabCfg[tab];
 
   return (
     <div>
@@ -785,35 +824,56 @@ function RulesTab({ groups, teams }) {
 
       {/* タブ */}
       <div style={{ display: 'flex', gap: 4, padding: 3, background: '#f1f5f9', borderRadius: 8, marginBottom: 20, width: 'fit-content' }}>
-        {[['role', '役職ルール'], ['dept', '部署ルール'], ['auto', '共通条件']].map(([v, l]) => (
+        {[['role', '役職ルール'], ['dept', '部署・共通']].map(([v, l]) => (
           <button key={v} onClick={() => setTab(v)}
-            style={{ padding: '5px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: '0.82rem',
-              fontWeight: v === tab ? 700 : 400, background: v === tab ? '#fff' : 'transparent',
-              color: v === tab ? tabCfg[v].color : '#9ca3af',
+            style={{ padding: '5px 18px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: '0.82rem',
+              fontWeight: v === tab ? 700 : 400,
+              background: v === tab ? '#fff' : 'transparent',
+              color: v === tab ? (v === 'role' ? roleCfg.color : '#0891b2') : '#9ca3af',
               boxShadow: v === tab ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
             {l}
           </button>
         ))}
       </div>
 
-      {tab === 'auto' && (
-        <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: '0.8rem', color: '#15803d' }}>
-          役職・部署に関わらず<strong>全員</strong>に適用される条件です。入社時や部署移動時に自動で付与されます。
+      {/* 役職ルール */}
+      {tab === 'role' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+          {ROLE_NAMES.filter(n => n !== 'なし').map(name => (
+            <RoleCard key={name} roleName={name} {...roleCfg} />
+          ))}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-        {tab === 'role' && ROLE_NAMES.filter(n => n !== 'なし').map(name => (
-          <RoleCard key={name} roleName={name} {...cfg} />
-        ))}
-        {tab === 'dept' && deptRows.map(row => (
-          <RuleCard key={row.id} rowName={row.name} category="dept" {...cfg}
-            label={row.indent > 0 ? `└ ${row.name}` : row.name} />
-        ))}
-        {tab === 'auto' && autoRows.map(row => (
-          <RuleCard key={row.name} rowName={row.name} category="auto" deptName={null} {...cfg} />
-        ))}
-      </div>
+      {/* 部署・共通（統合ツリー） */}
+      {tab === 'dept' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* 全社共通（全員に適用） */}
+          <div style={{ border: '1.5px solid #6ee7b7', borderLeft: '3px solid #059669', borderRadius: 10, background: '#f0fdf4', padding: '12px 16px' }}>
+            <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#059669', marginBottom: 8 }}>
+              🌐 全社共通
+              <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#94a3b8', marginLeft: 8 }}>メアドが @inrevo.jp 全員に適用</span>
+            </div>
+            <GroupTags rowName="全員 (@inrevo.jp)" category="auto" deptName={null} color="#059669" />
+          </div>
+
+          {/* 部署ツリー */}
+          {topLevelTeams.map(parent => (
+            <div key={parent.id}>
+              {/* 親部署 */}
+              <DeptTreeCard team={parent} isParent />
+              {/* 子部署（インデント） */}
+              {(childrenOf[parent.id] || []).length > 0 && (
+                <div style={{ marginLeft: 20, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(childrenOf[parent.id] || []).map(child => (
+                    <DeptTreeCard key={child.id} team={child} isParent={false} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

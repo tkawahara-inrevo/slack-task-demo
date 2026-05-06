@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { useBreakpoint } from '../hooks/useWindowWidth';
 
 // ── 分析タブ用コンポーネント ──────────────────────────────────────
 const STATUS_COLORS = { done:'#10b981', in_progress:'#3b82f6', pending:'#f59e0b', cancelled:'#94a3b8', overdue:'#dc2626' };
@@ -882,10 +883,12 @@ export default function Dashboard() {
     Object.entries(STATUS_CFG).reduce((s, [k]) => s + (mySummary?.[k] || 0), 0)
   , [mySummary]);
 
+  const { isMobile } = useBreakpoint();
+
   if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'60vh', color:'#94a3b8' }}>読み込み中…</div>;
 
   const card = (children, style={}) => (
-    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'16px 20px', ...style }}>{children}</div>
+    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding: isMobile ? '12px 14px' : '16px 20px', ...style }}>{children}</div>
   );
   const sh = (label, sub) => (
     <div style={{ marginBottom:10 }}>
@@ -902,7 +905,7 @@ export default function Dashboard() {
   });
 
   return (
-    <div style={{ padding:'20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap:14 }}>
+    <div style={{ padding: isMobile ? '0' : '20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap: isMobile ? 10 : 14 }}>
 
       {/* ヘッダー + タブ */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
@@ -917,16 +920,16 @@ export default function Dashboard() {
       {tab === 'tasks' && <>
 
       {/* KPIカード */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 8 : 12 }}>
         {[
           { label:'総タスク数', value: myTotal,                  color:'#6366f1' },
           { label:'進行中',    value: mySummary?.in_progress||0,  color:'#3b82f6' },
           { label:'期限切れ',  value: myOverdue,                  color: myOverdue > 0 ? '#dc2626' : '#94a3b8' },
           { label:'完了',      value: mySummary?.done||0,         color:'#10b981' },
         ].map(k => (
-          <div key={k.label} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'14px 18px' }}>
-            <div style={{ fontSize:'0.72rem', color:'#64748b', fontWeight:500, marginBottom:6 }}>{k.label}</div>
-            <div style={{ fontSize:'1.8rem', fontWeight:900, color:k.color, lineHeight:1 }}>{k.value}</div>
+          <div key={k.label} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding: isMobile ? '12px 14px' : '14px 18px' }}>
+            <div style={{ fontSize: isMobile ? '0.68rem' : '0.72rem', color:'#64748b', fontWeight:500, marginBottom:4 }}>{k.label}</div>
+            <div style={{ fontSize: isMobile ? '1.6rem' : '1.8rem', fontWeight:900, color:k.color, lineHeight:1 }}>{k.value}</div>
           </div>
         ))}
       </div>
@@ -957,7 +960,7 @@ export default function Dashboard() {
             アクティブなタスクはありません
           </div>
         ) : (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
+          <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
             {activeTasks.map(t => (
               <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
             ))}
@@ -1140,7 +1143,7 @@ export default function Dashboard() {
           ) : (
             <>
               <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginBottom:10 }}>{filteredTasks.total}件</div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
+              <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
                 {filteredTasks.tasks.map(t => (
                   <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
                 ))}

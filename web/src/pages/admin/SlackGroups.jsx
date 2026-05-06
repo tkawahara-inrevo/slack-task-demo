@@ -709,15 +709,31 @@ function RulesTab({ groups, teams }) {
         </div>
 
         {/* 部署別（例: HR専用） */}
-        {deptNames.map(dept => (
-          <div key={dept} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 8 }}>
-            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#0891b2', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ background: '#ecfeff', border: '1px solid #67e8f9', borderRadius: 4, padding: '1px 7px', color: '#0891b2' }}>{dept}専用</span>
-              <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 400 }}>{dept}部署のこの役職だけ追加で入るグループ</span>
+        {deptNames.map(dept => {
+          const deptRule = rules.find(r => r.name === roleName && r.category === 'role' && r.dept_name === dept);
+          const handleDeleteDeptSection = async () => {
+            if (!deptRule) return;
+            if (!window.confirm(`「${dept}専用」のルールを削除しますか？`)) return;
+            // グループを全て外す → ルールが空になる
+            const gids = deptRule.group_ids || [];
+            for (const gid of gids) {
+              await handleToggle(roleName, 'role', gid, dept);
+            }
+          };
+          return (
+            <div key={dept} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 8 }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#0891b2', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ background: '#ecfeff', border: '1px solid #67e8f9', borderRadius: 4, padding: '1px 7px', color: '#0891b2' }}>{dept}専用</span>
+                <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 400 }}>{dept}部署のこの役職だけ追加で入るグループ</span>
+                <button onClick={handleDeleteDeptSection}
+                  style={{ marginLeft: 'auto', fontSize: '0.68rem', color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 4, padding: '1px 7px', cursor: 'pointer' }}>
+                  このセクションを削除
+                </button>
+              </div>
+              <GroupTags rowName={roleName} category="role" deptName={dept} color="#0891b2" />
             </div>
-            <GroupTags rowName={roleName} category="role" deptName={dept} color="#0891b2" />
-          </div>
-        ))}
+          );
+        })}
 
         {/* 部署別ルールを追加 */}
         {addableDepts.length > 0 && (

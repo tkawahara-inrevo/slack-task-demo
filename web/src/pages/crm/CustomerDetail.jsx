@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../../api/client';
+import { useBreakpoint } from '../../hooks/useWindowWidth';
 
 const YOMI_ORDER = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
 const BC_MEMBERS = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘','添田 剛'];

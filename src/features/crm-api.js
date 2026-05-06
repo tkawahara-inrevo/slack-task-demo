@@ -421,7 +421,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { teamId, userId } = req.dashboardUser;
       const { stage, yomi, plan, q, salesUser, showDormant, quickFilter, limit: lq } = req.query;
       const scope = req.query.scope || 'all'; // 'all' | 'self'
-      const limit = Math.min(Number(lq) || 200, 500);
+      const limit = Math.min(Number(lq) || 2000, 5000);
 
       let where = `d.team_id=$1`;
       const params = [teamId];
@@ -485,31 +485,26 @@ function registerCrmApi({ expressApp, authWithRole }) {
         LIMIT ${limit}
       `, params);
 
-      // ヘルス計算＋ステージ付与
+      // ステージ付与（ヘルスは削除）
       const deals = rows.map(d => ({
         ...d,
-        stage:  yomiToStage(d.yomi, d.status),
-        health: calcHealth(d.yomi, d.status, d.updated_at, d.recent_activity_count > 0),
+        stage: yomiToStage(d.yomi, d.status),
         sales_person_name: d.sales_person || d.sales_user_id,
       }));
 
-      // KPI集計（全件から）
+      // KPI集計
       const activeDeals = deals.filter(d => d.status === 'active');
       const kpi = {
         total:       rows.length,
         totalAmount: activeDeals.reduce((s, d) => s + Number(d.initial_fee || 0), 0),
-        avgHealth:   activeDeals.length > 0 ? Math.round(activeDeals.reduce((s, d) => s + d.health, 0) / activeDeals.length) : 0,
         alertCount:  activeDeals.filter(d => d.next_action_date && new Date(d.next_action_date) < new Date()).length +
                      activeDeals.filter(d => { const days = Math.floor((Date.now() - new Date(d.updated_at)) / 86400000); return days >= 14 && !['アポ化前'].includes(d.yomi); }).length,
       };
 
-      // 担当者一覧（フィルター用）
-      const salesRes = await dbQuery(
-        `SELECT DISTINCT COALESCE(sales_person, sales_user_id) AS name FROM deals WHERE team_id=$1 AND COALESCE(sales_person, sales_user_id) IS NOT NULL ORDER BY name`,
-        [teamId]
-      );
+      // 担当者一覧：固定リストのみ表示
+      const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 亮弘'];
 
-      res.json({ deals, kpi, salesUsers: salesRes.rows.map(r => r.name).filter(Boolean) });
+      res.json({ deals, kpi, salesUsers: TARGET_REPS });
     } catch (e) {
       console.error('[CRM] deals-list error:', e);
       res.status(500).json({ error: 'internal', detail: e.message });

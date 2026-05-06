@@ -211,9 +211,6 @@ export default function CustomerList({ scope = 'all' }) {
           <div style={{ display:'flex', gap:8, flex:1, flexWrap:'wrap' }}>
             <KpiCard label="表示中" value={`${deals.length}件`} sub={`/ ${kpi?.total||0}件中`} />
             <KpiCard label="案件総額" value={fmtM(kpi?.totalAmount)} sub="進行中" color="#1e40af" bg="#eff6ff" />
-            <KpiCard label="平均ヘルス" value={kpi?.avgHealth??'—'} sub="100点満点"
-              color={kpi?.avgHealth>=70?'#059669':kpi?.avgHealth>=40?'#d97706':'#dc2626'}
-              bg={kpi?.avgHealth>=70?'#f0fdf4':kpi?.avgHealth>=40?'#fffbeb':'#fef2f2'} />
             <KpiCard label="要対応" value={`${kpi?.alertCount||0}件`} sub="期限切れ or 停滞"
               color={kpi?.alertCount>0?'#dc2626':'#94a3b8'} highlight={kpi?.alertCount>0} />
           </div>
@@ -381,11 +378,6 @@ export default function CustomerList({ scope = 'all' }) {
                     <div style={{ flex:'0 0 72px', textAlign:'right' }}>
                       <div style={{ fontSize:'0.8rem', fontWeight:700, color:'#1e40af' }}>{fmtM(d.initial_fee||d.monthly_fee)}</div>
                       {d.contract_type && <div style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{d.contract_type.replace('採用保証','保証').replace('月額','月額')}</div>}
-                    </div>
-
-                    {/* ヘルス */}
-                    <div style={{ flex:'0 0 80px' }}>
-                      <HealthBar score={d.health} />
                     </div>
 
                     {/* 最終更新 */}

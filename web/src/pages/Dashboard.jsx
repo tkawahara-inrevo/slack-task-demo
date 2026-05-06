@@ -820,7 +820,7 @@ export default function Dashboard() {
   const deptTeams = useMemo(() => {
     if (!me || !dashTeams.length) return [];
     const topLevel = dashTeams.filter(t => !t.parent_id);
-    if (me.role === 'admin') return topLevel;
+    if (me.role === 'admin' || me.role === 'it') return topLevel;
     const myTeamIds = new Set((me.dashTeams || []).map(t => t.id));
     const myParentIds = new Set();
     for (const t of dashTeams) {

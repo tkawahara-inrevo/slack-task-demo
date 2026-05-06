@@ -713,12 +713,11 @@ function RulesTab({ groups, teams }) {
           const deptRule = rules.find(r => r.name === roleName && r.category === 'role' && r.dept_name === dept);
           const handleDeleteDeptSection = async () => {
             if (!deptRule) return;
-            if (!window.confirm(`「${dept}専用」のルールを削除しますか？`)) return;
-            // グループを全て外す → ルールが空になる
-            const gids = deptRule.group_ids || [];
-            for (const gid of gids) {
-              await handleToggle(roleName, 'role', gid, dept);
-            }
+            if (!window.confirm(`「${dept}専用」のセクションを完全に削除しますか？`)) return;
+            try {
+              await api.slackGroupRuleDelete(deptRule.id);
+              setRules(prev => prev.filter(r => r.id !== deptRule.id));
+            } catch (e) { console.error(e); alert('削除に失敗しました'); }
           };
           return (
             <div key={dept} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 8 }}>

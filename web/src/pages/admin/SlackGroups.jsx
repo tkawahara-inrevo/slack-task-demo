@@ -790,25 +790,25 @@ function RulesTab({ groups, teams }) {
           {team.name}
         </div>
 
-        {/* 部署グループ */}
-        <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 4 }}>
-            部署グループ
-            <span style={{ marginLeft: 6, fontSize: '0.62rem' }}>（この部署に所属したら入るグループ）</span>
-          </div>
-          <GroupTags rowName={team.name} category="dept" deptName={null} color={color} />
+        {/* 部署グループ（dept + auto を統合表示） */}
+        <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 4 }}>
+          所属したら入るグループ
         </div>
-
-        {/* 自動付与グループ（旧 共通条件・部署名） */}
-        {autoRows.some(r => r.name === team.name) && (
-          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 6, marginTop: 4 }}>
-            <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 4 }}>
-              自動付与
-              <span style={{ marginLeft: 6, fontSize: '0.62rem' }}>（入社・異動時に自動で追加）</span>
-            </div>
-            <GroupTags rowName={team.name} category="auto" deptName={null} color="#059669" />
-          </div>
-        )}
+        <GroupTags rowName={team.name} category="dept" deptName={null} color={color} />
+        {/* auto カテゴリのグループも並べて表示（編集は dept 側に統一） */}
+        {(() => {
+          const autoIds = getRule(team.name, 'auto', null)?.group_ids || [];
+          const autoGrps = autoIds.map(id => groups.find(g => g.id === id)).filter(Boolean);
+          return autoGrps.map(g => (
+            <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.75rem', fontWeight: 700,
+              marginTop: 4, marginRight: 4,
+              padding: '2px 8px 2px 7px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}55`, color }}>
+              @{g.handle}
+              <button onClick={() => handleToggle(team.name, 'auto', g.id, null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
+            </span>
+          ));
+        })()}
       </div>
     );
   };

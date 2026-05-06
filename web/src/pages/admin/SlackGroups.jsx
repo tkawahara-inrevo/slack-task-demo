@@ -628,69 +628,129 @@ function RulesTab({ groups, teams }) {
 
   if (loading) return <div style={{ color: '#9ca3af', padding: 24 }}>読み込み中…</div>;
 
-  // カード1枚: 役職/部署名 → 所属グループを表示・編集
-  const RuleCard = ({ rowName, category, deptName = null, color, bg, border, label }) => {
-    const [addOpen, setAddOpen] = useState(false);
-    const [addSearch, setAddSearch] = useState('');
-    const curGroupIds = getRule(rowName, category, deptName)?.group_ids || [];
-    const curGroups = curGroupIds.map(id => groups.find(g => g.id === id)).filter(Boolean);
-    const remaining = groups.filter(g => !curGroupIds.includes(g.id));
-    const filtered = addSearch ? remaining.filter(g => g.handle.includes(addSearch)) : remaining;
-
+  // グループ追加ピッカー（共通部品）
+  const GroupPicker = ({ excludeIds, onAdd, color }) => {
+    const [search, setSearch] = useState('');
+    const remaining = groups.filter(g => !excludeIds.includes(g.id));
+    const filtered = search ? remaining.filter(g => g.handle.includes(search)) : remaining;
     return (
-      <div style={{ border: `1.5px solid ${border}`, borderRadius: 12, background: bg, padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <span style={{ fontWeight: 800, fontSize: '0.88rem', color }}>{label || rowName}</span>
-          {deptName && <span style={{ fontSize: '0.7rem', color: '#94a3b8', background: '#f8fafc', borderRadius: 4, padding: '1px 7px' }}>{deptName}</span>}
+      <div style={{ marginTop: 4 }}>
+        <input autoFocus placeholder="グループを検索…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px', border: '1px solid #e2e8f0', borderRadius: 6, outline: 'none', boxSizing: 'border-box', marginBottom: 4 }} />
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, maxHeight: 130, overflowY: 'auto' }}>
+          {filtered.slice(0, 20).map(g => (
+            <button key={g.id} onClick={() => onAdd(g.id)}
+              style={{ display: 'block', width: '100%', padding: '5px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: '0.75rem', color: '#374151' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+              @{g.handle}
+            </button>
+          ))}
+          {filtered.length === 0 && <div style={{ padding: 8, fontSize: '0.72rem', color: '#94a3b8' }}>候補なし</div>}
         </div>
+      </div>
+    );
+  };
 
-        {/* 現在のグループ */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, minHeight: 28, marginBottom: 8 }}>
+  // グループタグ一覧（共通部品）
+  const GroupTags = ({ rowName, category, deptName, color }) => {
+    const [addOpen, setAddOpen] = useState(false);
+    const curIds = getRule(rowName, category, deptName)?.group_ids || [];
+    const curGroups = curIds.map(id => groups.find(g => g.id === id)).filter(Boolean);
+    return (
+      <div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 24, marginBottom: addOpen ? 4 : 6 }}>
           {curGroups.length === 0
-            ? <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>グループなし</span>
+            ? <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontStyle: 'italic' }}>なし</span>
             : curGroups.map(g => {
                 const key = `${category}:${rowName}:${deptName}:${g.id}`;
                 return (
-                  <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', fontWeight: 700,
-                    padding: '3px 10px 3px 8px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}44`, color }}>
+                  <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.75rem', fontWeight: 700,
+                    padding: '2px 8px 2px 7px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}55`, color }}>
                     @{g.handle}
                     <button onClick={() => handleToggle(rowName, category, g.id, deptName)} disabled={isSavingKey(key)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 12, lineHeight: 1, padding: 0, flexShrink: 0 }}>
-                      ×
-                    </button>
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
                   </span>
                 );
               })}
         </div>
+        {addOpen
+          ? <GroupPicker excludeIds={curIds} color={color}
+              onAdd={gid => { handleToggle(rowName, category, gid, deptName); setAddOpen(false); }} />
+          : <button onClick={() => setAddOpen(true)}
+              style={{ fontSize: '0.72rem', color, background: 'none', border: `1px dashed ${color}66`, borderRadius: 5, padding: '2px 8px', cursor: 'pointer', fontWeight: 600 }}>
+              ＋ 追加
+            </button>
+        }
+      </div>
+    );
+  };
 
-        {/* グループ追加 */}
-        {addOpen ? (
-          <div style={{ marginTop: 4 }}>
-            <input autoFocus placeholder="グループを検索…" value={addSearch} onChange={e => setAddSearch(e.target.value)}
-              style={{ width: '100%', fontSize: '0.78rem', padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 6, outline: 'none', boxSizing: 'border-box', marginBottom: 4 }} />
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, maxHeight: 140, overflowY: 'auto' }}>
-              {filtered.slice(0, 20).map(g => (
-                <button key={g.id} onClick={() => { handleToggle(rowName, category, g.id, deptName); setAddOpen(false); setAddSearch(''); }}
-                  style={{ display: 'block', width: '100%', padding: '6px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: '0.78rem', color: '#374151' }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                  @{g.handle}
-                </button>
-              ))}
-              {filtered.length === 0 && <div style={{ padding: 8, fontSize: '0.75rem', color: '#94a3b8' }}>候補なし</div>}
-            </div>
-            <button onClick={() => { setAddOpen(false); setAddSearch(''); }}
-              style={{ marginTop: 4, fontSize: '0.72rem', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>キャンセル</button>
+  // 役職カード（全部署共通 ＋ 部署別セクション）
+  const RoleCard = ({ roleName, color, bg, border }) => {
+    const [showDeptAdd, setShowDeptAdd] = useState(false);
+    // 既に dept_name が設定されている部署ルールを収集
+    const deptSpecificRules = rules.filter(r => r.name === roleName && r.category === 'role' && r.dept_name);
+    const deptNames = [...new Set(deptSpecificRules.map(r => r.dept_name))];
+    // 部署追加候補（まだ設定していない部署）
+    const addableDepts = topLevelTeams.filter(t => !deptNames.includes(t.name));
+
+    return (
+      <div style={{ border: `1.5px solid ${border}`, borderRadius: 12, background: bg, padding: '14px 16px' }}>
+        <div style={{ fontWeight: 800, fontSize: '0.88rem', color, marginBottom: 10 }}>{roleName}</div>
+
+        {/* 全部署共通 */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>全部署共通</span>
+            <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 400 }}>このグループには全部署のこの役職が入る</span>
           </div>
-        ) : (
-          <button onClick={() => setAddOpen(true)}
-            style={{ fontSize: '0.75rem', color, background: 'none', border: `1px dashed ${color}66`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
-            ＋ グループを追加
-          </button>
+          <GroupTags rowName={roleName} category="role" deptName={null} color={color} />
+        </div>
+
+        {/* 部署別（例: HR専用） */}
+        {deptNames.map(dept => (
+          <div key={dept} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 8 }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#0891b2', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ background: '#ecfeff', border: '1px solid #67e8f9', borderRadius: 4, padding: '1px 7px', color: '#0891b2' }}>{dept}専用</span>
+              <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 400 }}>{dept}部署のこの役職だけ追加で入るグループ</span>
+            </div>
+            <GroupTags rowName={roleName} category="role" deptName={dept} color="#0891b2" />
+          </div>
+        ))}
+
+        {/* 部署別ルールを追加 */}
+        {addableDepts.length > 0 && (
+          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 8 }}>
+            {showDeptAdd ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {addableDepts.map(t => (
+                  <button key={t.id} onClick={() => { handleToggle(roleName, 'role', groups[0]?.id, t.name); setShowDeptAdd(false); }}
+                    style={{ fontSize: '0.72rem', padding: '2px 10px', border: '1px solid #67e8f9', borderRadius: 5, background: '#ecfeff', color: '#0891b2', cursor: 'pointer', fontWeight: 600 }}>
+                    ＋ {t.name}専用を追加
+                  </button>
+                ))}
+                <button onClick={() => setShowDeptAdd(false)} style={{ fontSize: '0.68rem', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>閉じる</button>
+              </div>
+            ) : (
+              <button onClick={() => setShowDeptAdd(true)}
+                style={{ fontSize: '0.72rem', color: '#94a3b8', background: 'none', border: '1px dashed #d1d5db', borderRadius: 5, padding: '2px 10px', cursor: 'pointer' }}>
+                ＋ 部署別ルールを追加
+              </button>
+            )}
+          </div>
         )}
       </div>
     );
   };
+
+  // 部署/共通カード（シンプル版）
+  const RuleCard = ({ rowName, category, deptName = null, color, bg, border, label }) => (
+    <div style={{ border: `1.5px solid ${border}`, borderRadius: 12, background: bg, padding: '14px 16px' }}>
+      <div style={{ fontWeight: 800, fontSize: '0.88rem', color, marginBottom: 10 }}>{label || rowName}</div>
+      <GroupTags rowName={rowName} category={category} deptName={deptName} color={color} />
+    </div>
+  );
 
   const tabCfg = {
     role: { color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd' },
@@ -728,7 +788,7 @@ function RulesTab({ groups, teams }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
         {tab === 'role' && ROLE_NAMES.filter(n => n !== 'なし').map(name => (
-          <RuleCard key={name} rowName={name} category="role" {...cfg} />
+          <RoleCard key={name} roleName={name} {...cfg} />
         ))}
         {tab === 'dept' && deptRows.map(row => (
           <RuleCard key={row.id} rowName={row.name} category="dept" {...cfg}

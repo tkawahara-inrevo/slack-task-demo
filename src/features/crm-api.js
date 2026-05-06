@@ -421,7 +421,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { teamId, userId } = req.dashboardUser;
       const { stage, yomi, plan, q, salesUser, showDormant, quickFilter, limit: lq } = req.query;
       const scope = req.query.scope || 'all'; // 'all' | 'self'
-      const limit = Math.min(Number(lq) || 2000, 5000);
+      const limit = Number(lq) || 10000; // 全件表示（ページネーションなし）
 
       let where = `d.team_id=$1`;
       const params = [teamId];

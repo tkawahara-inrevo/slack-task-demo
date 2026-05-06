@@ -713,20 +713,18 @@ function RulesTab({ groups, teams }) {
           const deptRule = rules.find(r => r.name === roleName && r.category === 'role' && r.dept_name === dept);
           const handleDeleteDeptSection = async () => {
             if (!deptRule) return;
-            if (!window.confirm(`「${dept}専用」のセクションを完全に削除しますか？`)) return;
             try {
               await api.slackGroupRuleDelete(deptRule.id);
               setRules(prev => prev.filter(r => r.id !== deptRule.id));
-            } catch (e) { console.error(e); alert('削除に失敗しました'); }
+            } catch (e) { console.error(e); }
           };
           return (
             <div key={dept} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 8 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#0891b2', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ background: '#ecfeff', border: '1px solid #67e8f9', borderRadius: 4, padding: '1px 7px', color: '#0891b2' }}>{dept}専用</span>
-                <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 400 }}>{dept}部署のこの役職だけ追加で入るグループ</span>
                 <button onClick={handleDeleteDeptSection}
-                  style={{ marginLeft: 'auto', fontSize: '0.68rem', color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 4, padding: '1px 7px', cursor: 'pointer' }}>
-                  このセクションを削除
+                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>
+                  ×
                 </button>
               </div>
               <GroupTags rowName={roleName} category="role" deptName={dept} color="#0891b2" />

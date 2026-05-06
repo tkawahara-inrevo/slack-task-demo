@@ -131,26 +131,43 @@ export default function CustomerList({ scope = 'all' }) {
   const [creating, setCreating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const sidebarRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const buildQuery = (params = {}) => ({
+    scope,
+    q: params.q ?? q,
+    quickFilter: (params.quickFilter ?? quickFilter) === 'self' ? undefined : (params.quickFilter ?? quickFilter) === 'all' ? undefined : (params.quickFilter ?? quickFilter),
+    salesUser: (params.quickFilter ?? quickFilter) === 'self' ? 'self_token' : (params.filterSales ?? filterSales),
+    stage: [...(params.filterStages ?? filterStages)].join(','),
+    showDormant: (params.showDormant ?? showDormant) ? '1' : undefined,
+  });
 
   const load = useCallback(async (params = {}) => {
     setLoading(true);
     try {
-      const r = await api.crmDealsList({
-        scope,
-        q: params.q ?? q,
-        quickFilter: (params.quickFilter ?? quickFilter) === 'self' ? undefined : (params.quickFilter ?? quickFilter) === 'all' ? undefined : (params.quickFilter ?? quickFilter),
-        salesUser: (params.quickFilter ?? quickFilter) === 'self' ? 'self_token' : (params.filterSales ?? filterSales),
-        stage: [...(params.filterStages ?? filterStages)].join(','),
-        showDormant: (params.showDormant ?? showDormant) ? '1' : undefined,
-      });
+      const r = await api.crmDealsList(buildQuery(params));
       setDeals(r.deals || []);
       setKpi(r.kpi);
+      setTotalCount(r.totalCount || 0);
+      setHasMore(r.hasMore || false);
       setSalesUsers(r.salesUsers || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, [q, quickFilter, filterStages, filterSales, showDormant, scope]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.crmDealsList({ ...buildQuery(), offset: deals.length });
+      setDeals(prev => [...prev, ...(r.deals || [])]);
+      setHasMore(r.hasMore || false);
+    } catch (e) { console.error(e); }
+    finally { setLoadingMore(false); }
+  };
 
   useEffect(() => { load(); }, []);
 
@@ -209,7 +226,7 @@ export default function CustomerList({ scope = 'all' }) {
         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
           {/* KPI */}
           <div style={{ display:'flex', gap:8, flex:1, flexWrap:'wrap' }}>
-            <KpiCard label="表示中" value={`${deals.length}件`} sub={`/ ${kpi?.total||0}件中`} />
+            <KpiCard label="表示中" value={`${deals.length}件`} sub={`/ ${totalCount}件中`} />
             <KpiCard label="案件総額" value={fmtM(kpi?.totalAmount)} sub="進行中" color="#1e40af" bg="#eff6ff" />
             <KpiCard label="要対応" value={`${kpi?.alertCount||0}件`} sub="期限切れ or 停滞"
               color={kpi?.alertCount>0?'#dc2626':'#94a3b8'} highlight={kpi?.alertCount>0} />
@@ -408,6 +425,16 @@ export default function CustomerList({ scope = 'all' }) {
           )}
         </div>
       </div>
+
+      {/* もっと読み込む */}
+      {hasMore && (
+        <div style={{ textAlign:'center', padding:'16px 0' }}>
+          <button onClick={loadMore} disabled={loadingMore}
+            style={{ padding:'8px 28px', border:'1px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.85rem', fontWeight:600, cursor: loadingMore ? 'default' : 'pointer' }}>
+            {loadingMore ? '読み込み中…' : `さらに読み込む（残り ${totalCount - deals.length}件）`}
+          </button>
+        </div>
+      )}
 
       {/* 見送りモーダル */}
       {dormantTarget && (

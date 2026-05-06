@@ -421,7 +421,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { teamId, userId } = req.dashboardUser;
       const { stage, yomi, plan, q, salesUser, showDormant, quickFilter, limit: lq } = req.query;
       const scope = req.query.scope || 'all'; // 'all' | 'self'
-      const limit = Number(lq) || 10000; // 全件表示（ページネーションなし）
+      const offset = Number(req.query.offset) || 0;
+      const limit = Math.min(Number(lq) || 500, 1000);
 
       let where = `d.team_id=$1`;
       const params = [teamId];
@@ -466,6 +467,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
       if (quickFilter === 'watch')         where += ` AND d.updated_at < now() - interval '14 days' AND d.status='active' AND d.yomi NOT IN ('アポ化前','受注','失注')`;
       if (quickFilter === 'yomi_mgmt')     where += ` AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％') AND d.status='active'`;
 
+      // 総件数（フィルター適用後）
+      const countRes = await dbQuery(
+        `SELECT COUNT(*)::int AS total FROM deals d JOIN customers c ON c.id=d.customer_id WHERE ${where}`,
+        params
+      );
+      const totalCount = countRes.rows[0]?.total || 0;
+
       // 直近アクティビティチェック用
       const { rows } = await dbQuery(`
         SELECT
@@ -482,7 +490,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         JOIN customers c ON c.id=d.customer_id
         WHERE ${where}
         ORDER BY d.updated_at DESC
-        LIMIT ${limit}
+        LIMIT ${limit} OFFSET ${offset}
       `, params);
 
       // ステージ付与（ヘルスは削除）
@@ -504,7 +512,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       // 担当者一覧：固定リストのみ表示
       const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 亮弘'];
 
-      res.json({ deals, kpi, salesUsers: TARGET_REPS });
+      res.json({ deals, kpi, totalCount, hasMore: offset + rows.length < totalCount, salesUsers: TARGET_REPS });
     } catch (e) {
       console.error('[CRM] deals-list error:', e);
       res.status(500).json({ error: 'internal', detail: e.message });

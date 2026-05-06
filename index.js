@@ -11,6 +11,8 @@ const { registerNotificationJobs } = require("./src/features/notifications");
 const { registerReactionFeature } = require("./src/features/reaction-task");
 const { registerTaskUiFeature } = require("./src/features/task-ui");
 const { generateToken, registerDashboardApi } = require("./src/features/dashboard-api");
+const { stampAttendance } = require("./src/features/ieyasu");
+const { INQUIRY_CHANNEL_ID, handleInquiryMessage } = require("./src/features/crm-inquiry");
 const {
   __cacheGet,
   __cacheKey,
@@ -3006,6 +3008,38 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   expressApp.get("/dashboard/{*splat}", (_req, res) => {
     res.sendFile(path.join(distPath, "index.html"));
   });
+
+  // ── 出勤日報 → IEYASU 出勤打刻 ──────────────────────────────
+  const REPORT_IN_CH  = process.env.RANKING_REPORT_IN_CHANNEL_ID  || '';
+  const REPORT_OUT_CH = process.env.RANKING_REPORT_OUT_CHANNEL_ID || '';
+
+  if (REPORT_IN_CH) {
+    app.message(async ({ message, client }) => {
+      if (message.channel !== REPORT_IN_CH || message.bot_id || message.subtype) return;
+      console.log(`[IEYASU] 出勤日報受信 user:${message.user}`);
+      const result = await stampAttendance(client, message.user, 'clock_in');
+      if (!result.ok) console.warn('[IEYASU] 出勤打刻失敗:', result);
+    });
+  }
+
+  if (REPORT_OUT_CH) {
+    app.message(async ({ message, client }) => {
+      if (message.channel !== REPORT_OUT_CH || message.bot_id || message.subtype) return;
+      console.log(`[IEYASU] 退勤日報受信 user:${message.user}`);
+      const result = await stampAttendance(client, message.user, 'clock_out');
+      if (!result.ok) console.warn('[IEYASU] 退勤打刻失敗:', result);
+    });
+  }
+
+  // ── 問い合わせフォーム → CRM 自動登録 ──────────────────────────
+  if (INQUIRY_CHANNEL_ID) {
+    app.message(async ({ message, client }) => {
+      if (message.channel !== INQUIRY_CHANNEL_ID || message.subtype) return;
+      await handleInquiryMessage(message, client).catch(e =>
+        console.error('[CRM Inquiry] handler error:', e.message)
+      );
+    });
+  }
 
   await app.start(port);
   console.log(`Slack app is running on port ${port}`);

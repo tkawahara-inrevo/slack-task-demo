@@ -791,23 +791,41 @@ function RulesTab({ groups, teams }) {
         </div>
 
         {/* 部署グループ（dept + auto を統合表示） */}
-        <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 4 }}>
-          所属したら入るグループ
-        </div>
-        <GroupTags rowName={team.name} category="dept" deptName={null} color={color} />
-        {/* auto カテゴリのグループも並べて表示（編集は dept 側に統一） */}
         {(() => {
-          const autoIds = getRule(team.name, 'auto', null)?.group_ids || [];
-          const autoGrps = autoIds.map(id => groups.find(g => g.id === id)).filter(Boolean);
-          return autoGrps.map(g => (
-            <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.75rem', fontWeight: 700,
-              marginTop: 4, marginRight: 4,
-              padding: '2px 8px 2px 7px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}55`, color }}>
-              @{g.handle}
-              <button onClick={() => handleToggle(team.name, 'auto', g.id, null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
-            </span>
-          ));
+          const [addOpen, setAddOpen] = useState(false);
+          const deptIds  = getRule(team.name, 'dept', null)?.group_ids || [];
+          const autoIds  = getRule(team.name, 'auto', null)?.group_ids || [];
+          const allGroups = [
+            ...deptIds.map(id => ({ id, cat: 'dept' })),
+            ...autoIds.map(id => ({ id, cat: 'auto' })),
+          ].map(({ id, cat }) => ({ g: groups.find(g => g.id === id), cat })).filter(({ g }) => g);
+          const excludeIds = [...deptIds, ...autoIds];
+
+          return (
+            <div>
+              <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 6 }}>所属したら入るグループ</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+                {allGroups.length === 0
+                  ? <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontStyle: 'italic' }}>なし</span>
+                  : allGroups.map(({ g, cat }) => (
+                      <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.75rem', fontWeight: 700,
+                        padding: '2px 8px 2px 7px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}55`, color }}>
+                        @{g.handle}
+                        <button onClick={() => handleToggle(team.name, cat, g.id, null)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
+                      </span>
+                    ))}
+              </div>
+              {addOpen
+                ? <GroupPicker excludeIds={excludeIds} color={color}
+                    onAdd={gid => { handleToggle(team.name, 'dept', gid, null); setAddOpen(false); }} />
+                : <button onClick={() => setAddOpen(true)}
+                    style={{ fontSize: '0.72rem', color, background: 'none', border: `1px dashed ${color}66`, borderRadius: 5, padding: '2px 8px', cursor: 'pointer', fontWeight: 600 }}>
+                    ＋ 追加
+                  </button>
+              }
+            </div>
+          );
         })()}
       </div>
     );

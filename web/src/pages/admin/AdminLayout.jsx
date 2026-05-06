@@ -8,8 +8,8 @@ export default function AdminLayout() {
   useEffect(() => { api.me().then(r => setRole(r.role || '')).catch(() => {}); }, []);
 
   const isAdmin     = role === 'admin';
-  const isIT        = role === 'it';
-  const isPersonnel = role === 'personnel';
+  const isIT        = role === 'admin' || role === 'it';
+  const isPersonnel = role === 'admin' || role === 'personnel';
 
   const navStyle = (isActive) => ({
     display: 'block', padding: collapsed ? '8px 0' : '8px 16px', textAlign: collapsed ? 'center' : 'left',

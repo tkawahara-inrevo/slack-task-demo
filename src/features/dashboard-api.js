@@ -252,19 +252,19 @@ function registerDashboardApi(deps) {
     next();
   }
 
-  // IT チームのみ（チャンネルマッピング・Slackメンション管理・日報管理・ランキング管理）
+  // IT チームまたは admin（チャンネルマッピング・Slackメンション管理・日報管理・ランキング管理）
   function adminOrITOnly(req, res, next) {
     const role = req.dashboardUser?.role;
-    if (role !== "it") {
+    if (role !== "admin" && role !== "it") {
       return res.status(403).json({ error: "it_required" });
     }
     next();
   }
 
-  // Personnel チームのみ（採用管理）
+  // Personnel チームまたは admin（採用管理）
   function adminOrPersonnelOnly(req, res, next) {
     const role = req.dashboardUser?.role;
-    if (role !== "personnel") {
+    if (role !== "admin" && role !== "personnel") {
       return res.status(403).json({ error: "personnel_required" });
     }
     next();

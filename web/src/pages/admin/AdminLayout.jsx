@@ -47,6 +47,11 @@ export default function AdminLayout() {
             {collapsed ? '⚙' : '管理者権限'}
           </NavLink>
         )}
+        {isAdmin && (
+          <NavLink to="/admin/crm-permissions" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '🔐' : 'CRM権限管理'}
+          </NavLink>
+        )}
 
         {/* IT 所属のみ */}
         {isIT && (

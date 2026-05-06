@@ -795,32 +795,49 @@ function CrmSettings() {
   );
 }
 
+// 🔒 アクセス拒否表示
+function AccessDenied({ message }) {
+  return (
+    <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:10, color:'#94a3b8' }}>
+      <div style={{ fontSize:'2rem' }}>🔒</div>
+      <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#374151' }}>アクセス権限がありません</div>
+      <div style={{ fontSize:'0.82rem', color:'#94a3b8' }}>{message || '権限が必要です'}</div>
+    </div>
+  );
+}
+
 // ── メイン CRM ────────────────────────────────────────────────
 export default function CRM() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get('tab') || 'dashboard';
+  const tab = searchParams.get('tab') || 'customers';
   const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
-  const [canViewPerf, setCanViewPerf] = useState(null);
+  const [access, setAccess] = useState(null); // null=loading
 
   useEffect(() => {
-    api.crmPerformanceAccess()
-      .then(r => setCanViewPerf(r.allowed))
-      .catch(() => setCanViewPerf(false));
+    api.crmMyAccess().then(setAccess).catch(() => setAccess({ tabs: {
+      dashboard:   { visible: false }, customers: { visible: true, scope: 'all' },
+      yomi:        { visible: false }, performance: { visible: false }, settings: { visible: false },
+    }}));
   }, []);
 
-  const tabs = [
-    { key:'dashboard',   label:'ダッシュボード' },
-    { key:'customers',   label:'顧客一覧' },
-    { key:'yomi',        label:'ヨミ管理' },
-    ...(canViewPerf ? [{ key:'performance', label:'成績' }] : []),
-    { key:'settings',    label:'設定' },
+  if (!access) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;
+
+  const tabDefs = [
+    { key:'dashboard',   label:'ダッシュボード', msg:'管理者またはBC所属のみ' },
+    { key:'customers',   label:'顧客一覧',       msg:'' },
+    { key:'yomi',        label:'ヨミ管理',       msg:'BC所属のみ' },
+    { key:'performance', label:'成績',           msg:'管理者またはBC管理職のみ' },
+    { key:'settings',    label:'設定',           msg:'管理者またはBC管理職のみ' },
   ];
+
+  // 顧客一覧は常に表示（ただし非BC/非adminはダッシュボードに飛ばさない）
+  const visibleTabs = tabDefs.filter(t => t.key === 'customers' || access.tabs[t.key]?.visible);
 
   return (
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
       {/* タブバー */}
       <div style={{ display:'flex', borderBottom:'1px solid #e5e7eb', background:'#fff', paddingLeft:8, flexShrink:0, overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
-        {tabs.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ padding:'10px 16px', border:'none', background:'none', cursor:'pointer', fontSize:'0.88rem', whiteSpace:'nowrap', flexShrink:0,
               fontWeight: tab===t.key?700:400, color:tab===t.key?'#1d4ed8':'#6b7280',
@@ -832,21 +849,27 @@ export default function CRM() {
 
       {/* タブコンテンツ */}
       <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {tab === 'dashboard'  && <div style={{ flex:1, overflow:'auto' }}><CrmDashboard /></div>}
+        {tab === 'dashboard' && (
+          access.tabs.dashboard?.visible
+            ? <div style={{ flex:1, overflow:'auto' }}><CrmDashboard scope={access.tabs.dashboard?.scope} /></div>
+            : <AccessDenied message="管理者またはBC所属のみ閲覧できます" />
+        )}
         {tab === 'customers'  && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><CustomerList /></div>}
-        {tab === 'yomi'       && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>}
-
-        {tab === 'performance' && canViewPerf && (
-          <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>
+        {tab === 'yomi' && (
+          access.tabs.yomi?.visible
+            ? <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><YomiPanel full /></div>
+            : <AccessDenied message="BC所属のみ閲覧できます" />
         )}
-        {tab === 'performance' && canViewPerf === false && (
-          <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#94a3b8', flexDirection:'column', gap:8 }}>
-            <div style={{ fontSize:'1.5rem' }}>🔒</div>
-            <div style={{ fontWeight:700, color:'#374151' }}>アクセス権限がありません</div>
-            <div style={{ fontSize:'0.82rem' }}>管理者またはBC Sub Manager以上のみ閲覧できます</div>
-          </div>
+        {tab === 'performance' && (
+          access.tabs.performance?.visible
+            ? <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>
+            : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
         )}
-        {tab === 'settings' && <CrmSettings />}
+        {tab === 'settings' && (
+          access.tabs.settings?.visible
+            ? <CrmSettings />
+            : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
+        )}
       </div>
     </div>
   );

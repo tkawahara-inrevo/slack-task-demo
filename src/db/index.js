@@ -564,6 +564,16 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // CRM権限設定
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS crm_permissions (
+      team_id     TEXT PRIMARY KEY,
+      bc_team_name TEXT NOT NULL DEFAULT 'Business Consulting',
+      config      JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+
   // カスタムフィールド設定
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS crm_custom_fields (

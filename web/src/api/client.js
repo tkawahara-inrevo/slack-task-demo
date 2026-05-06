@@ -249,6 +249,9 @@ export const api = {
 
   // CRM: Activity Settings
   crmActivitySettings: () => crmFetch('/activity-settings'),
+  crmMyAccess: () => crmFetch('/my-crm-access'),
+  crmPermissions: () => crmFetch('/permissions'),
+  crmPermissionsSave: (body) => crmFetch('/permissions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   crmSaveActivitySettings: (body) => crmFetch('/activity-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 
   // CRM: Dashboard

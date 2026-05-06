@@ -9,6 +9,7 @@ import AdminLayout from './pages/admin/AdminLayout'
 import TeamsAdmin from './pages/admin/TeamsAdmin'
 import ProjectsAdmin from './pages/admin/ProjectsAdmin'
 import RolesAdmin from './pages/admin/RolesAdmin'
+import CrmPermissions from './pages/admin/CrmPermissions'
 import PermissionsAdmin from './pages/admin/PermissionsAdmin'
 import IntegrationsAdmin from './pages/admin/IntegrationsAdmin'
 import FormulasAdmin from './pages/admin/FormulasAdmin'
@@ -56,6 +57,7 @@ function App() {
           <Route path="teams" element={<TeamsAdmin />} />
           <Route path="projects" element={<ProjectsAdmin />} />
           <Route path="roles" element={<RolesAdmin />} />
+          <Route path="crm-permissions" element={<CrmPermissions />} />
           <Route path="permissions" element={<PermissionsAdmin />} />
           <Route path="user-mapping" element={<UserMappingAdmin />} />
           <Route path="integrations" element={<IntegrationsAdmin />} />

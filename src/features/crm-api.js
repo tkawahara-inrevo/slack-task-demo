@@ -392,6 +392,104 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── CRM権限設定 CRUD ──────────────────────────────────────────────
+  const DEFAULT_CRM_PERMISSIONS = {
+    bc_team_name: 'Business Consulting',
+    tabs: {
+      dashboard:   { access: 'bc_and_above' },  // admin=all, bc manager=all, bc member=self, others=none
+      customers:   { access: 'all' },
+      yomi:        { access: 'bc_all' },         // bc member+ (any role) + admin
+      performance: { access: 'bc_manager' },     // bc sub_manager/manager + admin
+      settings:    { access: 'bc_manager' },
+    },
+  };
+
+  // ユーザーの CRM アクセス権を返す
+  expressApp.get('/api/crm/my-crm-access', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const role = req.dashboardUser.role;
+
+      // 権限設定を取得
+      const permRes = await dbQuery(`SELECT * FROM crm_permissions WHERE team_id=$1`, [teamId]);
+      const perm = permRes.rows[0] || {};
+      const cfg = { ...DEFAULT_CRM_PERMISSIONS, ...(perm.config || {}) };
+      const bcTeamName = perm.bc_team_name || cfg.bc_team_name;
+
+      // admin は常に全アクセス・全スコープ
+      if (role === 'admin') {
+        return res.json({
+          isBC: true, isBCManager: true, scope: 'all', role,
+          tabs: Object.fromEntries(Object.keys(cfg.tabs).map(t => [t, { visible: true, scope: 'all' }])),
+          bcTeamName,
+        });
+      }
+
+      // BC所属チェック（dash_team_members → dash_teams で名前確認）
+      const bcRes = await dbQuery(`
+        SELECT 1 FROM dash_team_members dtm
+        JOIN dash_teams dt ON dt.id=dtm.dash_team_id AND dt.team_id=dtm.team_id
+        WHERE dtm.team_id=$1 AND dtm.user_id=$2
+          AND dt.name ILIKE $3
+        LIMIT 1
+      `, [teamId, userId, `%${bcTeamName}%`]);
+      const isBC = bcRes.rows.length > 0;
+      const isBCManager = isBC && ['manager','sub_manager','sub_chief','chief','expert','sub_expert'].includes(role);
+
+      const tabAccess = {};
+      for (const [tab, rule] of Object.entries(cfg.tabs)) {
+        const acc = rule.access;
+        if (acc === 'all') {
+          tabAccess[tab] = { visible: true, scope: 'all' };
+        } else if (acc === 'bc_all') {
+          tabAccess[tab] = { visible: isBC, scope: 'all' };
+        } else if (acc === 'bc_manager') {
+          tabAccess[tab] = { visible: isBCManager, scope: 'all' };
+        } else if (acc === 'bc_and_above') {
+          if (!isBC) {
+            tabAccess[tab] = { visible: false, scope: 'none' };
+          } else if (isBCManager) {
+            tabAccess[tab] = { visible: true, scope: 'all' };
+          } else {
+            tabAccess[tab] = { visible: true, scope: 'self' };
+          }
+        } else {
+          tabAccess[tab] = { visible: false, scope: 'none' };
+        }
+      }
+
+      res.json({ isBC, isBCManager, scope: isBC ? (isBCManager ? 'all' : 'self') : 'none', role, tabs: tabAccess, bcTeamName });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 権限設定 GET（admin用）
+  expressApp.get('/api/crm/permissions', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const r = await dbQuery(`SELECT * FROM crm_permissions WHERE team_id=$1`, [teamId]);
+      const row = r.rows[0];
+      res.json({
+        bcTeamName: row?.bc_team_name || DEFAULT_CRM_PERMISSIONS.bc_team_name,
+        tabs: { ...DEFAULT_CRM_PERMISSIONS.tabs, ...(row?.config?.tabs || {}) },
+      });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 権限設定 PUT（admin用）
+  expressApp.put('/api/crm/permissions', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      if (req.dashboardUser.role !== 'admin') return res.status(403).json({ error: 'admin_required' });
+      const { bcTeamName, tabs } = req.body || {};
+      await dbQuery(`
+        INSERT INTO crm_permissions (team_id, bc_team_name, config)
+        VALUES ($1,$2,$3)
+        ON CONFLICT (team_id) DO UPDATE SET bc_team_name=$2, config=$3, updated_at=now()
+      `, [teamId, bcTeamName, JSON.stringify({ tabs })]);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── ダッシュボード ──────────────────────────────────────────────
   expressApp.get('/api/crm/dashboard', authWithRole, async (req, res) => {
     try {

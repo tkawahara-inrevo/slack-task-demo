@@ -538,17 +538,16 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
   );
 }
 
-// ───── マスタ設定タブ ─────
+// ───── マスタ設定タブ（カード形式） ─────
 const ROLE_NAMES = ['なし', 'lead', 'sub chief', 'chief', 'sub expert', 'expert', 'sub manager', 'manager'];
 
 function RulesTab({ groups, teams }) {
   const [rules, setRules] = useState([]);
-  const [visibility, setVisibility] = useState({}); // groupId -> string[]
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState({});
   const [tab, setTab] = useState('role');
-  const [expandedRoles, setExpandedRoles] = useState(new Set());
   const [showGroupManager, setShowGroupManager] = useState(false);
+  const [visibility, setVisibility] = useState({});
   const [visSaving, setVisSaving] = useState({});
 
   useEffect(() => {
@@ -627,199 +626,117 @@ function RulesTab({ groups, teams }) {
     .filter(g => tab === 'auto' ? true : !autoGroupIds.has(g.id))
     .filter(g => !isHiddenInTab(g.id, tab));
 
-  // テーブル共通スタイル
-  const stickyTh = { padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb', minWidth: 200, position: 'sticky', left: 0, background: '#f8fafc', zIndex: 2, whiteSpace: 'nowrap', boxShadow: '2px 0 4px rgba(0,0,0,0.06)' };
-  const stickyTd = (indent = 0, bold = true) => ({ padding: `8px ${16 + indent * 14}px`, fontWeight: bold ? 700 : 400, color: '#111827', position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '2px solid #e5e7eb', whiteSpace: 'nowrap', boxShadow: '2px 0 4px rgba(0,0,0,0.06)' });
-  const cellTd = { textAlign: 'center', borderLeft: '1px solid #f3f4f6', padding: 0, minWidth: 90 };
-  const labelSt = { display: 'flex', alignItems: 'center', justifyContent: 'center', height: 36, cursor: 'pointer', margin: 0 };
-
   if (loading) return <div style={{ color: '#9ca3af', padding: 24 }}>読み込み中…</div>;
+
+  // カード1枚: 役職/部署名 → 所属グループを表示・編集
+  const RuleCard = ({ rowName, category, deptName = null, color, bg, border, label }) => {
+    const [addOpen, setAddOpen] = useState(false);
+    const [addSearch, setAddSearch] = useState('');
+    const curGroupIds = getRule(rowName, category, deptName)?.group_ids || [];
+    const curGroups = curGroupIds.map(id => groups.find(g => g.id === id)).filter(Boolean);
+    const remaining = groups.filter(g => !curGroupIds.includes(g.id));
+    const filtered = addSearch ? remaining.filter(g => g.handle.includes(addSearch)) : remaining;
+
+    return (
+      <div style={{ border: `1.5px solid ${border}`, borderRadius: 12, background: bg, padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontWeight: 800, fontSize: '0.88rem', color }}>{label || rowName}</span>
+          {deptName && <span style={{ fontSize: '0.7rem', color: '#94a3b8', background: '#f8fafc', borderRadius: 4, padding: '1px 7px' }}>{deptName}</span>}
+        </div>
+
+        {/* 現在のグループ */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, minHeight: 28, marginBottom: 8 }}>
+          {curGroups.length === 0
+            ? <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>グループなし</span>
+            : curGroups.map(g => {
+                const key = `${category}:${rowName}:${deptName}:${g.id}`;
+                return (
+                  <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', fontWeight: 700,
+                    padding: '3px 10px 3px 8px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}44`, color }}>
+                    @{g.handle}
+                    <button onClick={() => handleToggle(rowName, category, g.id, deptName)} disabled={isSavingKey(key)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 12, lineHeight: 1, padding: 0, flexShrink: 0 }}>
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+        </div>
+
+        {/* グループ追加 */}
+        {addOpen ? (
+          <div style={{ marginTop: 4 }}>
+            <input autoFocus placeholder="グループを検索…" value={addSearch} onChange={e => setAddSearch(e.target.value)}
+              style={{ width: '100%', fontSize: '0.78rem', padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 6, outline: 'none', boxSizing: 'border-box', marginBottom: 4 }} />
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, maxHeight: 140, overflowY: 'auto' }}>
+              {filtered.slice(0, 20).map(g => (
+                <button key={g.id} onClick={() => { handleToggle(rowName, category, g.id, deptName); setAddOpen(false); setAddSearch(''); }}
+                  style={{ display: 'block', width: '100%', padding: '6px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: '0.78rem', color: '#374151' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                  @{g.handle}
+                </button>
+              ))}
+              {filtered.length === 0 && <div style={{ padding: 8, fontSize: '0.75rem', color: '#94a3b8' }}>候補なし</div>}
+            </div>
+            <button onClick={() => { setAddOpen(false); setAddSearch(''); }}
+              style={{ marginTop: 4, fontSize: '0.72rem', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>キャンセル</button>
+          </div>
+        ) : (
+          <button onClick={() => setAddOpen(true)}
+            style={{ fontSize: '0.75rem', color, background: 'none', border: `1px dashed ${color}66`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+            ＋ グループを追加
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const tabCfg = {
+    role: { color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd' },
+    dept: { color: '#0891b2', bg: '#ecfeff', border: '#67e8f9' },
+    auto: { color: '#059669', bg: '#f0fdf4', border: '#6ee7b7' },
+  };
+  const cfg = tabCfg[tab];
 
   return (
     <div>
-      {/* タブ + 表示切替 */}
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, gap: 12 }}>
-        <div style={{ display: 'flex', gap: 4, padding: '3px', background: '#f1f5f9', borderRadius: 8 }}>
-          {[['role', '役職'], ['dept', '部署'], ['auto', '共通条件']].map(([v, l]) => (
-            <button key={v} onClick={() => setTab(v)}
-              style={{ padding: '5px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: '0.82rem',
-                fontWeight: v === tab ? 700 : 400, background: v === tab ? '#fff' : 'transparent',
-                color: v === tab ? (v === 'auto' ? '#059669' : '#374151') : '#9ca3af',
-                boxShadow: v === tab ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
-              {l}
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setShowGroupManager(v => !v)}
-          style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid #e5e7eb',
-            background: '#fff', color: '#6b7280', cursor: 'pointer', marginLeft: 'auto' }}>
-          グループ表示設定
-        </button>
+      {/* 説明 */}
+      <div style={{ marginBottom: 16, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, fontSize: '0.8rem', color: '#64748b', border: '1px solid #e2e8f0' }}>
+        <strong>ルール設定とは：</strong>
+        役職・部署ごとに「自動で入るべきSlackグループ」を設定します。変更ウィザードで役職や部署を変更すると、ここの設定に基づいてグループが自動で追加/削除されます。
       </div>
 
-      {/* グループ表示設定パネル */}
-      {showGroupManager && (
-        <div style={{ marginBottom: 16, border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff', padding: 16 }}>
-          <div style={{ marginBottom: 10 }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>グループ表示設定</span>
-            <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 8 }}>各タブでの表示/非表示をDB保存</span>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc' }}>
-                  <th style={{ padding: '6px 12px', textAlign: 'left', fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>グループ</th>
-                  {[['role','役職'], ['dept','部署'], ['auto','共通条件']].map(([v, l]) => (
-                    <th key={v} style={{ padding: '6px 16px', textAlign: 'center', fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap', borderLeft: '1px solid #f3f4f6' }}>{l}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedGroups.map(g => {
-                  const isSav = !!visSaving[g.id];
-                  return (
-                    <tr key={g.id} style={{ borderBottom: '1px solid #f9fafb' }}>
-                      <td style={{ padding: '5px 12px', fontWeight: 500, color: '#374151', whiteSpace: 'nowrap' }}>@{g.handle}</td>
-                      {[['role','#6d28d9'], ['dept','#0891b2'], ['auto','#059669']].map(([v, col]) => {
-                        const hidden = isHiddenInTab(g.id, v);
-                        return (
-                          <td key={v} style={{ textAlign: 'center', borderLeft: '1px solid #f9fafb' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, cursor: isSav ? 'wait' : 'pointer', margin: 0 }}>
-                              <input type="checkbox" checked={!hidden} disabled={isSav}
-                                onChange={() => toggleTabVisibility(g.id, v)}
-                                style={{ accentColor: col, width: 14, height: 14, margin: 0 }} />
-                            </label>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {/* タブ */}
+      <div style={{ display: 'flex', gap: 4, padding: 3, background: '#f1f5f9', borderRadius: 8, marginBottom: 20, width: 'fit-content' }}>
+        {[['role', '役職ルール'], ['dept', '部署ルール'], ['auto', '共通条件']].map(([v, l]) => (
+          <button key={v} onClick={() => setTab(v)}
+            style={{ padding: '5px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: '0.82rem',
+              fontWeight: v === tab ? 700 : 400, background: v === tab ? '#fff' : 'transparent',
+              color: v === tab ? tabCfg[v].color : '#9ca3af',
+              boxShadow: v === tab ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
+            {l}
+          </button>
+        ))}
+      </div>
 
       {tab === 'auto' && (
-        <div style={{ marginBottom: 12, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12, color: '#15803d' }}>
-          役職・部署に関わらず<strong>常に</strong>適用される条件です。変更ウィザードでも自動で組み込まれます。
+        <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: '0.8rem', color: '#15803d' }}>
+          役職・部署に関わらず<strong>全員</strong>に適用される条件です。入社時や部署移動時に自動で付与されます。
         </div>
       )}
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: '#9ca3af' }}>変更は即座に保存されます</p>
 
-      <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 10 }}>
-        <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#f8fafc' }}>
-              <th style={stickyTh}>{tab === 'role' ? '役職' : tab === 'auto' ? '共通条件' : '部署'}</th>
-              {visibleGroups.map(g => (
-                <th key={g.id} style={{ padding: '8px 10px', textAlign: 'center', borderBottom: '1px solid #e5e7eb', borderLeft: '1px solid #f3f4f6', minWidth: 90, whiteSpace: 'nowrap' }}>
-                  <span style={{ fontSize: 12, color: '#374151', fontWeight: 600 }}>@{g.handle}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {/* ───── 役職タブ: 展開式 ───── */}
-            {tab === 'role' && ROLE_NAMES.map(roleName => {
-              const isNone = roleName === 'なし';
-              const isExpanded = expandedRoles.has(roleName);
-              return [
-                /* 役職ヘッダー行 */
-                <tr key={`hdr-${roleName}`} style={{ borderBottom: '1px solid #f3f4f6', background: '#f9fafb', cursor: isNone ? 'default' : 'pointer' }}
-                  onClick={() => !isNone && setExpandedRoles(prev => { const n = new Set(prev); n.has(roleName) ? n.delete(roleName) : n.add(roleName); return n; })}>
-                  <td style={{ ...stickyTd(0, true), background: '#f9fafb' }}>
-                    {!isNone && <span style={{ display: 'inline-block', width: 14, fontSize: 10, color: '#9ca3af' }}>{isExpanded ? '▼' : '▶'}</span>}
-                    {isNone ? <span style={{ color: '#9ca3af', fontStyle: 'italic', fontSize: 12 }}>なし（全役職グループ外す）</span> : <strong>{roleName}</strong>}
-                  </td>
-                  {visibleGroups.map(g => <td key={g.id} style={cellTd} />)}
-                </tr>,
-                /* 展開時: 共通サブ行 */
-                isExpanded && !isNone && (
-                  <tr key={`${roleName}:common`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ ...stickyTd(1, false), color: '#6b7280', fontSize: 12 }}>共通（全部署）</td>
-                    {visibleGroups.map(g => {
-                      const key = `role:${roleName}:null:${g.id}`;
-                      const checked = isChecked(roleName, 'role', g.id, null);
-                      return (
-                        <td key={g.id} style={cellTd}>
-                          <label style={labelSt}>
-                            <input type="checkbox" checked={checked} disabled={isSavingKey(key)}
-                              onChange={() => handleToggle(roleName, 'role', g.id, null)}
-                              style={{ accentColor: CATEGORY_COLORS.role, width: 15, height: 15, margin: 0 }} />
-                          </label>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ),
-                /* 展開時: 部署別サブ行 */
-                ...(isExpanded && !isNone ? topLevelTeams.filter(t => t.name === 'HR').map(dept => (
-                  <tr key={`${roleName}:${dept.name}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ ...stickyTd(1, false), fontSize: 12 }}>{dept.name}</td>
-                    {visibleGroups.map(g => {
-                      const key = `role:${roleName}:${dept.name}:${g.id}`;
-                      const checked = isChecked(roleName, 'role', g.id, dept.name);
-                      return (
-                        <td key={g.id} style={cellTd}>
-                          <label style={labelSt}>
-                            <input type="checkbox" checked={checked} disabled={isSavingKey(key)}
-                              onChange={() => handleToggle(roleName, 'role', g.id, dept.name)}
-                              style={{ accentColor: CATEGORY_COLORS.dept, width: 15, height: 15, margin: 0 }} />
-                          </label>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                )) : []),
-              ];
-            })}
-
-            {/* ───── 部署タブ ───── */}
-            {tab === 'dept' && deptRows.map(row => (
-              <tr key={row.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={stickyTd(row.indent, row.indent === 0)}>
-                  {row.indent > 0 && <span style={{ color: '#d1d5db', marginRight: 4 }}>└</span>}
-                  {row.name}
-                </td>
-                {visibleGroups.map(g => {
-                  const key = `dept:${row.name}:null:${g.id}`;
-                  const checked = isChecked(row.name, 'dept', g.id);
-                  return (
-                    <td key={g.id} style={cellTd}>
-                      <label style={labelSt}>
-                        <input type="checkbox" checked={checked} disabled={isSavingKey(key)}
-                          onChange={() => handleToggle(row.name, 'dept', g.id)}
-                          style={{ accentColor: CATEGORY_COLORS.dept, width: 15, height: 15, margin: 0 }} />
-                      </label>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-
-            {/* ───── 共通条件タブ ───── */}
-            {tab === 'auto' && autoRows.map(row => (
-              <tr key={row.name} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={stickyTd(row.indent, true)}>{row.name}</td>
-                {visibleGroups.map(g => {
-                  const key = `auto:${row.name}:null:${g.id}`;
-                  const checked = isChecked(row.name, 'auto', g.id);
-                  return (
-                    <td key={g.id} style={cellTd}>
-                      <label style={labelSt}>
-                        <input type="checkbox" checked={checked} disabled={isSavingKey(key)}
-                          onChange={() => handleToggle(row.name, 'auto', g.id)}
-                          style={{ accentColor: '#059669', width: 15, height: 15, margin: 0 }} />
-                      </label>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+        {tab === 'role' && ROLE_NAMES.filter(n => n !== 'なし').map(name => (
+          <RuleCard key={name} rowName={name} category="role" {...cfg} />
+        ))}
+        {tab === 'dept' && deptRows.map(row => (
+          <RuleCard key={row.id} rowName={row.name} category="dept" {...cfg}
+            label={row.indent > 0 ? `└ ${row.name}` : row.name} />
+        ))}
+        {tab === 'auto' && autoRows.map(row => (
+          <RuleCard key={row.name} rowName={row.name} category="auto" deptName={null} {...cfg} />
+        ))}
       </div>
     </div>
   );

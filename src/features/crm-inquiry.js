@@ -14,6 +14,7 @@ function parseWixMessage(text, blocks) {
     contactName: null,
     email: null,
     phone: null,
+    inflowSource: null,
     planType: null,   // 問い合わせフォーム種別（成果保証・上など）
     raw: text || '',
   };
@@ -32,20 +33,33 @@ function parseWixMessage(text, blocks) {
 }
 
 function parseTextFields(text, result) {
-  // 一般的なフィールド名パターン
+  // Wix / Studio.site フォームの実際のフィールド名に対応
   const patterns = [
-    [/会社名[：:\s]*(.+)/,        'companyName'],
-    [/企業名[：:\s]*(.+)/,        'companyName'],
+    // 会社名（Wix: 貴社名、Studio: 会社名/企業名）
+    [/貴社名[：:\s]*(.+)/,         'companyName'],
+    [/会社名[：:\s]*(.+)/,         'companyName'],
+    [/企業名[：:\s]*(.+)/,         'companyName'],
     [/社名[：:\s]*(.+)/,           'companyName'],
-    [/お名前[：:\s]*(.+)/,        'contactName'],
-    [/担当者名[：:\s]*(.+)/,      'contactName'],
+    [/Company[：:\s]*(.+)/i,       'companyName'],
+    // 担当者名
+    [/お名前[：:\s]*(.+)/,         'contactName'],
+    [/担当者名?[：:\s]*(.+)/,      'contactName'],
     [/氏名[：:\s]*(.+)/,           'contactName'],
-    [/メール[：:\s]*(.+)/,        'email'],
-    [/Email[：:\s]*(.+)/i,        'email'],
-    [/e-mail[：:\s]*(.+)/i,       'email'],
-    [/電話[：:\s]*(.+)/,          'phone'],
-    [/TEL[：:\s]*(.+)/i,          'phone'],
+    [/Name[：:\s]*(.+)/i,          'contactName'],
+    // メール
+    [/メールアドレス[：:\s]*(.+)/, 'email'],
+    [/メール[：:\s]*(.+)/,         'email'],
+    [/Email[：:\s]*(.+)/i,         'email'],
+    [/e-mail[：:\s]*(.+)/i,        'email'],
+    // 電話
     [/電話番号[：:\s]*(.+)/,       'phone'],
+    [/電話[：:\s]*(.+)/,           'phone'],
+    [/TEL[：:\s]*(.+)/i,           'phone'],
+    [/Phone[：:\s]*(.+)/i,         'phone'],
+    // 流入経路
+    [/知ったきっかけ[：:\s]*(.+)/, 'inflowSource'],
+    [/流入経路[：:\s]*(.+)/,        'inflowSource'],
+    [/きっかけ[：:\s]*(.+)/,       'inflowSource'],
   ];
 
   for (const line of text.split('\n')) {
@@ -70,11 +84,15 @@ function parseTextFields(text, result) {
 // メッセージから MK チャンネルか問い合わせかを判定
 function isWixInquiry(message) {
   const text = message.text || '';
-  // Wixフォームの通知か、「問い合わせ」含むメッセージ
+  // Wix または Studio.site フォームの通知
   return text.includes('Wix') ||
+         text.includes('Studio') ||
          text.includes('フォーム') ||
          text.includes('問い合わせ') ||
-         (message.bot_profile && message.bot_profile.name?.includes('Wix'));
+         text.includes('new response') ||
+         text.includes('貴社名') ||
+         (message.bot_profile?.name?.toLowerCase().includes('email')) ||
+         (message.username?.toLowerCase().includes('email'));
 }
 
 // CRMに顧客+商談を自動登録
@@ -105,12 +123,22 @@ async function registerInquiryAsCRM(teamId, parsed, sourceText) {
 
     // 商談作成（アポ化前 で追加）
     const dealName = `${companyName}（問い合わせ）`;
+    const memo = [
+      'Slack問い合わせ報告から自動登録',
+      parsed.contactName ? `担当者: ${parsed.contactName}` : null,
+      parsed.email ? `メール: ${parsed.email}` : null,
+      parsed.phone ? `電話: ${parsed.phone}` : null,
+      parsed.inflowSource ? `きっかけ: ${parsed.inflowSource}` : null,
+      '',
+      sourceText?.slice(0, 400) || '',
+    ].filter(v => v !== null).join('\n');
+
     const { rows: [deal] } = await dbQuery(`
-      INSERT INTO deals (id, team_id, customer_id, name, yomi, status, inflow_source, memo, created_by)
-      VALUES ($1, $2, $3, $4, 'アポ化前', 'active', '問い合わせフォーム', $5, 'system')
-      ON CONFLICT DO NOTHING RETURNING id
+      INSERT INTO deals (id, team_id, customer_id, name, yomi, status, inflow_source, inflow_date, memo, created_by)
+      VALUES ($1, $2, $3, $4, 'アポ化前', 'active', $5, CURRENT_DATE, $6, 'system')
+      RETURNING id
     `, [randomUUID(), teamId, customerId, dealName,
-        `Slack問い合わせ報告から自動登録\n\n${sourceText?.slice(0, 500) || ''}`]);
+        parsed.inflowSource || '問い合わせフォーム', memo]);
 
     if (deal) {
       console.log(`[CRM Inquiry] created deal: ${deal.id}`);

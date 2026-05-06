@@ -40,22 +40,49 @@ export default function ChannelMapping() {
   const loadData   = async () => { setLoading(true); try { setData(await api.channelMappingData()); } catch {} finally { setLoading(false); } };
   const loadHidden = async () => { try { const r = await api.channelMappingHidden(); setHiddenChs(new Set(r.hidden||[])); } catch {} };
 
-  useEffect(() => { loadStatus(); loadData(); loadHidden(); }, []);
+  // ポーリング共通処理
+  const startPolling = (jobId) => {
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const job = await api.channelMappingSyncStatus(jobId);
+        setSyncJob(job);
+        if (job.status === 'done' || job.status === 'error') {
+          clearInterval(pollRef.current);
+          sessionStorage.removeItem('channelMappingJobId');
+          setSyncing(false);
+          if (job.status === 'done') { await loadStatus(); await loadData(); }
+        }
+      } catch {
+        clearInterval(pollRef.current);
+        sessionStorage.removeItem('channelMappingJobId');
+        setSyncing(false);
+        await loadStatus(); await loadData();
+      }
+    }, 2000);
+  };
+
+  useEffect(() => {
+    loadStatus(); loadData(); loadHidden();
+
+    // ページ戻り時: 進行中の jobId があれば再開
+    const savedJobId = sessionStorage.getItem('channelMappingJobId');
+    if (savedJobId) {
+      setSyncing(true);
+      setSyncJob({ step: '同期中（再接続）...', detail: '', status: 'running' });
+      startPolling(savedJobId);
+    }
+
+    // unmount 時に interval をクリア（タブ離脱してもサーバー側は継続）
+    return () => clearInterval(pollRef.current);
+  }, []);
 
   const handleSync = async () => {
     setSyncing(true); setSyncJob({ step:'準備中...', detail:'', status:'running' });
     try {
       const { jobId } = await api.channelMappingSync();
-      pollRef.current = setInterval(async () => {
-        try {
-          const job = await api.channelMappingSyncStatus(jobId);
-          setSyncJob(job);
-          if (job.status === 'done' || job.status === 'error') {
-            clearInterval(pollRef.current); setSyncing(false);
-            if (job.status === 'done') { await loadStatus(); await loadData(); }
-          }
-        } catch { clearInterval(pollRef.current); setSyncing(false); await loadStatus(); await loadData(); }
-      }, 2000);
+      sessionStorage.setItem('channelMappingJobId', jobId); // 離脱しても再開できるよう保存
+      startPolling(jobId);
     } catch (e) { setSyncing(false); setSyncJob({ step:'エラーが発生しました', detail:e.message, status:'error' }); }
   };
 

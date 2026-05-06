@@ -146,12 +146,28 @@ function registerChannelMappingApi({ expressApp, authWithRole, adminOnly, slackC
   });
 
   // GET /sync/status/:jobId — 進捗ポーリング
-  expressApp.get('/api/dashboard/admin/channel-mapping/sync/status/:jobId', authWithRole, (req, res) => {
+  expressApp.get('/api/dashboard/admin/channel-mapping/sync/status/:jobId', authWithRole, async (req, res) => {
     const job = jobs.get(req.params.jobId);
-    if (!job) return res.status(404).json({ error: 'job not found' });
-    if (job.status === 'done') jobs.delete(req.params.jobId);
+    if (!job) {
+      // ジョブがメモリにない → 完了済みの可能性があるため DB の synced_at を確認
+      const { teamId } = req.dashboardUser;
+      const meta = await require('../db/index').dbQuery(
+        `SELECT synced_at FROM slack_cache_meta WHERE team_id=$1`, [teamId]
+      ).catch(() => ({ rows: [] }));
+      return res.json({ status: 'done', step: '同期完了（再読み込み済み）', detail: '', syncedAt: meta.rows[0]?.synced_at || null });
+    }
     res.json(job);
   });
+
+  // 完了ジョブを10分後に自動削除
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, job] of jobs.entries()) {
+      if ((job.status === 'done' || job.status === 'error') && now - job.updatedAt > 10 * 60 * 1000) {
+        jobs.delete(id);
+      }
+    }
+  }, 60 * 1000).unref();
 
   // GET /hidden — 非表示チャンネル一覧
   expressApp.get('/api/dashboard/admin/channel-mapping/hidden', authWithRole, async (req, res) => {

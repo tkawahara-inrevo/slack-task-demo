@@ -178,7 +178,10 @@ export default function Layout({ children }) {
   ];
 
   const adminLink = user && ['admin','corp','it','personnel'].includes(user?.role) ? (
-    user?.role === 'admin' ? '/admin' : user?.role === 'personnel' ? '/admin/recruitment' : '/admin/daily-report'
+    user?.role === 'admin'     ? '/admin' :
+    user?.role === 'it'        ? '/admin/slack-groups' :
+    user?.role === 'personnel' ? '/admin/recruitment' :
+    '/admin'  // corp
   ) : null;
 
   return (

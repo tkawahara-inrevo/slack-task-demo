@@ -8,9 +8,8 @@ export default function AdminLayout() {
   useEffect(() => { api.me().then(r => setRole(r.role || '')).catch(() => {}); }, []);
 
   const isAdmin     = role === 'admin';
-  const isIT        = role === 'admin' || role === 'it';
-  const isPersonnel = role === 'admin' || role === 'personnel';
-  const canSeeDailyReport = role === 'admin' || role === 'corp';
+  const isIT        = role === 'it';
+  const isPersonnel = role === 'personnel';
 
   const navStyle = (isActive) => ({
     display: 'block', padding: collapsed ? '8px 0' : '8px 16px', textAlign: collapsed ? 'center' : 'left',
@@ -22,7 +21,6 @@ export default function AdminLayout() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100%' }}>
-      {/* サイドナビ */}
       <nav style={{
         width: collapsed ? 40 : 200,
         flexShrink: 0,
@@ -38,17 +36,19 @@ export default function AdminLayout() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between', padding: collapsed ? '0' : '0 16px', marginBottom: 12 }}>
           {!collapsed && <h2 style={{ margin: 0, fontSize: '0.88rem', fontWeight: 800, color: '#374151' }}>Corp</h2>}
           <button onClick={() => setCollapsed(v => !v)}
-            title={collapsed ? '開く' : '閉じる'}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 14, padding: 2, lineHeight: 1, flexShrink: 0 }}>
             {collapsed ? '▶' : '◀'}
           </button>
         </div>
 
-        {isIT && (
+        {/* 管理者権限: admin のみ */}
+        {isAdmin && (
           <NavLink to="/admin/roles" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '⚙' : '管理者権限'}
           </NavLink>
         )}
+
+        {/* IT 所属のみ */}
         {isIT && (
           <NavLink to="/admin/channel-mapping" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '📡' : 'チャンネルマッピング'}
@@ -59,24 +59,25 @@ export default function AdminLayout() {
             {collapsed ? '💬' : 'Slackメンション管理'}
           </NavLink>
         )}
+        {isIT && (
+          <NavLink to="/admin/daily-report" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '📋' : '日報管理'}
+          </NavLink>
+        )}
+        {isIT && (
+          <NavLink to="/admin/ranking" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '🏆' : 'ランキング管理'}
+          </NavLink>
+        )}
+
+        {/* Personnel 所属のみ */}
         {isPersonnel && (
           <NavLink to="/admin/recruitment" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '📋' : '採用管理（自社）'}
           </NavLink>
         )}
-        {canSeeDailyReport && (
-          <NavLink to="/admin/daily-report" style={({ isActive }) => navStyle(isActive)}>
-            {collapsed ? '📋' : '日報管理'}
-          </NavLink>
-        )}
-        {isAdmin && (
-          <NavLink to="/admin/ranking" style={({ isActive }) => navStyle(isActive)}>
-            {collapsed ? '🏆' : 'ランキング管理'}
-          </NavLink>
-        )}
       </nav>
 
-      {/* コンテンツ */}
       <div style={{ flex: 1, padding: '24px', minWidth: 0 }}>
         <Outlet />
       </div>

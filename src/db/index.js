@@ -564,6 +564,9 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // deals: dormant ステータス追加（見送り）
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS dormant_reason TEXT`).catch(() => {});
+
   // CRM権限設定
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS crm_permissions (

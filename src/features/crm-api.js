@@ -392,6 +392,144 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── ステージ変換ヘルパー ─────────────────────────────────────────
+  function yomiToStage(yomi, status) {
+    if (status === 'won')     return '受注済';
+    if (status === 'lost')    return '失注';
+    if (status === 'dormant') return '見送り';
+    if (yomi === 'アポ化前')         return 'リード獲得';
+    if (yomi === 'アポ化済商談前')   return '初回商談待ち';
+    if (['E 5％','D 15％','C 30％','B 50％','A 70％','S 90％'].includes(yomi)) return '商談中';
+    return 'その他';
+  }
+
+  // ── ヘルス計算 ───────────────────────────────────────────────────
+  function calcHealth(yomi, status, updatedAt, hasRecentActivity) {
+    if (status === 'won')     return 100;
+    if (status === 'lost')    return 0;
+    if (status === 'dormant') return 0;
+    const base = { 'S 90％':90,'A 70％':75,'B 50％':60,'C 30％':45,'D 15％':30,'E 5％':20,'アポ化済商談前':15,'アポ化前':10 }[yomi] || 10;
+    const days = updatedAt ? Math.floor((Date.now() - new Date(updatedAt)) / 86400000) : 999;
+    const penalty = Math.min(days * 2, 30);
+    const bonus = hasRecentActivity ? 5 : 0;
+    return Math.max(0, Math.min(100, base - penalty + bonus));
+  }
+
+  // ── 案件一覧（新UI用・ヘルス付き）──────────────────────────────
+  expressApp.get('/api/crm/deals-list', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const { stage, yomi, plan, q, salesUser, showDormant, quickFilter, limit: lq } = req.query;
+      const scope = req.query.scope || 'all'; // 'all' | 'self'
+      const limit = Math.min(Number(lq) || 200, 500);
+
+      let where = `d.team_id=$1`;
+      const params = [teamId];
+
+      // スコープ（自分のみ）
+      if (scope === 'self') {
+        params.push(userId);
+        where += ` AND (COALESCE(d.sales_person, d.sales_user_id)=(SELECT display_name FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$${params.length} LIMIT 1) OR d.sales_user_id=$${params.length})`;
+      }
+
+      // 見送りの表示制御
+      if (showDormant === '1') {
+        where += ` AND d.status IN ('active','won','lost','dormant')`;
+      } else {
+        where += ` AND d.status IN ('active','won','lost')`;
+      }
+
+      // ステージフィルター
+      if (stage) {
+        const stageToYomi = {
+          'リード獲得':    `d.yomi='アポ化前'`,
+          '初回商談待ち':  `d.yomi='アポ化済商談前'`,
+          '商談中':        `d.yomi IN ('E 5％','D 15％','C 30％','B 50％','A 70％','S 90％')`,
+          '受注済':        `d.status='won'`,
+          '失注':          `d.status='lost'`,
+          '見送り':        `d.status='dormant'`,
+        };
+        if (stageToYomi[stage]) where += ` AND (${stageToYomi[stage]})`;
+      }
+
+      // ヨミフィルター
+      if (yomi) { params.push(yomi.split(',').filter(Boolean)); where += ` AND d.yomi=ANY($${params.length}::text[])`; }
+
+      // 担当者
+      if (salesUser) { params.push(salesUser); where += ` AND COALESCE(d.sales_person, d.sales_user_id)=$${params.length}`; }
+
+      // 検索
+      if (q) { params.push(`%${q}%`); where += ` AND (c.name ILIKE $${params.length} OR d.name ILIKE $${params.length})`; }
+
+      // クイックフィルター
+      if (quickFilter === 'high_priority') where += ` AND d.yomi IN ('A 70％','S 90％') AND d.status='active'`;
+      if (quickFilter === 'watch')         where += ` AND d.updated_at < now() - interval '14 days' AND d.status='active' AND d.yomi NOT IN ('アポ化前','受注','失注')`;
+      if (quickFilter === 'yomi_mgmt')     where += ` AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％') AND d.status='active'`;
+
+      // 直近アクティビティチェック用
+      const { rows } = await dbQuery(`
+        SELECT
+          d.id, d.name, d.yomi, d.status, d.dormant_reason,
+          d.contract_type, d.payment_type,
+          d.initial_fee, d.monthly_fee, d.hiring_target,
+          d.sales_person, d.sales_user_id, d.na_user_id,
+          d.next_action_date, d.next_action_content,
+          d.updated_at, d.order_date, d.first_meeting_date, d.inflow_source, d.data,
+          c.id AS customer_id, c.name AS customer_name, c.industry, c.prefecture,
+          (SELECT COUNT(*) FROM deal_activities da WHERE da.deal_id=d.id AND da.created_at > now() - interval '7 days')::int AS recent_activity_count,
+          (SELECT content FROM deal_activities da WHERE da.deal_id=d.id ORDER BY da.created_at DESC LIMIT 1) AS latest_activity
+        FROM deals d
+        JOIN customers c ON c.id=d.customer_id
+        WHERE ${where}
+        ORDER BY d.updated_at DESC
+        LIMIT ${limit}
+      `, params);
+
+      // ヘルス計算＋ステージ付与
+      const deals = rows.map(d => ({
+        ...d,
+        stage:  yomiToStage(d.yomi, d.status),
+        health: calcHealth(d.yomi, d.status, d.updated_at, d.recent_activity_count > 0),
+        sales_person_name: d.sales_person || d.sales_user_id,
+      }));
+
+      // KPI集計（全件から）
+      const activeDeals = deals.filter(d => d.status === 'active');
+      const kpi = {
+        total:       rows.length,
+        totalAmount: activeDeals.reduce((s, d) => s + Number(d.initial_fee || 0), 0),
+        avgHealth:   activeDeals.length > 0 ? Math.round(activeDeals.reduce((s, d) => s + d.health, 0) / activeDeals.length) : 0,
+        alertCount:  activeDeals.filter(d => d.next_action_date && new Date(d.next_action_date) < new Date()).length +
+                     activeDeals.filter(d => { const days = Math.floor((Date.now() - new Date(d.updated_at)) / 86400000); return days >= 14 && !['アポ化前'].includes(d.yomi); }).length,
+      };
+
+      // 担当者一覧（フィルター用）
+      const salesRes = await dbQuery(
+        `SELECT DISTINCT COALESCE(sales_person, sales_user_id) AS name FROM deals WHERE team_id=$1 AND COALESCE(sales_person, sales_user_id) IS NOT NULL ORDER BY name`,
+        [teamId]
+      );
+
+      res.json({ deals, kpi, salesUsers: salesRes.rows.map(r => r.name).filter(Boolean) });
+    } catch (e) {
+      console.error('[CRM] deals-list error:', e);
+      res.status(500).json({ error: 'internal', detail: e.message });
+    }
+  });
+
+  // ── 見送りに変更 ──────────────────────────────────────────────
+  expressApp.patch('/api/crm/deals/:id/dormant', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { reason, revert } = req.body || {};
+      if (revert) {
+        await dbQuery(`UPDATE deals SET status='active', dormant_reason=NULL WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]);
+      } else {
+        await dbQuery(`UPDATE deals SET status='dormant', dormant_reason=$3 WHERE id=$1 AND team_id=$2`, [req.params.id, teamId, reason || null]);
+      }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── CRM権限設定 CRUD ──────────────────────────────────────────────
   const DEFAULT_CRM_PERMISSIONS = {
     bc_team_name: 'Business Consulting',

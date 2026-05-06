@@ -1,89 +1,166 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 
-const YOMI_CFG = {
-  'S 90％':      { color:'#7c3aed', bg:'#ede9fe', dot:'#7c3aed' },
-  'A 70％':      { color:'#1d4ed8', bg:'#dbeafe', dot:'#1d4ed8' },
-  'B 50％':      { color:'#0891b2', bg:'#cffafe', dot:'#0891b2' },
-  'C 30％':      { color:'#059669', bg:'#d1fae5', dot:'#059669' },
-  'D 15％':      { color:'#64748b', bg:'#f1f5f9', dot:'#94a3b8' },
-  'E 5％':       { color:'#94a3b8', bg:'#f8fafc', dot:'#cbd5e1' },
-  'アポ化済商談前': { color:'#94a3b8', bg:'#f8fafc', dot:'#cbd5e1' },
-  'アポ化前':    { color:'#cbd5e1', bg:'#f8fafc', dot:'#e2e8f0' },
-  '受注':        { color:'#059669', bg:'#dcfce7', dot:'#059669' },
-  '失注':        { color:'#dc2626', bg:'#fee2e2', dot:'#dc2626' },
+// ── 定数 ────────────────────────────────────────────────────────
+const STAGE_CFG = {
+  'リード獲得':    { color:'#64748b', bg:'#f1f5f9', border:'#cbd5e1' },
+  '初回商談待ち':  { color:'#d97706', bg:'#fef3c7', border:'#fcd34d' },
+  '商談中':        { color:'#1d4ed8', bg:'#dbeafe', border:'#93c5fd' },
+  '受注済':        { color:'#059669', bg:'#dcfce7', border:'#6ee7b7' },
+  '失注':          { color:'#dc2626', bg:'#fee2e2', border:'#fca5a5' },
+  '見送り':        { color:'#94a3b8', bg:'#f8fafc', border:'#e2e8f0' },
+  '初回商談待ち':  { color:'#d97706', bg:'#fef3c7', border:'#fcd34d' },
 };
-const YOMI_ORDER = ['S 90％','A 70％','B 50％','C 30％','D 15％','E 5％','アポ化済商談前','アポ化前','受注','失注'];
-const daysSince = dt => Math.floor((Date.now() - new Date(dt)) / 86400000);
+const YOMI_CFG = {
+  'S 90％':{ color:'#7c3aed',bg:'#ede9fe' },'A 70％':{ color:'#1d4ed8',bg:'#dbeafe' },
+  'B 50％':{ color:'#0891b2',bg:'#cffafe' },'C 30％':{ color:'#059669',bg:'#d1fae5' },
+  'D 15％':{ color:'#64748b',bg:'#f1f5f9' },'E 5％':{ color:'#94a3b8',bg:'#f8fafc' },
+};
+const STAGES = ['リード獲得','初回商談待ち','商談中','受注済','失注','見送り'];
+const PLANS  = ['月額：コンサルのみ','月額：実務のみ','月額：フルコミット','後払い：媒体費弊社','後払い：媒体費クライアント','採用保証：分析付き','採用保証：人材紹介案件'];
+const QUICK_FILTERS = [
+  { key:'all',           label:'全て' },
+  { key:'self',          label:'自分の担当' },
+  { key:'high_priority', label:'高優先度' },
+  { key:'yomi_mgmt',    label:'ヨミ管理中' },
+  { key:'watch',         label:'要注視' },
+];
+const fmtM = n => { if(!n)return '—'; const m=Number(n); if(m>=1e8)return `¥${(m/1e8).toFixed(1)}億`; if(m>=1e4)return `¥${Math.round(m/1e4).toLocaleString()}万`; return `¥${m.toLocaleString()}`; };
+const daysSince = dt => Math.floor((Date.now()-new Date(dt))/86400000);
 
-function InitialCircle({ name }) {
-  const colors = ['#6366f1','#0891b2','#059669','#d97706','#dc2626','#7c3aed','#ec4899'];
-  const color = colors[(name?.charCodeAt(0) || 0) % colors.length];
-  const ch = name?.replace(/^(株式会社|有限会社|合同会社|一般社団法人)\s*/,'').charAt(0) || '?';
+// ── ヘルスバー ─────────────────────────────────────────────────
+function HealthBar({ score }) {
+  const color = score >= 70 ? '#059669' : score >= 40 ? '#d97706' : '#dc2626';
   return (
-    <div style={{ width:38, height:38, borderRadius:10, background:color+'18', border:`1.5px solid ${color}33`,
-      display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
-      fontWeight:800, fontSize:'0.88rem', color }}>
+    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+      <div style={{ flex:1, height:4, background:'#f1f5f9', borderRadius:2, overflow:'hidden' }}>
+        <div style={{ height:'100%', width:`${score}%`, background:color, borderRadius:2, transition:'width 0.3s' }} />
+      </div>
+      <span style={{ fontSize:'0.68rem', fontWeight:700, color, minWidth:22 }}>{score}</span>
+    </div>
+  );
+}
+
+// ── 会社イニシャル ────────────────────────────────────────────
+function Initial({ name }) {
+  const colors = ['#6366f1','#0891b2','#059669','#d97706','#dc2626','#7c3aed','#ec4899'];
+  const color = colors[(name?.charCodeAt(0)||0)%colors.length];
+  const ch = name?.replace(/^(株式会社|有限会社|合同会社)/,'').charAt(0)||'?';
+  return (
+    <div style={{ width:36, height:36, borderRadius:9, background:color+'15', border:`1.5px solid ${color}30`,
+      display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontWeight:800, fontSize:'0.88rem', color }}>
       {ch}
     </div>
   );
 }
 
-function YomiBadge({ yomi }) {
-  if (!yomi) return <span style={{ color:'#e2e8f0', fontSize:'0.72rem' }}>—</span>;
-  const cfg = YOMI_CFG[yomi] || { color:'#94a3b8', bg:'#f8fafc' };
+// ── KPI カード ─────────────────────────────────────────────────
+function KpiCard({ label, value, sub, color = '#0f172a', bg = '#fff', highlight }) {
   return (
-    <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:'0.72rem', fontWeight:700,
-      padding:'3px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, whiteSpace:'nowrap' }}>
-      <span style={{ width:6, height:6, borderRadius:'50%', background:cfg.dot || cfg.color, flexShrink:0 }} />
-      {yomi}
-    </span>
+    <div style={{ background:bg, borderRadius:10, padding:'10px 16px', minWidth:120, border:`1px solid ${highlight?'#fcd34d':'#e2e8f0'}`, flex:1 }}>
+      <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:4 }}>{label}</div>
+      <div style={{ fontSize:'1.3rem', fontWeight:800, color, lineHeight:1 }}>{value}</div>
+      {sub && <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:3 }}>{sub}</div>}
+    </div>
   );
 }
 
-export default function CustomerList() {
-  const navigate = useNavigate();
-  const [customers, setCustomers] = useState([]);
-  const [meta, setMeta] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState('');
-  const [filterSales, setFilterSales] = useState('');
-  const [filterYomis, setFilterYomis] = useState(new Set());
-  const [offset, setOffset] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name:'', industry:'', prefecture:'', employeeCount:'', website:'', memo:'' });
+// ── 見送りモーダル ─────────────────────────────────────────────
+function DormantModal({ deal, onClose, onDone }) {
+  const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncDone, setSyncDone] = useState(false);
-  const inputRef = useRef(null);
-  const LIMIT = 100;
-
-  const load = async (search=q, off=offset, sales=filterSales, yomis=filterYomis) => {
-    setLoading(true);
-    try {
-      const r = await api.crmCustomers(search, off, LIMIT, sales, [...yomis].join(','));
-      setCustomers(r.customers || []);
-      setTotal(r.total || 0);
-      if (r.meta) setMeta(r.meta);
-    } catch {}
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { load('', 0); }, []);
-
-  const handleCreate = async () => {
-    if (!form.name.trim()) return;
+  const REASONS = ['連絡が取れない','予算・タイミング合わず','競合先に決定','担当者交代待ち','その他'];
+  const handleSave = async () => {
     setSaving(true);
-    try {
-      const r = await api.crmCreateCustomer(form);
-      setShowModal(false);
-      setForm({ name:'', industry:'', prefecture:'', employeeCount:'', website:'', memo:'' });
-      navigate(`/crm/customers/${r.customer.id}`);
-    } catch { alert('作成に失敗しました'); }
+    try { await api.crmSetDormant(deal.id, reason); onDone(); onClose(); }
+    catch { alert('更新に失敗しました'); }
     finally { setSaving(false); }
   };
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+      onClick={onClose}>
+      <div style={{ background:'#fff', borderRadius:14, width:'min(440px,92vw)', overflow:'hidden', boxShadow:'0 20px 50px rgba(0,0,0,0.2)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding:'14px 20px', borderBottom:'1px solid #f1f5f9' }}>
+          <div style={{ fontWeight:800, fontSize:'0.95rem', color:'#0f172a' }}>見送りに変更</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginTop:2 }}>{deal.customer_name} — {deal.name}</div>
+        </div>
+        <div style={{ padding:'16px 20px' }}>
+          <div style={{ fontSize:'0.78rem', fontWeight:600, color:'#374151', marginBottom:8 }}>理由（任意）</div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
+            {REASONS.map(r => (
+              <button key={r} onClick={() => setReason(r)}
+                style={{ padding:'4px 12px', borderRadius:20, fontSize:'0.75rem', border:`1.5px solid ${reason===r?'#6366f1':'#e2e8f0'}`,
+                  background:reason===r?'#ede9fe':'#fff', color:reason===r?'#6d28d9':'#64748b', cursor:'pointer' }}>
+                {r}
+              </button>
+            ))}
+          </div>
+          <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={2} placeholder="自由記述（任意）"
+            style={{ width:'100%', boxSizing:'border-box', padding:'8px 10px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', outline:'none', resize:'vertical' }} />
+        </div>
+        <div style={{ padding:'12px 20px', borderTop:'1px solid #f1f5f9', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button onClick={onClose} style={{ padding:'7px 16px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', color:'#64748b', background:'#fff', cursor:'pointer' }}>キャンセル</button>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding:'7px 20px', border:'none', borderRadius:8, background:'#64748b', color:'#fff', fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
+            {saving?'更新中…':'見送りにする'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── メイン ────────────────────────────────────────────────────
+export default function CustomerList({ scope = 'all' }) {
+  const navigate = useNavigate();
+  const [deals, setDeals] = useState([]);
+  const [kpi, setKpi] = useState(null);
+  const [salesUsers, setSalesUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [quickFilter, setQuickFilter] = useState('all');
+  const [filterStages, setFilterStages] = useState(new Set());
+  const [filterYomis, setFilterYomis] = useState(new Set());
+  const [filterSales, setFilterSales] = useState('');
+  const [showDormant, setShowDormant] = useState(false);
+  const [dormantTarget, setDormantTarget] = useState(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState({ name:'', industry:'', prefecture:'' });
+  const [creating, setCreating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncDone, setSyncDone] = useState(false);
+  const sidebarRef = useRef(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const load = useCallback(async (params = {}) => {
+    setLoading(true);
+    try {
+      const r = await api.crmDealsList({
+        scope,
+        q: params.q ?? q,
+        quickFilter: (params.quickFilter ?? quickFilter) === 'self' ? undefined : (params.quickFilter ?? quickFilter) === 'all' ? undefined : (params.quickFilter ?? quickFilter),
+        salesUser: (params.quickFilter ?? quickFilter) === 'self' ? 'self_token' : (params.filterSales ?? filterSales),
+        stage: [...(params.filterStages ?? filterStages)].join(','),
+        showDormant: (params.showDormant ?? showDormant) ? '1' : undefined,
+      });
+      setDeals(r.deals || []);
+      setKpi(r.kpi);
+      setSalesUsers(r.salesUsers || []);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, [q, quickFilter, filterStages, filterSales, showDormant, scope]);
+
+  useEffect(() => { load(); }, []);
+
+  const handleQuickFilter = (key) => { setQuickFilter(key); load({ quickFilter: key }); };
+  const toggleStage = (s) => {
+    const n = new Set(filterStages); n.has(s)?n.delete(s):n.add(s);
+    setFilterStages(n); load({ filterStages: n });
+  };
+  const clearFilters = () => { setFilterStages(new Set()); setFilterYomis(new Set()); setFilterSales(''); setQ(''); load({ filterStages:new Set(), q:'', filterSales:'', quickFilter:'all' }); setQuickFilter('all'); };
+  const hasFilter = filterStages.size>0||filterYomis.size>0||filterSales||q;
 
   const handleKintoneSync = async () => {
     if (syncing) return;
@@ -91,225 +168,281 @@ export default function CustomerList() {
     try {
       await api.kintoneSync();
       const tick = setInterval(async () => {
-        try {
-          const st = await api.kintoneStatus();
-          if (!st.inProgress) { clearInterval(tick); setSyncDone(true); setSyncing(false); setTimeout(() => { load(); setSyncDone(false); }, 1500); }
-        } catch { clearInterval(tick); setSyncing(false); }
+        try { const st = await api.kintoneStatus(); if(!st.inProgress){ clearInterval(tick); setSyncDone(true); setSyncing(false); setTimeout(()=>{ load(); setSyncDone(false); },1500); } }
+        catch { clearInterval(tick); setSyncing(false); }
       }, 2000);
     } catch { setSyncing(false); }
   };
 
-  const toggleYomi = y => {
-    const n = new Set(filterYomis);
-    n.has(y) ? n.delete(y) : n.add(y);
-    setFilterYomis(n);
-    setOffset(0); load(q, 0, filterSales, n);
+  const handleCreate = async () => {
+    if (!createForm.name.trim()) return;
+    setCreating(true);
+    try {
+      const r = await api.crmCreateCustomer(createForm);
+      setShowCreateModal(false);
+      navigate(`/crm/customers/${r.customer.id}`);
+    } catch { alert('作成に失敗しました'); }
+    finally { setCreating(false); }
   };
 
-  const clearAll = () => { setQ(''); setFilterSales(''); setFilterYomis(new Set()); setOffset(0); load('', 0, '', new Set()); };
-  const hasFilter = q || filterSales || filterYomis.size > 0;
+  // ステージ別件数
+  const stageCounts = STAGES.reduce((acc, s) => {
+    acc[s] = deals.filter(d => d.stage === s).length;
+    return acc;
+  }, {});
+
+  // クイックフィルター件数
+  const selfName = null; // TODO: ログインユーザー名と突合
+  const qfCounts = {
+    all:           deals.length,
+    self:          deals.filter(d => d.sales_person_name?.includes('自分')).length, // placeholder
+    high_priority: deals.filter(d => ['A 70％','S 90％'].includes(d.yomi) && d.status==='active').length,
+    yomi_mgmt:     deals.filter(d => ['C 30％','B 50％','A 70％','S 90％'].includes(d.yomi) && d.status==='active').length,
+    watch:         deals.filter(d => { const days=daysSince(d.updated_at); return days>=14&&d.status==='active'&&!['アポ化前'].includes(d.yomi); }).length,
+  };
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#f1f5f9' }}>
 
       {/* ── ヘッダー ── */}
-      <div style={{ padding:'14px 20px 10px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
-          <div>
-            <span style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>顧客一覧</span>
-            <span style={{ fontSize:'0.72rem', color:'#94a3b8', marginLeft:8, fontWeight:400 }}>{total.toLocaleString()}件</span>
+      <div style={{ background:'#fff', borderBottom:'1px solid #e2e8f0', padding:'10px 16px', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+          {/* KPI */}
+          <div style={{ display:'flex', gap:8, flex:1, flexWrap:'wrap' }}>
+            <KpiCard label="表示中" value={`${deals.length}件`} sub={`/ ${kpi?.total||0}件中`} />
+            <KpiCard label="案件総額" value={fmtM(kpi?.totalAmount)} sub="進行中" color="#1e40af" bg="#eff6ff" />
+            <KpiCard label="平均ヘルス" value={kpi?.avgHealth??'—'} sub="100点満点"
+              color={kpi?.avgHealth>=70?'#059669':kpi?.avgHealth>=40?'#d97706':'#dc2626'}
+              bg={kpi?.avgHealth>=70?'#f0fdf4':kpi?.avgHealth>=40?'#fffbeb':'#fef2f2'} />
+            <KpiCard label="要対応" value={`${kpi?.alertCount||0}件`} sub="期限切れ or 停滞"
+              color={kpi?.alertCount>0?'#dc2626':'#94a3b8'} highlight={kpi?.alertCount>0} />
           </div>
-          <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+          {/* アクション */}
+          <div style={{ display:'flex', gap:8, flexShrink:0 }}>
             <button onClick={handleKintoneSync} disabled={syncing}
               style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.75rem', fontWeight:600,
-                background:syncDone?'#f0fdf4':'#fff', color:syncDone?'#059669':syncing?'#94a3b8':'#64748b',
-                cursor:syncing?'default':'pointer', display:'flex', alignItems:'center', gap:4 }}>
-              <span style={{ fontSize:'0.88rem' }}>{syncDone?'✓':'⟳'}</span>
-              {syncDone?'同期完了':syncing?'同期中…':'kintone同期'}
+                background:syncDone?'#f0fdf4':'#fff', color:syncDone?'#059669':syncing?'#94a3b8':'#64748b', cursor:syncing?'default':'pointer', display:'flex', alignItems:'center', gap:4 }}>
+              {syncDone?'✓':'⟳'} {syncDone?'同期完了':syncing?'同期中…':'kintone同期'}
             </button>
-            <button onClick={() => setShowModal(true)}
-              style={{ padding:'6px 16px', background:'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.82rem', fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
-              <span style={{ fontSize:'1rem', lineHeight:1 }}>＋</span> 顧客追加
+            <button onClick={() => setShowCreateModal(true)}
+              style={{ padding:'6px 14px', background:'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
+              ＋ 顧客追加
             </button>
           </div>
         </div>
 
-        {/* 検索バー */}
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-          <div style={{ flex:'1 1 200px', maxWidth:320, position:'relative' }}>
-            <svg style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'#94a3b8' }} width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-            </svg>
-            <input ref={inputRef} type="text" value={q} placeholder="会社名・業界で検索…"
-              onChange={e => setQ(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && (setOffset(0), load(q, 0))}
-              style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px 7px 32px',
-                border:'1.5px solid #e2e8f0', borderRadius:9, fontSize:'0.82rem', outline:'none', background:'#f8fafc' }} />
-          </div>
-          <select value={filterSales} onChange={e => { setFilterSales(e.target.value); setOffset(0); load(q, 0, e.target.value); }}
-            style={{ padding:'7px 10px', border:'1.5px solid #e2e8f0', borderRadius:9, fontSize:'0.8rem', background:'#f8fafc', color:'#374151', outline:'none' }}>
-            <option value="">全担当者</option>
-            {(meta?.salesUsers||[]).map(u => <option key={u} value={u}>{u}</option>)}
-          </select>
-          <button onClick={() => { setOffset(0); load(q, 0); }}
-            style={{ padding:'7px 16px', background:'#1e40af', color:'#fff', border:'none', borderRadius:9, fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}>
-            検索
-          </button>
-          {hasFilter && (
-            <button onClick={clearAll}
-              style={{ padding:'7px 12px', border:'1.5px solid #e2e8f0', borderRadius:9, fontSize:'0.78rem', color:'#64748b', background:'#fff', cursor:'pointer' }}>
-              クリア
+        {/* クイックフィルタータブ */}
+        <div style={{ display:'flex', gap:2, borderBottom:'1px solid #f1f5f9', paddingBottom:0, overflow:'hidden' }}>
+          {QUICK_FILTERS.map(f => (
+            <button key={f.key} onClick={() => handleQuickFilter(f.key)}
+              style={{ padding:'6px 14px', border:'none', background:'none', cursor:'pointer', fontSize:'0.82rem', whiteSpace:'nowrap',
+                fontWeight:quickFilter===f.key?700:400, color:quickFilter===f.key?'#1d4ed8':'#64748b',
+                borderBottom:quickFilter===f.key?'2px solid #1d4ed8':'2px solid transparent' }}>
+              {f.label}
+              <span style={{ marginLeft:5, fontSize:'0.68rem', color:quickFilter===f.key?'#1d4ed8':'#94a3b8',
+                background:quickFilter===f.key?'#dbeafe':'#f1f5f9', borderRadius:99, padding:'1px 6px' }}>
+                {qfCounts[f.key]||0}
+              </span>
             </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── メインエリア ── */}
+      <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
+
+        {/* 左サイドバー */}
+        <div style={{ width:sidebarOpen?200:0, flexShrink:0, overflowY:'auto', overflowX:'hidden',
+          background:'#fff', borderRight:'1px solid #e2e8f0', transition:'width 0.2s', padding:sidebarOpen?'12px 0':0 }}>
+          {sidebarOpen && (
+            <div style={{ padding:'0 12px' }}>
+              {/* 検索 */}
+              <div style={{ position:'relative', marginBottom:14 }}>
+                <input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&load({q})}
+                  placeholder="検索…" style={{ width:'100%', boxSizing:'border-box', padding:'6px 8px 6px 28px',
+                    border:'1.5px solid #e2e8f0', borderRadius:7, fontSize:'0.78rem', outline:'none', background:'#f8fafc' }} />
+                <span style={{ position:'absolute', left:8, top:'50%', transform:'translateY(-50%)', color:'#94a3b8', fontSize:'0.75rem' }}>🔍</span>
+              </div>
+
+              {hasFilter && (
+                <button onClick={clearFilters} style={{ width:'100%', marginBottom:12, padding:'4px 0', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.72rem', color:'#64748b', background:'#fff', cursor:'pointer' }}>
+                  フィルターをクリア
+                </button>
+              )}
+
+              {/* ステージ */}
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:'0.68rem', fontWeight:700, color:'#94a3b8', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.05em' }}>ステージ</div>
+                {STAGES.filter(s => s !== '見送り' || showDormant).map(s => {
+                  const cfg = STAGE_CFG[s] || {};
+                  const on = filterStages.has(s);
+                  return (
+                    <label key={s} style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 0', cursor:'pointer' }}>
+                      <input type="checkbox" checked={on} onChange={()=>toggleStage(s)} style={{ accentColor:cfg.color, width:13, height:13, cursor:'pointer' }} />
+                      <span style={{ fontSize:'0.78rem', color:on?cfg.color:'#374151', fontWeight:on?700:400, flex:1 }}>{s}</span>
+                      <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>{stageCounts[s]||0}</span>
+                    </label>
+                  );
+                })}
+                <label style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 0', cursor:'pointer', marginTop:6, borderTop:'1px solid #f1f5f9', paddingTop:8 }}>
+                  <input type="checkbox" checked={showDormant} onChange={e=>{setShowDormant(e.target.checked);load({showDormant:e.target.checked});}} style={{ width:13, height:13, cursor:'pointer' }} />
+                  <span style={{ fontSize:'0.75rem', color:'#94a3b8' }}>見送りを表示</span>
+                </label>
+              </div>
+
+              {/* 担当者 */}
+              {salesUsers.length > 0 && (
+                <div style={{ marginBottom:16 }}>
+                  <div style={{ fontSize:'0.68rem', fontWeight:700, color:'#94a3b8', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.05em' }}>担当者</div>
+                  <select value={filterSales} onChange={e=>{setFilterSales(e.target.value);load({filterSales:e.target.value});}}
+                    style={{ width:'100%', padding:'5px 8px', border:'1.5px solid #e2e8f0', borderRadius:7, fontSize:'0.78rem', background:'#f8fafc', outline:'none' }}>
+                    <option value="">全員</option>
+                    {salesUsers.map(u=><option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
-        {/* ヨミフィルター */}
-        <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:8, alignItems:'center' }}>
-          <span style={{ fontSize:'0.68rem', color:'#94a3b8', marginRight:2 }}>ヨミ</span>
-          {YOMI_ORDER.map(y => {
-            const cfg = YOMI_CFG[y] || {};
-            const on = filterYomis.has(y);
-            return (
-              <button key={y} onClick={() => toggleYomi(y)}
-                style={{ padding:'2px 10px', borderRadius:20, fontSize:'0.68rem', fontWeight:on?700:500, cursor:'pointer',
-                  border:`1.5px solid ${on ? cfg.color : '#e2e8f0'}`,
-                  background: on ? cfg.bg : '#fff', color: on ? cfg.color : '#94a3b8',
-                  display:'flex', alignItems:'center', gap:4, transition:'all 0.1s' }}>
-                {on && <span style={{ width:5, height:5, borderRadius:'50%', background:cfg.dot, flexShrink:0 }} />}
-                {y}
-              </button>
-            );
-          })}
+        {/* トグルボタン */}
+        <button onClick={()=>setSidebarOpen(v=>!v)}
+          style={{ width:18, flexShrink:0, background:'#f1f5f9', border:'none', borderRight:'1px solid #e2e8f0', cursor:'pointer', color:'#94a3b8', fontSize:10, padding:0 }}>
+          {sidebarOpen?'◀':'▶'}
+        </button>
+
+        {/* ── 案件リスト ── */}
+        <div style={{ flex:1, overflowY:'auto', padding:'10px 12px' }}>
+          {loading ? (
+            <div style={{ textAlign:'center', padding:60, color:'#94a3b8' }}>読み込み中…</div>
+          ) : deals.length === 0 ? (
+            <div style={{ textAlign:'center', padding:60, color:'#94a3b8' }}>
+              <div style={{ fontSize:'1.5rem', marginBottom:8 }}>📋</div>
+              案件が見つかりません
+            </div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              {deals.map(d => {
+                const stageCfg = STAGE_CFG[d.stage] || {};
+                const yomiCfg  = YOMI_CFG[d.yomi]  || {};
+                const days = daysSince(d.updated_at);
+                const stale = days >= 14 && d.status === 'active';
+                const overdue = d.next_action_date && new Date(d.next_action_date) < new Date();
+                const isDormant = d.status === 'dormant';
+
+                return (
+                  <div key={d.id}
+                    style={{ background:'#fff', borderRadius:10, border:`1px solid ${overdue?'#fca5a5':stale?'#fcd34d':'#e2e8f0'}`,
+                      padding:'10px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:12,
+                      opacity:isDormant?0.6:1, transition:'all 0.1s', boxShadow:'0 1px 2px rgba(0,0,0,0.03)' }}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor='#c7d2fe';e.currentTarget.style.boxShadow='0 2px 8px rgba(99,102,241,0.08)';}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor=overdue?'#fca5a5':stale?'#fcd34d':'#e2e8f0';e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';}}
+                    onClick={() => navigate(`/crm/customers/${d.customer_id}`)}>
+
+                    <Initial name={d.customer_name} />
+
+                    {/* 会社・案件名 */}
+                    <div style={{ flex:'0 0 200px', minWidth:0 }}>
+                      <div style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.customer_name}</div>
+                      <div style={{ fontSize:'0.72rem', color:'#64748b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginTop:1 }}>{d.name}</div>
+                      <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:1 }}>
+                        {[d.prefecture, d.industry].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+
+                    {/* ステージ */}
+                    <div style={{ flex:'0 0 90px' }}>
+                      <span style={{ fontSize:'0.72rem', fontWeight:700, padding:'3px 10px', borderRadius:99,
+                        background:stageCfg.bg, color:stageCfg.color, border:`1px solid ${stageCfg.border}`, whiteSpace:'nowrap' }}>
+                        {d.stage}
+                      </span>
+                    </div>
+
+                    {/* 担当者 */}
+                    <div style={{ flex:'0 0 72px', minWidth:0 }}>
+                      {d.sales_person_name
+                        ? <span style={{ fontSize:'0.72rem', color:'#374151', fontWeight:600,
+                            background:'#f1f5f9', padding:'2px 7px', borderRadius:5, display:'inline-block',
+                            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'100%' }}>
+                            {d.sales_person_name.split(/[\s　]/)[0]}
+                          </span>
+                        : <span style={{ color:'#e2e8f0', fontSize:'0.72rem' }}>—</span>}
+                    </div>
+
+                    {/* ヨミ */}
+                    <div style={{ flex:'0 0 85px' }}>
+                      {yomiCfg.color
+                        ? <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 9px', borderRadius:99,
+                            background:yomiCfg.bg, color:yomiCfg.color, whiteSpace:'nowrap' }}>{d.yomi}</span>
+                        : <span style={{ color:'#e2e8f0', fontSize:'0.7rem' }}>—</span>}
+                    </div>
+
+                    {/* 金額 */}
+                    <div style={{ flex:'0 0 72px', textAlign:'right' }}>
+                      <div style={{ fontSize:'0.8rem', fontWeight:700, color:'#1e40af' }}>{fmtM(d.initial_fee||d.monthly_fee)}</div>
+                      {d.contract_type && <div style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{d.contract_type.replace('採用保証','保証').replace('月額','月額')}</div>}
+                    </div>
+
+                    {/* ヘルス */}
+                    <div style={{ flex:'0 0 80px' }}>
+                      <HealthBar score={d.health} />
+                    </div>
+
+                    {/* 最終更新 */}
+                    <div style={{ flex:'0 0 60px', textAlign:'right' }}>
+                      <span style={{ fontSize:'0.68rem', color:stale?'#ef4444':'#94a3b8', fontWeight:stale?700:400 }}>
+                        {days===0?'今日':`${days}日前`}
+                      </span>
+                      {overdue && <div style={{ fontSize:'0.62rem', color:'#ef4444', fontWeight:700 }}>アクション遅延</div>}
+                    </div>
+
+                    {/* 見送りボタン */}
+                    {d.status === 'active' && (
+                      <button onClick={e=>{e.stopPropagation();setDormantTarget(d);}}
+                        style={{ flexShrink:0, background:'none', border:'1px solid #e2e8f0', borderRadius:6, cursor:'pointer', color:'#94a3b8', fontSize:'0.65rem', padding:'3px 8px', whiteSpace:'nowrap' }}>
+                        見送り
+                      </button>
+                    )}
+                    {d.status === 'dormant' && (
+                      <button onClick={async e=>{e.stopPropagation();await api.crmRevertDormant(d.id);load();}}
+                        style={{ flexShrink:0, background:'none', border:'1px solid #86efac', borderRadius:6, cursor:'pointer', color:'#059669', fontSize:'0.65rem', padding:'3px 8px', whiteSpace:'nowrap' }}>
+                        復活
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── リスト ── */}
-      <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
-        {loading ? (
-          <div style={{ textAlign:'center', padding:60, color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>
-        ) : customers.length === 0 ? (
-          <div style={{ textAlign:'center', padding:60, color:'#94a3b8', fontSize:'0.85rem' }}>
-            <div style={{ fontSize:'2rem', marginBottom:8 }}>🔍</div>
-            顧客が見つかりません
-          </div>
-        ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
-            {customers.map(c => {
-              const days = daysSince(c.updated_at);
-              const stale = days >= 14;
-              const salesName = c.latest_sales_person?.split(/[\s　]/)[0] || null;
-              return (
-                <div key={c.id} onClick={() => navigate(`/crm/customers/${c.id}`)}
-                  style={{ background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', padding:'10px 14px',
-                    cursor:'pointer', display:'flex', alignItems:'center', gap:12, transition:'all 0.1s',
-                    boxShadow:'0 1px 2px rgba(0,0,0,0.03)' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor='#c7d2fe'; e.currentTarget.style.boxShadow='0 2px 8px rgba(99,102,241,0.08)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor='#e2e8f0'; e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)'; }}>
+      {/* 見送りモーダル */}
+      {dormantTarget && (
+        <DormantModal deal={dormantTarget} onClose={()=>setDormantTarget(null)} onDone={()=>{load();setDormantTarget(null);}} />
+      )}
 
-                  <InitialCircle name={c.name} />
-
-                  {/* 会社名・都道府県 */}
-                  <div style={{ flex:'0 0 240px', minWidth:0 }}>
-                    <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</div>
-                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:1 }}>
-                      {[c.prefecture, c.industry].filter(Boolean).join(' · ') || ' '}
-                    </div>
-                  </div>
-
-                  {/* 担当者 */}
-                  <div style={{ flex:'0 0 80px', minWidth:0 }}>
-                    {salesName
-                      ? <span style={{ fontSize:'0.75rem', fontWeight:600, color:'#374151', background:'#f1f5f9', padding:'2px 8px', borderRadius:5 }}>{salesName}</span>
-                      : <span style={{ color:'#e2e8f0', fontSize:'0.75rem' }}>—</span>}
-                  </div>
-
-                  {/* 商談数 */}
-                  <div style={{ flex:'0 0 60px', textAlign:'center' }}>
-                    {c.deal_count > 0
-                      ? <span style={{ fontWeight:700, fontSize:'0.82rem', color:'#1e40af' }}>{c.deal_count}<span style={{ fontSize:'0.62rem', color:'#94a3b8', marginLeft:2 }}>件</span></span>
-                      : <span style={{ color:'#e2e8f0', fontSize:'0.75rem' }}>—</span>}
-                  </div>
-
-                  {/* ヨミ */}
-                  <div style={{ flex:'1 1 130px' }}>
-                    <YomiBadge yomi={c.latest_yomi} />
-                  </div>
-
-                  {/* 最終更新 */}
-                  <div style={{ flex:'0 0 70px', textAlign:'right' }}>
-                    <span style={{ fontSize:'0.7rem', color: stale?'#ef4444':'#94a3b8', fontWeight:stale?700:400 }}>
-                      {days === 0 ? '今日' : `${days}日前`}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ページネーション */}
-        {total > LIMIT && (
-          <div style={{ display:'flex', gap:8, justifyContent:'center', marginTop:16, alignItems:'center' }}>
-            <button disabled={offset===0} onClick={() => { const o=Math.max(0,offset-LIMIT); setOffset(o); load(q,o); }}
-              style={{ padding:'6px 18px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', cursor:offset===0?'default':'pointer', background:'#fff', color:'#374151', opacity:offset===0?0.4:1 }}>
-              ← 前
-            </button>
-            <span style={{ fontSize:'0.78rem', color:'#64748b', minWidth:80, textAlign:'center' }}>
-              {Math.floor(offset/LIMIT)+1} / {Math.ceil(total/LIMIT)}ページ
-            </span>
-            <button disabled={offset+LIMIT>=total} onClick={() => { const o=offset+LIMIT; setOffset(o); load(q,o); }}
-              style={{ padding:'6px 18px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', cursor:offset+LIMIT>=total?'default':'pointer', background:'#fff', color:'#374151', opacity:offset+LIMIT>=total?0.4:1 }}>
-              次 →
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ── 新規作成モーダル ── */}
-      {showModal && (
+      {/* 顧客追加モーダル */}
+      {showCreateModal && (
         <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={() => setShowModal(false)}>
-          <div style={{ background:'#fff', borderRadius:16, width:'min(500px,92vw)', overflow:'hidden', boxShadow:'0 25px 50px rgba(0,0,0,0.25)' }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ padding:'16px 24px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>顧客を追加</div>
-              <button onClick={() => setShowModal(false)} style={{ background:'#f1f5f9', border:'none', cursor:'pointer', color:'#64748b', fontSize:16, borderRadius:8, width:28, height:28 }}>×</button>
-            </div>
-            <div style={{ padding:'20px 24px', display:'flex', flexDirection:'column', gap:12 }}>
-              {[
-                { key:'name',          label:'会社名',   required:true, placeholder:'例: 株式会社サンプル' },
-                { key:'industry',      label:'業界',     placeholder:'例: 製造業' },
-                { key:'prefecture',    label:'都道府県', placeholder:'例: 東京都' },
-                { key:'employeeCount', label:'従業員数', placeholder:'例: 51-100' },
-                { key:'website',       label:'Webサイト',placeholder:'https://' },
-              ].map(f => (
+          onClick={()=>setShowCreateModal(false)}>
+          <div style={{ background:'#fff', borderRadius:14, width:'min(440px,92vw)', overflow:'hidden', boxShadow:'0 20px 50px rgba(0,0,0,0.2)' }}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{ padding:'14px 20px', borderBottom:'1px solid #f1f5f9', fontWeight:800, color:'#0f172a' }}>顧客を追加</div>
+            <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:12 }}>
+              {[{key:'name',label:'会社名',req:true,ph:'例: 株式会社○○'},{key:'industry',label:'業界',ph:'例: 製造業'},{key:'prefecture',label:'都道府県',ph:'例: 東京都'}].map(f=>(
                 <div key={f.key}>
-                  <label style={{ display:'block', fontSize:'0.75rem', fontWeight:700, color:'#374151', marginBottom:4 }}>
-                    {f.label}{f.required && <span style={{ color:'#ef4444', marginLeft:3 }}>*</span>}
-                  </label>
-                  <input type="text" value={form[f.key]} onChange={e => setForm(p => ({...p,[f.key]:e.target.value}))}
-                    placeholder={f.placeholder}
-                    style={{ width:'100%', boxSizing:'border-box', padding:'8px 12px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.85rem', outline:'none' }}
-                    onFocus={e => e.target.style.borderColor='#6366f1'}
-                    onBlur={e => e.target.style.borderColor='#e2e8f0'} />
+                  <label style={{ display:'block', fontSize:'0.75rem', fontWeight:700, color:'#374151', marginBottom:4 }}>{f.label}{f.req&&<span style={{color:'#ef4444',marginLeft:3}}>*</span>}</label>
+                  <input value={createForm[f.key]} onChange={e=>setCreateForm(p=>({...p,[f.key]:e.target.value}))} placeholder={f.ph}
+                    style={{ width:'100%', boxSizing:'border-box', padding:'8px 10px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', outline:'none' }} />
                 </div>
               ))}
-              <div>
-                <label style={{ display:'block', fontSize:'0.75rem', fontWeight:700, color:'#374151', marginBottom:4 }}>メモ</label>
-                <textarea value={form.memo} onChange={e => setForm(p => ({...p,memo:e.target.value}))} rows={2}
-                  style={{ width:'100%', resize:'vertical', boxSizing:'border-box', padding:'8px 12px', border:'1.5px solid #e2e8f0', borderRadius:8, fontSize:'0.85rem', outline:'none' }}
-                  onFocus={e => e.target.style.borderColor='#6366f1'}
-                  onBlur={e => e.target.style.borderColor='#e2e8f0'} />
-              </div>
             </div>
-            <div style={{ padding:'12px 24px', borderTop:'1px solid #f1f5f9', display:'flex', justifyContent:'flex-end', gap:8 }}>
-              <button onClick={() => setShowModal(false)}
-                style={{ padding:'8px 18px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', color:'#374151', background:'#fff', cursor:'pointer' }}>
-                キャンセル
-              </button>
-              <button onClick={handleCreate} disabled={!form.name.trim()||saving}
-                style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1e40af', color:'#fff', fontSize:'0.82rem', fontWeight:700, cursor:'pointer', opacity:!form.name.trim()||saving?0.6:1 }}>
-                {saving?'作成中…':'✓ 作成'}
+            <div style={{ padding:'12px 20px', borderTop:'1px solid #f1f5f9', display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button onClick={()=>setShowCreateModal(false)} style={{ padding:'7px 16px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', color:'#64748b', background:'#fff', cursor:'pointer' }}>キャンセル</button>
+              <button onClick={handleCreate} disabled={!createForm.name.trim()||creating}
+                style={{ padding:'7px 20px', border:'none', borderRadius:8, background:'#1e40af', color:'#fff', fontSize:'0.82rem', fontWeight:700, cursor:'pointer', opacity:!createForm.name.trim()||creating?0.6:1 }}>
+                {creating?'作成中…':'✓ 作成'}
               </button>
             </div>
           </div>

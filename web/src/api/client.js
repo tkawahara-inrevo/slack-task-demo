@@ -249,6 +249,9 @@ export const api = {
 
   // CRM: Activity Settings
   crmActivitySettings: () => crmFetch('/activity-settings'),
+  crmDealsList: (params = {}) => { const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v])=>v!=null&&v!==''))).toString(); return crmFetch(`/deals-list${qs?'?'+qs:''}`); },
+  crmSetDormant: (id, reason) => crmFetch(`/deals/${id}/dormant`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ reason }) }),
+  crmRevertDormant: (id) => crmFetch(`/deals/${id}/dormant`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ revert:true }) }),
   crmMyAccess: () => crmFetch('/my-crm-access'),
   crmPermissions: () => crmFetch('/permissions'),
   crmPermissionsSave: (body) => crmFetch('/permissions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

@@ -505,20 +505,22 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
                     const ci = topLevel.indexOf(parent);
                     const col = COLORS[ci % COLORS.length];
 
-                    const DeptBtn = ({ rule, label, indent }) => {
-                      if (!rule) return null;
-                      const isSel = deptSelection === rule.id;
-                      const isCur = rule.id === currentDeptRule?.id;
+                    const DeptBtn = ({ rule, teamName, label, indent }) => {
+                      // ルールなしでもチーム名で選択できる（擬似IDとしてチーム名を使用）
+                      const selId = rule ? rule.id : `__team__${teamName}`;
+                      const isSel = deptSelection === selId;
+                      const isCur = rule ? rule.id === currentDeptRule?.id : teamName === currentTeamName;
+                      const noRule = !rule;
                       return (
-                        <button onClick={() => setDeptSelection(isSel ? null : rule.id)}
+                        <button onClick={() => setDeptSelection(isSel ? null : selId)}
                           style={{ textAlign: 'left', padding: '5px 10px', paddingLeft: indent ? 28 : 10,
                             borderRadius: 6, border: `1.5px solid ${isSel ? col : isCur ? col+'55' : '#e5e7eb'}`,
                             background: isSel ? col+'15' : '#fff',
-                            color: isSel ? col : isCur ? col : '#374151',
+                            color: isSel ? col : isCur ? col : noRule ? '#94a3b8' : '#374151',
                             fontSize: 12, fontWeight: isSel || isCur ? 700 : 400, cursor: 'pointer',
                             display: 'flex', alignItems: 'center', gap: 6 }}>
                           {indent && <svg width="12" height="10" style={{ flexShrink:0, color:'#d1d5db' }}><path d="M2 0 L2 5 L10 5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>}
-                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, flexShrink: 0, opacity: isSel ? 1 : 0.4 }} />
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: noRule ? '#e2e8f0' : col, flexShrink: 0, opacity: isSel ? 1 : 0.4 }} />
                           {label}
                           {isCur && <span style={{ fontSize: 10, color: col, marginLeft: 4 }}>（現在）</span>}
                         </button>
@@ -527,10 +529,10 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
 
                     return (
                       <div key={parent.id}>
-                        <DeptBtn rule={parentRule} label={parent.name} indent={false} />
+                        <DeptBtn rule={parentRule} teamName={parent.name} label={parent.name} indent={false} />
                         {children.map(child => {
                           const childRule = deptRules.find(r => r.name === child.name);
-                          return <DeptBtn key={child.id} rule={childRule} label={child.name} indent={true} />;
+                          return <DeptBtn key={child.id} rule={childRule} teamName={child.name} label={child.name} indent={true} />;
                         })}
                       </div>
                     );

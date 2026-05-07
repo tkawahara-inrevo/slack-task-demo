@@ -179,7 +179,7 @@ export default function Recruitment() {
               <input value={settingsForm.from_email || ''} onChange={e => setSettingsForm(f => ({ ...f, from_email: e.target.value }))}
                 placeholder="hr@inrevo.jp"
                 style={{ width: '100%', fontSize: 12, padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', boxSizing: 'border-box' }} />
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>GAS で MailApp.sendEmail の from として使用されます</div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>GmailApp で差出人として使用（Gmailのエイリアス登録が必要）</div>
             </div>
             <div style={{ marginBottom: 10 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 4 }}>

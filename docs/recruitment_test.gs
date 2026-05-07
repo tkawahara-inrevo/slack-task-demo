@@ -388,5 +388,7 @@ function authorizeAllScopes() {
   console.log('現在のトリガー数:', triggers.length);
   DriveApp.getRootFolder();
   SpreadsheetApp.getActiveSpreadsheet();
-  Browser.msgBox('✅ 権限承認が完了しました。');
+  // GmailApp の権限承認（エイリアス送信に必要）
+  GmailApp.getInboxThreads(0, 1);
+  Browser.msgBox('✅ 権限承認が完了しました（GmailApp含む）。');
 }

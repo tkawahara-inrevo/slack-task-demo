@@ -422,7 +422,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { stage, yomi, plan, q, salesUser, showDormant, quickFilter, limit: lq } = req.query;
       const scope = req.query.scope || 'all'; // 'all' | 'self'
       const offset = Number(req.query.offset) || 0;
-      const limit = Math.min(Number(lq) || 500, 1000);
+      const limit = Math.min(Number(lq) || 100, 500);
 
       let where = `d.team_id=$1`;
       const params = [teamId];

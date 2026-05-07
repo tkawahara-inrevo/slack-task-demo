@@ -529,7 +529,16 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
 
                     return (
                       <div key={parent.id}>
-                        <DeptBtn rule={parentRule} teamName={parent.name} label={parent.name} indent={false} />
+                        {children.length > 0 ? (
+                          /* 子チームあり → 親は選択不可のヘッダー */
+                          <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 800,
+                            color: col, letterSpacing: '0.04em', opacity: 0.7 }}>
+                            {parent.name}
+                          </div>
+                        ) : (
+                          /* 子チームなし → 親を直接選択可能 */
+                          <DeptBtn rule={parentRule} teamName={parent.name} label={parent.name} indent={false} />
+                        )}
                         {children.map(child => {
                           const childRule = deptRules.find(r => r.name === child.name);
                           return <DeptBtn key={child.id} rule={childRule} teamName={child.name} label={child.name} indent={true} />;

@@ -478,19 +478,64 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
               </div>
             </div>
 
-            {/* 部署セクション */}
+            {/* 部署セクション（ツリー構造） */}
             <div style={{ marginBottom: 16, border: '1px solid #cffafe', borderRadius: 10, overflow: 'hidden' }}>
               <div style={{ background: '#ecfeff', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#0891b2', textTransform: 'uppercase', letterSpacing: '0.06em' }}>部署</span>
                 {currentDeptRule && <span style={{ fontSize: 11, color: '#6b7280' }}>現在: {currentDeptRule.name}</span>}
                 {targetDeptRule && <span style={{ fontSize: 11, color: '#0891b2', fontWeight: 700 }}>→ {targetDeptRule.name}</span>}
               </div>
-              <div style={{ padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <BtnSet selected={!deptSelection} label="変更なし" onClick={() => setDeptSelection(null)} />
-                {deptRules.map(r => (
-                  <BtnSet key={r.id} selected={deptSelection === r.id} isCurrent={r.id === currentDeptRule?.id} label={r.name}
-                    onClick={() => setDeptSelection(deptSelection === r.id ? null : r.id)} color="#0891b2" />
-                ))}
+              <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 280, overflowY: 'auto' }}>
+                <button onClick={() => setDeptSelection(null)}
+                  style={{ textAlign: 'left', padding: '5px 10px', borderRadius: 6, border: `1.5px solid ${!deptSelection ? '#0891b2' : '#e5e7eb'}`,
+                    background: !deptSelection ? '#ecfeff' : '#fff', color: !deptSelection ? '#0891b2' : '#6b7280',
+                    fontSize: 12, fontWeight: !deptSelection ? 700 : 400, cursor: 'pointer' }}>
+                  変更なし
+                </button>
+                {/* teams ツリーを使って親子グループで表示 */}
+                {(() => {
+                  const topLevel = teams.filter(t => !t.parent_id);
+                  const childMap = {};
+                  teams.forEach(t => { if (t.parent_id) { if (!childMap[t.parent_id]) childMap[t.parent_id] = []; childMap[t.parent_id].push(t); } });
+
+                  return topLevel.map(parent => {
+                    const children = childMap[parent.id] || [];
+                    const parentRule = deptRules.find(r => r.name === parent.name);
+                    const COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899'];
+                    const ci = topLevel.indexOf(parent);
+                    const col = COLORS[ci % COLORS.length];
+
+                    const DeptBtn = ({ rule, label, indent }) => {
+                      if (!rule) return null;
+                      const isSel = deptSelection === rule.id;
+                      const isCur = rule.id === currentDeptRule?.id;
+                      return (
+                        <button onClick={() => setDeptSelection(isSel ? null : rule.id)}
+                          style={{ textAlign: 'left', padding: '5px 10px', paddingLeft: indent ? 28 : 10,
+                            borderRadius: 6, border: `1.5px solid ${isSel ? col : isCur ? col+'55' : '#e5e7eb'}`,
+                            background: isSel ? col+'15' : '#fff',
+                            color: isSel ? col : isCur ? col : '#374151',
+                            fontSize: 12, fontWeight: isSel || isCur ? 700 : 400, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {indent && <svg width="12" height="10" style={{ flexShrink:0, color:'#d1d5db' }}><path d="M2 0 L2 5 L10 5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>}
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, flexShrink: 0, opacity: isSel ? 1 : 0.4 }} />
+                          {label}
+                          {isCur && <span style={{ fontSize: 10, color: col, marginLeft: 4 }}>（現在）</span>}
+                        </button>
+                      );
+                    };
+
+                    return (
+                      <div key={parent.id}>
+                        <DeptBtn rule={parentRule} label={parent.name} indent={false} />
+                        {children.map(child => {
+                          const childRule = deptRules.find(r => r.name === child.name);
+                          return <DeptBtn key={child.id} rule={childRule} label={child.name} indent={true} />;
+                        })}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
 

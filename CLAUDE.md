@@ -48,6 +48,22 @@ ssh -i ~/.ssh/lightsail-us-east-1.pem ubuntu@3.222.101.208 "cd /home/ubuntu/slac
 - テンプレートスプシ: `1Jq-6I_276W-e6J91X544wY6d9kIi6JnyPh6I8UKR95k`
 - Webhook Secret: GAS Script Properties `WEBHOOK_SECRET`
 
+## HRMOS勤怠 API連携（接続確認済み）
+- ベースURL: `https://ieyasu.co/api/inrevo/v1/`
+- 認証: `GET /authentication/token` に `Authorization: Basic {IEYASU_API_TOKEN}` → トークン取得
+- 以降: `Authorization: Token {token}`
+- 打刻: `POST /stamp_logs` `{ user_id: int, stamp_type: 1(出勤)|2(退勤) }`
+- ユーザー取得: `GET /users?page=N`（ページング、メールで社員特定）
+- 実装: `src/features/ieyasu.js`（トークン・ユーザーキャッシュ実装済み）
+- Slackリスナー: `index.js` で出退勤日報チャンネルをフック済み
+- env: `IEYASU_API_TOKEN`（サーバー .env 設定済み）
+
+## HRMOS採用 CSV連携（未実装・方針確定）
+- HRMOS採用にAPIなし、**CSVエクスポートは可能**（サポート確認済み）
+- 方針: 週1CSVアップロード → TaskHubで自動集計・ダッシュボード表示
+- **未決**: CSVヘッダー確認待ち・配置場所未決定（次回作業時に確認）
+- 目的: HR担当者の週次MTG報告資料作成を自動化
+
 ## Git運用
 - デプロイはgit push経由（SCPなし）
 - SSH鍵: `~/.ssh/lightsail-us-east-1.pem`（リポジトリ外）

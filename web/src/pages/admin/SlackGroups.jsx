@@ -767,67 +767,73 @@ function RulesTab({ groups, teams }) {
 
   const roleCfg = { color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd' };
 
-  // 部署ツリーカード（部署ルール + 共通条件を統合）
-  const DeptTreeCard = ({ team, isParent }) => {
-    const PARENT_COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899'];
-    const parentIdx = topLevelTeams.findIndex(t => t.id === (isParent ? team.id : team.parent_id));
-    const parentColor = PARENT_COLORS[parentIdx % PARENT_COLORS.length] || '#0891b2';
-    const childColor = '#64748b';
-    const color = isParent ? parentColor : childColor;
+  // 部署グループ行（dept + auto 統合・各チーム共通）
+  const DeptGroupRow = ({ teamName, color }) => {
+    const [addOpen, setAddOpen] = useState(false);
+    const deptIds = getRule(teamName, 'dept', null)?.group_ids || [];
+    const autoIds = getRule(teamName, 'auto', null)?.group_ids || [];
+    const allGroups = [
+      ...deptIds.map(id => ({ id, cat: 'dept' })),
+      ...autoIds.map(id => ({ id, cat: 'auto' })),
+    ].map(({ id, cat }) => ({ g: groups.find(g => g.id === id), cat })).filter(({ g }) => g);
+    const excludeIds = [...deptIds, ...autoIds];
 
     return (
-      <div style={{
-        border: `1.5px solid ${isParent ? color + '55' : '#e2e8f0'}`,
-        borderLeft: `3px solid ${color}`,
-        borderRadius: isParent ? 10 : 8,
-        background: isParent ? color + '08' : '#fafafa',
-        padding: '10px 14px',
-      }}>
-        <div style={{ fontWeight: isParent ? 800 : 600, fontSize: isParent ? '0.9rem' : '0.82rem', color, marginBottom: 8 }}>
-          {!isParent && <span style={{ color: '#d1d5db', marginRight: 6 }}>└</span>}
-          {team.name}
-        </div>
-
-        {/* 部署グループ（dept + auto を統合表示） */}
-        {(() => {
-          const [addOpen, setAddOpen] = useState(false);
-          const deptIds  = getRule(team.name, 'dept', null)?.group_ids || [];
-          const autoIds  = getRule(team.name, 'auto', null)?.group_ids || [];
-          const allGroups = [
-            ...deptIds.map(id => ({ id, cat: 'dept' })),
-            ...autoIds.map(id => ({ id, cat: 'auto' })),
-          ].map(({ id, cat }) => ({ g: groups.find(g => g.id === id), cat })).filter(({ g }) => g);
-          const excludeIds = [...deptIds, ...autoIds];
-
-          return (
-            <div>
-              <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: 6 }}>所属したら入るグループ</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
-                {allGroups.length === 0
-                  ? <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontStyle: 'italic' }}>なし</span>
-                  : allGroups.map(({ g, cat }) => (
-                      <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.75rem', fontWeight: 700,
-                        padding: '2px 8px 2px 7px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}55`, color }}>
-                        @{g.handle}
-                        <button onClick={() => handleToggle(team.name, cat, g.id, null)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
-                      </span>
-                    ))}
-              </div>
-              {addOpen
-                ? <GroupPicker excludeIds={excludeIds} color={color}
-                    onAdd={gid => { handleToggle(team.name, 'dept', gid, null); setAddOpen(false); }} />
-                : <button onClick={() => setAddOpen(true)}
-                    style={{ fontSize: '0.72rem', color, background: 'none', border: `1px dashed ${color}66`, borderRadius: 5, padding: '2px 8px', cursor: 'pointer', fontWeight: 600 }}>
-                    ＋ 追加
-                  </button>
-              }
-            </div>
-          );
-        })()}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+        {allGroups.length === 0
+          ? <span style={{ fontSize: '0.72rem', color: '#cbd5e1', fontStyle: 'italic' }}>グループなし</span>
+          : allGroups.map(({ g, cat }) => (
+              <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.75rem', fontWeight: 700,
+                padding: '2px 8px 2px 7px', borderRadius: 99, background: '#fff', border: `1.5px solid ${color}55`, color }}>
+                @{g.handle}
+                <button onClick={() => handleToggle(teamName, cat, g.id, null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
+              </span>
+            ))}
+        {addOpen
+          ? <GroupPicker excludeIds={excludeIds} color={color}
+              onAdd={gid => { handleToggle(teamName, 'dept', gid, null); setAddOpen(false); }} />
+          : <button onClick={() => setAddOpen(true)}
+              style={{ fontSize: '0.7rem', color, background: 'none', border: `1px dashed ${color}55`, borderRadius: 4, padding: '1px 7px', cursor: 'pointer' }}>
+              ＋
+            </button>
+        }
       </div>
     );
   };
+
+  // 部署セクション（親チーム + 子チームを1つのブロックに収める）
+  const DeptSection = ({ parent, children, color }) => (
+    <div style={{ border: `1.5px solid ${color}30`, borderRadius: 12, overflow: 'hidden' }}>
+      {/* 親チーム ヘッダー行 */}
+      <div style={{ background: color + '10', borderBottom: children.length > 0 ? `1px solid ${color}20` : 'none', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: 4, height: 20, borderRadius: 2, background: color, flexShrink: 0 }} />
+        <span style={{ fontWeight: 800, fontSize: '0.88rem', color, minWidth: 100 }}>{parent.name}</span>
+        <DeptGroupRow teamName={parent.name} color={color} />
+      </div>
+
+      {/* 子チーム 一覧 */}
+      {children.map((child, i) => (
+        <div key={child.id} style={{
+          padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 12,
+          borderBottom: i < children.length - 1 ? '1px solid #f1f5f9' : 'none',
+          background: '#fff',
+        }}>
+          {/* 縦線 + 横線 */}
+          <div style={{ width: 4, flexShrink: 0 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0 }}>
+            <div style={{ width: 12, height: 1, background: '#d1d5db' }} />
+            <div style={{ width: 1, height: 20, background: '#d1d5db', position: 'absolute', marginTop: -20, marginLeft: 0 }} />
+          </div>
+          <svg width="16" height="16" style={{ flexShrink: 0, color: '#d1d5db' }}>
+            <path d="M2 0 L2 8 L14 8" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+          </svg>
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#374151', minWidth: 90 }}>{child.name}</span>
+          <DeptGroupRow teamName={child.name} color="#64748b" />
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div>
@@ -873,20 +879,14 @@ function RulesTab({ groups, teams }) {
           </div>
 
           {/* 部署ツリー */}
-          {topLevelTeams.map(parent => (
-            <div key={parent.id}>
-              {/* 親部署 */}
-              <DeptTreeCard team={parent} isParent />
-              {/* 子部署（インデント） */}
-              {(childrenOf[parent.id] || []).length > 0 && (
-                <div style={{ marginLeft: 20, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {(childrenOf[parent.id] || []).map(child => (
-                    <DeptTreeCard key={child.id} team={child} isParent={false} />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+          {topLevelTeams.map((parent, idx) => {
+            const COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899','#6366f1','#f43f5e'];
+            const color = COLORS[idx % COLORS.length];
+            const children = childrenOf[parent.id] || [];
+            return (
+              <DeptSection key={parent.id} parent={parent} children={children} color={color} />
+            );
+          })}
         </div>
       )}
     </div>

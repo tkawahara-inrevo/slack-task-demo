@@ -60,6 +60,21 @@ function doPost(e) {
     setupCompleteCheckbox(ss);
     setupValidation(ss);
 
+    // 古い onCompleteCheckbox トリガーを削除してから新規作成（上限20個対策）
+    ScriptApp.getProjectTriggers().forEach(t => {
+      if (t.getHandlerFunction() === 'onCompleteCheckbox') {
+        try {
+          // 対象スプレッドシートが存在しない or 完了済みのトリガーを削除
+          const ssId = t.getTriggerSourceId();
+          if (ssId !== ss.getId()) {
+            ScriptApp.deleteTrigger(t);
+          }
+        } catch (_) {
+          ScriptApp.deleteTrigger(t); // アクセス不能なら削除
+        }
+      }
+    });
+
     ScriptApp.newTrigger('onCompleteCheckbox')
       .forSpreadsheet(ss)
       .onEdit()
@@ -389,6 +404,19 @@ function jsonRes(obj) {
 // ================================================================
 // fromEmail が正しく渡されているか確認するテスト
 // 送信後にこれを実行してfromEmailが届いていたか確認
+// 溜まった onCompleteCheckbox トリガーを全削除（上限エラー解消用）
+function deleteAllCompleteTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let count = 0;
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'onCompleteCheckbox') {
+      ScriptApp.deleteTrigger(t);
+      count++;
+    }
+  });
+  Browser.msgBox(`${count}件のトリガーを削除しました`);
+}
+
 function readDebug() {
   const val = PropertiesService.getScriptProperties().getProperty('DEBUG_LAST_FROM_EMAIL');
   Browser.msgBox('最後のdoPostで受け取ったfromEmail: ' + (val || '(未記録)'));

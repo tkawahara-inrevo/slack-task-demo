@@ -261,13 +261,19 @@ inrevo 採用担当`;
   // from_email が設定されている場合は GmailApp で試みる（エイリアス登録済みのみ有効）
   if (opts.fromEmail) {
     try {
-      GmailApp.sendEmail(email, subject, body, { from: opts.fromEmail });
+      GmailApp.sendEmail(email, subject, body, {
+        from: opts.fromEmail,
+        name: 'inrevo 採用担当',
+      });
+      console.log('[sendTestEmail] sent via GmailApp from: ' + opts.fromEmail);
       return;
-    } catch (_) {
-      // エイリアス未登録の場合は MailApp にフォールバック
+    } catch (e) {
+      // エイリアス未登録 or 権限不足の場合はログに残してフォールバック
+      console.error('[sendTestEmail] GmailApp failed (' + opts.fromEmail + '): ' + e.message);
     }
   }
   MailApp.sendEmail(email, subject, body);
+  console.log('[sendTestEmail] sent via MailApp (no from override)');
 }
 
 // ================================================================

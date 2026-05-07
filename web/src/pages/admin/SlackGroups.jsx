@@ -497,68 +497,48 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
                   const topLevel = teams.filter(t => !t.parent_id);
                   const childMap = {};
                   teams.forEach(t => { if (t.parent_id) { if (!childMap[t.parent_id]) childMap[t.parent_id] = []; childMap[t.parent_id].push(t); } });
-                  // チーム名に一致しないルール（bc, mk 等の略称ルール）
-                  const allTeamNames = new Set(teams.map(t => t.name));
-                  const orphanRules = deptRules.filter(r => !allTeamNames.has(r.name) && (r.group_ids || []).length > 0);
+                  const COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899'];
 
-                  return [...topLevel.map(parent => {
+                  const MkDeptBtn = ({ rule, teamName, label, indent, col }) => {
+                    const selId = rule ? rule.id : `__team__${teamName}`;
+                    const isSel = deptSelection === selId;
+                    const isCur = rule ? rule.id === currentDeptRule?.id : teamName === currentTeamName;
+                    return (
+                      <button onClick={() => setDeptSelection(isSel ? null : selId)}
+                        style={{ textAlign: 'left', padding: '5px 10px', paddingLeft: indent ? 28 : 10,
+                          borderRadius: 6, border: `1.5px solid ${isSel ? col : isCur ? col+'55' : '#e5e7eb'}`,
+                          background: isSel ? col+'15' : '#fff',
+                          color: isSel ? col : isCur ? col : !rule ? '#94a3b8' : '#374151',
+                          fontSize: 12, fontWeight: isSel || isCur ? 700 : 400, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {indent && <svg width="12" height="10" style={{ flexShrink:0, color:'#d1d5db' }}><path d="M2 0 L2 5 L10 5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>}
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: !rule ? '#e2e8f0' : col, flexShrink: 0, opacity: isSel ? 1 : 0.4 }} />
+                        {label}
+                        {isCur && <span style={{ fontSize: 10, color: col, marginLeft: 4 }}>（現在）</span>}
+                      </button>
+                    );
+                  };
+
+                  return topLevel.map((parent, ci) => {
                     const children = childMap[parent.id] || [];
                     const parentRule = deptRules.find(r => r.name === parent.name);
-                    const COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899'];
-                    const ci = topLevel.indexOf(parent);
                     const col = COLORS[ci % COLORS.length];
-
-                    const DeptBtn = ({ rule, teamName, label, indent }) => {
-                      // ルールなしでもチーム名で選択できる（擬似IDとしてチーム名を使用）
-                      const selId = rule ? rule.id : `__team__${teamName}`;
-                      const isSel = deptSelection === selId;
-                      const isCur = rule ? rule.id === currentDeptRule?.id : teamName === currentTeamName;
-                      const noRule = !rule;
-                      return (
-                        <button onClick={() => setDeptSelection(isSel ? null : selId)}
-                          style={{ textAlign: 'left', padding: '5px 10px', paddingLeft: indent ? 28 : 10,
-                            borderRadius: 6, border: `1.5px solid ${isSel ? col : isCur ? col+'55' : '#e5e7eb'}`,
-                            background: isSel ? col+'15' : '#fff',
-                            color: isSel ? col : isCur ? col : noRule ? '#94a3b8' : '#374151',
-                            fontSize: 12, fontWeight: isSel || isCur ? 700 : 400, cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {indent && <svg width="12" height="10" style={{ flexShrink:0, color:'#d1d5db' }}><path d="M2 0 L2 5 L10 5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>}
-                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: noRule ? '#e2e8f0' : col, flexShrink: 0, opacity: isSel ? 1 : 0.4 }} />
-                          {label}
-                          {isCur && <span style={{ fontSize: 10, color: col, marginLeft: 4 }}>（現在）</span>}
-                        </button>
-                      );
-                    };
-
                     return (
                       <div key={parent.id}>
                         {children.length > 0 ? (
-                          <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 800,
-                            color: col, letterSpacing: '0.04em', opacity: 0.7 }}>
+                          <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 800, color: col, letterSpacing: '0.04em', opacity: 0.7 }}>
                             {parent.name}
                           </div>
                         ) : (
-                          <DeptBtn rule={parentRule} teamName={parent.name} label={parent.name} indent={false} />
+                          <MkDeptBtn rule={parentRule} teamName={parent.name} label={parent.name} indent={false} col={col} />
                         )}
                         {children.map(child => {
                           const childRule = deptRules.find(r => r.name === child.name);
-                          return <DeptBtn key={child.id} rule={childRule} teamName={child.name} label={child.name} indent={true} />;
+                          return <MkDeptBtn key={child.id} rule={childRule} teamName={child.name} label={child.name} indent={true} col={col} />;
                         })}
                       </div>
                     );
-                  }),
-                  // チーム名に一致しない別名ルール（bc, mk 等）を末尾に追加
-                  orphanRules.length > 0 && (
-                    <div key="__orphan">
-                      <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 800, color: '#64748b', opacity: 0.6 }}>
-                        その他のルール
-                      </div>
-                      {orphanRules.map(r => (
-                        <DeptBtn key={r.id} rule={r} teamName={r.name} label={r.name} indent={false} />
-                      ))}
-                    </div>
-                  ),
-                  ];
+                  });
                 })()}
               </div>
             </div>

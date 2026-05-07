@@ -308,39 +308,39 @@ function registerDashboardApi(deps) {
         } else if (dbRole === 'corp') {
           role = 'corp';
         } else {
-          // Corporateチームに所属していれば corp 扱い
-          const { rows: corpRows } = await dbQuery(`
+          // IT チーム所属チェック（Corporateより先に判定）
+          const { rows: itRows } = await dbQuery(`
             SELECT 1 FROM dash_team_members dtm
             JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-            JOIN dash_teams parent ON parent.id = dt.parent_id AND parent.team_id = dt.team_id
             WHERE dtm.team_id = $1 AND dtm.user_id = $2
-              AND parent.name ILIKE '%corporate%'
+              AND (dt.name ILIKE '%IT%' OR dt.name ILIKE '%情シス%')
             LIMIT 1
           `, [teamId, userId]);
-          if (corpRows.length > 0) {
-            role = 'corp';
+          if (itRows.length > 0) {
+            role = 'it';
           } else {
-            // IT チーム所属チェック
-            const { rows: itRows } = await dbQuery(`
+            // Personnel（人事）チーム所属チェック
+            const { rows: persRows } = await dbQuery(`
               SELECT 1 FROM dash_team_members dtm
               JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
               WHERE dtm.team_id = $1 AND dtm.user_id = $2
-                AND (dt.name ILIKE '%IT%' OR dt.name ILIKE '%情シス%')
+                AND (dt.name ILIKE '%personnel%' OR dt.name ILIKE '%人事%' OR dt.name ILIKE '%HR%')
               LIMIT 1
             `, [teamId, userId]);
-            if (itRows.length > 0) {
-              role = 'it';
+            if (persRows.length > 0) {
+              role = 'personnel';
             } else {
-              // Personnel（人事）チーム所属チェック
-              const { rows: persRows } = await dbQuery(`
+              // Corporateチームに所属していれば corp 扱い（IT/Personnel より後に判定）
+              const { rows: corpRows } = await dbQuery(`
                 SELECT 1 FROM dash_team_members dtm
                 JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
+                JOIN dash_teams parent ON parent.id = dt.parent_id AND parent.team_id = dt.team_id
                 WHERE dtm.team_id = $1 AND dtm.user_id = $2
-                  AND (dt.name ILIKE '%personnel%' OR dt.name ILIKE '%人事%' OR dt.name ILIKE '%HR%')
+                  AND parent.name ILIKE '%corporate%'
                 LIMIT 1
               `, [teamId, userId]);
-              if (persRows.length > 0) {
-                role = 'personnel';
+              if (corpRows.length > 0) {
+                role = 'corp';
               } else {
                 const title = await dbGetUserSlackTitle(teamId, userId);
                 role = roleTitleFromSlack(title);

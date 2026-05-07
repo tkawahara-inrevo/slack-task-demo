@@ -148,7 +148,7 @@ export default function Recruitment() {
                 ['template_spreadsheet_id', 'テンプレートスプレッドシートID', '1Jq-6I_276W-e6J91X544wY6d9kIi6JnyPh6I8UKR95k'],
                 ['gas_endpoint_url', 'GAS Web App URL', 'https://script.google.com/macros/s/...'],
                 ['notify_channel_id', 'HR通知チャンネルID', 'C01234ABCDE'],
-                ['notify_mention_user_id', 'メンション先ユーザーID', 'U01234ABCDE'],
+                ['notify_mention_user_id', 'メンション先ユーザーID（複数はカンマ区切り）', 'U01234ABCDE,U09876ZYXWV'],
                 ['webhook_secret', 'Webhookシークレット', '任意のランダム文字列'],
                 ['total_score', '満点（配点）', '10'],
                 ['import_sheet_url', '取り込み用スプレッドシートURL', 'https://docs.google.com/spreadsheets/d/...'],

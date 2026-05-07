@@ -1354,7 +1354,8 @@ function registerDashboardApi(deps) {
           const mention = cand.notify_mention_user_id
             ? cand.notify_mention_user_id.split(',').map(id => `<@${id.trim()}>`).join(' ') + ' '
             : '';
-          const text = `${mention}【採用テスト完了】*${cand.name}* さんが実技テストを完了しました\nスコア: *${score ?? '未採点'}点*\n<${cand.spreadsheet_url}|スプレッドシートを確認>`;
+          const typingInfo = typingLevel ? `\nタイピング: *${typingLevel}*` : '';
+          const text = `${mention}【採用テスト完了】*${cand.name}* さんが実技テストを完了しました\nスコア: *${score ?? '未採点'}点*${typingInfo}\n<${cand.spreadsheet_url}|スプレッドシートを確認>`;
           const { WebClient } = require("@slack/web-api");
           const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
           await slack.chat.postMessage({ channel: cand.notify_channel_id, text });

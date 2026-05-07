@@ -1,113 +1,142 @@
-// IEYASU（HRMOS勤怠）連携
+// HRMOS勤怠（ieyasu.co）連携
 // Slack日報投稿 → 自動打刻
+//
+// 確認済みAPIエンドポイント:
+//   トークン取得: GET  https://ieyasu.co/api/inrevo/v1/authentication/token
+//     Auth: Authorization: Basic {base64(secretKey)}
+//   ユーザー一覧: GET  https://ieyasu.co/api/inrevo/v1/users?page=1
+//     Auth: Authorization: Token {token}
+//   打刻:         POST https://ieyasu.co/api/inrevo/v1/stamp_logs
+//     Body: { user_id: number, stamp_type: 1(出勤) | 2(退勤) }
+
 const https = require('https');
 
-const IEYASU_TOKEN = process.env.IEYASU_API_TOKEN || '';
-// 打刻API: POST /api/v1/attendances
-// 種別: clock_in(出勤) / clock_out(退勤)
+const SECRET_KEY  = process.env.IEYASU_API_TOKEN || '';
+const COMPANY     = 'inrevo';
+const BASE_HOST   = 'ieyasu.co';
 
-async function ieyasuPost(path, body) {
+// ── HTTP ヘルパー ──────────────────────────────────────────────
+function ieyasuRequest({ method = 'GET', path, auth, body = null }) {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = https.request({
-      hostname: 'f.ieyasu.co',
-      path,
-      method: 'POST',
-      headers: {
-        'X-Api-Token': IEYASU_TOKEN,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data),
-      },
-    }, res => {
+    const data = body ? JSON.stringify(body) : null;
+    const headers = { 'Authorization': auth };
+    if (data) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(data);
+    }
+    const req = https.request({ hostname: BASE_HOST, path, method, headers }, res => {
       let buf = '';
       res.on('data', c => { buf += c; });
       res.on('end', () => {
         try { resolve({ status: res.statusCode, body: JSON.parse(buf) }); }
-        catch (e) { resolve({ status: res.statusCode, body: buf }); }
+        catch { resolve({ status: res.statusCode, body: buf }); }
       });
     });
     req.on('error', reject);
-    req.write(data);
+    if (data) req.write(data);
     req.end();
   });
 }
 
-// Slack ユーザーのメールから IEYASU 社員を特定して打刻する
+// ── トークン取得（有効期限内はキャッシュ）─────────────────────
+let _cachedToken = null;
+let _tokenExpiry = 0;
+
+async function getToken() {
+  if (!SECRET_KEY) throw new Error('IEYASU_API_TOKEN not set');
+  if (_cachedToken && Date.now() < _tokenExpiry - 60_000) return _cachedToken;
+
+  const b64 = Buffer.from(SECRET_KEY).toString('base64');
+  const res = await ieyasuRequest({
+    path: `/api/${COMPANY}/v1/authentication/token`,
+    auth: `Basic ${b64}`,
+  });
+  if (res.status !== 200 || !res.body?.token) {
+    throw new Error(`HRMOS token error: ${JSON.stringify(res.body)}`);
+  }
+  _cachedToken = res.body.token;
+  _tokenExpiry = new Date(res.body.expired_at).getTime();
+  console.log('[HRMOS] token refreshed, expires:', res.body.expired_at);
+  return _cachedToken;
+}
+
+// ── ユーザー一覧取得（全ページ）────────────────────────────────
+let _usersCache = null;
+let _usersCacheAt = 0;
+const USERS_CACHE_TTL = 30 * 60 * 1000; // 30分
+
+async function getAllUsers(token) {
+  if (_usersCache && Date.now() - _usersCacheAt < USERS_CACHE_TTL) return _usersCache;
+
+  const users = [];
+  let page = 1;
+  while (true) {
+    const res = await ieyasuRequest({
+      path: `/api/${COMPANY}/v1/users?page=${page}`,
+      auth: `Token ${token}`,
+    });
+    if (res.status !== 200 || !Array.isArray(res.body) || res.body.length === 0) break;
+    users.push(...res.body);
+    if (res.body.length < 25) break; // 1ページ25件未満なら最終ページ
+    page++;
+  }
+
+  _usersCache = users;
+  _usersCacheAt = Date.now();
+  console.log(`[HRMOS] users cached: ${users.length}名`);
+  return users;
+}
+
+// ── メインの打刻関数 ───────────────────────────────────────────
+// type: 1=出勤 / 2=退勤
 async function stampAttendance(slackClient, slackUserId, type) {
-  if (!IEYASU_TOKEN) {
-    console.warn('[IEYASU] IEYASU_API_TOKEN not set, skipping stamp');
+  if (!SECRET_KEY) {
+    console.warn('[HRMOS] IEYASU_API_TOKEN not set');
     return { ok: false, reason: 'no_token' };
   }
 
   try {
-    // Slackプロフィールからメールを取得
+    // 1. Slackメール取得
     const profileRes = await slackClient.users.profile.get({ user: slackUserId });
-    const email = profileRes.profile?.email;
+    const email = (profileRes.profile?.email || '').toLowerCase();
     if (!email) return { ok: false, reason: 'no_email' };
 
-    // IEYASU で該当社員を検索
-    const empRes = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: 'f.ieyasu.co',
-        path: `/api/v1/employees?email=${encodeURIComponent(email)}`,
-        method: 'GET',
-        headers: { 'X-Api-Token': IEYASU_TOKEN },
-      }, res => {
-        let buf = '';
-        res.on('data', c => { buf += c; });
-        res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { resolve({}); } });
-      });
-      req.on('error', reject);
-      req.end();
-    });
+    // 2. トークン取得
+    const token = await getToken();
 
-    const emp = empRes.employees?.[0];
-    if (!emp) {
-      console.warn(`[IEYASU] employee not found for email: ${email}`);
-      return { ok: false, reason: 'employee_not_found', email };
+    // 3. HRMOSユーザーをメールで検索
+    const users = await getAllUsers(token);
+    const hrUser = users.find(u => (u.email || '').toLowerCase() === email);
+    if (!hrUser) {
+      console.warn(`[HRMOS] user not found: ${email}`);
+      return { ok: false, reason: 'user_not_found', email };
     }
 
-    // 打刻
-    const stampRes = await ieyasuPost('/api/v1/attendances', {
-      employee_id: emp.id,
-      type,          // 'clock_in' or 'clock_out'
-      datetime: new Date().toISOString(),
+    // 4. 打刻
+    const stampRes = await ieyasuRequest({
+      method: 'POST',
+      path: `/api/${COMPANY}/v1/stamp_logs`,
+      auth: `Token ${token}`,
+      body: { user_id: hrUser.id, stamp_type: type },
     });
 
     if (stampRes.status === 200 || stampRes.status === 201) {
-      console.log(`[IEYASU] stamped ${type} for ${email}`);
-      return { ok: true, type, email };
+      const typeName = type === 1 ? '出勤' : '退勤';
+      console.log(`[HRMOS] ${typeName}打刻 OK: ${email} (user_id=${hrUser.id})`);
+      return { ok: true, type, typeName, email, userId: hrUser.id };
     } else {
-      console.warn(`[IEYASU] stamp failed: ${JSON.stringify(stampRes.body)}`);
+      console.warn(`[HRMOS] stamp failed:`, stampRes.body);
       return { ok: false, reason: 'api_error', detail: stampRes.body };
     }
   } catch (e) {
-    console.error('[IEYASU] error:', e.message);
+    console.error('[HRMOS] stampAttendance error:', e.message);
     return { ok: false, reason: 'exception', message: e.message };
   }
 }
 
-// 今日の打刻状況を取得（ホーム画面表示用）
-async function getTodayAttendance(email) {
-  if (!IEYASU_TOKEN) return null;
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const res = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: 'f.ieyasu.co',
-        path: `/api/v1/attendances?date=${today}&email=${encodeURIComponent(email)}`,
-        method: 'GET',
-        headers: { 'X-Api-Token': IEYASU_TOKEN },
-      }, r => {
-        let buf = '';
-        r.on('data', c => { buf += c; });
-        r.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { resolve(null); } });
-      });
-      req.on('error', () => resolve(null));
-      req.end();
-    });
-    return res;
-  } catch { return null; }
+// ── ユーザーキャッシュ無効化（再取得強制）─────────────────────
+function invalidateUsersCache() {
+  _usersCache = null;
 }
 
-module.exports = { stampAttendance, getTodayAttendance };
+module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache };

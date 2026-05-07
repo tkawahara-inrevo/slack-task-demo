@@ -1252,6 +1252,9 @@ function registerDashboardApi(deps) {
               templateId: settings.template_spreadsheet_id,
               webhookUrl,
               secret: settings.webhook_secret || '',
+              fromEmail: settings.from_email || null,
+              emailSubject: settings.email_subject || null,
+              emailBody: settings.email_body || null,
             }),
           });
           const gasData = await gasRes.json();

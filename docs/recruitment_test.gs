@@ -37,6 +37,10 @@ function doPost(e) {
       return jsonRes({ error: 'unauthorized' });
     }
 
+    // デバッグ: 受信したfromEmailをプロパティに保存（後でreadDebugで確認）
+    PropertiesService.getScriptProperties().setProperty('DEBUG_LAST_FROM_EMAIL', fromEmail || '(null)');
+    console.log('[doPost] fromEmail received:', fromEmail);
+
     // スプレッドシートからの候補者取り込み
     if (data.action === 'importFromSheet') {
       return importFromSheet(data.spreadsheetId);
@@ -383,6 +387,42 @@ function jsonRes(obj) {
 // ================================================================
 // 初回セットアップ用（スクリプトエディタから1回だけ手動実行）
 // ================================================================
+// fromEmail が正しく渡されているか確認するテスト
+// 送信後にこれを実行してfromEmailが届いていたか確認
+function readDebug() {
+  const val = PropertiesService.getScriptProperties().getProperty('DEBUG_LAST_FROM_EMAIL');
+  Browser.msgBox('最後のdoPostで受け取ったfromEmail: ' + (val || '(未記録)'));
+}
+
+function testSendEmailFull() {
+  const testEmail = Session.getActiveUser().getEmail();
+  sendTestEmail(
+    'テスト太郎',
+    testEmail,
+    'https://example.com/test',
+    {
+      fromEmail:    'jinji@inrevo.jp',
+      emailSubject: '【テスト】実技試験のご案内',
+      emailBody:    '{name} 様\n\nテストです。\n\n{url}',
+    }
+  );
+  Browser.msgBox('送信完了。受信トレイを確認してください（差出人アドレスに注目）');
+}
+
+function testGmailAlias() {
+  try {
+    GmailApp.sendEmail(
+      Session.getActiveUser().getEmail(),
+      'テスト送信',
+      'GmailApp alias テスト',
+      { from: 'jinji@inrevo.jp', name: 'inrevo人事' }
+    );
+    Browser.msgBox('✅ 成功！jinji@inrevo.jp から送信できました');
+  } catch (e) {
+    Browser.msgBox('❌ エラー: ' + e.message);
+  }
+}
+
 function authorizeAllScopes() {
   const triggers = ScriptApp.getProjectTriggers();
   console.log('現在のトリガー数:', triggers.length);

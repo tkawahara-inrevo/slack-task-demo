@@ -497,8 +497,11 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
                   const topLevel = teams.filter(t => !t.parent_id);
                   const childMap = {};
                   teams.forEach(t => { if (t.parent_id) { if (!childMap[t.parent_id]) childMap[t.parent_id] = []; childMap[t.parent_id].push(t); } });
+                  // チーム名に一致しないルール（bc, mk 等の略称ルール）
+                  const allTeamNames = new Set(teams.map(t => t.name));
+                  const orphanRules = deptRules.filter(r => !allTeamNames.has(r.name) && (r.group_ids || []).length > 0);
 
-                  return topLevel.map(parent => {
+                  return [...topLevel.map(parent => {
                     const children = childMap[parent.id] || [];
                     const parentRule = deptRules.find(r => r.name === parent.name);
                     const COLORS = ['#0891b2','#7c3aed','#059669','#d97706','#dc2626','#ec4899'];
@@ -530,13 +533,11 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
                     return (
                       <div key={parent.id}>
                         {children.length > 0 ? (
-                          /* 子チームあり → 親は選択不可のヘッダー */
                           <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 800,
                             color: col, letterSpacing: '0.04em', opacity: 0.7 }}>
                             {parent.name}
                           </div>
                         ) : (
-                          /* 子チームなし → 親を直接選択可能 */
                           <DeptBtn rule={parentRule} teamName={parent.name} label={parent.name} indent={false} />
                         )}
                         {children.map(child => {
@@ -545,7 +546,19 @@ function ChangeWizard({ user, currentGroupIds, currentTeamName, groups, teams, o
                         })}
                       </div>
                     );
-                  });
+                  }),
+                  // チーム名に一致しない別名ルール（bc, mk 等）を末尾に追加
+                  orphanRules.length > 0 && (
+                    <div key="__orphan">
+                      <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 800, color: '#64748b', opacity: 0.6 }}>
+                        その他のルール
+                      </div>
+                      {orphanRules.map(r => (
+                        <DeptBtn key={r.id} rule={r} teamName={r.name} label={r.name} indent={false} />
+                      ))}
+                    </div>
+                  ),
+                  ];
                 })()}
               </div>
             </div>

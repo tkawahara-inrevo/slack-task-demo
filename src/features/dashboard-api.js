@@ -1810,17 +1810,48 @@ function registerDashboardApi(deps) {
     }
   });
 
-  // ── HRMOS勤怠: チームの今日の日報提出状況 ────────────────────────
+  // ── Slack WF → HRMOS打刻 webhook（認証不要、secret付きURL）────────
+  expressApp.post('/api/hrmos/stamp', async (req, res) => {
+    try {
+      const secret = req.query.secret || req.body.secret;
+      if (!secret || secret !== process.env.HRMOS_WEBHOOK_SECRET) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      // Slack WFが送るuser_idとstamp_type(1=出勤,2=退勤)
+      const slackUserId = req.body.user_id;
+      const stampType   = Number(req.body.stamp_type) || 1;
+      if (!slackUserId) return res.status(400).json({ error: 'user_id required' });
+
+      // teamIdをDBから取得
+      const teamR = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1');
+      const teamId = teamR.rows[0]?.team_id || '';
+
+      const { stampAttendance } = require('./ieyasu');
+      const result = await stampAttendance(slackClient, slackUserId, stampType);
+
+      await dbQuery(
+        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
+        [teamId, slackUserId, stampType, result.ok, result.userId || null, result.ok ? null : result.reason]
+      ).catch(e => console.error('[HRMOS WF] DB記録失敗:', e.message));
+
+      console.log(`[HRMOS WF] stamp ${stampType === 1 ? '出勤' : '退勤'}: user=${slackUserId} ok=${result.ok}`);
+      res.json({ ok: result.ok, reason: result.ok ? null : result.reason });
+    } catch (e) {
+      console.error('[HRMOS WF] error:', e.message);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ── HRMOS勤怠: チームの今日の打刻状況（hrmos_stampsベース）────────
   expressApp.get('/api/dashboard/team-report-status', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const REPORT_IN_CH  = process.env.RANKING_REPORT_IN_CHANNEL_ID  || '';
-      const REPORT_OUT_CH = process.env.RANKING_REPORT_OUT_CHANNEL_ID || '';
 
       // JSTの本日0時
       const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
       const todayJst = jstNow.toISOString().slice(0, 10);
-      const dayStartTs = (new Date(todayJst + 'T00:00:00+09:00').getTime() / 1000).toString();
+      const dayStart = new Date(todayJst + 'T00:00:00+09:00');
 
       // 対象メンバー取得
       const membersR = await dbQuery(
@@ -1829,32 +1860,30 @@ function registerDashboardApi(deps) {
       );
       const members = membersR.rows;
 
-      // Slackチャンネル履歴から今日の投稿者を取得
-      const fetchPosters = async (channelId) => {
-        if (!channelId) return new Set();
-        try {
-          const result = await slackClient.conversations.history({
-            channel: channelId, oldest: dayStartTs, limit: 1000, inclusive: true,
-          });
-          return new Set(
-            (result.messages || [])
-              .filter(m => !m.bot_id && !m.subtype)
-              .map(m => m.user)
-          );
-        } catch { return new Set(); }
-      };
+      // 今日の打刻状況をDBから取得
+      const stampsR = await dbQuery(`
+        SELECT DISTINCT ON (slack_user_id, stamp_type) slack_user_id, stamp_type, stamped_at, ok
+        FROM hrmos_stamps
+        WHERE team_id=$1 AND stamped_at >= $2 AND ok=true
+        ORDER BY slack_user_id, stamp_type, stamped_at ASC
+      `, [teamId, dayStart.toISOString()]);
 
-      const [inPosters, outPosters] = await Promise.all([
-        fetchPosters(REPORT_IN_CH),
-        fetchPosters(REPORT_OUT_CH),
-      ]);
+      const stampedIn  = new Set(stampsR.rows.filter(s => s.stamp_type === 1).map(s => s.slack_user_id));
+      const stampedOut = new Set(stampsR.rows.filter(s => s.stamp_type === 2).map(s => s.slack_user_id));
+      const stampTimes = {};
+      for (const s of stampsR.rows) {
+        if (!stampTimes[s.slack_user_id]) stampTimes[s.slack_user_id] = {};
+        stampTimes[s.slack_user_id][s.stamp_type] = s.stamped_at;
+      }
 
       const status = members.map(m => ({
         userId: m.user_id,
         displayName: m.display_name,
         avatarUrl: m.avatar_url,
-        submittedIn:  inPosters.has(m.user_id),
-        submittedOut: outPosters.has(m.user_id),
+        submittedIn:  stampedIn.has(m.user_id),
+        submittedOut: stampedOut.has(m.user_id),
+        clockInAt:  stampTimes[m.user_id]?.[1] || null,
+        clockOutAt: stampTimes[m.user_id]?.[2] || null,
       }));
 
       res.json({

@@ -753,24 +753,111 @@ function TaskCard({ t, members, onClick }) {
 
 // ── 勤怠ウィジェット ───────────────────────────────────────────────
 function AttendanceWidget() {
-  const [myAtt, setMyAtt]       = useState(null);
+  const [myAtt, setMyAtt]         = useState(null);
   const [teamStatus, setTeamStatus] = useState(null);
-  const [showDetail, setShowDetail] = useState(false);
+  const [showDetail, setShowDetail] = useState(null); // null | 'missing_in' | 'missing_out' | 'all'
 
   useEffect(() => {
     api.myAttendance().then(setMyAtt).catch(() => {});
     api.teamReportStatus().then(setTeamStatus).catch(() => {});
   }, []);
 
-  const fmtTime = (stamp) => {
-    if (!stamp?.ok || !stamp?.stamped_at) return null;
-    return new Date(stamp.stamped_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+  const fmtTime = (isoStr) => {
+    if (!isoStr) return null;
+    return new Date(isoStr).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
   };
 
-  const inTime  = fmtTime(myAtt?.clockIn);
-  const outTime = fmtTime(myAtt?.clockOut);
+  const inTime  = myAtt?.clockIn?.ok  ? fmtTime(myAtt.clockIn.stamped_at)  : null;
+  const outTime = myAtt?.clockOut?.ok ? fmtTime(myAtt.clockOut.stamped_at) : null;
 
-  const StampBadge = ({ time, label }) => (
+  const missing = teamStatus ? {
+    in:  teamStatus.members.filter(m => !m.submittedIn),
+    out: teamStatus.members.filter(m => !m.submittedOut),
+  } : null;
+
+  const detailMembers = showDetail === 'missing_in'  ? missing?.in
+                      : showDetail === 'missing_out' ? missing?.out
+                      : teamStatus?.members;
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '12px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+
+        {/* 自分の打刻 */}
+        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151' }}>本日の勤怠</span>
+        <StampBadge label="出勤" time={inTime} />
+        <StampBadge label="退勤" time={outTime} />
+
+        <div style={{ width: 1, height: 20, background: '#e2e8f0', flexShrink: 0 }} />
+
+        {/* チーム打刻状況 */}
+        {teamStatus && missing && (
+          <>
+            <MissingBadge
+              label="出勤未打刻"
+              count={missing.in.length}
+              total={teamStatus.summary.total}
+              color="#ef4444"
+              active={showDetail === 'missing_in'}
+              onClick={() => setShowDetail(v => v === 'missing_in' ? null : 'missing_in')}
+            />
+            <MissingBadge
+              label="退勤未打刻"
+              count={missing.out.length}
+              total={teamStatus.summary.total}
+              color="#f59e0b"
+              active={showDetail === 'missing_out'}
+              onClick={() => setShowDetail(v => v === 'missing_out' ? null : 'missing_out')}
+            />
+            <button onClick={() => setShowDetail(v => v === 'all' ? null : 'all')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.72rem', color: '#94a3b8', padding: 0 }}>
+              全員 {showDetail === 'all' ? '▲' : '▼'}
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* 詳細一覧 */}
+      {showDetail && teamStatus && detailMembers && (
+        <div style={{ marginTop: 10, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
+          <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginBottom: 8 }}>
+            {showDetail === 'missing_in'  && `出勤未打刻 ${missing.in.length}人`}
+            {showDetail === 'missing_out' && `退勤未打刻 ${missing.out.length}人`}
+            {showDetail === 'all'         && `全員 ${teamStatus.summary.total}人`}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+            {detailMembers.map(m => (
+              <div key={m.userId} style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px',
+                borderRadius: 7, background: (!m.submittedIn && showDetail === 'all') ? '#fef2f2' : '#f8fafc',
+              }}>
+                {m.avatarUrl
+                  ? <img src={m.avatarUrl} alt="" style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }} />
+                  : <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#e2e8f0', flexShrink: 0 }} />}
+                <span style={{ fontSize: '0.75rem', color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {m.displayName}
+                </span>
+                {showDetail === 'all' && (
+                  <>
+                    <span title="出勤" style={{ fontSize: '0.65rem', color: m.submittedIn ? '#3b82f6' : '#e5e7eb' }}>
+                      {m.submittedIn ? `▶${fmtTime(m.clockInAt) || ''}` : '─'}
+                    </span>
+                    <span title="退勤" style={{ fontSize: '0.65rem', color: m.submittedOut ? '#8b5cf6' : '#e5e7eb' }}>
+                      {m.submittedOut ? `◀${fmtTime(m.clockOutAt) || ''}` : '─'}
+                    </span>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StampBadge({ label, time }) {
+  return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
       <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{label}</span>
       {time
@@ -778,68 +865,22 @@ function AttendanceWidget() {
         : <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>未打刻</span>}
     </div>
   );
-
-  return (
-    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '12px 16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        {/* 自分の打刻 */}
-        <div style={{ display: 'flex', align: 'center', gap: 4, marginRight: 4 }}>
-          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151' }}>本日の勤怠</span>
-        </div>
-        <div style={{ display: 'flex', gap: 14 }}>
-          <StampBadge label="出勤" time={inTime} />
-          <StampBadge label="退勤" time={outTime} />
-        </div>
-
-        <div style={{ width: 1, height: 20, background: '#e2e8f0', flexShrink: 0 }} />
-
-        {/* チーム提出状況 */}
-        {teamStatus && (
-          <button onClick={() => setShowDetail(v => !v)} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-            display: 'flex', gap: 12, alignItems: 'center',
-          }}>
-            <StatusPill label="出勤日報" done={teamStatus.summary.submittedIn} total={teamStatus.summary.total} color="#3b82f6" />
-            <StatusPill label="退勤日報" done={teamStatus.summary.submittedOut} total={teamStatus.summary.total} color="#8b5cf6" />
-            <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{showDetail ? '▲' : '▼'}</span>
-          </button>
-        )}
-      </div>
-
-      {/* 詳細パネル */}
-      {showDetail && teamStatus && (
-        <div style={{ marginTop: 12, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-            {teamStatus.members.map(m => (
-              <div key={m.userId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {m.avatarUrl
-                  ? <img src={m.avatarUrl} alt="" style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }} />
-                  : <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#e2e8f0', flexShrink: 0 }} />}
-                <span style={{ fontSize: '0.75rem', color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.displayName}</span>
-                <span style={{ fontSize: '0.7rem' }}>{m.submittedIn ? '🟦' : '⬜'}</span>
-                <span style={{ fontSize: '0.7rem' }}>{m.submittedOut ? '🟪' : '⬜'}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 8, fontSize: '0.68rem', color: '#94a3b8' }}>🟦=出勤日報　🟪=退勤日報</div>
-        </div>
-      )}
-    </div>
-  );
 }
 
-function StatusPill({ label, done, total, color }) {
-  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+function MissingBadge({ label, count, total, color, active, onClick }) {
+  const allOk = count === 0;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{label}</span>
-        <span style={{ fontSize: '0.7rem', fontWeight: 700, color }}>{done}/{total}</span>
-      </div>
-      <div style={{ width: 80, height: 4, background: '#f1f5f9', borderRadius: 2 }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.3s' }} />
-      </div>
-    </div>
+    <button onClick={onClick} style={{
+      background: allOk ? '#f0fdf4' : (active ? color : '#fff'),
+      border: `1px solid ${allOk ? '#bbf7d0' : color}`,
+      borderRadius: 20, padding: '3px 10px', cursor: 'pointer',
+      display: 'flex', alignItems: 'center', gap: 5,
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: allOk ? '#22c55e' : color, flexShrink: 0 }} />
+      <span style={{ fontSize: '0.72rem', fontWeight: 600, color: allOk ? '#16a34a' : (active ? '#fff' : color) }}>
+        {allOk ? `${label} 全員OK` : `${label} ${count}人`}
+      </span>
+    </button>
   );
 }
 

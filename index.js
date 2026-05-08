@@ -3011,37 +3011,29 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     res.sendFile(path.join(distPath, "index.html"));
   });
 
-  // ── 出勤日報 → IEYASU 出勤打刻 ──────────────────────────────
-  const REPORT_IN_CH  = process.env.RANKING_REPORT_IN_CHANNEL_ID  || '';
-  const REPORT_OUT_CH = process.env.RANKING_REPORT_OUT_CHANNEL_ID || '';
+  // ── 出勤日報 → IEYASU 出勤打刻（複数チャンネル対応）──────────────
+  const toChSet = (envVal) => new Set((envVal || '').split(',').map(s => s.trim()).filter(Boolean));
+  const STAMP_IN_CHS  = toChSet(process.env.RANKING_REPORT_IN_CHANNEL_ID);
+  const STAMP_OUT_CHS = toChSet(process.env.RANKING_REPORT_OUT_CHANNEL_ID);
 
-  if (REPORT_IN_CH) {
-    app.message(async ({ message, client }) => {
-      if (message.channel !== REPORT_IN_CH || message.bot_id || message.subtype) return;
-      const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
-      console.log(`[IEYASU] 出勤日報受信 user:${message.user}`);
-      const result = await stampAttendance(client, message.user, 1);
-      await dbQuery(
-        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason)
-         VALUES (gen_random_uuid(), $1, $2, 1, $3, $4, $5)`,
-        [teamId, message.user, result.ok, result.userId || null, result.ok ? null : result.reason]
-      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-      if (!result.ok) console.warn('[IEYASU] 出勤打刻失敗:', result);
-    });
-  }
+  const doStamp = async (client, message, stampType) => {
+    if (message.bot_id || message.subtype) return;
+    const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
+    const label = stampType === 1 ? '出勤' : '退勤';
+    console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${message.user}`);
+    const result = await stampAttendance(client, message.user, stampType);
+    await dbQuery(
+      `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
+      [teamId, message.user, stampType, result.ok, result.userId || null, result.ok ? null : result.reason]
+    ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
+    if (!result.ok) console.warn(`[IEYASU] ${label}打刻失敗:`, result);
+  };
 
-  if (REPORT_OUT_CH) {
+  if (STAMP_IN_CHS.size > 0 || STAMP_OUT_CHS.size > 0) {
     app.message(async ({ message, client }) => {
-      if (message.channel !== REPORT_OUT_CH || message.bot_id || message.subtype) return;
-      const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
-      console.log(`[IEYASU] 退勤日報受信 user:${message.user}`);
-      const result = await stampAttendance(client, message.user, 2);
-      await dbQuery(
-        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason)
-         VALUES (gen_random_uuid(), $1, $2, 2, $3, $4, $5)`,
-        [teamId, message.user, result.ok, result.userId || null, result.ok ? null : result.reason]
-      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-      if (!result.ok) console.warn('[IEYASU] 退勤打刻失敗:', result);
+      if (STAMP_IN_CHS.has(message.channel))  await doStamp(client, message, 1);
+      if (STAMP_OUT_CHS.has(message.channel)) await doStamp(client, message, 2);
     });
   }
 

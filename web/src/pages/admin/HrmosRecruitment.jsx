@@ -43,6 +43,7 @@ export default function HrmosRecruitment() {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [sheetUrl, setSheetUrl] = useState('');
   const [error, setError] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -88,6 +89,22 @@ export default function HrmosRecruitment() {
 
   const onFileChange = (e) => handleImport(e.target.files?.[0]);
 
+  const handleSheetImport = async () => {
+    if (!sheetUrl.trim()) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await api.hrmosImportSheet(sheetUrl.trim());
+      setImportResult(result);
+      await loadSummary();
+      await fetchAnalytics(from, to);
+    } catch (e) {
+      setImportResult({ ok: false, error: e.message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const onDrop = (e) => {
     e.preventDefault();
     setDragging(false);
@@ -109,9 +126,45 @@ export default function HrmosRecruitment() {
         )}
       </div>
 
-      {/* CSV アップロード */}
+      {/* インポートセクション */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 20, marginBottom: 24 }}>
-        <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12 }}>CSVインポート（HRMOSからエクスポートしたCSVをアップロード）</div>
+        <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 14 }}>データ取り込み</div>
+
+        {/* スプシURL取り込み */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: 6 }}>Google スプレッドシートから取り込む（推奨）</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              value={sheetUrl}
+              onChange={e => setSheetUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              style={{ flex: 1, border: '1px solid #d1d5db', borderRadius: 6, padding: '7px 12px', fontSize: '0.85rem' }}
+            />
+            <button
+              onClick={handleSheetImport}
+              disabled={importing || !sheetUrl.trim()}
+              style={{
+                background: importing ? '#9ca3af' : '#10b981', color: '#fff', border: 'none',
+                borderRadius: 6, padding: '7px 16px', fontSize: '0.85rem', cursor: importing ? 'not-allowed' : 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
+              }}
+            >
+              {importing ? '取り込み中...' : 'スプシから取り込む'}
+            </button>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 4 }}>
+            ※ スプレッドシートをサービスアカウントに共有する必要があります
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+          <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>または</span>
+          <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+        </div>
+
+        {/* CSVアップロード */}
+        <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: 6 }}>CSVファイルをアップロード</div>
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
@@ -119,7 +172,7 @@ export default function HrmosRecruitment() {
           onClick={() => fileRef.current?.click()}
           style={{
             border: `2px dashed ${dragging ? '#3b82f6' : '#d1d5db'}`,
-            borderRadius: 8, padding: '28px 20px', textAlign: 'center',
+            borderRadius: 8, padding: '20px', textAlign: 'center',
             background: dragging ? '#eff6ff' : '#f9fafb',
             cursor: 'pointer', transition: 'all 0.15s',
           }}
@@ -127,7 +180,7 @@ export default function HrmosRecruitment() {
           <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={onFileChange} />
           {importing
             ? <span style={{ color: '#3b82f6', fontWeight: 600 }}>取り込み中...</span>
-            : <span style={{ color: '#6b7280', fontSize: '0.88rem' }}>CSVファイルをドロップ、またはクリックして選択</span>
+            : <span style={{ color: '#6b7280', fontSize: '0.85rem' }}>CSVをドロップ、またはクリックして選択</span>
           }
         </div>
 

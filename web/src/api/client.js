@@ -531,6 +531,9 @@ export const api = {
     form.append('file', file);
     return apiFetch('/admin/hrmos-recruitment/import', { method: 'POST', body: form });
   },
+  hrmosImportSheet: (spreadsheetUrl) => apiFetch('/admin/hrmos-recruitment/import-sheet', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spreadsheetUrl }),
+  }),
   hrmosAnalytics: (params = {}) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v))).toString();
     return apiFetch(`/admin/hrmos-recruitment/analytics${qs ? '?' + qs : ''}`);

@@ -1370,113 +1370,153 @@ function registerDashboardApi(deps) {
   let hrmosUpload;
   try {
     const multer = require('multer');
-    hrmosUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+    hrmosUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
   } catch {
     hrmosUpload = { single: () => (req, res, next) => res.status(503).json({ error: 'csv_import_unavailable' }) };
   }
 
-  // POST /api/dashboard/admin/hrmos-recruitment/import  — CSV取り込み
+  // CSVパース共通（ダブルクォート対応）
+  function hrmosParseCSVLine(line) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+      else { cur += c; }
+    }
+    result.push(cur);
+    return result;
+  }
+
+  async function hrmosImportCsv(teamId, raw) {
+    const { randomUUID } = require('crypto');
+    const lines = raw.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) throw new Error('empty_csv');
+
+    const headers = hrmosParseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+    const idx = (names) => {
+      for (const n of names) {
+        const i = headers.findIndex(h => h.includes(n));
+        if (i !== -1) return i;
+      }
+      return -1;
+    };
+
+    const col = {
+      appId:        idx(['応募ID']),
+      jobId:        idx(['求人ID']),
+      jobName:      idx(['求人名']),
+      posName:      idx(['選考ポジション名', 'ポジション名']),
+      appliedDate:  idx(['応募日']),
+      name:         idx(['氏名', '名前']),
+      source:       idx(['応募経路']),
+      sourceDetail: idx(['応募経路詳細']),
+      label:        idx(['ラベル']),
+      status:       idx(['選考ステータス', 'ステータス']),
+      offerDate:    idx(['内定日']),
+      joinDate:     idx(['入社日']),
+      declineDate:  idx(['辞退日']),
+    };
+
+    const get = (cols, i) => i >= 0 ? (cols[i] || '').replace(/^"|"$/g, '').trim() || null : null;
+    const toDate = v => {
+      if (!v) return null;
+      const d = new Date(v.replace(/\//g, '-'));
+      return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    };
+
+    let imported = 0, skipped = 0, errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = hrmosParseCSVLine(lines[i]);
+      if (cols.every(c => !c.trim())) continue;
+      const appId = get(cols, col.appId);
+      try {
+        const id = randomUUID();
+        await dbQuery(`
+          INSERT INTO hrmos_applicants
+            (id, team_id, app_id, job_id, job_name, position_name, applied_date,
+             applicant_name, source, source_detail, label, status,
+             offer_date, join_date, decline_date, imported_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+          ON CONFLICT (team_id, app_id) WHERE app_id IS NOT NULL
+          DO UPDATE SET
+            job_id=EXCLUDED.job_id, job_name=EXCLUDED.job_name,
+            position_name=EXCLUDED.position_name, applied_date=EXCLUDED.applied_date,
+            applicant_name=EXCLUDED.applicant_name, source=EXCLUDED.source,
+            source_detail=EXCLUDED.source_detail, label=EXCLUDED.label,
+            status=EXCLUDED.status, offer_date=EXCLUDED.offer_date,
+            join_date=EXCLUDED.join_date, decline_date=EXCLUDED.decline_date,
+            imported_at=now()
+        `, [
+          id, teamId, appId,
+          get(cols, col.jobId), get(cols, col.jobName), get(cols, col.posName),
+          toDate(get(cols, col.appliedDate)),
+          get(cols, col.name), get(cols, col.source), get(cols, col.sourceDetail),
+          get(cols, col.label), get(cols, col.status),
+          toDate(get(cols, col.offerDate)), toDate(get(cols, col.joinDate)), toDate(get(cols, col.declineDate)),
+        ]);
+        imported++;
+      } catch (e) {
+        errors.push({ line: i + 1, error: e.message });
+        skipped++;
+      }
+    }
+    console.log(`[HRMOS採用] import: ${imported}件 imported, ${skipped}件 skipped`);
+    return { ok: true, imported, skipped, errors: errors.slice(0, 10) };
+  }
+
+  // POST /api/dashboard/admin/hrmos-recruitment/import  — CSVファイルアップロード
   expressApp.post('/api/dashboard/admin/hrmos-recruitment/import', authWithRole, adminOrPersonnelOnly, hrmosUpload.single('file'), async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       if (!req.file) return res.status(400).json({ error: 'file_required' });
-
-      const { randomUUID } = require('crypto');
       const raw = req.file.buffer.toString('utf-8');
-
-      // CSVパース（ダブルクォートで囲まれたフィールド対応）
-      function parseCsvLine(line) {
-        const result = [];
-        let cur = '', inQ = false;
-        for (let i = 0; i < line.length; i++) {
-          const c = line[i];
-          if (c === '"') { inQ = !inQ; }
-          else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
-          else { cur += c; }
-        }
-        result.push(cur);
-        return result;
-      }
-
-      const lines = raw.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) return res.status(400).json({ error: 'empty_csv' });
-
-      const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
-
-      // ヘッダー名でカラム位置を特定
-      const idx = (names) => {
-        for (const n of names) {
-          const i = headers.findIndex(h => h.includes(n));
-          if (i !== -1) return i;
-        }
-        return -1;
-      };
-
-      const col = {
-        appId:        idx(['応募ID']),
-        jobId:        idx(['求人ID']),
-        jobName:      idx(['求人名']),
-        posName:      idx(['選考ポジション名', 'ポジション名']),
-        appliedDate:  idx(['応募日']),
-        name:         idx(['氏名', '名前']),
-        source:       idx(['応募経路']),
-        sourceDetail: idx(['応募経路詳細']),
-        label:        idx(['ラベル']),
-        status:       idx(['選考ステータス', 'ステータス']),
-        offerDate:    idx(['内定日']),
-        joinDate:     idx(['入社日']),
-        declineDate:  idx(['辞退日']),
-      };
-
-      const get = (cols, i) => i >= 0 ? (cols[i] || '').replace(/^"|"$/g, '').trim() || null : null;
-      const toDate = v => {
-        if (!v) return null;
-        const d = new Date(v.replace(/\//g, '-'));
-        return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-      };
-
-      let imported = 0, skipped = 0, errors = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = parseCsvLine(lines[i]);
-        if (cols.every(c => !c.trim())) continue;
-
-        const appId = get(cols, col.appId);
-        try {
-          const id = randomUUID();
-          await dbQuery(`
-            INSERT INTO hrmos_applicants
-              (id, team_id, app_id, job_id, job_name, position_name, applied_date,
-               applicant_name, source, source_detail, label, status,
-               offer_date, join_date, decline_date, imported_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
-            ON CONFLICT (team_id, app_id) WHERE app_id IS NOT NULL
-            DO UPDATE SET
-              job_id=EXCLUDED.job_id, job_name=EXCLUDED.job_name,
-              position_name=EXCLUDED.position_name, applied_date=EXCLUDED.applied_date,
-              applicant_name=EXCLUDED.applicant_name, source=EXCLUDED.source,
-              source_detail=EXCLUDED.source_detail, label=EXCLUDED.label,
-              status=EXCLUDED.status, offer_date=EXCLUDED.offer_date,
-              join_date=EXCLUDED.join_date, decline_date=EXCLUDED.decline_date,
-              imported_at=now()
-          `, [
-            id, teamId, appId,
-            get(cols, col.jobId), get(cols, col.jobName), get(cols, col.posName),
-            toDate(get(cols, col.appliedDate)),
-            get(cols, col.name), get(cols, col.source), get(cols, col.sourceDetail),
-            get(cols, col.label), get(cols, col.status),
-            toDate(get(cols, col.offerDate)), toDate(get(cols, col.joinDate)), toDate(get(cols, col.declineDate)),
-          ]);
-          imported++;
-        } catch (e) {
-          errors.push({ line: i + 1, error: e.message });
-          skipped++;
-        }
-      }
-      console.log(`[HRMOS採用] import: ${imported}件 imported, ${skipped}件 skipped`);
-      res.json({ ok: true, imported, skipped, errors: errors.slice(0, 10) });
+      const result = await hrmosImportCsv(teamId, raw);
+      res.json(result);
     } catch (e) {
+      if (e.message === 'empty_csv') return res.status(400).json({ error: 'empty_csv' });
       console.error('[HRMOS採用] import error:', e);
       res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // POST /api/dashboard/admin/hrmos-recruitment/import-sheet  — Google Sheetsから取り込み
+  expressApp.post('/api/dashboard/admin/hrmos-recruitment/import-sheet', authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { spreadsheetUrl } = req.body;
+      if (!spreadsheetUrl) return res.status(400).json({ error: 'spreadsheetUrl required' });
+
+      // スプレッドシートIDを抽出
+      const idMatch = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      if (!idMatch) return res.status(400).json({ error: 'invalid_url' });
+      const fileId = idMatch[1];
+
+      // Drive API でCSVとしてエクスポート
+      const { google } = require('googleapis');
+      const path = require('path');
+      const KEY_PATH = path.join(__dirname, '../../drive-service-account.json');
+      const auth = new google.auth.GoogleAuth({
+        keyFile: KEY_PATH,
+        scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+      });
+      const drive = google.drive({ version: 'v3', auth });
+
+      const exportRes = await drive.files.export(
+        { fileId, mimeType: 'text/csv', supportsAllDrives: true },
+        { responseType: 'text' }
+      );
+      const raw = exportRes.data;
+      if (!raw || raw.length < 10) return res.status(400).json({ error: 'empty_sheet' });
+
+      const result = await hrmosImportCsv(teamId, raw);
+      res.json(result);
+    } catch (e) {
+      console.error('[HRMOS採用] sheet import error:', e.message);
+      if (e.code === 404) return res.status(404).json({ error: 'sheet_not_found', message: 'スプレッドシートが見つからないか、サービスアカウントに共有されていません' });
+      if (e.code === 403) return res.status(403).json({ error: 'sheet_permission', message: 'スプレッドシートへのアクセス権がありません。サービスアカウントに共有してください' });
+      res.status(500).json({ error: 'internal', message: e.message });
     }
   });
 

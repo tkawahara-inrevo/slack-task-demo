@@ -1375,29 +1375,26 @@ function registerDashboardApi(deps) {
     hrmosUpload = { single: () => (req, res, next) => res.status(503).json({ error: 'csv_import_unavailable' }) };
   }
 
-  // CSVパーサー: クォート内の改行・カンマに対応した全文パース
-  function hrmosParseCSV(text) {
-    // CRLF → LF 正規化
+  // CSVパーサー: カンマ or タブ区切り、クォート内改行対応
+  function hrmosParseCSV(text, delim) {
     const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const rows = [];
     let row = [], field = '', inQ = false;
 
     for (let i = 0; i <= s.length; i++) {
-      const c = i < s.length ? s[i] : '\n'; // 末尾センチネル
+      const c = i < s.length ? s[i] : '\n';
 
       if (inQ) {
         if (c === '"') {
-          if (s[i + 1] === '"') { field += '"'; i++; } // "" → "
+          if (s[i + 1] === '"') { field += '"'; i++; }
           else { inQ = false; }
         } else {
-          field += c; // クォート内の改行もフィールドの一部
+          field += c;
         }
       } else {
-        if (c === '"') {
-          inQ = true;
-        } else if (c === ',') {
-          row.push(field); field = '';
-        } else if (c === '\n') {
+        if (c === '"') { inQ = true; }
+        else if (c === delim) { row.push(field); field = ''; }
+        else if (c === '\n') {
           row.push(field); field = '';
           if (row.some(f => f.trim())) rows.push(row);
           row = [];
@@ -1409,10 +1406,20 @@ function registerDashboardApi(deps) {
     return rows;
   }
 
+  // カンマとタブどちらが区切り文字か判定
+  function hrmosDetectDelim(text) {
+    const first = text.slice(0, 2000);
+    const tabs   = (first.match(/\t/g) || []).length;
+    const commas = (first.match(/,/g) || []).length;
+    return tabs > commas ? '\t' : ',';
+  }
+
   async function hrmosImportCsv(teamId, raw) {
     const { randomUUID } = require('crypto');
-    const rows = hrmosParseCSV(raw);
+    const delim = hrmosDetectDelim(raw);
+    const rows = hrmosParseCSV(raw, delim);
     if (rows.length < 2) throw new Error('empty_csv');
+    console.log(`[HRMOS] delim=${delim === '\t' ? 'TAB' : 'COMMA'}`);
 
     // ヘッダー行を自動検索（メタ行がある場合も対応）
     let headerRowIdx = rows.findIndex(row => row.some(c => c.includes('応募ID') || c.includes('応募者ID')));
@@ -1461,35 +1468,46 @@ function registerDashboardApi(deps) {
     let imported = 0, skipped = 0, errors = [];
     for (let i = 0; i < dataRows.length; i++) {
       const cols = dataRows[i];
-      const appId = get(cols, col.appId);
+      const appId = (get(cols, col.appId) || '').slice(0, 200) || null;
+      const vals = [
+        teamId, appId,
+        get(cols, col.jobId), get(cols, col.jobName), get(cols, col.posName),
+        toDate(get(cols, col.appliedDate)),
+        get(cols, col.name), get(cols, col.source), get(cols, col.sourceDetail),
+        get(cols, col.label), get(cols, col.status),
+        toDate(get(cols, col.offerDate)), toDate(get(cols, col.joinDate)), toDate(get(cols, col.declineDate)),
+      ];
       try {
-        const id = randomUUID();
-        await dbQuery(`
-          INSERT INTO hrmos_applicants
-            (id, team_id, app_id, job_id, job_name, position_name, applied_date,
-             applicant_name, source, source_detail, label, status,
-             offer_date, join_date, decline_date, imported_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
-          ON CONFLICT (team_id, app_id) WHERE app_id IS NOT NULL
-          DO UPDATE SET
-            job_id=EXCLUDED.job_id, job_name=EXCLUDED.job_name,
-            position_name=EXCLUDED.position_name, applied_date=EXCLUDED.applied_date,
-            applicant_name=EXCLUDED.applicant_name, source=EXCLUDED.source,
-            source_detail=EXCLUDED.source_detail, label=EXCLUDED.label,
-            status=EXCLUDED.status, offer_date=EXCLUDED.offer_date,
-            join_date=EXCLUDED.join_date, decline_date=EXCLUDED.decline_date,
-            imported_at=now()
-        `, [
-          id, teamId, appId,
-          get(cols, col.jobId), get(cols, col.jobName), get(cols, col.posName),
-          toDate(get(cols, col.appliedDate)),
-          get(cols, col.name), get(cols, col.source), get(cols, col.sourceDetail),
-          get(cols, col.label), get(cols, col.status),
-          toDate(get(cols, col.offerDate)), toDate(get(cols, col.joinDate)), toDate(get(cols, col.declineDate)),
-        ]);
+        if (appId) {
+          // app_id があれば UPSERT (既存を UPDATE)
+          await dbQuery(`
+            INSERT INTO hrmos_applicants
+              (id, team_id, app_id, job_id, job_name, position_name, applied_date,
+               applicant_name, source, source_detail, label, status,
+               offer_date, join_date, decline_date, imported_at)
+            VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+            ON CONFLICT DO NOTHING
+          `, vals);
+          // 既存レコードを UPDATE
+          await dbQuery(`
+            UPDATE hrmos_applicants SET
+              job_id=$3, job_name=$4, position_name=$5, applied_date=$6,
+              applicant_name=$7, source=$8, source_detail=$9, label=$10,
+              status=$11, offer_date=$12, join_date=$13, decline_date=$14, imported_at=now()
+            WHERE team_id=$1 AND app_id=$2
+          `, vals);
+        } else {
+          await dbQuery(`
+            INSERT INTO hrmos_applicants
+              (id, team_id, app_id, job_id, job_name, position_name, applied_date,
+               applicant_name, source, source_detail, label, status,
+               offer_date, join_date, decline_date, imported_at)
+            VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+          `, vals);
+        }
         imported++;
       } catch (e) {
-        errors.push({ line: headerRowIdx + i + 2, error: e.message });
+        errors.push({ line: headerRowIdx + i + 2, error: e.message.slice(0, 100) });
         skipped++;
       }
     }

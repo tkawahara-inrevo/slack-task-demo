@@ -190,13 +190,14 @@ export default function HrmosRecruitment() {
             background: importResult.ok ? '#f0fdf4' : '#fef2f2',
             border: `1px solid ${importResult.ok ? '#bbf7d0' : '#fecaca'}`,
             fontSize: '0.85rem', color: importResult.ok ? '#15803d' : '#dc2626',
+            overflow: 'hidden',
           }}>
             {importResult.ok
               ? <>
                   {`✅ 取り込み完了: ${importResult.imported}件インポート、${importResult.skipped}件スキップ`}
                   {importResult.colsFound && Object.keys(importResult.colsFound).length === 0 && (
-                    <div style={{ marginTop: 6, color: '#dc2626', fontWeight: 600 }}>
-                      ⚠️ 列が1つも検出されませんでした。CSVのエンコーディングや形式を確認してください。
+                    <div style={{ marginTop: 6, color: '#b45309', fontWeight: 600 }}>
+                      ⚠️ 列が1つも検出されませんでした。CSVファイルのエンコーディングを確認してください（UTF-8推奨）。
                     </div>
                   )}
                   {importResult.colsFound && Object.keys(importResult.colsFound).length > 0 && (
@@ -207,8 +208,8 @@ export default function HrmosRecruitment() {
                 </>
               : `❌ エラー: ${importResult.error}`}
             {importResult.errors?.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#dc2626' }}>
-                {importResult.errors.map((e, i) => <div key={i}>行{e.line}: {e.error}</div>)}
+              <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#dc2626', maxHeight: 120, overflowY: 'auto', wordBreak: 'break-all' }}>
+                {importResult.errors.slice(0, 5).map((e, i) => <div key={i}>行{e.line}: {e.error}</div>)}
               </div>
             )}
           </div>

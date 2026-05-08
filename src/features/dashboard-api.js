@@ -1597,7 +1597,7 @@ function registerDashboardApi(deps) {
   expressApp.get('/api/dashboard/admin/hrmos-recruitment/analytics', authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { from, to } = req.query;
+      const { from, to, granularity = 'month' } = req.query;
 
       const conditions = ['team_id = $1'];
       const params = [teamId];
@@ -1605,8 +1605,16 @@ function registerDashboardApi(deps) {
       if (to)   { conditions.push(`applied_date <= $${params.length + 1}`); params.push(to); }
       const where = conditions.join(' AND ');
 
+      // 粒度別のSQLフォーマット
+      const trendExpr = {
+        day:   `TO_CHAR(applied_date, 'YYYY-MM-DD')`,
+        '3day': `TO_CHAR(DATE '2000-01-01' + ((applied_date - DATE '2000-01-01') / 3) * 3, 'YYYY-MM-DD')`,
+        week:  `TO_CHAR(date_trunc('week', applied_date::timestamp), 'YYYY-MM-DD')`,
+        month: `TO_CHAR(applied_date, 'YYYY-MM')`,
+      }[granularity] || `TO_CHAR(applied_date, 'YYYY-MM')`;
+
       const [totalR, byJobR, bySourceR, byLabelR, byStatusR, trendR, latestImportR] = await Promise.all([
-        dbQuery(`SELECT COUNT(*)::int AS total FROM hrmos_applicants WHERE ${where}`, params),
+        dbQuery(`SELECT COUNT(*)::int AS total, COUNT(DISTINCT job_name)::int AS unique_jobs FROM hrmos_applicants WHERE ${where}`, params),
         dbQuery(`
           SELECT COALESCE(job_name, '不明') AS name, COUNT(*)::int AS cnt
           FROM hrmos_applicants WHERE ${where}
@@ -1628,20 +1636,22 @@ function registerDashboardApi(deps) {
           GROUP BY status ORDER BY cnt DESC
         `, params),
         dbQuery(`
-          SELECT TO_CHAR(applied_date, 'YYYY-MM') AS month, COUNT(*)::int AS cnt
+          SELECT ${trendExpr} AS period, COUNT(*)::int AS cnt
           FROM hrmos_applicants WHERE ${where} AND applied_date IS NOT NULL
-          GROUP BY month ORDER BY month
+          GROUP BY period ORDER BY period
         `, params),
         dbQuery(`SELECT MAX(imported_at) AS latest FROM hrmos_applicants WHERE team_id = $1`, [teamId]),
       ]);
 
       res.json({
         total: totalR.rows[0]?.total ?? 0,
+        uniqueJobs: totalR.rows[0]?.unique_jobs ?? 0,
         byJob: byJobR.rows,
         bySource: bySourceR.rows,
         byLabel: byLabelR.rows,
         byStatus: byStatusR.rows,
         trend: trendR.rows,
+        granularity,
         latestImport: latestImportR.rows[0]?.latest ?? null,
       });
     } catch (e) {

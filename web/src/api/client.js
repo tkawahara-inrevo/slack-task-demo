@@ -535,7 +535,7 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spreadsheetUrl }),
   }),
   hrmosAnalytics: (params = {}) => {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v))).toString();
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))).toString();
     return apiFetch(`/admin/hrmos-recruitment/analytics${qs ? '?' + qs : ''}`);
   },
   hrmosSummary: () => apiFetch('/admin/hrmos-recruitment/summary'),

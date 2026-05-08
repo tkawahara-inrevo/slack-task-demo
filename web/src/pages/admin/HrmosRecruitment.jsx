@@ -54,11 +54,21 @@ export default function HrmosRecruitment() {
     try { setSummary(await api.hrmosSummary()); } catch {}
   }, []);
 
+  const calcGranularity = (f, t) => {
+    if (!f || !t) return 'month';
+    const days = (new Date(t) - new Date(f)) / 86400000;
+    if (days <= 10) return 'day';
+    if (days <= 29) return '3day';
+    if (days <= 89) return 'week';
+    return 'month';
+  };
+
   const fetchAnalytics = useCallback(async (fromDate, toDate) => {
     setLoading(true);
     setError('');
     try {
-      const data = await api.hrmosAnalytics({ from: fromDate || undefined, to: toDate || undefined });
+      const granularity = calcGranularity(fromDate, toDate);
+      const data = await api.hrmosAnalytics({ from: fromDate || '', to: toDate || '', granularity });
       setAnalytics(data);
     } catch (e) {
       setError(e.message);
@@ -112,7 +122,6 @@ export default function HrmosRecruitment() {
     if (file && file.name.endsWith('.csv')) handleImport(file);
   };
 
-  const totalByStatus = analytics?.byStatus?.reduce((s, r) => s + r.cnt, 0) || 0;
 
   return (
     <div style={{ maxWidth: 1100 }}>
@@ -245,33 +254,39 @@ export default function HrmosRecruitment() {
           {/* KPI */}
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
             <KpiCard label="総応募数" value={analytics.total.toLocaleString()} />
-            {analytics.byStatus.slice(0, 4).map(r => (
+            <KpiCard label="求人数（応募あり）" value={analytics.uniqueJobs?.toLocaleString() ?? '—'} color="#8b5cf6" />
+            {analytics.byStatus.slice(0, 3).map(r => (
               <KpiCard key={r.name} label={r.name} value={r.cnt.toLocaleString()}
-                sub={`${totalByStatus > 0 ? Math.round(r.cnt / analytics.total * 100) : 0}%`}
+                sub={`${analytics.total > 0 ? Math.round(r.cnt / analytics.total * 100) : 0}%`}
                 color={statusColor(r.name)} />
             ))}
           </div>
 
-          {/* 月次推移 */}
+          {/* 応募数推移（粒度自動） */}
           {analytics.trend.length > 0 && (
             <>
-              <SectionTitle>月次応募数推移</SectionTitle>
+              <SectionTitle>
+                応募数推移
+                <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#9ca3af', marginLeft: 8 }}>
+                  {{ day:'日別', '3day':'3日別', week:'週別', month:'月別' }[analytics.granularity] ?? '月別'}
+                </span>
+              </SectionTitle>
               <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={analytics.trend} margin={{ top: 4, right: 20, left: 0, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                    <XAxis dataKey="month" tick={CHART_TICK_STYLE} />
+                    <XAxis dataKey="period" tick={CHART_TICK_STYLE} />
                     <YAxis tick={CHART_TICK_STYLE} allowDecimals={false} />
                     <Tooltip formatter={(v) => [`${v}件`, '応募数']} />
-                    <Line type="monotone" dataKey="cnt" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="cnt" stroke="#3b82f6" strokeWidth={2} dot={analytics.trend.length < 30 ? { r: 3 } : false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </>
           )}
 
-          {/* 求人別 + 応募経路別 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 4 }}>
+          {/* 求人別 + 応募経路別（円グラフ） */}
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 20, marginTop: 4 }}>
             <div>
               <SectionTitle>求人別応募数（上位20件）</SectionTitle>
               <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
@@ -282,7 +297,7 @@ export default function HrmosRecruitment() {
                       <BarChart data={analytics.byJob} layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                         <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={140} />
+                        <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={150} />
                         <Tooltip formatter={(v) => [`${v}件`]} />
                         <Bar dataKey="cnt" fill="#3b82f6" radius={[0, 4, 4, 0]} name="応募数" />
                       </BarChart>
@@ -294,22 +309,21 @@ export default function HrmosRecruitment() {
 
             <div>
               <SectionTitle>応募経路別</SectionTitle>
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
+              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 16 }}>
                 {analytics.bySource.length === 0
                   ? <div style={{ color: '#9ca3af', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>データなし</div>
                   : (
-                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.bySource.length * 28 + 40)}>
-                      <BarChart data={analytics.bySource} layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                        <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={120} />
-                        <Tooltip formatter={(v) => [`${v}件`]} />
-                        <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
-                          {analytics.bySource.map((_, idx) => (
-                            <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
+                    <ResponsiveContainer width="100%" height={Math.max(220, analytics.bySource.length * 22 + 60)}>
+                      <PieChart>
+                        <Pie data={analytics.bySource} dataKey="cnt" nameKey="name"
+                          cx="50%" cy="45%" outerRadius={85}
+                          label={({ name, percent }) => percent > 0.04 ? `${(percent * 100).toFixed(0)}%` : ''}
+                          labelLine={false}>
+                          {analytics.bySource.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={(v, n) => [`${v}件`, n]} />
+                        <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
+                      </PieChart>
                     </ResponsiveContainer>
                   )
                 }
@@ -317,24 +331,24 @@ export default function HrmosRecruitment() {
             </div>
           </div>
 
-          {/* ラベル + 選考ステータス */}
+          {/* ラベル（横棒グラフ） + 選考ステータス */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             <div>
               <SectionTitle>ラベル別</SectionTitle>
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 16 }}>
+              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
                 {analytics.byLabel.length === 0
                   ? <div style={{ color: '#9ca3af', fontSize: '0.85rem', textAlign: 'center', padding: 16 }}>データなし</div>
                   : (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <PieChart>
-                        <Pie data={analytics.byLabel} dataKey="cnt" nameKey="name"
-                          cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          labelLine={false}>
-                          {analytics.byLabel.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                        </Pie>
+                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.byLabel.length * 26)}>
+                      <BarChart data={analytics.byLabel} layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                        <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={130} />
                         <Tooltip formatter={(v) => [`${v}件`]} />
-                        <Legend wrapperStyle={{ fontSize: '0.78rem' }} />
-                      </PieChart>
+                        <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
+                          {analytics.byLabel.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
                   )
                 }
@@ -356,8 +370,7 @@ export default function HrmosRecruitment() {
                         <div style={{
                           height: '100%', borderRadius: 3,
                           width: `${analytics.total > 0 ? Math.round(r.cnt / analytics.total * 100) : 0}%`,
-                          background: statusColor(r.name),
-                          transition: 'width 0.5s ease',
+                          background: statusColor(r.name), transition: 'width 0.5s ease',
                         }} />
                       </div>
                     </div>

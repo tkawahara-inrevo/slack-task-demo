@@ -3017,17 +3017,25 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   const STAMP_OUT_CHS = toChSet(process.env.RANKING_REPORT_OUT_CHANNEL_ID);
 
   const doStamp = async (client, message, stampType) => {
-    // ボット・システムメッセージ・スレッド返信は除外
-    if (message.bot_id || message.subtype) return;
+    // スレッド返信は除外
     if (message.thread_ts && message.thread_ts !== message.ts) return;
+
+    // 実行ユーザーを特定: 通常メッセージはmessage.user、WF botはテキストから<@UXXXXX>を抽出
+    let targetUserId = message.user;
+    if (!targetUserId && (message.bot_id || message.subtype === 'bot_message')) {
+      const match = (message.text || '').match(/<@(U[A-Z0-9]+)>/);
+      if (!match) return; // ユーザーIDが取れなければスキップ
+      targetUserId = match[1];
+    }
+    if (!targetUserId) return;
     const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
     const label = stampType === 1 ? '出勤' : '退勤';
-    console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${message.user}`);
-    const result = await stampAttendance(client, message.user, stampType);
+    console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${targetUserId}`);
+    const result = await stampAttendance(client, targetUserId, stampType);
     await dbQuery(
       `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
-      [teamId, message.user, stampType, result.ok, result.userId || null, result.ok ? null : result.reason]
+      [teamId, targetUserId, stampType, result.ok, result.userId || null, result.ok ? null : result.reason]
     ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
     if (!result.ok) console.warn(`[IEYASU] ${label}打刻失敗:`, result);
   };

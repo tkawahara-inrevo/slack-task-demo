@@ -1660,6 +1660,42 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // GET /api/dashboard/admin/hrmos-recruitment/applicants  — ドリルダウン用応募者一覧
+  expressApp.get('/api/dashboard/admin/hrmos-recruitment/applicants', authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { from, to, label, status, job_name, source } = req.query;
+
+      const conditions = ['team_id = $1'];
+      const params = [teamId];
+      const add = (col, val) => {
+        conditions.push(`${col} = $${params.length + 1}`);
+        params.push(val);
+      };
+      if (from) { conditions.push(`applied_date >= $${params.length + 1}`); params.push(from); }
+      if (to)   { conditions.push(`applied_date <= $${params.length + 1}`); params.push(to); }
+      if (label)    add('COALESCE(label, \'（なし）\')', label);
+      if (status)   add('COALESCE(status, \'不明\')', status);
+      if (job_name) add('COALESCE(job_name, \'不明\')', job_name);
+      if (source)   add('COALESCE(source, \'不明\')', source);
+
+      const r = await dbQuery(`
+        SELECT applicant_name, job_name, position_name, applied_date,
+               source, source_detail, label, status,
+               offer_date, join_date, decline_date
+        FROM hrmos_applicants
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY applied_date DESC NULLS LAST
+        LIMIT 500
+      `, params);
+
+      res.json({ applicants: r.rows, total: r.rows.length });
+    } catch (e) {
+      console.error('[HRMOS採用] applicants error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
   // GET /api/dashboard/admin/hrmos-recruitment/summary  — インポート状況
   expressApp.get('/api/dashboard/admin/hrmos-recruitment/summary', authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {

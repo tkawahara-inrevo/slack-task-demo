@@ -1355,12 +1355,14 @@ function registerDashboardApi(deps) {
           const mention = cand.notify_mention_user_id
             ? cand.notify_mention_user_id.split(',').map(id => `<@${id.trim()}>`).join(' ') + ' '
             : '';
+          const scoreText = (score != null) ? `${score}点` : '未採点';
           const typingInfo = typingLevel ? `\nタイピング: *${typingLevel}*` : '';
-          const text = `${mention}【採用テスト完了】*${cand.name}* さんが実技テストを完了しました\nスコア: *${score ?? '未採点'}点*${typingInfo}\n<${cand.spreadsheet_url}|スプレッドシートを確認>`;
-          const { WebClient } = require("@slack/web-api");
-          const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
-          await slack.chat.postMessage({ channel: cand.notify_channel_id, text });
-        } catch (slackErr) { console.error("Slack通知エラー:", slackErr.message); }
+          const text = `${mention}【採用テスト完了】*${cand.name}* さんが実技テストを完了しました\nスコア: *${scoreText}*${typingInfo}\n<${cand.spreadsheet_url}|スプレッドシートを確認>`;
+          await slackClient.chat.postMessage({ channel: cand.notify_channel_id, text });
+          console.log(`[採用通知] 送信完了: ${cand.name} → ${cand.notify_channel_id}`);
+        } catch (slackErr) {
+          console.error("[採用通知] Slack送信エラー:", slackErr.message);
+        }
       }
 
       res.json({ ok: true });

@@ -1395,6 +1395,7 @@ function registerDashboardApi(deps) {
     if (lines.length < 2) throw new Error('empty_csv');
 
     const headers = hrmosParseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+    console.log('[HRMOS採用] CSV headers detected:', headers.slice(0, 25).join(' | '));
     const idx = (names) => {
       for (const n of names) {
         const i = headers.findIndex(h => h.includes(n));
@@ -1422,6 +1423,10 @@ function registerDashboardApi(deps) {
     const get = (cols, i) => i >= 0 ? (cols[i] || '').replace(/^"|"$/g, '').trim() || null : null;
     const toDate = v => {
       if (!v) return null;
+      // "2026年02月09日" 形式
+      const jp = v.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+      if (jp) return `${jp[1]}-${jp[2].padStart(2,'0')}-${jp[3].padStart(2,'0')}`;
+      // "2026/02/09" or "2026-02-09"
       const d = new Date(v.replace(/\//g, '-'));
       return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
     };
@@ -1471,7 +1476,23 @@ function registerDashboardApi(deps) {
     try {
       const { teamId } = req.dashboardUser;
       if (!req.file) return res.status(400).json({ error: 'file_required' });
-      const raw = req.file.buffer.toString('utf-8');
+      // Shift-JIS / UTF-8 自動判定
+      let raw;
+      try {
+        const iconv = require('iconv-lite');
+        // BOMなしUTF-8 or Shift-JIS を判定: 先頭バイトで簡易チェック
+        const buf = req.file.buffer;
+        const isUtf8 = buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF; // UTF-8 BOM
+        if (isUtf8) {
+          raw = buf.slice(3).toString('utf-8');
+        } else {
+          // まずUTF-8でデコードして日本語ヘッダーが読めるか確認
+          const asUtf8 = buf.toString('utf-8');
+          raw = asUtf8.includes('応募') ? asUtf8 : iconv.decode(buf, 'Shift_JIS');
+        }
+      } catch {
+        raw = req.file.buffer.toString('utf-8');
+      }
       const result = await hrmosImportCsv(teamId, raw);
       res.json(result);
     } catch (e) {

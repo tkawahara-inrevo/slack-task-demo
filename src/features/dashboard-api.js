@@ -1355,8 +1355,9 @@ function registerDashboardApi(deps) {
           const mention = cand.notify_mention_user_id
             ? cand.notify_mention_user_id.split(',').map(id => `<@${id.trim()}>`).join(' ') + ' '
             : '';
-          const scoreText = (score != null) ? `${score}点` : '未採点';
-          const typingInfo = typingLevel ? `\nタイピング: *${typingLevel}*` : '';
+          const scoreText = (score != null) ? `${score}/10点` : '未採点';
+          const typingRaw = scoreDetail?.q13_raw ?? cand.score_detail?.q13_raw;
+          const typingInfo = typingLevel ? `\nタイピング: *${typingLevel}*${typingRaw != null ? `（${typingRaw}）` : ''}` : '';
           const text = `${mention}【採用テスト完了】*${cand.name}* さんが実技テストを完了しました\nスコア: *${scoreText}*${typingInfo}\n<${cand.spreadsheet_url}|スプレッドシートを確認>`;
           await slackClient.chat.postMessage({ channel: cand.notify_channel_id, text });
           console.log(`[採用通知] 送信完了: ${cand.name} → ${cand.notify_channel_id}`);

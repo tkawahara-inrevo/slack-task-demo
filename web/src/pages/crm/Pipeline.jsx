@@ -42,7 +42,7 @@ const STAGE_GROUPS = [
 function fmt(n) {
   if (!n || Number(n) === 0) return null;
   const num = Number(n);
-  if (num >= 1000000) return `¥${(num/10000).toFixed(0)}万`;
+  if (num >= 1000000) return `¥${Math.round(num/10000).toLocaleString()}万`;
   return `¥${num.toLocaleString()}`;
 }
 

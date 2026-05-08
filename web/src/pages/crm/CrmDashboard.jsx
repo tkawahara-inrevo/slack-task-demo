@@ -32,7 +32,7 @@ const YOMI_COLORS = {
 const fmtM = n => {
   if (!n) return '0万';
   const m = Number(n);
-  if (m >= 1e8) return `${(m / 1e8).toFixed(1)}億`;
+  if (m >= 1e8) return `${(m / 1e8).toLocaleString(undefined, { maximumFractionDigits: 1 })}億`;
   if (m >= 1e4) return `${Math.round(m / 1e4).toLocaleString()}万`;
   return m.toLocaleString();
 };

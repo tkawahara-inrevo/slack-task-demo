@@ -1502,23 +1502,31 @@ function registerDashboardApi(deps) {
     try {
       const { teamId } = req.dashboardUser;
       if (!req.file) return res.status(400).json({ error: 'file_required' });
-      // エンコーディング自動判定: UTF-8 BOM → BOM除去, Shift-JIS → iconv変換
       const buf = req.file.buffer;
-      let raw;
-      if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
-        // UTF-8 with BOM
-        raw = buf.slice(3).toString('utf-8');
-      } else {
-        const asUtf8 = buf.toString('utf-8');
-        // U+FFFD（無効シーケンス）が多い場合は Shift-JIS
-        const fffdCount = (asUtf8.match(/�/g) || []).length;
-        if (fffdCount > 5) {
-          try { raw = require('iconv-lite').decode(buf, 'Shift_JIS'); }
-          catch { raw = asUtf8; }
-        } else {
-          raw = asUtf8;
-        }
-      }
+      // 複数エンコーディングを試してHRMOSヘッダーが最多一致するものを採用
+      const raw = (() => {
+        const iconv = (() => { try { return require('iconv-lite'); } catch { return null; } })();
+        const KNOWN = ['応募ID','求人名','応募日','氏名','応募経路','ラベル','選考ステータス'];
+        const score = (text) => KNOWN.filter(h => text.slice(0, 3000).includes(h)).length;
+        const candidates = [];
+        // UTF-8 BOM あり
+        if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF)
+          candidates.push(buf.slice(3).toString('utf-8'));
+        // UTF-16 LE BOM あり
+        if (buf[0] === 0xFF && buf[1] === 0xFE && iconv)
+          candidates.push(iconv.decode(buf.slice(2), 'UTF-16LE'));
+        // UTF-16 BE BOM あり
+        if (buf[0] === 0xFE && buf[1] === 0xFF && iconv)
+          candidates.push(iconv.decode(buf.slice(2), 'UTF-16BE'));
+        // Shift-JIS
+        if (iconv) candidates.push(iconv.decode(buf, 'Shift_JIS'));
+        // UTF-8 (BOM なし / フォールバック)
+        candidates.push(buf.toString('utf-8'));
+        const scored = candidates.map(t => ({ t, s: score(t) }));
+        const best = scored.reduce((a, b) => b.s > a.s ? b : a);
+        console.log('[HRMOS] encoding scores:', scored.map(c => c.s).join(','), 'best:', best.s);
+        return best.t;
+      })();
       const result = await hrmosImportCsv(teamId, raw);
       res.json(result);
     } catch (e) {

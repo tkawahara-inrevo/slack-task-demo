@@ -96,9 +96,9 @@ async function stampAttendance(slackClient, slackUserId, type) {
   }
 
   try {
-    // 1. Slackメール取得
-    const profileRes = await slackClient.users.profile.get({ user: slackUserId });
-    const email = (profileRes.profile?.email || '').toLowerCase();
+    // 1. Slackメール取得（users:read.email スコープで動作）
+    const userRes = await slackClient.users.info({ user: slackUserId });
+    const email = (userRes.user?.profile?.email || '').toLowerCase();
     if (!email) return { ok: false, reason: 'no_email' };
 
     // 2. トークン取得

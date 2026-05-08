@@ -3017,7 +3017,9 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   const STAMP_OUT_CHS = toChSet(process.env.RANKING_REPORT_OUT_CHANNEL_ID);
 
   const doStamp = async (client, message, stampType) => {
+    // ボット・システムメッセージ・スレッド返信は除外
     if (message.bot_id || message.subtype) return;
+    if (message.thread_ts && message.thread_ts !== message.ts) return;
     const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
     const label = stampType === 1 ? '出勤' : '退勤';
     console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${message.user}`);

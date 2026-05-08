@@ -174,6 +174,7 @@ export default function Layout({ children }) {
   const navLinks = [
     { to: '/', label: 'ホーム', end: true },
     { to: '/workload', label: '業務ガント' },
+    { to: '/workflows', label: 'WF' },
     { to: '/org-chart', label: 'チーム設定' },
   ];
 

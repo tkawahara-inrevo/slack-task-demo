@@ -35,6 +35,7 @@ import CustomerDetail from './pages/crm/CustomerDetail'
 import Pipeline from './pages/crm/Pipeline'
 import CustomerList from './pages/crm/CustomerList'
 import SalesPerformance from './pages/crm/SalesPerformance'
+import SlackWorkflows from './pages/SlackWorkflows'
 import './App.css'
 
 function App() {
@@ -48,6 +49,7 @@ function App() {
         <Route path="/tasks/new" element={<TaskCreate />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
         <Route path="/projects/:id" element={<ProjectView />} />
+        <Route path="/workflows" element={<SlackWorkflows />} />
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/workload" element={<WorkloadGantt />} />
         <Route path="/org-chart" element={<OrgChart />} />

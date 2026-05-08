@@ -65,6 +65,7 @@ function registerDashboardApi(deps) {
     expressApp,
     slackClient,
     dbQuery,
+    dbTransaction,
     getUserDisplayName,
     dbGetDashboardRole,
     dbSetDashboardRole,
@@ -1465,53 +1466,37 @@ function registerDashboardApi(deps) {
       return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
     };
 
+    // トランザクション内で全削除 → 一括INSERT（フルリプレイス）
     let imported = 0, skipped = 0, errors = [];
-    for (let i = 0; i < dataRows.length; i++) {
-      const cols = dataRows[i];
-      const appId = (get(cols, col.appId) || '').slice(0, 200) || null;
-      const vals = [
-        teamId, appId,
-        get(cols, col.jobId), get(cols, col.jobName), get(cols, col.posName),
-        toDate(get(cols, col.appliedDate)),
-        get(cols, col.name), get(cols, col.source), get(cols, col.sourceDetail),
-        get(cols, col.label), get(cols, col.status),
-        toDate(get(cols, col.offerDate)), toDate(get(cols, col.joinDate)), toDate(get(cols, col.declineDate)),
-      ];
-      try {
-        if (appId) {
-          // app_id があれば UPSERT (既存を UPDATE)
-          await dbQuery(`
-            INSERT INTO hrmos_applicants
-              (id, team_id, app_id, job_id, job_name, position_name, applied_date,
-               applicant_name, source, source_detail, label, status,
-               offer_date, join_date, decline_date, imported_at)
-            VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
-            ON CONFLICT DO NOTHING
-          `, vals);
-          // 既存レコードを UPDATE
-          await dbQuery(`
-            UPDATE hrmos_applicants SET
-              job_id=$3, job_name=$4, position_name=$5, applied_date=$6,
-              applicant_name=$7, source=$8, source_detail=$9, label=$10,
-              status=$11, offer_date=$12, join_date=$13, decline_date=$14, imported_at=now()
-            WHERE team_id=$1 AND app_id=$2
-          `, vals);
-        } else {
-          await dbQuery(`
+    await dbTransaction(async (client) => {
+      await client.query('DELETE FROM hrmos_applicants WHERE team_id = $1', [teamId]);
+      for (let i = 0; i < dataRows.length; i++) {
+        const cols = dataRows[i];
+        const appId = (get(cols, col.appId) || '').slice(0, 200) || null;
+        const vals = [
+          teamId, appId,
+          get(cols, col.jobId), get(cols, col.jobName), get(cols, col.posName),
+          toDate(get(cols, col.appliedDate)),
+          get(cols, col.name), get(cols, col.source), get(cols, col.sourceDetail),
+          get(cols, col.label), get(cols, col.status),
+          toDate(get(cols, col.offerDate)), toDate(get(cols, col.joinDate)), toDate(get(cols, col.declineDate)),
+        ];
+        try {
+          await client.query(`
             INSERT INTO hrmos_applicants
               (id, team_id, app_id, job_id, job_name, position_name, applied_date,
                applicant_name, source, source_detail, label, status,
                offer_date, join_date, decline_date, imported_at)
             VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
           `, vals);
+          imported++;
+        } catch (e) {
+          errors.push({ line: headerRowIdx + i + 2, error: e.message.slice(0, 100) });
+          skipped++;
         }
-        imported++;
-      } catch (e) {
-        errors.push({ line: headerRowIdx + i + 2, error: e.message.slice(0, 100) });
-        skipped++;
       }
-    }
-    console.log(`[HRMOS採用] import done: ${imported}件 imported, ${skipped}件 skipped`);
+    });
+    console.log(`[HRMOS採用] import done: ${imported}件 imported, ${skipped}件 skipped (full replace)`);
     return { ok: true, imported, skipped, errors: errors.slice(0, 10), colsFound: Object.fromEntries(Object.entries(col).filter(([,v]) => v >= 0)) };
   }
 

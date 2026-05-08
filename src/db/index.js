@@ -41,6 +41,22 @@ async function dbQuery(text, params) {
   throw lastErr;
 }
 
+// トランザクション: callback(client) 内でclient.query()を使うことでアトミック実行
+async function dbTransaction(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function dbGetUserDept(teamId, userId) {
   const q = `
     SELECT team_id, user_id, dept_key, dept_handle, updated_at
@@ -2433,6 +2449,7 @@ async function dbPipelineSummary(teamId) {
 }
 
 module.exports = {
+  dbTransaction,
   dbEnsureSettingsSchema,
   dbCountCompletions,
   dbCountTargets,

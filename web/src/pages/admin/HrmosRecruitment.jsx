@@ -108,7 +108,7 @@ function DrilldownPanel({ filter, from, to, jobFilter, onClose }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
-                    {['氏名', '求人', '応募日', '応募経路', 'ラベル', 'ステータス', '内定日', '入社日'].map(h => (
+                    {['氏名', ...(!jobFilter ? ['求人'] : []), '応募日', '応募経路', 'ラベル', 'ステータス', '内定日', '入社日'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', borderBottom: '1px solid #e5e7eb' }}>{h}</th>
                     ))}
                   </tr>
@@ -117,8 +117,10 @@ function DrilldownPanel({ filter, from, to, jobFilter, onClose }) {
                   {applicants.map((a, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', fontWeight: 500 }}>{a.applicant_name || '—'}</td>
-                      <td style={{ padding: '7px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                          title={a.job_name}>{a.job_name || '—'}</td>
+                      {!jobFilter && (
+                        <td style={{ padding: '7px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={a.job_name}>{a.job_name || '—'}</td>
+                      )}
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: '#6b7280' }}>{fmtDate(a.applied_date)}</td>
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{a.source || '—'}</td>
                       <td style={{ padding: '7px 10px' }}>

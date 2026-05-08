@@ -622,6 +622,21 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // HRMOS勤怠打刻ログ
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS hrmos_stamps (
+      id          TEXT PRIMARY KEY,
+      team_id     TEXT NOT NULL,
+      slack_user_id TEXT NOT NULL,
+      stamp_type  INT NOT NULL,
+      stamped_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      hrmos_user_id INT,
+      ok          BOOLEAN NOT NULL DEFAULT false,
+      error_reason TEXT
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_stamps_user_date ON hrmos_stamps(team_id, slack_user_id, stamped_at DESC)`).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

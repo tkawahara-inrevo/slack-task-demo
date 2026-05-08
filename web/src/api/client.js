@@ -525,6 +525,10 @@ export const api = {
   slackGroupChangePreview: (userId, toRuleId) => apiFetch('/admin/slack-group-rules/change-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, toRuleId }) }),
   slackGroupChangeApply: (userId, add, remove) => apiFetch('/admin/slack-group-rules/change-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, add, remove }) }),
 
+  // HRMOS勤怠
+  myAttendance: () => apiFetch('/my-attendance'),
+  teamReportStatus: () => apiFetch('/team-report-status'),
+
   // HRMOS採用
   hrmosImportCsv: (file) => {
     const form = new FormData();

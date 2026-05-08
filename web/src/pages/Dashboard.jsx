@@ -751,6 +751,98 @@ function TaskCard({ t, members, onClick }) {
   );
 }
 
+// ── 勤怠ウィジェット ───────────────────────────────────────────────
+function AttendanceWidget() {
+  const [myAtt, setMyAtt]       = useState(null);
+  const [teamStatus, setTeamStatus] = useState(null);
+  const [showDetail, setShowDetail] = useState(false);
+
+  useEffect(() => {
+    api.myAttendance().then(setMyAtt).catch(() => {});
+    api.teamReportStatus().then(setTeamStatus).catch(() => {});
+  }, []);
+
+  const fmtTime = (stamp) => {
+    if (!stamp?.ok || !stamp?.stamped_at) return null;
+    return new Date(stamp.stamped_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+  };
+
+  const inTime  = fmtTime(myAtt?.clockIn);
+  const outTime = fmtTime(myAtt?.clockOut);
+
+  const StampBadge = ({ time, label }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{label}</span>
+      {time
+        ? <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a' }}>{time}</span>
+        : <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>未打刻</span>}
+    </div>
+  );
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '12px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        {/* 自分の打刻 */}
+        <div style={{ display: 'flex', align: 'center', gap: 4, marginRight: 4 }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151' }}>本日の勤怠</span>
+        </div>
+        <div style={{ display: 'flex', gap: 14 }}>
+          <StampBadge label="出勤" time={inTime} />
+          <StampBadge label="退勤" time={outTime} />
+        </div>
+
+        <div style={{ width: 1, height: 20, background: '#e2e8f0', flexShrink: 0 }} />
+
+        {/* チーム提出状況 */}
+        {teamStatus && (
+          <button onClick={() => setShowDetail(v => !v)} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+            display: 'flex', gap: 12, alignItems: 'center',
+          }}>
+            <StatusPill label="出勤日報" done={teamStatus.summary.submittedIn} total={teamStatus.summary.total} color="#3b82f6" />
+            <StatusPill label="退勤日報" done={teamStatus.summary.submittedOut} total={teamStatus.summary.total} color="#8b5cf6" />
+            <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{showDetail ? '▲' : '▼'}</span>
+          </button>
+        )}
+      </div>
+
+      {/* 詳細パネル */}
+      {showDetail && teamStatus && (
+        <div style={{ marginTop: 12, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
+            {teamStatus.members.map(m => (
+              <div key={m.userId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {m.avatarUrl
+                  ? <img src={m.avatarUrl} alt="" style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }} />
+                  : <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#e2e8f0', flexShrink: 0 }} />}
+                <span style={{ fontSize: '0.75rem', color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.displayName}</span>
+                <span style={{ fontSize: '0.7rem' }}>{m.submittedIn ? '🟦' : '⬜'}</span>
+                <span style={{ fontSize: '0.7rem' }}>{m.submittedOut ? '🟪' : '⬜'}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: '0.68rem', color: '#94a3b8' }}>🟦=出勤日報　🟪=退勤日報</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusPill({ label, done, total, color }) {
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{label}</span>
+        <span style={{ fontSize: '0.7rem', fontWeight: 700, color }}>{done}/{total}</span>
+      </div>
+      <div style={{ width: 80, height: 4, background: '#f1f5f9', borderRadius: 2 }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.3s' }} />
+      </div>
+    </div>
+  );
+}
+
 // ── メインダッシュボード ──────────────────────────────────────────
 export default function Dashboard() {
   const [tab, setTab] = useState('tasks');
@@ -906,6 +998,9 @@ export default function Dashboard() {
 
   return (
     <div style={{ padding: isMobile ? '0' : '20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap: isMobile ? 10 : 14 }}>
+
+      {/* 勤怠ウィジェット */}
+      <AttendanceWidget />
 
       {/* ヘッダー + タブ */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>

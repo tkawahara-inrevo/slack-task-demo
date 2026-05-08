@@ -1784,6 +1784,93 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // ── HRMOS勤怠: 自分の今日の打刻状況 ────────────────────────────────
+  expressApp.get('/api/dashboard/my-attendance', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      // JSTの本日0時をUTCで計算
+      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const todayJst = jstNow.toISOString().slice(0, 10);
+      const dayStart = new Date(todayJst + 'T00:00:00+09:00');
+
+      const r = await dbQuery(`
+        SELECT stamp_type, stamped_at, ok, error_reason
+        FROM hrmos_stamps
+        WHERE team_id=$1 AND slack_user_id=$2 AND stamped_at >= $3
+        ORDER BY stamped_at ASC
+      `, [teamId, userId, dayStart.toISOString()]);
+
+      const clockIn  = r.rows.find(s => s.stamp_type === 1);
+      const clockOut = r.rows.find(s => s.stamp_type === 2);
+      res.json({ clockIn: clockIn || null, clockOut: clockOut || null, today: todayJst });
+    } catch (e) {
+      console.error('[勤怠] my-attendance error:', e.message);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ── HRMOS勤怠: チームの今日の日報提出状況 ────────────────────────
+  expressApp.get('/api/dashboard/team-report-status', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const REPORT_IN_CH  = process.env.RANKING_REPORT_IN_CHANNEL_ID  || '';
+      const REPORT_OUT_CH = process.env.RANKING_REPORT_OUT_CHANNEL_ID || '';
+
+      // JSTの本日0時
+      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const todayJst = jstNow.toISOString().slice(0, 10);
+      const dayStartTs = (new Date(todayJst + 'T00:00:00+09:00').getTime() / 1000).toString();
+
+      // 対象メンバー取得
+      const membersR = await dbQuery(
+        `SELECT user_id, display_name, avatar_url FROM daily_report_members WHERE team_id=$1 AND is_target=true ORDER BY display_name`,
+        [teamId]
+      );
+      const members = membersR.rows;
+
+      // Slackチャンネル履歴から今日の投稿者を取得
+      const fetchPosters = async (channelId) => {
+        if (!channelId) return new Set();
+        try {
+          const result = await slackClient.conversations.history({
+            channel: channelId, oldest: dayStartTs, limit: 1000, inclusive: true,
+          });
+          return new Set(
+            (result.messages || [])
+              .filter(m => !m.bot_id && !m.subtype)
+              .map(m => m.user)
+          );
+        } catch { return new Set(); }
+      };
+
+      const [inPosters, outPosters] = await Promise.all([
+        fetchPosters(REPORT_IN_CH),
+        fetchPosters(REPORT_OUT_CH),
+      ]);
+
+      const status = members.map(m => ({
+        userId: m.user_id,
+        displayName: m.display_name,
+        avatarUrl: m.avatar_url,
+        submittedIn:  inPosters.has(m.user_id),
+        submittedOut: outPosters.has(m.user_id),
+      }));
+
+      res.json({
+        today: todayJst,
+        members: status,
+        summary: {
+          total: members.length,
+          submittedIn:  status.filter(s => s.submittedIn).length,
+          submittedOut: status.filter(s => s.submittedOut).length,
+        },
+      });
+    } catch (e) {
+      console.error('[勤怠] team-report-status error:', e.message);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
   // --- /members (team-scoped) ---
   expressApp.get("/api/dashboard/members", authWithRole, async (req, res) => {
     try {

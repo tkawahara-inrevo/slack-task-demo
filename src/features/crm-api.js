@@ -667,37 +667,51 @@ function registerCrmApi({ expressApp, authWithRole }) {
       }
       const [prevStart, prevEnd] = [ps.prev_start, ps.prev_end];
 
+      // アライアンス担当者（KPI除外）
+      const ALLIANCE_REPS = ['長嶺', '丸山', '外山'];
+      const allianceExclude = ALLIANCE_REPS.map(n => `kp.staff NOT ILIKE '%${n}%'`).join(' AND ');
+
       // ── 期間内の主要指標を集計するヘルパー ──
       const getMetrics = async (start, end) => {
         const pf = salesUser ? ` AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '';
         const si = salesUser ? 3 : 2;
         const baseP = salesUser ? [teamId, salesUser, start, end] : [teamId, start, end];
 
-        const [wonRes, meetingRes, payRes] = await Promise.all([
+        // アライアンスフィルター（特定担当者指定時はスキップ）
+        const allianceWhere = !salesUser ? ` AND ${allianceExclude}` : '';
+
+        const [wonRes, meetingRes, payRes, alliancePayRes] = await Promise.all([
           // 受注件数・金額
           dbQuery(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(d.initial_fee),0)::bigint AS amount
             FROM deals d WHERE d.team_id=$1${pf}
             AND d.status='won' AND d.order_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 初回商談数（BCの初回商談日のみ）
+          // 初回商談数
           dbQuery(`SELECT COUNT(*)::int AS cnt FROM deals d
             WHERE d.team_id=$1${pf}
             AND d.first_meeting_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 入金額 & インセン（両方取得）
+          // 入金額 & インセン（アライアンス除外）
           dbQuery(`SELECT COALESCE(SUM(kp.amount),0)::bigint AS total_amount,
                           COALESCE(SUM(kp.incentive_amount),0)::bigint AS incentive_amount
             FROM kintone_payments kp
             WHERE kp.payment_date BETWEEN $1::date AND $2::date
-            ${salesUser ? `AND kp.staff=$3` : ''}`,
+            ${salesUser ? `AND kp.staff=$3` : allianceWhere}`,
             salesUser ? [start, end, salesUser] : [start, end]),
+          // アライアンスのインセン（担当者フィルターなし時のみ）
+          !salesUser ? dbQuery(`SELECT COALESCE(SUM(kp.incentive_amount),0)::bigint AS incentive_amount
+            FROM kintone_payments kp
+            WHERE kp.payment_date BETWEEN $1::date AND $2::date
+            AND (${ALLIANCE_REPS.map(n => `kp.staff ILIKE '%${n}%'`).join(' OR ')})`,
+            [start, end]) : Promise.resolve({ rows: [{ incentive_amount: 0 }] }),
         ]);
 
         const wonCount = wonRes.rows[0]?.cnt || 0;
         return {
           wonCount,
-          wonAmount:        Number(wonRes.rows[0]?.amount || 0),
-          meetingCount:     meetingRes.rows[0]?.cnt || 0,
-          paymentAmount:    Number(payRes.rows[0]?.total_amount || 0),    // 入金額合計
-          incentiveAmount:  Number(payRes.rows[0]?.incentive_amount || 0), // インセン合計
+          wonAmount:           Number(wonRes.rows[0]?.amount || 0),
+          meetingCount:        meetingRes.rows[0]?.cnt || 0,
+          paymentAmount:       Number(payRes.rows[0]?.total_amount || 0),
+          incentiveAmount:     Number(payRes.rows[0]?.incentive_amount || 0), // アライアンス除外済
+          allianceIncentive:   Number(alliancePayRes.rows[0]?.incentive_amount || 0),
         };
       };
 
@@ -745,13 +759,41 @@ function registerCrmApi({ expressApp, authWithRole }) {
         repPayMap[r.staff] = { payment: Number(r.payment_amount), incentive: Number(r.incentive_amount) };
       }
 
-      const repTable = repRows.rows.map(r => ({
+      // アライアンス・添田/リファラル分類ヘルパー
+      const isAlliance   = (rep) => rep && ALLIANCE_REPS.some(n => rep.includes(n));
+      const isAddaRef    = (rep) => rep && (rep.includes('添田') || rep.toLowerCase().includes('リファラル'));
+
+      const rawRepTable = repRows.rows.map(r => ({
         rep:              r.rep,
         wonCount:         r.won_count,
         meetingCount:     r.meeting_count,
         paymentAmount:    repPayMap[r.rep]?.payment   || 0,
         incentiveAmount:  repPayMap[r.rep]?.incentive || 0,
       }));
+
+      // アライアンスをまとめる
+      const allianceRows = rawRepTable.filter(r => isAlliance(r.rep));
+      const addaRefRows  = rawRepTable.filter(r => isAddaRef(r.rep));
+      const normalRows   = rawRepTable.filter(r => !isAlliance(r.rep) && !isAddaRef(r.rep));
+
+      const sumRows = (rows, label) => rows.length === 0 ? null : ({
+        rep:             label,
+        wonCount:        rows.reduce((s, r) => s + r.wonCount, 0),
+        meetingCount:    rows.reduce((s, r) => s + r.meetingCount, 0),
+        paymentAmount:   rows.reduce((s, r) => s + r.paymentAmount, 0),
+        incentiveAmount: rows.reduce((s, r) => s + r.incentiveAmount, 0),
+        isGrouped: true,
+        groupType: label === 'アライアンス' ? 'alliance' : 'adda_ref',
+      });
+
+      const allianceRow = sumRows(allianceRows, 'アライアンス');
+      const addaRefRow  = sumRows(addaRefRows,  '添田/リファラル');
+
+      const repTable = [
+        ...normalRows,
+        ...(addaRefRow  ? [addaRefRow]  : []),
+        ...(allianceRow ? [allianceRow] : []),
+      ];
 
       // ── アラート（全担当者対象、フィルター不要）──
       const today = new Date().toISOString().split('T')[0];
@@ -867,7 +909,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       res.json({
         period, rangeStart, rangeEnd,
         prevStart, prevEnd,
-        curr: currMetrics,
+        curr: { ...currMetrics, allianceIncentive: currMetrics.allianceIncentive },
         prev: prevMetrics,
         repTable,
         repTargetMap,

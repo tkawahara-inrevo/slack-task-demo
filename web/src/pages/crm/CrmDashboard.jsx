@@ -63,15 +63,25 @@ function buildRepTable(repTable, filterRep) {
     const f = repTable.find(r => r.rep === filterRep);
     return [f ? { ...f } : { rep: filterRep, wonCount: 0, meetingCount: 0, paymentAmount: 0 }];
   }
+  // TARGET_REPS（メイン担当者）
   const rows = TARGET_REPS.map(name => {
     const f = repTable.find(r => r.rep === name);
     return f ? { ...f } : { rep: name, wonCount: 0, meetingCount: 0, paymentAmount: 0 };
   });
-  const others = repTable.filter(r => !TARGET_REPS.includes(r.rep));
+  // 添田/リファラル（KPI対象）
+  const addaRef = repTable.find(r => r.groupType === 'adda_ref');
+  if (addaRef) rows.push({ ...addaRef });
+  // アライアンス（KPI対象外・最後に表示）
+  const alliance = repTable.find(r => r.groupType === 'alliance');
+  if (alliance) rows.push({ ...alliance });
+  // その他（上記以外）
+  const others = repTable.filter(r =>
+    !TARGET_REPS.includes(r.rep) && r.groupType !== 'alliance' && r.groupType !== 'adda_ref'
+  );
   if (others.length > 0) rows.push({
     rep: 'その他', isOther: true,
-    wonCount:      others.reduce((s, r) => s + r.wonCount, 0),
-    meetingCount:  others.reduce((s, r) => s + r.meetingCount, 0),
+    wonCount:        others.reduce((s, r) => s + r.wonCount, 0),
+    meetingCount:    others.reduce((s, r) => s + r.meetingCount, 0),
     paymentAmount:   others.reduce((s, r) => s + r.paymentAmount, 0),
     incentiveAmount: others.reduce((s, r) => s + (r.incentiveAmount || 0), 0),
   });
@@ -441,6 +451,11 @@ export default function CrmDashboard() {
                 インセン {fmtM(curr.incentiveAmount || 0)} / 目標 {fmtM(kpiDenom)}
                 {curr.paymentAmount > 0 && <span style={{ marginLeft:6 }}>（入金 {fmtM(curr.paymentAmount)}）</span>}
               </div>
+              {curr.allianceIncentive > 0 && (
+                <div style={{ fontSize:'0.6rem', color:'#94a3b8', marginTop:1 }}>
+                  ＋アライアンス {fmtM(curr.allianceIncentive)}（KPI除外）
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -479,18 +494,26 @@ export default function CrmDashboard() {
                     const repAchieve     = (repTermTarget > 0 && !r.isOther) ? Math.round((r.incentiveAmount || 0) / repTermTarget * 100) : null;
                     const [fam, given] = r.rep.split(/[\s　]/);
                     return (
-                      <tr key={r.rep} style={{ borderBottom:'1px solid #f8fafc', transition:'background 0.1s' }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                        onMouseLeave={e => e.currentTarget.style.background = ''}>
+                      <tr key={r.rep} style={{
+                          borderBottom:'1px solid #f8fafc', transition:'background 0.1s',
+                          background: r.groupType === 'alliance' ? '#fafaf0' : '',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = r.groupType === 'alliance' ? '#f5f5e0' : '#f8fafc'}
+                        onMouseLeave={e => e.currentTarget.style.background = r.groupType === 'alliance' ? '#fafaf0' : ''}>
                         <td style={{ padding:'9px 14px' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                             <span style={{ width:24, height:24, borderRadius:6, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', fontWeight:800,
-                              background: r.isOther ? '#f1f5f9' : `${color}22`, color: r.isOther ? '#94a3b8' : color }}>
-                              {r.isOther ? '他' : (fam?.[0] || '?')}
+                              background: r.isOther ? '#f1f5f9' : r.groupType === 'alliance' ? '#fef9c322' : r.groupType === 'adda_ref' ? '#f0fdf4' : `${color}22`,
+                              color: r.isOther ? '#94a3b8' : r.groupType === 'alliance' ? '#92400e' : r.groupType === 'adda_ref' ? '#059669' : color }}>
+                              {r.isOther ? '他' : r.groupType === 'alliance' ? '提' : r.groupType === 'adda_ref' ? '添' : (fam?.[0] || '?')}
                             </span>
                             <div>
                               {r.isOther
                                 ? <span style={{ color:'#94a3b8' }}>その他</span>
+                                : r.groupType === 'alliance'
+                                ? <><span style={{ fontWeight:700, color:'#92400e', fontSize:'0.75rem' }}>アライアンス</span><span style={{ fontSize:'0.65rem', color:'#94a3b8', marginLeft:4 }}>KPI除外</span></>
+                                : r.groupType === 'adda_ref'
+                                ? <span style={{ fontWeight:700, color:'#059669', fontSize:'0.75rem' }}>添田/リファラル</span>
                                 : <><span style={{ fontWeight:700, color, fontSize:'0.68rem' }}>{fam}</span><span style={{ color:'#374151', fontSize:'0.8rem', marginLeft:3 }}>{given || ''}</span></>
                               }
                             </div>

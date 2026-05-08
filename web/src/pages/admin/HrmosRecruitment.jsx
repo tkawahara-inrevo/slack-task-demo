@@ -7,10 +7,15 @@ import { api } from '../../api/client';
 
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1'];
 
-function KpiCard({ label, value, sub, color = '#3b82f6' }) {
+function KpiCard({ label, value, sub, color = '#3b82f6', onClick }) {
   return (
-    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 20px', minWidth: 140 }}>
-      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>{label}</div>
+    <div onClick={onClick} style={{
+      background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 20px', minWidth: 140,
+      cursor: onClick ? 'pointer' : 'default', transition: 'box-shadow 0.15s',
+    }}
+    onMouseEnter={e => { if (onClick) e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.10)'; }}
+    onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
+      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>{label}{onClick && <span style={{ marginLeft: 4, fontSize: '0.65rem', color: '#d1d5db' }}>▶</span>}</div>
       <div style={{ fontSize: '1.8rem', fontWeight: 800, color }}>{value}</div>
       {sub && <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: 2 }}>{sub}</div>}
     </div>
@@ -32,18 +37,31 @@ function statusColor(s) {
 
 const CHART_TICK_STYLE = { fontSize: 11, fill: '#6b7280' };
 
+// Y軸ラベルを truncate して SVG title でフルテキストをhover表示
+function LabelTick({ x, y, payload, maxLen = 18 }) {
+  const full = payload.value || '';
+  const short = full.length > maxLen ? full.slice(0, maxLen) + '…' : full;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <title>{full}</title>
+      <text x={0} y={0} dy={4} textAnchor="end" fill="#6b7280" fontSize={11}>{short}</text>
+    </g>
+  );
+}
+
 function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
-function DrilldownPanel({ filter, from, to, onClose }) {
+function DrilldownPanel({ filter, from, to, jobFilter, onClose }) {
   const [applicants, setApplicants] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    api.hrmosApplicants({ from, to, ...filter })
+    const params = { from, to, ...(jobFilter ? { job_name: jobFilter } : {}), ...filter };
+    api.hrmosApplicants(params)
       .then(d => setApplicants(d.applicants || []))
       .catch(() => setApplicants([]))
       .finally(() => setLoading(false));
@@ -431,16 +449,19 @@ export default function HrmosRecruitment() {
         <>
           {/* KPI */}
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
-            <KpiCard label={compareMode && compareAnalytics ? `総応募数（メイン）` : '総応募数'} value={analytics.total.toLocaleString()}
-              sub={compareMode && compareAnalytics ? `比較: ${compareAnalytics.total.toLocaleString()}件` : undefined} />
-            <KpiCard label="求人数（応募あり）" value={analytics.uniqueJobs?.toLocaleString() ?? '—'} color="#8b5cf6"
-              sub={compareMode && compareAnalytics ? `比較: ${compareAnalytics.uniqueJobs?.toLocaleString() ?? '—'}件` : undefined} />
-            {analytics.byStatus.slice(0, 3).map(r => {
+            <KpiCard label={compareMode && compareAnalytics ? '総応募数（メイン）' : '総応募数'} value={analytics.total.toLocaleString()}
+              sub={compareMode && compareAnalytics ? `比較: ${compareAnalytics.total.toLocaleString()}件` : undefined}
+              onClick={() => setDrilldown({})} />
+            {!jobFilter && (
+              <KpiCard label="求人数（応募あり）" value={analytics.uniqueJobs?.toLocaleString() ?? '—'} color="#8b5cf6"
+                sub={compareMode && compareAnalytics ? `比較: ${compareAnalytics.uniqueJobs?.toLocaleString() ?? '—'}件` : undefined} />
+            )}
+            {analytics.byStatus.slice(0, 4).map(r => {
               const cmp = compareAnalytics?.byStatus?.find(s => s.name === r.name);
               return (
                 <KpiCard key={r.name} label={r.name} value={r.cnt.toLocaleString()}
                   sub={cmp ? `比較: ${cmp.cnt}件` : `${analytics.total > 0 ? Math.round(r.cnt / analytics.total * 100) : 0}%`}
-                  color={statusColor(r.name)} />
+                  color={statusColor(r.name)} onClick={() => openDrilldown('status', r.name)} />
               );
             })}
           </div>
@@ -474,37 +495,39 @@ export default function HrmosRecruitment() {
             </>
           )}
 
-          {/* 求人別 + 応募経路別（円グラフ） */}
-          <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 20, marginTop: 4 }}>
-            <div>
-              <SectionTitle>求人別応募数（上位20件）<span style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 400 }}> クリックで一覧</span></SectionTitle>
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
-                {analytics.byJob.length === 0
-                  ? <div style={{ color: '#9ca3af', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>データなし</div>
-                  : (
-                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.byJob.length * (compareMode && compareAnalytics ? 42 : 28))}>
-                      <BarChart
-                        data={analytics.byJob.map(r => ({
-                          name: r.name, cnt: r.cnt,
-                          cmp: compareAnalytics?.byJob?.find(c => c.name === r.name)?.cnt ?? 0,
-                        }))}
-                        layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}
-                        onClick={e => e?.activePayload?.[0] && openDrilldown('job_name', e.activePayload[0].payload.name)}
-                        style={{ cursor: 'pointer' }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                        <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={150} />
-                        <Tooltip formatter={(v) => [`${v}件`]} cursor={{ fill: '#eff6ff' }} />
-                        <Bar dataKey="cnt" fill="#3b82f6" radius={[0, 4, 4, 0]} name="メイン期間" />
-                        {compareMode && compareAnalytics && (
-                          <Bar dataKey="cmp" fill="#c4b5fd" radius={[0, 4, 4, 0]} name="比較期間" />
-                        )}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )
-                }
+          {/* 求人別 + 応募経路別（求人フィルター中は経路のみ） */}
+          <div style={{ display: 'grid', gridTemplateColumns: jobFilter ? '1fr' : '3fr 2fr', gap: 20, marginTop: 4 }}>
+            {!jobFilter && (
+              <div>
+                <SectionTitle>求人別応募数（上位20件）<span style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 400 }}> クリックで一覧</span></SectionTitle>
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
+                  {analytics.byJob.length === 0
+                    ? <div style={{ color: '#9ca3af', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>データなし</div>
+                    : (
+                      <ResponsiveContainer width="100%" height={Math.max(200, analytics.byJob.length * (compareMode && compareAnalytics ? 42 : 28))}>
+                        <BarChart
+                          data={analytics.byJob.map(r => ({
+                            name: r.name, cnt: r.cnt,
+                            cmp: compareAnalytics?.byJob?.find(c => c.name === r.name)?.cnt ?? 0,
+                          }))}
+                          layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}
+                          onClick={e => e?.activePayload?.[0] && openDrilldown('job_name', e.activePayload[0].payload.name)}
+                          style={{ cursor: 'pointer' }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                          <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
+                          <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={150} />
+                          <Tooltip formatter={(v) => [`${v}件`]} cursor={{ fill: '#eff6ff' }} />
+                          <Bar dataKey="cnt" fill="#3b82f6" radius={[0, 4, 4, 0]} name="メイン期間" />
+                          {compareMode && compareAnalytics && (
+                            <Bar dataKey="cmp" fill="#c4b5fd" radius={[0, 4, 4, 0]} name="比較期間" />
+                          )}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )
+                  }
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
               <SectionTitle>応募経路別 <span style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 400 }}>クリックで一覧</span></SectionTitle>
@@ -539,13 +562,13 @@ export default function HrmosRecruitment() {
                 {analytics.byLabel.length === 0
                   ? <div style={{ color: '#9ca3af', fontSize: '0.85rem', textAlign: 'center', padding: 16 }}>データなし</div>
                   : (
-                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.byLabel.length * 26)}>
-                      <BarChart data={analytics.byLabel} layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}
+                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.byLabel.length * 28)}>
+                      <BarChart data={analytics.byLabel} layout="vertical" margin={{ top: 0, right: 20, left: 4, bottom: 0 }}
                         onClick={e => e?.activePayload?.[0] && openDrilldown('label', e.activePayload[0].payload.name)}
                         style={{ cursor: 'pointer' }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                         <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={130} />
+                        <YAxis type="category" dataKey="name" width={150} tick={<LabelTick maxLen={20} />} />
                         <Tooltip formatter={(v) => [`${v}件`]} cursor={{ fill: '#eff6ff' }} />
                         <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
                           {analytics.byLabel.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
@@ -588,7 +611,7 @@ export default function HrmosRecruitment() {
       )}
 
       {drilldown && (
-        <DrilldownPanel filter={drilldown} from={from} to={to} onClose={() => setDrilldown(null)} />
+        <DrilldownPanel filter={drilldown} from={from} to={to} jobFilter={jobFilter} onClose={() => setDrilldown(null)} />
       )}
 
       {analytics && analytics.total === 0 && !loading && (

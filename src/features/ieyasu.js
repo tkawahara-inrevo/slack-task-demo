@@ -46,10 +46,10 @@ async function getToken() {
   if (!SECRET_KEY) throw new Error('IEYASU_API_TOKEN not set');
   if (_cachedToken && Date.now() < _tokenExpiry - 60_000) return _cachedToken;
 
-  const b64 = Buffer.from(SECRET_KEY).toString('base64');
+  // SECRET_KEY はすでにBase64済みなのでそのまま使う
   const res = await ieyasuRequest({
     path: `/api/${COMPANY}/v1/authentication/token`,
-    auth: `Basic ${b64}`,
+    auth: `Basic ${SECRET_KEY}`,
   });
   if (res.status !== 200 || !res.body?.token) {
     throw new Error(`HRMOS token error: ${JSON.stringify(res.body)}`);

@@ -1375,27 +1375,48 @@ function registerDashboardApi(deps) {
     hrmosUpload = { single: () => (req, res, next) => res.status(503).json({ error: 'csv_import_unavailable' }) };
   }
 
-  // CSVパース共通（ダブルクォート対応）
-  function hrmosParseCSVLine(line) {
-    const result = [];
-    let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { inQ = !inQ; }
-      else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
-      else { cur += c; }
+  // CSVパーサー: クォート内の改行・カンマに対応した全文パース
+  function hrmosParseCSV(text) {
+    // CRLF → LF 正規化
+    const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rows = [];
+    let row = [], field = '', inQ = false;
+
+    for (let i = 0; i <= s.length; i++) {
+      const c = i < s.length ? s[i] : '\n'; // 末尾センチネル
+
+      if (inQ) {
+        if (c === '"') {
+          if (s[i + 1] === '"') { field += '"'; i++; } // "" → "
+          else { inQ = false; }
+        } else {
+          field += c; // クォート内の改行もフィールドの一部
+        }
+      } else {
+        if (c === '"') {
+          inQ = true;
+        } else if (c === ',') {
+          row.push(field); field = '';
+        } else if (c === '\n') {
+          row.push(field); field = '';
+          if (row.some(f => f.trim())) rows.push(row);
+          row = [];
+        } else {
+          field += c;
+        }
+      }
     }
-    result.push(cur);
-    return result;
+    return rows;
   }
 
   async function hrmosImportCsv(teamId, raw) {
     const { randomUUID } = require('crypto');
-    const lines = raw.split(/\r?\n/).filter(l => l.trim());
-    if (lines.length < 2) throw new Error('empty_csv');
+    const rows = hrmosParseCSV(raw);
+    if (rows.length < 2) throw new Error('empty_csv');
 
-    const headers = hrmosParseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
-    console.log('[HRMOS採用] CSV headers detected:', headers.slice(0, 25).join(' | '));
+    const headers = rows[0].map(h => h.trim());
+    console.log('[HRMOS採用] headers:', headers.slice(0, 10).join(' | '), '... total:', headers.length, 'cols, rows:', rows.length - 1);
+
     const idx = (names) => {
       for (const n of names) {
         const i = headers.findIndex(h => h.includes(n));
@@ -1419,22 +1440,20 @@ function registerDashboardApi(deps) {
       joinDate:     idx(['入社日']),
       declineDate:  idx(['辞退日']),
     };
+    console.log('[HRMOS採用] col indices:', JSON.stringify(col));
 
-    const get = (cols, i) => i >= 0 ? (cols[i] || '').replace(/^"|"$/g, '').trim() || null : null;
+    const get = (cols, i) => i >= 0 ? (cols[i] || '').trim() || null : null;
     const toDate = v => {
       if (!v) return null;
-      // "2026年02月09日" 形式
       const jp = v.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
       if (jp) return `${jp[1]}-${jp[2].padStart(2,'0')}-${jp[3].padStart(2,'0')}`;
-      // "2026/02/09" or "2026-02-09"
       const d = new Date(v.replace(/\//g, '-'));
       return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
     };
 
     let imported = 0, skipped = 0, errors = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cols = hrmosParseCSVLine(lines[i]);
-      if (cols.every(c => !c.trim())) continue;
+    for (let i = 1; i < rows.length; i++) {
+      const cols = rows[i];
       const appId = get(cols, col.appId);
       try {
         const id = randomUUID();
@@ -1467,7 +1486,7 @@ function registerDashboardApi(deps) {
         skipped++;
       }
     }
-    console.log(`[HRMOS採用] import: ${imported}件 imported, ${skipped}件 skipped`);
+    console.log(`[HRMOS採用] import done: ${imported}件 imported, ${skipped}件 skipped`);
     return { ok: true, imported, skipped, errors: errors.slice(0, 10) };
   }
 

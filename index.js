@@ -3013,8 +3013,8 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
 
   // ── 出勤日報 → IEYASU 出勤打刻（複数チャンネル対応）──────────────
   const toChSet = (envVal) => new Set((envVal || '').split(',').map(s => s.trim()).filter(Boolean));
-  const STAMP_IN_CHS  = toChSet(process.env.RANKING_REPORT_IN_CHANNEL_ID);
-  const STAMP_OUT_CHS = toChSet(process.env.RANKING_REPORT_OUT_CHANNEL_ID);
+  const STAMP_IN_CHS  = toChSet(process.env.HRMOS_STAMP_IN_CHANNELS);
+  const STAMP_OUT_CHS = toChSet(process.env.HRMOS_STAMP_OUT_CHANNELS);
 
   const doStamp = async (client, message, stampType) => {
     // スレッド返信は除外

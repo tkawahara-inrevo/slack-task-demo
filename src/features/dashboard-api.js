@@ -1582,12 +1582,13 @@ function registerDashboardApi(deps) {
   expressApp.get('/api/dashboard/admin/hrmos-recruitment/analytics', authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { from, to, granularity = 'month' } = req.query;
+      const { from, to, granularity = 'month', jobName } = req.query;
 
       const conditions = ['team_id = $1'];
       const params = [teamId];
-      if (from) { conditions.push(`applied_date >= $${params.length + 1}`); params.push(from); }
-      if (to)   { conditions.push(`applied_date <= $${params.length + 1}`); params.push(to); }
+      if (from)    { conditions.push(`applied_date >= $${params.length + 1}`); params.push(from); }
+      if (to)      { conditions.push(`applied_date <= $${params.length + 1}`); params.push(to); }
+      if (jobName) { conditions.push(`COALESCE(job_name,'不明') = $${params.length + 1}`); params.push(jobName); }
       const where = conditions.join(' AND ');
 
       // 粒度別のSQLフォーマット
@@ -1693,6 +1694,91 @@ function registerDashboardApi(deps) {
       res.json(r.rows[0] || { total: 0, latest_import: null });
     } catch (e) {
       res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // GET/PUT /admin/hrmos-recruitment/sheet-settings  — スプシURL保存
+  expressApp.get('/api/dashboard/admin/hrmos-recruitment/sheet-settings', authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const r = await dbQuery(`SELECT sheet_url FROM hrmos_recruitment_settings WHERE team_id=$1`, [teamId]);
+      res.json({ sheetUrl: r.rows[0]?.sheet_url || '' });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.put('/api/dashboard/admin/hrmos-recruitment/sheet-settings', authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { sheetUrl } = req.body;
+      await dbQuery(`
+        INSERT INTO hrmos_recruitment_settings (team_id, sheet_url, updated_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (team_id) DO UPDATE SET sheet_url=$2, updated_at=now()
+      `, [teamId, sheetUrl || '']);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // POST /admin/hrmos-recruitment/sync  — 保存済みURLからワンクリック取り込み
+  expressApp.post('/api/dashboard/admin/hrmos-recruitment/sync', authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const r = await dbQuery(`SELECT sheet_url FROM hrmos_recruitment_settings WHERE team_id=$1`, [teamId]);
+      const sheetUrl = r.rows[0]?.sheet_url;
+      if (!sheetUrl) return res.status(400).json({ error: 'sheet_url_not_set', message: 'スプシURLが保存されていません' });
+
+      const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      if (!idMatch) return res.status(400).json({ error: 'invalid_url' });
+      const fileId = idMatch[1];
+
+      // 公開シートなら認証なしで取得可能
+      let raw;
+      try {
+        raw = await new Promise((resolve, reject) => {
+          const https = require('https');
+          const url = `https://docs.google.com/spreadsheets/d/${fileId}/export?format=csv`;
+          const req2 = https.get(url, res2 => {
+            if (res2.statusCode !== 200) return reject(Object.assign(new Error(`HTTP ${res2.statusCode}`), { code: 'HTTP_ERR' }));
+            const chunks = [];
+            res2.on('data', c => chunks.push(c));
+            res2.on('end', () => {
+              const body = Buffer.concat(chunks);
+              const preview = body.slice(0, 300).toString();
+              if (preview.includes('<html') || preview.includes('<!DOCTYPE') || preview.includes('Sign in')) {
+                return reject(Object.assign(new Error('sheet_private'), { code: 'PRIVATE' }));
+              }
+              resolve(body.toString('utf-8'));
+            });
+          });
+          req2.on('error', reject);
+          req2.end();
+        });
+      } catch (fetchErr) {
+        if (fetchErr.code === 'PRIVATE') {
+          // 非公開 → Drive API を試みる
+          try {
+            const { google } = require('googleapis');
+            const path = require('path');
+            const auth = new google.auth.GoogleAuth({
+              keyFile: path.join(__dirname, '../../drive-service-account.json'),
+              scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+            });
+            const drive = google.drive({ version: 'v3', auth });
+            const exportRes = await drive.files.export({ fileId, mimeType: 'text/csv', supportsAllDrives: true }, { responseType: 'text' });
+            raw = exportRes.data;
+          } catch {
+            return res.status(403).json({ error: 'sheet_private', message: 'スプレッドシートが非公開です。「リンクを知っている全員が閲覧可能」に設定するか、サービスアカウントに共有してください。' });
+          }
+        } else {
+          return res.status(500).json({ error: 'fetch_failed', message: fetchErr.message });
+        }
+      }
+
+      const result = await hrmosImportCsv(teamId, raw);
+      res.json(result);
+    } catch (e) {
+      console.error('[HRMOS採用] sync error:', e);
+      res.status(500).json({ error: 'internal', message: e.message });
     }
   });
 

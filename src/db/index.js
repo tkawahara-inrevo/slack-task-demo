@@ -622,6 +622,15 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // HRMOS採用設定（スプシURLなど）
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (
+      team_id   TEXT PRIMARY KEY,
+      sheet_url TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+
   // HRMOS採用 応募者データ
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_applicants (

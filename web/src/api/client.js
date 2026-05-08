@@ -543,6 +543,12 @@ export const api = {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))).toString();
     return apiFetch(`/admin/hrmos-recruitment/applicants${qs ? '?' + qs : ''}`);
   },
+  hrmosSheetSettings: () => apiFetch('/admin/hrmos-recruitment/sheet-settings'),
+  hrmosSaveSheetSettings: (sheetUrl) => apiFetch('/admin/hrmos-recruitment/sheet-settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sheetUrl }),
+  }),
+  hrmosSync: () => apiFetch('/admin/hrmos-recruitment/sync', { method: 'POST' }),
+  hrmosJobList: () => apiFetch('/admin/hrmos-recruitment/analytics').then(d => (d.byJob || []).map(j => j.name)),
 
   // チャンネルマッピング
   channelMappingSync: () => apiFetch('/admin/channel-mapping/sync', { method: 'POST' }),

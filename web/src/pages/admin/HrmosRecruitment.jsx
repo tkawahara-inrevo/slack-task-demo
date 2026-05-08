@@ -128,19 +128,34 @@ export default function HrmosRecruitment() {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [sheetUrl, setSheetUrl] = useState('');
+  const [savedSheetUrl, setSavedSheetUrl] = useState('');
+  const [savingUrl, setSavingUrl] = useState(false);
   const [error, setError] = useState('');
+  // メイン期間フィルター
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // 求人フィルター
+  const [jobFilter, setJobFilter] = useState('');
+  // 期間比較
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareFrom, setCompareFrom] = useState('');
+  const [compareTo, setCompareTo] = useState('');
+  const [compareAnalytics, setCompareAnalytics] = useState(null);
   const [dragging, setDragging] = useState(false);
-  const [drilldown, setDrilldown] = useState(null); // { label? status? job_name? source? }
+  const [drilldown, setDrilldown] = useState(null);
   const fileRef = useRef();
 
   const openDrilldown = (filterKey, value) => setDrilldown({ [filterKey]: value });
 
   const loadSummary = useCallback(async () => {
     try { setSummary(await api.hrmosSummary()); } catch {}
+  }, []);
+
+  const loadSheetSettings = useCallback(async () => {
+    try { const s = await api.hrmosSheetSettings(); setSavedSheetUrl(s.sheetUrl || ''); setSheetUrl(s.sheetUrl || ''); } catch {}
   }, []);
 
   const calcGranularity = (f, t) => {
@@ -152,12 +167,12 @@ export default function HrmosRecruitment() {
     return 'month';
   };
 
-  const fetchAnalytics = useCallback(async (fromDate, toDate) => {
+  const fetchAnalytics = useCallback(async (fromDate, toDate, jobName) => {
     setLoading(true);
     setError('');
     try {
       const granularity = calcGranularity(fromDate, toDate);
-      const data = await api.hrmosAnalytics({ from: fromDate || '', to: toDate || '', granularity });
+      const data = await api.hrmosAnalytics({ from: fromDate || '', to: toDate || '', granularity, jobName: jobName || '' });
       setAnalytics(data);
     } catch (e) {
       setError(e.message);
@@ -166,9 +181,18 @@ export default function HrmosRecruitment() {
     }
   }, []);
 
-  const loadAnalytics = useCallback(() => fetchAnalytics(from, to), [from, to, fetchAnalytics]);
+  const fetchCompareAnalytics = useCallback(async (fromDate, toDate, jobName) => {
+    if (!fromDate || !toDate) { setCompareAnalytics(null); return; }
+    try {
+      const granularity = calcGranularity(fromDate, toDate);
+      const data = await api.hrmosAnalytics({ from: fromDate, to: toDate, granularity, jobName: jobName || '' });
+      setCompareAnalytics(data);
+    } catch { setCompareAnalytics(null); }
+  }, []);
 
-  useEffect(() => { loadSummary(); fetchAnalytics('', ''); }, []);
+  const loadAnalytics = useCallback(() => fetchAnalytics(from, to, jobFilter), [from, to, jobFilter, fetchAnalytics]);
+
+  useEffect(() => { loadSummary(); loadSheetSettings(); fetchAnalytics('', '', ''); }, []);
 
   const handleImport = async (file) => {
     if (!file) return;
@@ -184,6 +208,38 @@ export default function HrmosRecruitment() {
     } finally {
       setImporting(false);
     }
+  };
+
+  const handleSaveUrl = async () => {
+    setSavingUrl(true);
+    try { await api.hrmosSaveSheetSettings(sheetUrl); setSavedSheetUrl(sheetUrl); } catch {}
+    setSavingUrl(false);
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setImportResult(null);
+    try {
+      const result = await api.hrmosSync();
+      setImportResult(result);
+      await loadSummary();
+      await fetchAnalytics(from, to, jobFilter);
+    } catch (e) {
+      setImportResult({ ok: false, error: e.message });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleApplyFilter = () => {
+    fetchAnalytics(from, to, jobFilter);
+    if (compareMode) fetchCompareAnalytics(compareFrom, compareTo, jobFilter);
+  };
+
+  const handleReset = () => {
+    setFrom(''); setTo(''); setJobFilter('');
+    setCompareFrom(''); setCompareTo(''); setCompareAnalytics(null);
+    fetchAnalytics('', '', '');
   };
 
   const onFileChange = (e) => handleImport(e.target.files?.[0]);
@@ -228,30 +284,30 @@ export default function HrmosRecruitment() {
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 20, marginBottom: 24 }}>
         <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 14 }}>データ取り込み</div>
 
-        {/* スプシURL取り込み */}
+        {/* スプシURL保存 + ワンクリック同期 */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: 6 }}>Google スプレッドシートから取り込む（推奨）</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="text"
-              value={sheetUrl}
-              onChange={e => setSheetUrl(e.target.value)}
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>スプシURL固定同期</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <input type="text" value={sheetUrl} onChange={e => setSheetUrl(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/d/..."
-              style={{ flex: 1, border: '1px solid #d1d5db', borderRadius: 6, padding: '7px 12px', fontSize: '0.85rem' }}
-            />
-            <button
-              onClick={handleSheetImport}
-              disabled={importing || !sheetUrl.trim()}
-              style={{
-                background: importing ? '#9ca3af' : '#10b981', color: '#fff', border: 'none',
-                borderRadius: 6, padding: '7px 16px', fontSize: '0.85rem', cursor: importing ? 'not-allowed' : 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
-              }}
-            >
-              {importing ? '取り込み中...' : 'スプシから取り込む'}
+              style={{ flex: 1, border: '1px solid #d1d5db', borderRadius: 6, padding: '7px 12px', fontSize: '0.85rem' }} />
+            <button onClick={handleSaveUrl} disabled={savingUrl}
+              style={{ background: sheetUrl === savedSheetUrl ? '#f3f4f6' : '#3b82f6', color: sheetUrl === savedSheetUrl ? '#6b7280' : '#fff',
+                border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: '0.82rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {savingUrl ? '保存中' : sheetUrl === savedSheetUrl ? '保存済' : 'URLを保存'}
             </button>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 4 }}>
-            ※ スプレッドシートをサービスアカウントに共有する必要があります
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={handleSync} disabled={syncing || !savedSheetUrl}
+              style={{ background: savedSheetUrl ? '#10b981' : '#d1d5db', color: '#fff', border: 'none',
+                borderRadius: 6, padding: '8px 20px', fontSize: '0.88rem', cursor: savedSheetUrl ? 'pointer' : 'not-allowed', fontWeight: 700 }}>
+              {syncing ? '同期中...' : '最新データを同期'}
+            </button>
+            {savedSheetUrl && <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>保存されたURLから取り込み</span>}
+            {!savedSheetUrl && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>URLを保存してください</span>}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 6 }}>
+            ※ シートを「リンクを知っている全員が閲覧可能」に設定すると認証なしで同期可能
           </div>
         </div>
 
@@ -314,23 +370,56 @@ export default function HrmosRecruitment() {
         )}
       </div>
 
-      {/* フィルター */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#374151' }}>応募日</label>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-          style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.85rem' }} />
-        <span style={{ color: '#6b7280' }}>〜</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)}
-          style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.85rem' }} />
-        <button onClick={loadAnalytics}
-          style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 16px', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 600 }}>
-          絞り込む
-        </button>
-        {(from || to) && (
-          <button onClick={() => { setFrom(''); setTo(''); fetchAnalytics('', ''); }}
-            style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 12px', fontSize: '0.82rem', cursor: 'pointer', color: '#6b7280' }}>
-            リセット
+      {/* フィルターパネル */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', marginBottom: 20 }}>
+        {/* 期間 + 求人フィルター */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>応募日</span>
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+            style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem' }} />
+          <span style={{ color: '#9ca3af' }}>〜</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)}
+            style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem' }} />
+
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', marginLeft: 8 }}>求人</span>
+          <select value={jobFilter} onChange={e => setJobFilter(e.target.value)}
+            style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem', minWidth: 160 }}>
+            <option value="">すべて</option>
+            {(analytics?.byJob || []).map(j => <option key={j.name} value={j.name}>{j.name}</option>)}
+          </select>
+
+          <button onClick={handleApplyFilter}
+            style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 16px', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 600 }}>
+            絞り込む
           </button>
+          {(from || to || jobFilter) && (
+            <button onClick={handleReset}
+              style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 12px', fontSize: '0.8rem', cursor: 'pointer', color: '#6b7280' }}>
+              リセット
+            </button>
+          )}
+
+          <button onClick={() => setCompareMode(v => !v)}
+            style={{ marginLeft: 'auto', background: compareMode ? '#eff6ff' : 'none', color: compareMode ? '#1d4ed8' : '#6b7280',
+              border: '1px solid ' + (compareMode ? '#bfdbfe' : '#d1d5db'), borderRadius: 6, padding: '5px 12px', fontSize: '0.8rem', cursor: 'pointer' }}>
+            {compareMode ? '比較中' : '期間比較'}
+          </button>
+        </div>
+
+        {/* 比較期間（比較モード時のみ） */}
+        {compareMode && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingTop: 10, borderTop: '1px solid #f3f4f6' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#8b5cf6', whiteSpace: 'nowrap' }}>比較期間</span>
+            <input type="date" value={compareFrom} onChange={e => setCompareFrom(e.target.value)}
+              style={{ border: '1px solid #c4b5fd', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem' }} />
+            <span style={{ color: '#9ca3af' }}>〜</span>
+            <input type="date" value={compareTo} onChange={e => setCompareTo(e.target.value)}
+              style={{ border: '1px solid #c4b5fd', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem' }} />
+            <button onClick={() => fetchCompareAnalytics(compareFrom, compareTo, jobFilter)}
+              style={{ background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 600 }}>
+              比較データを取得
+            </button>
+          </div>
         )}
       </div>
 
@@ -342,16 +431,21 @@ export default function HrmosRecruitment() {
         <>
           {/* KPI */}
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
-            <KpiCard label="総応募数" value={analytics.total.toLocaleString()} />
-            <KpiCard label="求人数（応募あり）" value={analytics.uniqueJobs?.toLocaleString() ?? '—'} color="#8b5cf6" />
-            {analytics.byStatus.slice(0, 3).map(r => (
-              <KpiCard key={r.name} label={r.name} value={r.cnt.toLocaleString()}
-                sub={`${analytics.total > 0 ? Math.round(r.cnt / analytics.total * 100) : 0}%`}
-                color={statusColor(r.name)} />
-            ))}
+            <KpiCard label={compareMode && compareAnalytics ? `総応募数（メイン）` : '総応募数'} value={analytics.total.toLocaleString()}
+              sub={compareMode && compareAnalytics ? `比較: ${compareAnalytics.total.toLocaleString()}件` : undefined} />
+            <KpiCard label="求人数（応募あり）" value={analytics.uniqueJobs?.toLocaleString() ?? '—'} color="#8b5cf6"
+              sub={compareMode && compareAnalytics ? `比較: ${compareAnalytics.uniqueJobs?.toLocaleString() ?? '—'}件` : undefined} />
+            {analytics.byStatus.slice(0, 3).map(r => {
+              const cmp = compareAnalytics?.byStatus?.find(s => s.name === r.name);
+              return (
+                <KpiCard key={r.name} label={r.name} value={r.cnt.toLocaleString()}
+                  sub={cmp ? `比較: ${cmp.cnt}件` : `${analytics.total > 0 ? Math.round(r.cnt / analytics.total * 100) : 0}%`}
+                  color={statusColor(r.name)} />
+              );
+            })}
           </div>
 
-          {/* 応募数推移（粒度自動） */}
+          {/* 応募数推移（比較対応） */}
           {analytics.trend.length > 0 && (
             <>
               <SectionTitle>
@@ -362,12 +456,18 @@ export default function HrmosRecruitment() {
               </SectionTitle>
               <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 8px' }}>
                 <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={analytics.trend} margin={{ top: 4, right: 20, left: 0, bottom: 4 }}>
+                  <LineChart margin={{ top: 4, right: 20, left: 0, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                    <XAxis dataKey="period" tick={CHART_TICK_STYLE} />
+                    <XAxis dataKey="period" type="category" allowDuplicatedCategory={false} tick={CHART_TICK_STYLE} />
                     <YAxis tick={CHART_TICK_STYLE} allowDecimals={false} />
-                    <Tooltip formatter={(v) => [`${v}件`, '応募数']} />
-                    <Line type="monotone" dataKey="cnt" stroke="#3b82f6" strokeWidth={2} dot={analytics.trend.length < 30 ? { r: 3 } : false} />
+                    <Tooltip formatter={(v, n) => [`${v}件`, n]} />
+                    <Legend wrapperStyle={{ fontSize: '0.78rem' }} />
+                    <Line data={analytics.trend} type="monotone" dataKey="cnt" name="メイン期間"
+                      stroke="#3b82f6" strokeWidth={2} dot={analytics.trend.length < 30 ? { r: 3 } : false} />
+                    {compareMode && compareAnalytics?.trend?.length > 0 && (
+                      <Line data={compareAnalytics.trend} type="monotone" dataKey="cnt" name="比較期間"
+                        stroke="#8b5cf6" strokeWidth={2} strokeDasharray="5 3" dot={compareAnalytics.trend.length < 30 ? { r: 3 } : false} />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -382,15 +482,23 @@ export default function HrmosRecruitment() {
                 {analytics.byJob.length === 0
                   ? <div style={{ color: '#9ca3af', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>データなし</div>
                   : (
-                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.byJob.length * 28)}>
-                      <BarChart data={analytics.byJob} layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}
+                    <ResponsiveContainer width="100%" height={Math.max(200, analytics.byJob.length * (compareMode && compareAnalytics ? 42 : 28))}>
+                      <BarChart
+                        data={analytics.byJob.map(r => ({
+                          name: r.name, cnt: r.cnt,
+                          cmp: compareAnalytics?.byJob?.find(c => c.name === r.name)?.cnt ?? 0,
+                        }))}
+                        layout="vertical" margin={{ top: 0, right: 20, left: 8, bottom: 0 }}
                         onClick={e => e?.activePayload?.[0] && openDrilldown('job_name', e.activePayload[0].payload.name)}
                         style={{ cursor: 'pointer' }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                         <XAxis type="number" tick={CHART_TICK_STYLE} allowDecimals={false} />
                         <YAxis type="category" dataKey="name" tick={CHART_TICK_STYLE} width={150} />
                         <Tooltip formatter={(v) => [`${v}件`]} cursor={{ fill: '#eff6ff' }} />
-                        <Bar dataKey="cnt" fill="#3b82f6" radius={[0, 4, 4, 0]} name="応募数" />
+                        <Bar dataKey="cnt" fill="#3b82f6" radius={[0, 4, 4, 0]} name="メイン期間" />
+                        {compareMode && compareAnalytics && (
+                          <Bar dataKey="cmp" fill="#c4b5fd" radius={[0, 4, 4, 0]} name="比較期間" />
+                        )}
                       </BarChart>
                     </ResponsiveContainer>
                   )

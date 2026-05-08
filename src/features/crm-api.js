@@ -934,20 +934,40 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { rep, type, start, end } = req.query;
       // type: 'payments' | 'won'
 
+      // グループ名 → 実スタッフ名のマッチ条件
+      const ALLIANCE_REPS_DD = ['長嶺', '丸山', '外山'];
+      const staffCondition = (repName, paramOffset) => {
+        if (repName === 'アライアンス') {
+          return {
+            where: ALLIANCE_REPS_DD.map((n, i) => `kp.staff ILIKE $${paramOffset + i}`).join(' OR '),
+            params: ALLIANCE_REPS_DD.map(n => `%${n}%`),
+          };
+        }
+        if (repName === '添田/リファラル') {
+          return {
+            where: `(kp.staff ILIKE $${paramOffset} OR kp.staff ILIKE $${paramOffset + 1})`,
+            params: ['%添田%', '%リファラル%'],
+          };
+        }
+        return { where: `kp.staff=$${paramOffset}`, params: [repName] };
+      };
+
       if (type === 'payments') {
+        const sc = staffCondition(rep, 3);
         const { rows } = await dbQuery(`
           SELECT kp.payment_date, kp.company, kp.plan, kp.incentive_amount, kp.amount,
+            kp.staff,
             CASE WHEN kp.plan LIKE '%月額%' THEN (
               SELECT COUNT(*)::int FROM kintone_payments kp2
               WHERE kp2.company = kp.company
                 AND kp2.payment_date <= kp.payment_date
             ) ELSE NULL END AS month_num
           FROM kintone_payments kp
-          WHERE kp.staff=$1
-            AND kp.payment_date BETWEEN $2::date AND $3::date
+          WHERE (${sc.where})
+            AND kp.payment_date BETWEEN $1::date AND $2::date
             AND kp.incentive_amount > 0
           ORDER BY kp.payment_date DESC
-        `, [rep, start, end]);
+        `, [start, end, ...sc.params]);
         res.json({ rows });
       } else if (type === 'won') {
         const { rows } = await dbQuery(`

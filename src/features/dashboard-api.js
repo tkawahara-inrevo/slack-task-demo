@@ -1414,8 +1414,15 @@ function registerDashboardApi(deps) {
     const rows = hrmosParseCSV(raw);
     if (rows.length < 2) throw new Error('empty_csv');
 
-    const headers = rows[0].map(h => h.trim());
-    console.log('[HRMOS採用] headers:', headers.slice(0, 10).join(' | '), '... total:', headers.length, 'cols, rows:', rows.length - 1);
+    // ヘッダー行を自動検索（メタ行がある場合も対応）
+    let headerRowIdx = rows.findIndex(row => row.some(c => c.includes('応募ID') || c.includes('応募者ID')));
+    if (headerRowIdx === -1) headerRowIdx = 0; // fallback
+    const headers = rows[headerRowIdx].map(h => h.trim());
+    const dataRows = rows.slice(headerRowIdx + 1);
+
+    // ASCII-safeなログ（Buffer経由でバイナリログ問題を回避）
+    const safeHeaders = headers.slice(0, 10).map(h => Buffer.from(h).toString('base64')).join(',');
+    console.log(`[HRMOS] headerRow=${headerRowIdx} cols=${headers.length} dataRows=${dataRows.length} enc_headers_b64=${safeHeaders}`);
 
     const idx = (names) => {
       for (const n of names) {
@@ -1452,8 +1459,8 @@ function registerDashboardApi(deps) {
     };
 
     let imported = 0, skipped = 0, errors = [];
-    for (let i = 1; i < rows.length; i++) {
-      const cols = rows[i];
+    for (let i = 0; i < dataRows.length; i++) {
+      const cols = dataRows[i];
       const appId = get(cols, col.appId);
       try {
         const id = randomUUID();
@@ -1482,12 +1489,12 @@ function registerDashboardApi(deps) {
         ]);
         imported++;
       } catch (e) {
-        errors.push({ line: i + 1, error: e.message });
+        errors.push({ line: headerRowIdx + i + 2, error: e.message });
         skipped++;
       }
     }
     console.log(`[HRMOS採用] import done: ${imported}件 imported, ${skipped}件 skipped`);
-    return { ok: true, imported, skipped, errors: errors.slice(0, 10) };
+    return { ok: true, imported, skipped, errors: errors.slice(0, 10), colsFound: Object.fromEntries(Object.entries(col).filter(([,v]) => v >= 0)) };
   }
 
   // POST /api/dashboard/admin/hrmos-recruitment/import  — CSVファイルアップロード
@@ -1495,22 +1502,22 @@ function registerDashboardApi(deps) {
     try {
       const { teamId } = req.dashboardUser;
       if (!req.file) return res.status(400).json({ error: 'file_required' });
-      // Shift-JIS / UTF-8 自動判定
+      // エンコーディング自動判定: UTF-8 BOM → BOM除去, Shift-JIS → iconv変換
+      const buf = req.file.buffer;
       let raw;
-      try {
-        const iconv = require('iconv-lite');
-        // BOMなしUTF-8 or Shift-JIS を判定: 先頭バイトで簡易チェック
-        const buf = req.file.buffer;
-        const isUtf8 = buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF; // UTF-8 BOM
-        if (isUtf8) {
-          raw = buf.slice(3).toString('utf-8');
+      if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+        // UTF-8 with BOM
+        raw = buf.slice(3).toString('utf-8');
+      } else {
+        const asUtf8 = buf.toString('utf-8');
+        // U+FFFD（無効シーケンス）が多い場合は Shift-JIS
+        const fffdCount = (asUtf8.match(/�/g) || []).length;
+        if (fffdCount > 5) {
+          try { raw = require('iconv-lite').decode(buf, 'Shift_JIS'); }
+          catch { raw = asUtf8; }
         } else {
-          // まずUTF-8でデコードして日本語ヘッダーが読めるか確認
-          const asUtf8 = buf.toString('utf-8');
-          raw = asUtf8.includes('応募') ? asUtf8 : iconv.decode(buf, 'Shift_JIS');
+          raw = asUtf8;
         }
-      } catch {
-        raw = req.file.buffer.toString('utf-8');
       }
       const result = await hrmosImportCsv(teamId, raw);
       res.json(result);

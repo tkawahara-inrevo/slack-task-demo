@@ -192,7 +192,19 @@ export default function HrmosRecruitment() {
             fontSize: '0.85rem', color: importResult.ok ? '#15803d' : '#dc2626',
           }}>
             {importResult.ok
-              ? `✅ 取り込み完了: ${importResult.imported}件インポート、${importResult.skipped}件スキップ`
+              ? <>
+                  {`✅ 取り込み完了: ${importResult.imported}件インポート、${importResult.skipped}件スキップ`}
+                  {importResult.colsFound && Object.keys(importResult.colsFound).length === 0 && (
+                    <div style={{ marginTop: 6, color: '#dc2626', fontWeight: 600 }}>
+                      ⚠️ 列が1つも検出されませんでした。CSVのエンコーディングや形式を確認してください。
+                    </div>
+                  )}
+                  {importResult.colsFound && Object.keys(importResult.colsFound).length > 0 && (
+                    <div style={{ marginTop: 4, fontSize: '0.78rem', color: '#166534' }}>
+                      検出列: {Object.keys(importResult.colsFound).join(', ')}
+                    </div>
+                  )}
+                </>
               : `❌ エラー: ${importResult.error}`}
             {importResult.errors?.length > 0 && (
               <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#dc2626' }}>

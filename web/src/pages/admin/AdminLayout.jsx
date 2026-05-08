@@ -81,6 +81,11 @@ export default function AdminLayout() {
             {collapsed ? '📋' : '採用管理（自社）'}
           </NavLink>
         )}
+        {isPersonnel && (
+          <NavLink to="/admin/hrmos-recruitment" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '📊' : 'HRMOS採用分析'}
+          </NavLink>
+        )}
       </nav>
 
       <div style={{ flex: 1, padding: '24px', minWidth: 0 }}>

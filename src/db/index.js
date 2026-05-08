@@ -606,6 +606,30 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // HRMOS採用 応募者データ
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS hrmos_applicants (
+      id          TEXT PRIMARY KEY,
+      team_id     TEXT NOT NULL,
+      app_id      TEXT,
+      job_id      TEXT,
+      job_name    TEXT,
+      position_name TEXT,
+      applied_date DATE,
+      applicant_name TEXT,
+      source      TEXT,
+      source_detail TEXT,
+      label       TEXT,
+      status      TEXT,
+      offer_date  DATE,
+      join_date   DATE,
+      decline_date DATE,
+      imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_applicants_team_date ON hrmos_applicants(team_id, applied_date)`).catch(() => {});
+  await dbQuery(`CREATE UNIQUE INDEX IF NOT EXISTS hrmos_applicants_team_appid ON hrmos_applicants(team_id, app_id) WHERE app_id IS NOT NULL`).catch(() => {});
+
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
   if (INITIAL_ADMIN_ID) {

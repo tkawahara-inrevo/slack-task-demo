@@ -19,6 +19,7 @@ import ChannelMapping from './pages/admin/ChannelMapping'
 import PermissionsManager from './pages/admin/PermissionsManager'
 import SlackGroups from './pages/admin/SlackGroups'
 import Recruitment from './pages/admin/Recruitment'
+import HrmosRecruitment from './pages/admin/HrmosRecruitment'
 import ProjectView from './pages/ProjectView'
 import Analytics from './pages/Analytics'
 import WorkloadGantt from './pages/WorkloadGantt'
@@ -67,6 +68,7 @@ function App() {
           <Route path="channel-mapping" element={<ChannelMapping />} />
           <Route path="slack-groups" element={<SlackGroups />} />
           <Route path="recruitment" element={<Recruitment />} />
+          <Route path="hrmos-recruitment" element={<HrmosRecruitment />} />
           <Route path="ranking" element={<Ranking />} />
         </Route>
         <Route path="/crm" element={<CRM />} />

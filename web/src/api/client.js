@@ -525,6 +525,18 @@ export const api = {
   slackGroupChangePreview: (userId, toRuleId) => apiFetch('/admin/slack-group-rules/change-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, toRuleId }) }),
   slackGroupChangeApply: (userId, add, remove) => apiFetch('/admin/slack-group-rules/change-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, add, remove }) }),
 
+  // HRMOS採用
+  hrmosImportCsv: (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiFetch('/admin/hrmos-recruitment/import', { method: 'POST', body: form });
+  },
+  hrmosAnalytics: (params = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v))).toString();
+    return apiFetch(`/admin/hrmos-recruitment/analytics${qs ? '?' + qs : ''}`);
+  },
+  hrmosSummary: () => apiFetch('/admin/hrmos-recruitment/summary'),
+
   // チャンネルマッピング
   channelMappingSync: () => apiFetch('/admin/channel-mapping/sync', { method: 'POST' }),
   channelMappingSyncStatus: (jobId) => apiFetch(`/admin/channel-mapping/sync/status/${jobId}`),

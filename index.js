@@ -3121,3 +3121,43 @@ cron.schedule(
   },
   { timezone: "Asia/Tokyo" },
 );
+
+// ── 遅延通知cron（毎分）: notify_scheduled_at が過ぎたタスクを通知 ──
+cron.schedule("* * * * *", async () => {
+  try {
+    const due = await dbQuery(`
+      SELECT t.id, t.team_id, t.task_type, t.title,
+             t.assignee_id, t.source_permalink, t.due_date, t.created_by_user_id,
+             t.broadcast_group_handle, t.broadcast_group_id, t.assignee_label
+      FROM tasks t
+      WHERE t.notify_scheduled_at IS NOT NULL
+        AND t.notify_scheduled_at <= now()
+        AND t.notified_at IS NULL
+        AND t.status NOT IN ('done', 'cancelled')
+    `);
+    if (!due.rows.length) return;
+
+    for (const task of due.rows) {
+      try {
+        if (task.task_type === "broadcast") {
+          const targets = await dbQuery(
+            "SELECT user_id FROM task_targets WHERE task_id=$1", [task.id]
+          );
+          for (const t of targets.rows) {
+            if (t.user_id !== task.created_by_user_id) {
+              await notifyTaskSimpleDM(t.user_id, task, "タスクが届いたよ").catch(() => {});
+            }
+          }
+        } else if (task.assignee_id && task.assignee_id !== task.created_by_user_id) {
+          await notifyTaskSimpleDM(task.assignee_id, task, "タスクが届いたよ").catch(() => {});
+        }
+        await dbQuery("UPDATE tasks SET notified_at=now() WHERE id=$1", [task.id]);
+        console.log(`[delayed-notify] sent: ${task.id} (${task.title?.slice(0,30)})`);
+      } catch (e) {
+        console.error("[delayed-notify] error for task", task.id, e.message);
+      }
+    }
+  } catch (e) {
+    console.error("[delayed-notify] cron error:", e.message);
+  }
+});

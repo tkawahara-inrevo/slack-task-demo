@@ -637,6 +637,10 @@ async function dbEnsureSettingsSchema() {
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_stamps_user_date ON hrmos_stamps(team_id, slack_user_id, stamped_at DESC)`).catch(() => {});
 
+  // タスク通知遅延（キーワード/リアクション経由タスクは10分後に通知）
+  await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS tasks_notify_scheduled ON tasks(notify_scheduled_at) WHERE notify_scheduled_at IS NOT NULL AND notified_at IS NULL`).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

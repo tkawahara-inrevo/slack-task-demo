@@ -90,7 +90,9 @@ function registerReactionFeature(deps) {
     teamId, channelId, msgTs, rawText, baseText,
     blocks = null,
     requesterUserId, actorUserId, dueYmd, permalink,
-    delayNotification = false,   // true: 10分後に通知, false: 即通知
+    // delayNotification=true の場合: タスク作成直後は通知せず10分後に送る。
+    // キーワード/<タスク化>およびリアクション経由で使用。担当者変更の猶予を与えるため。
+    delayNotification = false,
   }) {
     const notifyScheduledAt = delayNotification
       ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
@@ -183,9 +185,10 @@ function registerReactionFeature(deps) {
     return { created, targetList };
   }
 
-const TASK_REACTION_NAME = "task";
+const TASK_REACTION_NAME = "task"; // :task: 絵文字でタスク化
 
-// キーワードタスク化：全角・半角両対応
+// メッセージ本文にこのキーワードが含まれると自動タスク化される。
+// 全角・半角両対応。タスクタイトルはキーワード除去後のテキストになる。
 const TASK_KEYWORD_PATTERNS = [
   /＜タスク化＞/,
   /<タスク化>/,

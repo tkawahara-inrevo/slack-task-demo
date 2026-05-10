@@ -667,7 +667,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       }
       const [prevStart, prevEnd] = [ps.prev_start, ps.prev_end];
 
-      // アライアンス担当者（KPI除外）
+      // アライアンス担当者はKPI集計から除外し、別途 allianceIncentive として返す。
+      // 外部パートナー経由の受注はチーム目標達成率に含めない運用方針のため。
       const ALLIANCE_REPS = ['長嶺', '丸山', '外山'];
       const allianceExclude = ALLIANCE_REPS.map(n => `kp.staff NOT ILIKE '%${n}%'`).join(' AND ');
 
@@ -861,7 +862,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const repRepRoleMap = {};
       for (const r of repRoleRes.rows) repRepRoleMap[r.rep_name] = r;
 
-      // Slack プロフィールから役職を自動推定するヘルパー（perf-staffと共通ロジック）
+      // Slackのtitleから役職を推定するフォールバック。crm_rep_roles に手動設定がある場合はそちら優先。
+      // 役職名は crm_role_targets の role_name と一致させること。manager→Chief は意図的な運用。
       const inferRoleFromTitle = (title) => {
         if (!title) return '役職無し';
         const t = title.toLowerCase();
@@ -884,6 +886,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       const repTargetMap = {};
       const repRoleInferred = {}; // フロントに渡す自動推定役職
+      // KPI管理対象の担当者（BC担当）。フロント側の TARGET_REPS と同期させること。
+      // 追加・変更時は crm-api.js と CrmDashboard.jsx の両方を更新する必要がある。
       const TARGET_REPS_SERVER = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘'];
       let teamTarget = 0;
       for (const rep of TARGET_REPS_SERVER) {

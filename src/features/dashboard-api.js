@@ -289,9 +289,9 @@ function registerDashboardApi(deps) {
     }
   }, 5 * 60 * 1000).unref();
 
-  // Enhance authMiddleware to attach role.
-  // dashboard_roles に admin が明示設定されている場合はそれを優先。
-  // それ以外はSlackプロフィールのtitleから自動判定する。
+  // ロール判定ミドルウェア。優先順位: admin(DB明示) > corp(DB明示) > IT > Personnel > Corporate > Slackタイトル推定
+  // ロールはキャッシュ(5分)で保持。ロール変更後は最大5分で反映される。
+  // IT・Personnel・Corporate はチーム所属名で判定しているため、チーム名変更時は要確認。
   async function authWithRole(req, res, next) {
     authMiddleware(req, res, async () => {
       try {
@@ -1379,7 +1379,9 @@ function registerDashboardApi(deps) {
     hrmosUpload = { single: () => (req, res, next) => res.status(503).json({ error: 'csv_import_unavailable' }) };
   }
 
-  // CSVパーサー: カンマ or タブ区切り、クォート内改行対応
+  // HRMOSのCSVエクスポートはタブ区切り(TSV)・Shift-JISで出力される。
+  // 下記パーサーはクォート内の改行（レジュメ・備考欄）も正しく処理する。
+  // split('\n')だと複数行フィールドで壊れるため、1文字ずつ処理する方式を採用。
   function hrmosParseCSV(text, delim) {
     const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const rows = [];
@@ -1410,7 +1412,7 @@ function registerDashboardApi(deps) {
     return rows;
   }
 
-  // カンマとタブどちらが区切り文字か判定
+  // HRMOSはTSV（タブ区切り）でエクスポートするが、将来CSV変更の可能性もあるため自動判定する。
   function hrmosDetectDelim(text) {
     const first = text.slice(0, 2000);
     const tabs   = (first.match(/\t/g) || []).length;
@@ -1509,7 +1511,9 @@ function registerDashboardApi(deps) {
       const { teamId } = req.dashboardUser;
       if (!req.file) return res.status(400).json({ error: 'file_required' });
       const buf = req.file.buffer;
-      // 複数エンコーディングを試してHRMOSヘッダーが最多一致するものを採用
+      // HRMOSエクスポートはShift-JISが多いが、GoogleシートやOS設定によって変わるため
+      // UTF-8 BOM / UTF-16 / Shift-JIS / UTF-8 の4パターンを試し、既知ヘッダーとのマッチ数が
+      // 最も多いエンコーディングを採用する。
       const raw = (() => {
         const iconv = (() => { try { return require('iconv-lite'); } catch { return null; } })();
         const KNOWN = ['応募ID','求人名','応募日','氏名','応募経路','ラベル','選考ステータス'];

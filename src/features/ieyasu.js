@@ -11,6 +11,8 @@
 
 const https = require('https');
 
+// IEYASU_API_TOKEN はHRMOS管理画面で発行したAPIキーをそのままセットする。
+// 内部でbase64エンコードせずそのままBasic認証ヘッダーに使う（HRMOSの仕様）。
 const SECRET_KEY  = process.env.IEYASU_API_TOKEN || '';
 const COMPANY     = 'inrevo';
 const BASE_HOST   = 'ieyasu.co';

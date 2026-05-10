@@ -3011,7 +3011,11 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     res.sendFile(path.join(distPath, "index.html"));
   });
 
-  // ── 出勤日報 → IEYASU 出勤打刻（複数チャンネル対応）──────────────
+  // ── 出勤日報 → HRMOS(IEYASU)自動打刻 ─────────────────────────────────────
+  // 出退勤日報チャンネルへの投稿を検知して自動打刻する。
+  // チャンネルはカンマ区切りで複数指定可能（テスト用チャンネルの追加などに対応）。
+  // WFのbotメッセージはuser_idを持たないため、テキスト中の<@UXXXXX>からユーザーを特定する。
+  // スレッド返信は除外（日報本文への雑談コメントで誤打刻しないため）。
   const toChSet = (envVal) => new Set((envVal || '').split(',').map(s => s.trim()).filter(Boolean));
   const STAMP_IN_CHS  = toChSet(process.env.HRMOS_STAMP_IN_CHANNELS);
   const STAMP_OUT_CHS = toChSet(process.env.HRMOS_STAMP_OUT_CHANNELS);
@@ -3122,7 +3126,10 @@ cron.schedule(
   { timezone: "Asia/Tokyo" },
 );
 
-// ── 遅延通知cron（毎分）: notify_scheduled_at が過ぎたタスクを通知 ──
+// ── 遅延通知cron（毎分）────────────────────────────────────────────────────────
+// キーワード/<タスク化> および :task: リアクション経由で作成されたタスクは、
+// 作成直後ではなく10分後に担当者へ通知する（作成者が担当者を変更する猶予を与えるため）。
+// tasks.notify_scheduled_at に通知予定時刻をセット、送信後 notified_at を記録。
 cron.schedule("* * * * *", async () => {
   try {
     const due = await dbQuery(`

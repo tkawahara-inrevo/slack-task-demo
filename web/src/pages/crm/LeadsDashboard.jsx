@@ -174,18 +174,9 @@ export default function LeadsDashboard() {
                 </div>
               )}
               <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
-                <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>12ヶ月平均</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{data.stats.avg12}件</div>
+                <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>月平均（直近12ヶ月）</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{data.stats.avg12}件/月</div>
               </div>
-              {data.stats.vsAvgPct !== null && (
-                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>平均比</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: data.stats.vsAvgPct >= 0 ? '#16a34a' : '#dc2626' }}>
-                    {data.stats.vsAvgPct >= 0 ? '+' : ''}{data.stats.vsAvgPct}%
-                  </div>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>今期 {data.stats.current}件 vs 平均 {data.stats.avg12}件</div>
-                </div>
-              )}
             </div>
           )}
 

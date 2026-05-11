@@ -1680,13 +1680,18 @@ function registerCrmApi({ expressApp, authWithRole }) {
       `;
       const params = [rangeFrom, rangeTo];
 
-      const [funnelR, sourceR, repR, trendR, recentR] = await Promise.all([
-        // ファネル（deals テーブル / yomi別）
+      const page  = Math.max(1, Number(req.query.page) || 1);
+      const limit = 50;
+      const offset = (page - 1) * limit;
+
+      const [funnelR, sourceR, repR, trendR, recentR, totalR] = await Promise.all([
+        // ファネル（kintone_cache / 期間フィルター込み）
         dbQuery(`
-          SELECT yomi, COUNT(*)::int AS cnt
-          FROM deals WHERE team_id=$1 AND status='active'
+          SELECT COALESCE(NULLIF(data->>'ヨミ',''), '不明') AS yomi, COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
           GROUP BY yomi ORDER BY cnt DESC
-        `, [teamId]),
+        `, params),
 
         // 流入経路別（kintone_cache）
         dbQuery(`
@@ -1718,7 +1723,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           GROUP BY month ORDER BY month
         `, params),
 
-        // 最新リード一覧
+        // リード一覧（ページング）
         dbQuery(`
           SELECT
             data->>'顧客' AS customer,
@@ -1730,7 +1735,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
           FROM kintone_cache
           WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
           ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
-          LIMIT 50
+          LIMIT $3 OFFSET $4
+        `, [...params, limit, offset]),
+
+        // 総件数
+        dbQuery(`
+          SELECT COUNT(*)::int AS total FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
         `, params),
       ]);
 
@@ -1738,6 +1749,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const yomiOrder = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％'];
       const yomiMap = {};
       for (const r of funnelR.rows) yomiMap[r.yomi] = r.cnt;
+      const periodTotal = funnelR.rows.reduce((s, r) => s + r.cnt, 0);
       const funnel = [
         { label: 'リード（アポ化前）', cnt: yomiMap['アポ化前'] || 0 },
         { label: 'アポ取得済', cnt: yomiMap['アポ化済商談前'] || 0 },
@@ -1747,10 +1759,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
       res.json({
         period: { from: rangeFrom, to: rangeTo },
         funnel,
+        periodTotal,
         bySource: sourceR.rows,
         byRep:    repR.rows,
         trend:    trendR.rows,
         recent:   recentR.rows,
+        pagination: { page, limit, total: totalR.rows[0]?.total || 0 },
       });
     } catch (e) {
       console.error('[CRM] leads-dashboard error:', e);

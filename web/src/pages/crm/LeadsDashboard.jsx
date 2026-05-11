@@ -43,26 +43,28 @@ export default function LeadsDashboard() {
   const [from, setFrom]     = useState('');
   const [to, setTo]         = useState('');
   const [activePreset, setActivePreset] = useState(null);
+  const [page, setPage]     = useState(1);
 
-  const load = useCallback(async (f, t) => {
+  const load = useCallback(async (f, t, p = 1) => {
     setLoading(true);
     try {
-      const d = await api.crmLeadsDashboard({ from: f || undefined, to: t || undefined });
+      const d = await api.crmLeadsDashboard({ from: f, to: t, page: p });
       setData(d);
+      setPage(p);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
 
-  useEffect(() => { load('', ''); }, []);
+  useEffect(() => { load('', '', 1); }, []);
 
   const applyPreset = (key) => {
     const { from: f, to: t } = getPreset(key);
     setFrom(f); setTo(t); setActivePreset(key);
-    load(f, t);
+    load(f, t, 1);
   };
 
-  const handleSearch = () => { setActivePreset(null); load(from, to); };
-  const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', ''); };
+  const handleSearch = () => { setActivePreset(null); load(from, to, 1); };
+  const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', '', 1); };
 
   const presets = [
     { key: 'this_month', label: '今月' },
@@ -124,9 +126,15 @@ export default function LeadsDashboard() {
         <>
           {/* ファネル KPI */}
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
+              <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>期間内合計</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, color: '#374151' }}>
+                {(data.periodTotal || 0).toLocaleString()}
+              </div>
+            </div>
             {data.funnel.map((f, i) => {
-              const rate = i > 0 && data.funnel[i-1].cnt > 0
-                ? Math.round(f.cnt / data.funnel[i-1].cnt * 100) : null;
+              const base = i === 0 ? data.periodTotal : data.funnel[i-1].cnt;
+              const rate = base > 0 ? Math.round(f.cnt / base * 100) : null;
               return (
                 <div key={f.label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
                   <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>{f.label}</div>
@@ -135,18 +143,12 @@ export default function LeadsDashboard() {
                   </div>
                   {rate !== null && (
                     <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2 }}>
-                      転換率 {rate}%
+                      {i === 0 ? `うち ${rate}%` : `転換率 ${rate}%`}
                     </div>
                   )}
                 </div>
               );
             })}
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
-              <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>期間内合計</div>
-              <div style={{ fontSize: '2rem', fontWeight: 800, color: '#374151' }}>
-                {(data.bySource.reduce((s, r) => s + r.cnt, 0)).toLocaleString()}
-              </div>
-            </div>
           </div>
 
           {/* 月次推移 + 流入経路 */}
@@ -196,8 +198,9 @@ export default function LeadsDashboard() {
 
           {/* リード一覧 */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', fontWeight: 700, fontSize: '0.85rem' }}>
-              リード一覧（最新50件）
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>リード一覧</span>
+              <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>全{(data.pagination?.total || 0).toLocaleString()}件</span>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -225,6 +228,23 @@ export default function LeadsDashboard() {
                 </tbody>
               </table>
             </div>
+          </div>
+            {/* ページング */}
+            {data.pagination && data.pagination.total > data.pagination.limit && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 16px', borderTop: '1px solid #f3f4f6' }}>
+                <button onClick={() => load(from, to, page - 1)} disabled={page <= 1}
+                  style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, cursor: page <= 1 ? 'not-allowed' : 'pointer', background: '#fff', color: page <= 1 ? '#d1d5db' : '#374151', fontSize: '0.8rem' }}>
+                  ← 前
+                </button>
+                <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                  {page} / {Math.ceil(data.pagination.total / data.pagination.limit)} ページ
+                </span>
+                <button onClick={() => load(from, to, page + 1)} disabled={page >= Math.ceil(data.pagination.total / data.pagination.limit)}
+                  style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, cursor: page >= Math.ceil(data.pagination.total / data.pagination.limit) ? 'not-allowed' : 'pointer', background: '#fff', color: page >= Math.ceil(data.pagination.total / data.pagination.limit) ? '#d1d5db' : '#374151', fontSize: '0.8rem' }}>
+                  次 →
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

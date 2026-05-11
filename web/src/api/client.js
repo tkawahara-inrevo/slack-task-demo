@@ -212,7 +212,7 @@ export const api = {
 
   // CRM: Pipeline summary
   crmLeadsDashboard: (params = {}) => {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v))).toString();
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))).toString();
     return crmFetch(`/leads-dashboard${qs ? '?' + qs : ''}`);
   },
   crmPipelineSummary: () => crmFetch('/pipeline-summary'),

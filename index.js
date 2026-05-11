@@ -3079,12 +3079,12 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview]).catch(() => {});
   };
 
-  app.event('message', async ({ event, client }) => {
+  app.event('message', async ({ event, client, body }) => {
     try {
       if (event.bot_id || event.subtype === 'bot_message' || event.subtype === 'message_deleted') return;
       if (!event.text || !event.user) return;
 
-      const teamId = event.team || '';
+      const teamId = body?.team_id || body?.team?.id || event.team || '';
       const channelId = event.channel;
       const msgTs = event.ts;
       const senderUserId = event.user;
@@ -3094,8 +3094,8 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       if (event.thread_ts && event.thread_ts !== msgTs) {
         await dbQuery(`
           UPDATE user_mentions SET dismissed_at=now()
-          WHERE team_id=$1 AND mentioned_user_id=$2 AND channel_id=$3 AND message_ts=$4 AND dismissed_at IS NULL
-        `, [teamId, senderUserId, channelId, event.thread_ts]).catch(() => {});
+          WHERE mentioned_user_id=$1 AND channel_id=$2 AND message_ts=$3 AND dismissed_at IS NULL
+        `, [senderUserId, channelId, event.thread_ts]).catch(() => {});
       }
 
       const preview = stripMentions(text).slice(0, 100) || '（本文なし）';
@@ -3132,13 +3132,13 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   });
 
   // リアクションで既読
-  app.event('reaction_added', async ({ event }) => {
+  app.event('reaction_added', async ({ event, body }) => {
     try {
       if (event.item?.type !== 'message') return;
       await dbQuery(`
         UPDATE user_mentions SET dismissed_at=now()
-        WHERE team_id=$1 AND mentioned_user_id=$2 AND channel_id=$3 AND message_ts=$4 AND dismissed_at IS NULL
-      `, [event.team || '', event.user, event.item.channel, event.item.ts]).catch(() => {});
+        WHERE mentioned_user_id=$1 AND channel_id=$2 AND message_ts=$3 AND dismissed_at IS NULL
+      `, [event.user, event.item.channel, event.item.ts]).catch(() => {});
     } catch (e) { /* silent */ }
   });
 

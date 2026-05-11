@@ -10,9 +10,10 @@ const fmtM = n => { if (!n) return '—'; const m = Math.round(Number(n)); retur
 const TICK = { fontSize: 11, fill: '#6b7280' };
 
 const YOMI_COLOR = {
-  'リード（アポ化前）': '#94a3b8',
+  'アポ化前':  '#94a3b8',
   'アポ取得済': '#3b82f6',
-  '商談中': '#10b981',
+  '商談中':    '#f59e0b',
+  '受注':      '#10b981',
 };
 
 const pad = n => String(n).padStart(2, '0');
@@ -81,7 +82,16 @@ export default function LeadsDashboard() {
         <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#111827' }}>リード管理</h2>
         {data?.period && (
           <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: '#6b7280' }}>
-            集計期間: {data.period.from} 〜 {data.period.to}
+            {(() => {
+              const f = data.period.from, t = data.period.to;
+              if (!f || !t) return null;
+              const fd = new Date(f), td = new Date(t);
+              const fmt = d => `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+              // 同月なら "2026年5月" 表記
+              if (fd.getFullYear() === td.getFullYear() && fd.getMonth() === td.getMonth())
+                return `${fd.getFullYear()}年${fd.getMonth()+1}月`;
+              return `${fmt(fd)} 〜 ${fmt(td)}`;
+            })()}
           </p>
         )}
       </div>

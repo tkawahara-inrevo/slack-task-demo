@@ -1778,15 +1778,22 @@ function registerCrmApi({ expressApp, authWithRole }) {
         `, params),
       ]);
 
-      // ファネル集計
-      const yomiOrder = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％'];
-      const yomiMap = {};
-      for (const r of funnelR.rows) yomiMap[r.yomi] = r.cnt;
+      // ファネル集計（ヨミ値は説明付き "E 5％ (〜)" 形式なので先頭文字で判定）
+      let cntApoBefore = 0, cntApoGot = 0, cntDeal = 0, cntOrder = 0, cntLost = 0;
+      for (const r of funnelR.rows) {
+        const y = r.yomi || '';
+        if (y === 'アポ化前' || y.startsWith('アポ化前')) cntApoBefore += r.cnt;
+        else if (y === 'アポ化済商談前' || y.startsWith('アポ化済')) cntApoGot += r.cnt;
+        else if (/^[EDCBAS]\s*\d/.test(y) || y.includes('％')) cntDeal += r.cnt;
+        else if (y === '受注' || y === '受注済み' || y.startsWith('受注')) cntOrder += r.cnt;
+        else if (y === '失注' || y.startsWith('失注')) cntLost += r.cnt;
+      }
       const periodTotal = funnelR.rows.reduce((s, r) => s + r.cnt, 0);
       const funnel = [
-        { label: 'リード（アポ化前）', cnt: yomiMap['アポ化前'] || 0 },
-        { label: 'アポ取得済', cnt: yomiMap['アポ化済商談前'] || 0 },
-        { label: '商談中', cnt: yomiOrder.slice(2).reduce((s, y) => s + (yomiMap[y] || 0), 0) },
+        { label: 'アポ化前',  cnt: cntApoBefore },
+        { label: 'アポ取得済', cnt: cntApoGot },
+        { label: '商談中',    cnt: cntDeal },
+        { label: '受注',      cnt: cntOrder },
       ];
 
       const currentTotal = totalR.rows[0]?.total || 0;

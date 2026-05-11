@@ -211,6 +211,10 @@ export const api = {
   crmDeleteClient: (id) => crmDelete(`/clients/${id}`),
 
   // CRM: Pipeline summary
+  crmLeadsDashboard: (params = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v))).toString();
+    return crmFetch(`/leads-dashboard${qs ? '?' + qs : ''}`);
+  },
   crmPipelineSummary: () => crmFetch('/pipeline-summary'),
   crmMonthlySummary: (month, salesUser) => {
     const p = new URLSearchParams();

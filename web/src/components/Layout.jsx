@@ -168,6 +168,7 @@ export default function Layout({ children }) {
 
   const hitotoreItems = [
     { to: '/crm', label: 'CRM' },
+    { to: '/crm/leads', label: 'リード管理' },
     ...(rpoAccess ? [{ to: '/rpo', label: '案件管理' }] : []),
   ];
 

@@ -35,6 +35,7 @@ import CustomerDetail from './pages/crm/CustomerDetail'
 import Pipeline from './pages/crm/Pipeline'
 import CustomerList from './pages/crm/CustomerList'
 import SalesPerformance from './pages/crm/SalesPerformance'
+import LeadsDashboard from './pages/crm/LeadsDashboard'
 import SlackWorkflows from './pages/SlackWorkflows'
 import './App.css'
 
@@ -73,6 +74,7 @@ function App() {
           <Route path="hrmos-recruitment" element={<HrmosRecruitment />} />
           <Route path="ranking" element={<Ranking />} />
         </Route>
+        <Route path="/crm/leads" element={<LeadsDashboard />} />
         <Route path="/crm" element={<CRM />} />
         <Route path="/crm/customers/:id" element={<CustomerDetail />} />
         {/* 旧URLの後方互換 */}

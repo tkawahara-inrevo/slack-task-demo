@@ -1658,6 +1658,105 @@ function registerCrmApi({ expressApp, authWithRole }) {
       res.status(500).json({ error: 'internal' });
     }
   });
+
+  // ── リード管理ダッシュボード ──────────────────────────────────────
+  expressApp.get('/api/crm/leads-dashboard', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { from, to } = req.query;
+
+      // 期間デフォルト: 今期（deals の crm_period_settings を参考）
+      const periodR = await dbQuery('SELECT curr_start, curr_end FROM crm_period_settings WHERE team_id=$1', [teamId]);
+      const ps = periodR.rows[0] || { curr_start: '2025-12-01', curr_end: '2026-05-31' };
+      const rangeFrom = from || ps.curr_start;
+      const rangeTo   = to   || ps.curr_end;
+
+      const dateFilter = `
+        AND (
+          (data->>'流入日' IS NOT NULL AND data->>'流入日' != '' AND (data->>'流入日')::date BETWEEN $1::date AND $2::date)
+          OR
+          (data->>'商談獲得日_マーケチーム' IS NOT NULL AND data->>'商談獲得日_マーケチーム' != '' AND (data->>'商談獲得日_マーケチーム')::date BETWEEN $1::date AND $2::date)
+        )
+      `;
+      const params = [rangeFrom, rangeTo];
+
+      const [funnelR, sourceR, repR, trendR, recentR] = await Promise.all([
+        // ファネル（deals テーブル / yomi別）
+        dbQuery(`
+          SELECT yomi, COUNT(*)::int AS cnt
+          FROM deals WHERE team_id=$1 AND status='active'
+          GROUP BY yomi ORDER BY cnt DESC
+        `, [teamId]),
+
+        // 流入経路別（kintone_cache）
+        dbQuery(`
+          SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
+                 COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          GROUP BY source ORDER BY cnt DESC LIMIT 20
+        `, params),
+
+        // 担当者別（商談獲得者）
+        dbQuery(`
+          SELECT COALESCE(NULLIF(data->>'商談獲得者',''), NULLIF(data->>'担当営業_0',''), '不明') AS rep,
+                 COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          GROUP BY rep ORDER BY cnt DESC LIMIT 15
+        `, params),
+
+        // 月次推移（流入日）
+        dbQuery(`
+          SELECT TO_CHAR(COALESCE(
+            NULLIF(data->>'流入日',''),
+            NULLIF(data->>'商談獲得日_マーケチーム','')
+          )::date, 'YYYY-MM') AS month,
+          COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          GROUP BY month ORDER BY month
+        `, params),
+
+        // 最新リード一覧
+        dbQuery(`
+          SELECT
+            data->>'顧客' AS customer,
+            data->>'ヨミ' AS yomi,
+            data->>'流入経路' AS source,
+            COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep,
+            COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
+            data->>'案件名' AS deal_name
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
+          LIMIT 50
+        `, params),
+      ]);
+
+      // ファネル集計
+      const yomiOrder = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％'];
+      const yomiMap = {};
+      for (const r of funnelR.rows) yomiMap[r.yomi] = r.cnt;
+      const funnel = [
+        { label: 'リード（アポ化前）', cnt: yomiMap['アポ化前'] || 0 },
+        { label: 'アポ取得済', cnt: yomiMap['アポ化済商談前'] || 0 },
+        { label: '商談中', cnt: yomiOrder.slice(2).reduce((s, y) => s + (yomiMap[y] || 0), 0) },
+      ];
+
+      res.json({
+        period: { from: rangeFrom, to: rangeTo },
+        funnel,
+        bySource: sourceR.rows,
+        byRep:    repR.rows,
+        trend:    trendR.rows,
+        recent:   recentR.rows,
+      });
+    } catch (e) {
+      console.error('[CRM] leads-dashboard error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
 }
 
 module.exports = { registerCrmApi, registerDailyReportApi, YOMI_OPTIONS, CONTRACT_TYPES, PAYMENT_TYPES, LOST_REASONS };

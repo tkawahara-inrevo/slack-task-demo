@@ -124,7 +124,7 @@ export default function LeadsDashboard() {
 
       {data && !loading && (
         <>
-          {/* ファネル KPI */}
+          {/* ファネル KPI — 全て期間合計を分母にした割合 */}
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
             <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
               <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>期間内合計</div>
@@ -132,18 +132,18 @@ export default function LeadsDashboard() {
                 {(data.periodTotal || 0).toLocaleString()}
               </div>
             </div>
-            {data.funnel.map((f, i) => {
-              const base = i === 0 ? data.periodTotal : data.funnel[i-1].cnt;
-              const rate = base > 0 ? Math.round(f.cnt / base * 100) : null;
+            {data.funnel.map((f) => {
+              const label = f.label === 'リード（アポ化前）' ? 'アポ化前' : f.label;
+              const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : null;
               return (
                 <div key={f.label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
-                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>{f.label}</div>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>{label}</div>
                   <div style={{ fontSize: '2rem', fontWeight: 800, color: YOMI_COLOR[f.label] || '#374151' }}>
                     {f.cnt.toLocaleString()}
                   </div>
                   {rate !== null && (
                     <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2 }}>
-                      {i === 0 ? `うち ${rate}%` : `転換率 ${rate}%`}
+                      {rate}%
                     </div>
                   )}
                 </div>

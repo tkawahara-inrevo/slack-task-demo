@@ -3069,14 +3069,14 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   const CHANNEL_HERE_RE = /<!channel>|<!here>/;
   const stripMentions = (t) => (t || '').replace(/<@[A-Z0-9]+>/g, '').replace(/<[^>]+>/g, '').trim();
 
-  const saveMention = async (teamId, uid, channelId, msgTs, senderUserId, preview) => {
+  const saveMention = async (teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot) => {
     if (uid === senderUserId) return;
     const { randomUUID } = require('crypto');
     await dbQuery(`
-      INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, created_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+      INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, thread_ts_root, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
       ON CONFLICT (team_id, mentioned_user_id, channel_id, message_ts) DO NOTHING
-    `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview]).catch(() => {});
+    `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot || msgTs]).catch(() => {});
   };
 
   app.event('message', async ({ event, client, body }) => {
@@ -3090,11 +3090,13 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       const senderUserId = event.user;
       const text = event.text;
 
-      // スレッド返信 → 自分がメンションされたスレッドへの返信なら既読
+      // スレッド返信 → そのスレッド内でメンションされていたら既読
+      // thread_ts_root でスレッドルートと照合（スレッド内の返信でも正しく消えるよう）
       if (event.thread_ts && event.thread_ts !== msgTs) {
         await dbQuery(`
           UPDATE user_mentions SET dismissed_at=now()
-          WHERE mentioned_user_id=$1 AND channel_id=$2 AND message_ts=$3 AND dismissed_at IS NULL
+          WHERE mentioned_user_id=$1 AND channel_id=$2
+            AND (message_ts=$3 OR thread_ts_root=$3) AND dismissed_at IS NULL
         `, [senderUserId, channelId, event.thread_ts]).catch(() => {});
       }
 
@@ -3125,8 +3127,10 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       }
 
       if (!targetIds.size) return;
+      // thread_ts_root: スレッド内メッセージはルートtsを、ルートメッセージはそのtsを保存
+      const threadTsRoot = event.thread_ts || msgTs;
       for (const uid of targetIds) {
-        await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview);
+        await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot);
       }
     } catch (e) { /* silent */ }
   });

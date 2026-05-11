@@ -526,6 +526,7 @@ export const api = {
   slackGroupChangeApply: (userId, add, remove) => apiFetch('/admin/slack-group-rules/change-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, add, remove }) }),
 
   // メンション
+  teamCalendarDetail: () => apiFetch('/team-calendar-detail'),
   myCalendar: () => apiFetch('/my-calendar'),
   gcalStatus: () => apiFetch('/gcal-status'),
 

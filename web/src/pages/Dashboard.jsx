@@ -908,6 +908,86 @@ function AttendanceWidget() {
   );
 }
 
+// ── チームメンバー稼働詳細ウィジェット（Chief以上用）──────────────
+function TeamDetailWidget() {
+  const [data, setData] = useState(null);
+
+  useEffect(() => { api.teamCalendarDetail().then(setData).catch(() => {}); }, []);
+
+  if (!data || !data.canView) return null;
+
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Tokyo' }) : '';
+  const fmtHour = (min) => {
+    if (min == null) return '—';
+    const h = Math.floor(min / 60), m = min % 60;
+    return h > 0 ? `${h}h${m > 0 ? m + 'm' : ''}` : `${m}m`;
+  };
+  const nowIso = new Date().toISOString();
+
+  if (!data.members.length) return null;
+
+  return (
+    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
+      <div style={{ padding:'10px 16px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+        <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>チームメンバー</span>
+        <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{data.members.length}人</span>
+        {!data.calendarConnected && <span style={{ fontSize:'0.7rem', color:'#f59e0b', marginLeft:'auto' }}>カレンダー未連携</span>}
+      </div>
+      <div style={{ overflowX:'auto' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+          <thead>
+            <tr style={{ background:'#f8fafc' }}>
+              <th style={{ padding:'7px 12px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>メンバー</th>
+              <th style={{ padding:'7px 10px', textAlign:'center', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>出勤</th>
+              <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>タスク</th>
+              {data.calendarConnected && <>
+                <th style={{ padding:'7px 10px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>今日の予定</th>
+                <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>今週MTG</th>
+              </>}
+            </tr>
+          </thead>
+          <tbody>
+            {data.members.map((m, i) => {
+              const inMeeting = m.currentEvent != null;
+              const nextEvent = m.todayEvents?.find(e => e.start > nowIso);
+              return (
+                <tr key={m.userId} style={{ borderBottom:'1px solid #f8fafc', background: inMeeting ? '#fefce8' : 'transparent' }}>
+                  <td style={{ padding:'7px 12px' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+                      {m.avatarUrl
+                        ? <img src={m.avatarUrl} alt="" style={{ width:22, height:22, borderRadius:'50%', flexShrink:0 }} />
+                        : <div style={{ width:22, height:22, borderRadius:'50%', background:'#e2e8f0', flexShrink:0 }} />}
+                      <span style={{ color:'#0f172a', whiteSpace:'nowrap' }}>{m.displayName}</span>
+                    </div>
+                  </td>
+                  <td style={{ padding:'7px 10px', textAlign:'center' }}>
+                    <span>{m.clockedIn ? '🟢' : '⬜'}</span>
+                  </td>
+                  <td style={{ padding:'7px 10px', textAlign:'right', color:'#374151' }}>
+                    {m.taskCount > 0 ? <span style={{ background:'#eff6ff', color:'#3b82f6', borderRadius:10, padding:'1px 7px', fontSize:'0.72rem' }}>{m.taskCount}</span> : '—'}
+                  </td>
+                  {data.calendarConnected && <>
+                    <td style={{ padding:'7px 10px', maxWidth:220 }}>
+                      {inMeeting
+                        ? <span style={{ color:'#d97706', fontSize:'0.75rem' }}>🟡 {m.currentEvent.title} 〜{fmtTime(m.currentEvent.end)}</span>
+                        : nextEvent
+                        ? <span style={{ color:'#64748b', fontSize:'0.75rem' }}>{fmtTime(nextEvent.start)} {nextEvent.title}</span>
+                        : <span style={{ color:'#cbd5e1', fontSize:'0.75rem' }}>予定なし</span>}
+                    </td>
+                    <td style={{ padding:'7px 10px', textAlign:'right', color:'#64748b', fontSize:'0.75rem', whiteSpace:'nowrap' }}>
+                      {fmtHour(m.weekMinutes)}
+                    </td>
+                  </>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── カレンダーウィジェット ─────────────────────────────────────────
 function CalendarWidget({ role }) {
   const [data, setData] = useState(null);
@@ -1146,8 +1226,11 @@ export default function Dashboard() {
       {/* 勤怠ウィジェット */}
       <AttendanceWidget />
 
-      {/* カレンダー */}
+      {/* 自分のカレンダー */}
       <CalendarWidget role={me?.role} />
+
+      {/* チームメンバー詳細（Chief以上） */}
+      <TeamDetailWidget />
 
       {/* 未確認メンション */}
       <MentionWidget />

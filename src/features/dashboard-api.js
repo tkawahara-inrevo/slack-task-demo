@@ -1914,6 +1914,108 @@ function registerDashboardApi(deps) {
     } catch { res.json({ connected: false }); }
   });
 
+  // GET /api/dashboard/team-calendar-detail — チームメンバーの出勤+タスク+カレンダー
+  // Chief以上またはadminのみ。自分が所属するチームのメンバーを対象とする。
+  const CHIEF_ROLES = new Set(['Chief','Sub Chief','Manager','Expert','Sub Expert']);
+  expressApp.get('/api/dashboard/team-calendar-detail', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId, role } = req.dashboardUser;
+
+      // 権限チェック: adminまたはCRMでChief以上
+      if (role !== 'admin') {
+        const repR = await dbQuery('SELECT role_name FROM crm_rep_roles WHERE team_id=$1 AND rep_name IN (SELECT display_name FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2)', [teamId, userId]);
+        const repRole = repR.rows[0]?.role_name || '';
+        if (!CHIEF_ROLES.has(repRole)) return res.json({ canView: false });
+      }
+
+      // 自分が所属するチームのメンバーを取得
+      const myTeamsR = await dbQuery(`
+        SELECT dtm.dash_team_id FROM dash_team_members dtm WHERE dtm.team_id=$1 AND dtm.user_id=$2
+      `, [teamId, userId]);
+      const myTeamIds = myTeamsR.rows.map(r => r.dash_team_id);
+      if (!myTeamIds.length) return res.json({ canView: true, members: [] });
+
+      const membersR = await dbQuery(`
+        SELECT DISTINCT dtm.user_id, d.display_name, d.profile_json->>'image_48' AS avatar_url,
+               d.profile_json->>'email' AS email
+        FROM dash_team_members dtm
+        JOIN dashboard_user_directory d ON d.team_id=dtm.team_id AND d.user_id=dtm.user_id
+        WHERE dtm.team_id=$1 AND dtm.dash_team_id=ANY($2) AND dtm.user_id != $3
+          AND d.is_active=true
+        ORDER BY d.display_name
+      `, [teamId, myTeamIds, userId]);
+      const members = membersR.rows;
+      if (!members.length) return res.json({ canView: true, members: [] });
+
+      // 打刻状況
+      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const todayJst = jstNow.toISOString().slice(0, 10);
+      const dayStart = new Date(todayJst + 'T00:00:00+09:00');
+      const stampsR = await dbQuery(`
+        SELECT DISTINCT ON (slack_user_id, stamp_type) slack_user_id, stamp_type
+        FROM hrmos_stamps WHERE team_id=$1 AND stamped_at>=$2 AND ok=true
+        ORDER BY slack_user_id, stamp_type, stamped_at ASC
+      `, [teamId, dayStart.toISOString()]);
+      const clockedIn  = new Set(stampsR.rows.filter(s => s.stamp_type === 1).map(s => s.slack_user_id));
+      const clockedOut = new Set(stampsR.rows.filter(s => s.stamp_type === 2).map(s => s.slack_user_id));
+
+      // タスク数
+      const taskR = await dbQuery(`SELECT assignee_id, COUNT(*)::int AS cnt FROM tasks WHERE team_id=$1 AND status='in_progress' GROUP BY assignee_id`, [teamId]);
+      const taskMap = {};
+      for (const r of taskR.rows) taskMap[r.assignee_id] = r.cnt;
+
+      // カレンダー（連携済み時のみ）
+      const auth = await getGcalAuth(teamId);
+      let calMap = {};
+      if (auth) {
+        const { google } = require('googleapis');
+        const calendar = google.calendar({ version: 'v3', auth });
+        const timeMin = dayStart.toISOString();
+        const timeMax = new Date(todayJst + 'T23:59:59+09:00').toISOString();
+        // 今週の範囲
+        const weekStart = new Date(jstNow); weekStart.setDate(jstNow.getDate() - jstNow.getDay() + 1); weekStart.setHours(0,0,0,0);
+        const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6); weekEnd.setHours(23,59,59,999);
+
+        await Promise.all(members.filter(m => m.email).map(async (m) => {
+          try {
+            const [todayR, weekR] = await Promise.all([
+              calendar.events.list({ calendarId: m.email, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 10 }),
+              calendar.events.list({ calendarId: m.email, timeMin: weekStart.toISOString(), timeMax: weekEnd.toISOString(), singleEvents: true, maxResults: 50 }),
+            ]);
+            const todayEvents = (todayR.data.items || []).filter(e => e.start?.dateTime).map(e => ({
+              title: e.summary || '（タイトルなし）',
+              start: e.start.dateTime,
+              end: e.end.dateTime,
+            }));
+            // 今週MTG合計分
+            const weekMinutes = (weekR.data.items || []).filter(e => e.start?.dateTime).reduce((s, e) => {
+              return s + (new Date(e.end.dateTime) - new Date(e.start.dateTime)) / 60000;
+            }, 0);
+            // 今会議中か
+            const nowIso = new Date().toISOString();
+            const currentEvent = todayEvents.find(e => e.start <= nowIso && e.end >= nowIso) || null;
+            calMap[m.user_id] = { todayEvents, weekMinutes: Math.round(weekMinutes), currentEvent };
+          } catch { calMap[m.user_id] = { todayEvents: [], weekMinutes: 0, currentEvent: null }; }
+        }));
+      }
+
+      const result = members.map(m => ({
+        userId:      m.user_id,
+        displayName: m.display_name,
+        avatarUrl:   m.avatar_url,
+        clockedIn:   clockedIn.has(m.user_id),
+        clockedOut:  clockedOut.has(m.user_id),
+        taskCount:   taskMap[m.user_id] || 0,
+        ...(calMap[m.user_id] || { todayEvents: [], weekMinutes: null, currentEvent: null }),
+      }));
+
+      res.json({ canView: true, members: result, calendarConnected: !!auth });
+    } catch (e) {
+      console.error('[team-calendar] error:', e.message);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
   // ── HRMOS勤怠: 自分の今日の打刻状況 ────────────────────────────────
   expressApp.get('/api/dashboard/my-attendance', authWithRole, async (req, res) => {
     try {

@@ -1680,9 +1680,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
       `;
       const params = [rangeFrom, rangeTo];
 
-      const page  = Math.max(1, Number(req.query.page) || 1);
-      const limit = 50;
-      const offset = (page - 1) * limit;
+      const page     = Math.max(1, Number(req.query.page) || 1);
+      const limit    = 50;
+      const offset   = (page - 1) * limit;
+      const listOnly = req.query.listOnly === '1'; // ページング用：一覧だけ返す
 
       // 先月比用の前期間を計算
       const rangeFromDate = new Date(rangeFrom), rangeToDate = new Date(rangeTo);
@@ -1806,22 +1807,46 @@ function registerCrmApi({ expressApp, authWithRole }) {
         ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
         : 0;
 
-      // 流入経路ドリルダウン（source指定時）
+      // リスト専用（ページング用）
+      if (listOnly) {
+        const [recentR, totalR] = await Promise.all([
+          dbQuery(`
+            SELECT data->>'顧客' AS customer, data->>'ヨミ' AS yomi,
+                   data->>'流入経路' AS source,
+                   COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep,
+                   COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date
+            FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+            ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
+            LIMIT $3 OFFSET $4
+          `, [...params, limit, offset]),
+          dbQuery(`SELECT COUNT(*)::int AS total FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}`, params),
+        ]);
+        return res.json({ recent: recentR.rows, pagination: { page, limit, total: totalR.rows[0]?.total || 0 } });
+      }
+
+      // ドリルダウン（source/type指定時）
       const sourceFilter = req.query.source;
+      const drillType    = req.query.drillType; // 'appo' | 'order' | null
       if (sourceFilter) {
         const drillParams = [...params];
         const srcCond = sourceFilter === '不明'
           ? `AND (data->>'流入経路' IS NULL OR data->>'流入経路' = '')`
           : `AND data->>'流入経路' = $${drillParams.push(sourceFilter)}`;
+        const typeCond = drillType === 'appo'
+          ? `AND (data->>'ヨミ_経過フロー' LIKE '%アポ化済商談前%')`
+          : drillType === 'order'
+          ? `AND (data->>'受注日' IS NOT NULL AND data->>'受注日' != '')`
+          : '';
         const drillR = await dbQuery(`
           SELECT
             data->>'顧客' AS customer,
             data->>'ヨミ' AS yomi,
+            split_part(COALESCE(NULLIF(data->>'ヨミ_経過フロー',''), data->>'ヨミ'), ', ', 1) AS first_yomi,
             COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
             COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep,
             data->>'案件名' AS deal_name
           FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter} ${srcCond}
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter} ${srcCond} ${typeCond}
           ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
           LIMIT 200
         `, drillParams);

@@ -40,23 +40,36 @@ function getPreset(key) {
 }
 
 export default function LeadsDashboard() {
-  const [data, setData]       = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [from, setFrom]       = useState('');
-  const [to, setTo]           = useState('');
+  const [data, setData]         = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [from, setFrom]         = useState('');
+  const [to, setTo]             = useState('');
   const [activePreset, setActivePreset] = useState(null);
-  const [page, setPage]       = useState(1);
-  const [drill, setDrill]     = useState(null); // { source, rows }
+  const [page, setPage]         = useState(1);
+  const [listData, setListData] = useState(null); // ページング専用
+  const [listLoading, setListLoading] = useState(false);
+  const [drill, setDrill]       = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
-  const load = useCallback(async (f, t, p = 1) => {
+  const load = useCallback(async (f, t) => {
     setLoading(true);
     try {
-      const d = await api.crmLeadsDashboard({ from: f, to: t, page: p });
+      const d = await api.crmLeadsDashboard({ from: f, to: t, page: 1 });
       setData(d);
-      setPage(p);
+      setListData({ recent: d.recent, pagination: d.pagination });
+      setPage(1);
     } catch (e) { console.error(e); }
     setLoading(false);
+  }, []);
+
+  const loadPage = useCallback(async (f, t, p) => {
+    setListLoading(true);
+    try {
+      const d = await api.crmLeadsList({ from: f, to: t, page: p });
+      setListData(d);
+      setPage(p);
+    } catch (e) { console.error(e); }
+    setListLoading(false);
   }, []);
 
   useEffect(() => { load('', '', 1); }, []);
@@ -64,19 +77,19 @@ export default function LeadsDashboard() {
   const applyPreset = (key) => {
     const { from: f, to: t } = getPreset(key);
     setFrom(f); setTo(t); setActivePreset(key);
-    load(f, t, 1);
+    load(f, t);
   };
 
-  const handleSearch = () => { setActivePreset(null); load(from, to, 1); };
-  const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', '', 1); };
+  const handleSearch = () => { setActivePreset(null); load(from, to); };
+  const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', ''); };
 
-  const openDrill = async (source) => {
-    setDrill({ source, rows: null });
+  const openDrill = async (source, drillType) => {
+    setDrill({ source, drillType, rows: null });
     setDrillLoading(true);
     try {
-      const d = await api.crmLeadsDrilldown(source, from, to);
-      setDrill({ source, rows: d.drilldown || [] });
-    } catch { setDrill({ source, rows: [] }); }
+      const d = await api.crmLeadsDrilldown(source, from, to, drillType);
+      setDrill({ source, drillType, rows: d.drilldown || [] });
+    } catch { setDrill({ source, drillType, rows: [] }); }
     setDrillLoading(false);
   };
 
@@ -222,16 +235,16 @@ export default function LeadsDashboard() {
                   <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8, paddingLeft: 8 }}>
                     流入経路 <span style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 400 }}>クリックで詳細</span>
                   </div>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <PieChart>
-                      <Pie data={pieData} dataKey="cnt" nameKey="source" cx="50%" cy="45%" outerRadius={90}
-                        label={({ name, percent }) => percent > 0.04 ? `${(percent*100).toFixed(0)}%` : ''}
-                        labelLine={false} style={{ cursor: 'pointer' }}
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+                      <Pie data={pieData} dataKey="cnt" nameKey="source" cx="50%" cy="50%" outerRadius={85}
+                        label={({ percent }) => percent > 0.05 ? `${(percent*100).toFixed(0)}%` : ''}
+                        labelLine style={{ cursor: 'pointer' }}
                         onClick={d => d?.source && d.source !== 'その他' && openDrill(d.source)}>
                         {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                       <Tooltip formatter={(v, n) => [`${v}件`, n]} />
-                      <Legend wrapperStyle={{ fontSize: '0.72rem' }} />
+                      <Legend wrapperStyle={{ fontSize: '0.7rem' }} layout="vertical" align="right" verticalAlign="middle" />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -278,20 +291,25 @@ export default function LeadsDashboard() {
           {/* アポ化/受注 流入経路 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
             {[
-              { title: 'アポ化につながった流入経路', key: 'appoBySource', color: '#3b82f6' },
-              { title: '受注につながった流入経路', key: 'orderBySource', color: '#10b981' },
-            ].map(({ title, key, color }) => (
+              { title: 'アポ化につながった流入経路', key: 'appoBySource', color: '#3b82f6', type: 'appo' },
+              { title: '受注につながった流入経路',   key: 'orderBySource', color: '#10b981', type: 'order' },
+            ].map(({ title, key, color, type }) => (
               <div key={key} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>{title}</div>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, paddingLeft:8 }}>
+                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>{title}</span>
+                  <span style={{ fontSize:'0.7rem', color:'#9ca3af' }}>クリックで詳細</span>
+                </div>
                 {data[key]?.length === 0
                   ? <div style={{ color: '#9ca3af', fontSize: '0.8rem', textAlign: 'center', padding: 16 }}>データなし</div>
                   : (
                     <ResponsiveContainer width="100%" height={Math.max(160, (data[key]?.length || 0) * 26)}>
-                      <BarChart data={data[key]} layout="vertical" margin={{ top: 0, right: 50, left: 4, bottom: 0 }}>
+                      <BarChart data={data[key]} layout="vertical" margin={{ top: 0, right: 50, left: 4, bottom: 0 }}
+                        onClick={e => e?.activePayload?.[0] && openDrill(e.activePayload[0].payload.source, type)}
+                        style={{ cursor: 'pointer' }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                         <XAxis type="number" tick={TICK} allowDecimals={false} />
                         <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={120} />
-                        <Tooltip formatter={v => [`${v}件`]} />
+                        <Tooltip formatter={v => [`${v}件`]} cursor={{ fill: '#f0fdf4' }} />
                         <Bar dataKey="cnt" fill={color} radius={[0, 4, 4, 0]} name="件数">
                           <LabelList dataKey="cnt" position="right" style={{ fontSize: 11, fill: '#374151' }} />
                         </Bar>
@@ -326,7 +344,7 @@ export default function LeadsDashboard() {
                       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
                         <thead>
                           <tr style={{ background:'#f8fafc', position:'sticky', top:0 }}>
-                            {['流入日','会社名','ヨミ','担当者'].map(h => (
+                            {['流入日','会社名','初回ヨミ','現在ヨミ','担当者'].map(h => (
                               <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem' }}>{h}</th>
                             ))}
                           </tr>
@@ -335,9 +353,12 @@ export default function LeadsDashboard() {
                           {drill.rows.map((r, i) => (
                             <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'#fff':'#fafafa' }}>
                               <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'#6b7280' }}>{r.inflow_date?.slice(0,10)||'—'}</td>
-                              <td style={{ padding:'7px 12px', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{r.customer||'—'}</td>
+                              <td style={{ padding:'7px 12px', maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{r.customer||'—'}</td>
                               <td style={{ padding:'7px 12px', whiteSpace:'nowrap' }}>
-                                <span style={{ fontSize:'0.72rem', background:'#eff6ff', color:'#3b82f6', borderRadius:4, padding:'2px 6px' }}>{r.yomi}</span>
+                                <span style={{ fontSize:'0.7rem', background:'#f1f5f9', color:'#64748b', borderRadius:4, padding:'2px 6px' }}>{r.first_yomi||'—'}</span>
+                              </td>
+                              <td style={{ padding:'7px 12px', whiteSpace:'nowrap' }}>
+                                <span style={{ fontSize:'0.7rem', background:'#eff6ff', color:'#3b82f6', borderRadius:4, padding:'2px 6px' }}>{r.yomi}</span>
                               </td>
                               <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'#374151' }}>{r.rep||'—'}</td>
                             </tr>
@@ -355,7 +376,8 @@ export default function LeadsDashboard() {
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
             <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>リード一覧</span>
-              <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>全{(data.pagination?.total || 0).toLocaleString()}件</span>
+              <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>全{(listData?.pagination?.total || data?.pagination?.total || 0).toLocaleString()}件</span>
+              {listLoading && <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>読み込み中...</span>}
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -367,7 +389,7 @@ export default function LeadsDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.recent.map((r, i) => (
+                  {(listData?.recent || data?.recent || []).map((r, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid #f8fafc', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
                       <td style={{ padding: '7px 12px', whiteSpace: 'nowrap', color: '#6b7280' }}>{r.inflow_date?.slice(0,10) || '—'}</td>
                       <td style={{ padding: '7px 12px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{r.customer || '—'}</td>
@@ -383,22 +405,25 @@ export default function LeadsDashboard() {
                 </tbody>
               </table>
             </div>
-            {/* ページング */}
-            {data.pagination && data.pagination.total > data.pagination.limit && (
+            {/* ページング（チャートを再描画しない） */}
+            {(() => {
+              const pg = listData?.pagination || data?.pagination;
+              if (!pg || pg.total <= pg.limit) return null;
+              const maxPage = Math.ceil(pg.total / pg.limit);
+              return (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 16px', borderTop: '1px solid #f3f4f6' }}>
-                <button onClick={() => load(from, to, page - 1)} disabled={page <= 1}
+                <button onClick={() => loadPage(from, to, page - 1)} disabled={page <= 1 || listLoading}
                   style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, cursor: page <= 1 ? 'not-allowed' : 'pointer', background: '#fff', color: page <= 1 ? '#d1d5db' : '#374151', fontSize: '0.8rem' }}>
                   ← 前
                 </button>
-                <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
-                  {page} / {Math.ceil(data.pagination.total / data.pagination.limit)} ページ
-                </span>
-                <button onClick={() => load(from, to, page + 1)} disabled={page >= Math.ceil(data.pagination.total / data.pagination.limit)}
-                  style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, cursor: page >= Math.ceil(data.pagination.total / data.pagination.limit) ? 'not-allowed' : 'pointer', background: '#fff', color: page >= Math.ceil(data.pagination.total / data.pagination.limit) ? '#d1d5db' : '#374151', fontSize: '0.8rem' }}>
+                <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{page} / {maxPage} ページ</span>
+                <button onClick={() => loadPage(from, to, page + 1)} disabled={page >= maxPage || listLoading}
+                  style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, cursor: page >= maxPage ? 'not-allowed' : 'pointer', background: '#fff', color: page >= maxPage ? '#d1d5db' : '#374151', fontSize: '0.8rem' }}>
                   次 →
                 </button>
               </div>
-            )}
+              );
+            })()}
           </div>
         </>
       )}

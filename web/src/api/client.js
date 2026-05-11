@@ -215,8 +215,12 @@ export const api = {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))).toString();
     return crmFetch(`/leads-dashboard${qs ? '?' + qs : ''}`);
   },
-  crmLeadsDrilldown: (source, from, to) => {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries({ source, from, to }).filter(([,v]) => v))).toString();
+  crmLeadsDrilldown: (source, from, to, drillType) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries({ source, from, to, drillType }).filter(([,v]) => v))).toString();
+    return crmFetch(`/leads-dashboard?${qs}`);
+  },
+  crmLeadsList: (params = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries({ ...params, listOnly: '1' }).filter(([,v]) => v != null && v !== ''))).toString();
     return crmFetch(`/leads-dashboard?${qs}`);
   },
   crmPipelineSummary: () => crmFetch('/pipeline-summary'),

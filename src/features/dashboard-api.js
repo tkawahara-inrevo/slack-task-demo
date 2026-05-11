@@ -1789,6 +1789,131 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // ── Google Calendar OAuth ──────────────────────────────────────────
+  const gcalClient = (() => {
+    const { google } = require('googleapis');
+    return new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'https://inrevo-task.com/api/google/oauth/callback'
+    );
+  })();
+
+  const GCAL_SCOPES = [
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar.events.readonly',
+  ];
+
+  const getGcalAuth = async (teamId) => {
+    const r = await dbQuery('SELECT * FROM google_oauth_tokens WHERE team_id=$1', [teamId]);
+    if (!r.rows[0]?.refresh_token) return null;
+    const auth = new (require('googleapis').google.auth.OAuth2)(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'https://inrevo-task.com/api/google/oauth/callback'
+    );
+    auth.setCredentials({
+      access_token: r.rows[0].access_token,
+      refresh_token: r.rows[0].refresh_token,
+      expiry_date: Number(r.rows[0].expiry_date),
+    });
+    // トークン自動更新時に保存
+    auth.on('tokens', async (tokens) => {
+      await dbQuery(
+        `UPDATE google_oauth_tokens SET access_token=$2, expiry_date=$3, updated_at=now() WHERE team_id=$1`,
+        [teamId, tokens.access_token, tokens.expiry_date]
+      ).catch(() => {});
+    });
+    return auth;
+  };
+
+  // GET /api/google/oauth/start — OAuth認証開始（admin限定）
+  expressApp.get('/api/google/oauth/start', authWithRole, (req, res) => {
+    if (req.dashboardUser.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
+    const url = gcalClient.generateAuthUrl({
+      access_type: 'offline',
+      scope: GCAL_SCOPES,
+      prompt: 'consent',
+      state: req.dashboardUser.teamId,
+    });
+    res.redirect(url);
+  });
+
+  // GET /api/google/oauth/callback — OAuthコールバック
+  expressApp.get('/api/google/oauth/callback', async (req, res) => {
+    try {
+      const { code, state: teamId } = req.query;
+      if (!code || !teamId) return res.status(400).send('Bad request');
+      const { tokens } = await gcalClient.getToken(code);
+      await dbQuery(`
+        INSERT INTO google_oauth_tokens (team_id, access_token, refresh_token, expiry_date, updated_at)
+        VALUES ($1,$2,$3,$4,now())
+        ON CONFLICT (team_id) DO UPDATE SET
+          access_token=$2, refresh_token=COALESCE($3, google_oauth_tokens.refresh_token),
+          expiry_date=$4, updated_at=now()
+      `, [teamId, tokens.access_token, tokens.refresh_token || null, tokens.expiry_date || null]);
+      res.send('<script>window.close(); window.opener && window.opener.location.reload();</script><p>✅ 認証完了！このタブを閉じてください。</p>');
+    } catch (e) {
+      console.error('[GCal] callback error:', e.message);
+      res.status(500).send('認証エラー: ' + e.message);
+    }
+  });
+
+  // GET /api/dashboard/my-calendar — 今日の自分の予定
+  expressApp.get('/api/dashboard/my-calendar', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const auth = await getGcalAuth(teamId);
+      if (!auth) return res.json({ events: [], connected: false });
+
+      const { google } = require('googleapis');
+      const calendar = google.calendar({ version: 'v3', auth });
+
+      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const todayJst = jstNow.toISOString().slice(0, 10);
+      const timeMin = new Date(todayJst + 'T00:00:00+09:00').toISOString();
+      const timeMax = new Date(todayJst + 'T23:59:59+09:00').toISOString();
+
+      // 自分のメールアドレスを取得
+      const dirR = await dbQuery(
+        `SELECT profile_json->>'email' AS email FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2`,
+        [teamId, userId]
+      );
+      const email = dirR.rows[0]?.email;
+
+      const r = await calendar.events.list({
+        calendarId: email || 'primary',
+        timeMin, timeMax,
+        singleEvents: true,
+        orderBy: 'startTime',
+        maxResults: 20,
+      });
+
+      const events = (r.data.items || []).map(e => ({
+        id: e.id,
+        title: e.summary || '（タイトルなし）',
+        start: e.start?.dateTime || e.start?.date,
+        end: e.end?.dateTime || e.end?.date,
+        allDay: !e.start?.dateTime,
+        location: e.location || null,
+        meetUrl: e.hangoutLink || null,
+      }));
+
+      res.json({ events, connected: true });
+    } catch (e) {
+      console.error('[GCal] my-calendar error:', e.message);
+      res.json({ events: [], connected: true, error: e.message });
+    }
+  });
+
+  // GET /api/dashboard/gcal-status — 連携状態確認
+  expressApp.get('/api/dashboard/gcal-status', authWithRole, async (req, res) => {
+    try {
+      const r = await dbQuery('SELECT updated_at FROM google_oauth_tokens WHERE team_id=$1', [req.dashboardUser.teamId]);
+      res.json({ connected: !!r.rows[0], updatedAt: r.rows[0]?.updated_at || null });
+    } catch { res.json({ connected: false }); }
+  });
+
   // ── HRMOS勤怠: 自分の今日の打刻状況 ────────────────────────────────
   expressApp.get('/api/dashboard/my-attendance', authWithRole, async (req, res) => {
     try {

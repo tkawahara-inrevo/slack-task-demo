@@ -908,6 +908,85 @@ function AttendanceWidget() {
   );
 }
 
+// ── カレンダーウィジェット ─────────────────────────────────────────
+function CalendarWidget({ role }) {
+  const [data, setData] = useState(null);
+  const [status, setStatus] = useState(null);
+
+  useEffect(() => {
+    api.gcalStatus().then(setStatus).catch(() => {});
+    api.myCalendar().then(setData).catch(() => {});
+  }, []);
+
+  const fmtTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+  };
+
+  const now = new Date();
+
+  if (!status) return null;
+
+  // 未連携の場合（adminのみ連携ボタンを表示）
+  if (!status.connected) {
+    if (role !== 'admin') return null;
+    return (
+      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px', display:'flex', alignItems:'center', gap:10 }}>
+        <span style={{ fontSize:'0.8rem', color:'#64748b' }}>Googleカレンダー未連携</span>
+        <a href="/api/google/oauth/start" target="_blank" rel="noreferrer"
+          style={{ marginLeft:'auto', background:'#3b82f6', color:'#fff', borderRadius:8, padding:'5px 14px', fontSize:'0.8rem', fontWeight:600, textDecoration:'none' }}>
+          連携する
+        </a>
+      </div>
+    );
+  }
+
+  if (!data?.events) return null;
+
+  const events = data.events.filter(e => !e.allDay);
+  if (events.length === 0) return (
+    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+      <div style={{ fontSize:'0.8rem', fontWeight:700, color:'#374151', marginBottom:4 }}>今日の予定</div>
+      <div style={{ fontSize:'0.8rem', color:'#94a3b8' }}>予定なし</div>
+    </div>
+  );
+
+  return (
+    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+      <div style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a', marginBottom:8 }}>今日の予定</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+        {events.map(e => {
+          const start = new Date(e.start);
+          const end   = new Date(e.end);
+          const active = now >= start && now <= end;
+          const past   = now > end;
+          return (
+            <div key={e.id} style={{
+              display:'flex', alignItems:'center', gap:8, padding:'6px 10px',
+              borderRadius:8, borderLeft:`3px solid ${active ? '#3b82f6' : past ? '#e5e7eb' : '#94a3b8'}`,
+              background: active ? '#eff6ff' : '#f8fafc',
+              opacity: past ? 0.5 : 1,
+            }}>
+              <span style={{ fontSize:'0.72rem', color:'#64748b', whiteSpace:'nowrap', minWidth:80 }}>
+                {fmtTime(e.start)}〜{fmtTime(e.end)}
+              </span>
+              <span style={{ flex:1, fontSize:'0.8rem', fontWeight: active ? 700 : 400, color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {active && <span style={{ color:'#3b82f6', marginRight:4 }}>▶</span>}
+                {e.title}
+              </span>
+              {e.meetUrl && (
+                <a href={e.meetUrl} target="_blank" rel="noreferrer"
+                  style={{ fontSize:'0.7rem', color:'#3b82f6', textDecoration:'none', flexShrink:0 }}>Meet</a>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── メインダッシュボード ──────────────────────────────────────────
 export default function Dashboard() {
   const [tab, setTab] = useState('tasks');
@@ -1066,6 +1145,9 @@ export default function Dashboard() {
 
       {/* 勤怠ウィジェット */}
       <AttendanceWidget />
+
+      {/* カレンダー */}
+      <CalendarWidget role={me?.role} />
 
       {/* 未確認メンション */}
       <MentionWidget />

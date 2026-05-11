@@ -658,6 +658,17 @@ async function dbEnsureSettingsSchema() {
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS user_mentions_active ON user_mentions(team_id, mentioned_user_id, created_at) WHERE dismissed_at IS NULL`).catch(() => {});
 
+  // Googleカレンダー連携トークン（admin1アカウントで全員分を取得）
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS google_oauth_tokens (
+      team_id       TEXT PRIMARY KEY,
+      access_token  TEXT,
+      refresh_token TEXT,
+      expiry_date   BIGINT,
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

@@ -1684,8 +1684,22 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const limit = 50;
       const offset = (page - 1) * limit;
 
-      const [funnelR, sourceR, repR, trendR, recentR, totalR] = await Promise.all([
-        // ファネル（kintone_cache / 期間フィルター込み）
+      // 先月比用の前期間を計算
+      const rangeFromDate = new Date(rangeFrom), rangeToDate = new Date(rangeTo);
+      const daysDiff = Math.round((rangeToDate - rangeFromDate) / 86400000) + 1;
+      const prevFrom = new Date(rangeFromDate); prevFrom.setDate(prevFrom.getDate() - daysDiff);
+      const prevTo   = new Date(rangeFromDate); prevTo.setDate(prevTo.getDate() - 1);
+      const prevParams = [prevFrom.toISOString().slice(0,10), prevTo.toISOString().slice(0,10)];
+      const prevDateFilter = `
+        AND (
+          (data->>'流入日' IS NOT NULL AND data->>'流入日' != '' AND (data->>'流入日')::date BETWEEN $1::date AND $2::date)
+          OR
+          (data->>'商談獲得日_マーケチーム' IS NOT NULL AND data->>'商談獲得日_マーケチーム' != '' AND (data->>'商談獲得日_マーケチーム')::date BETWEEN $1::date AND $2::date)
+        )
+      `;
+
+      const [funnelR, sourceR, trendAllR, recentR, totalR, prevTotalR, trend12R, appoSourceR, orderSourceR] = await Promise.all([
+        // ファネル（期間フィルター込み）
         dbQuery(`
           SELECT COALESCE(NULLIF(data->>'ヨミ',''), '不明') AS yomi, COUNT(*)::int AS cnt
           FROM kintone_cache
@@ -1693,25 +1707,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
           GROUP BY yomi ORDER BY cnt DESC
         `, params),
 
-        // 流入経路別（kintone_cache）
+        // 流入経路別（全件）
         dbQuery(`
           SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
                  COUNT(*)::int AS cnt
           FROM kintone_cache
           WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
-          GROUP BY source ORDER BY cnt DESC LIMIT 20
+          GROUP BY source ORDER BY cnt DESC
         `, params),
 
-        // 担当者別（商談獲得者）
-        dbQuery(`
-          SELECT COALESCE(NULLIF(data->>'商談獲得者',''), NULLIF(data->>'担当営業_0',''), '不明') AS rep,
-                 COUNT(*)::int AS cnt
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
-          GROUP BY rep ORDER BY cnt DESC LIMIT 15
-        `, params),
-
-        // 月次推移（流入日）
+        // 月次推移（常に直近12ヶ月 + 選択期間）
         dbQuery(`
           SELECT TO_CHAR(COALESCE(
             NULLIF(data->>'流入日',''),
@@ -1719,9 +1724,11 @@ function registerCrmApi({ expressApp, authWithRole }) {
           )::date, 'YYYY-MM') AS month,
           COUNT(*)::int AS cnt
           FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          WHERE data->>'ヨミ' IS NOT NULL
+            AND COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム','')) IS NOT NULL
+            AND COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム',''))::date >= (CURRENT_DATE - INTERVAL '12 months')
           GROUP BY month ORDER BY month
-        `, params),
+        `, []),
 
         // リード一覧（ページング）
         dbQuery(`
@@ -1739,9 +1746,35 @@ function registerCrmApi({ expressApp, authWithRole }) {
         `, [...params, limit, offset]),
 
         // 総件数
+        dbQuery(`SELECT COUNT(*)::int AS total FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}`, params),
+
+        // 前期間件数（先月比用）
+        dbQuery(`SELECT COUNT(*)::int AS total FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${prevDateFilter}`, prevParams),
+
+        // 12ヶ月平均用
         dbQuery(`
-          SELECT COUNT(*)::int AS total FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          SELECT TO_CHAR(COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム',''))::date, 'YYYY-MM') AS month,
+                 COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL
+            AND COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム',''))::date >= (CURRENT_DATE - INTERVAL '12 months')
+          GROUP BY month
+        `, []),
+
+        // アポ化につながった流入経路（経過フローにアポ化済が含まれる）
+        dbQuery(`
+          SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source, COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE data->>'ヨミ_経過フロー' LIKE '%アポ化済商談前%' ${dateFilter}
+          GROUP BY source ORDER BY cnt DESC LIMIT 15
+        `, params),
+
+        // 受注につながった流入経路
+        dbQuery(`
+          SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source, COUNT(*)::int AS cnt
+          FROM kintone_cache
+          WHERE (data->>'受注日' IS NOT NULL AND data->>'受注日' != '') ${dateFilter}
+          GROUP BY source ORDER BY cnt DESC LIMIT 15
         `, params),
       ]);
 
@@ -1756,15 +1789,29 @@ function registerCrmApi({ expressApp, authWithRole }) {
         { label: '商談中', cnt: yomiOrder.slice(2).reduce((s, y) => s + (yomiMap[y] || 0), 0) },
       ];
 
+      const currentTotal = totalR.rows[0]?.total || 0;
+      const prevTotal    = prevTotalR.rows[0]?.total || 0;
+      const avg12 = trend12R.rows.length > 0
+        ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
+        : 0;
+
       res.json({
         period: { from: rangeFrom, to: rangeTo },
         funnel,
         periodTotal,
-        bySource: sourceR.rows,
-        byRep:    repR.rows,
-        trend:    trendR.rows,
-        recent:   recentR.rows,
-        pagination: { page, limit, total: totalR.rows[0]?.total || 0 },
+        stats: {
+          current:  currentTotal,
+          prev:     prevTotal,
+          diffPct:  prevTotal > 0 ? Math.round((currentTotal - prevTotal) / prevTotal * 100) : null,
+          avg12,
+          vsAvgPct: avg12 > 0 ? Math.round((currentTotal - avg12) / avg12 * 100) : null,
+        },
+        bySource:      sourceR.rows,
+        trend:         trendAllR.rows,
+        recent:        recentR.rows,
+        appoBySource:  appoSourceR.rows,
+        orderBySource: orderSourceR.rows,
+        pagination: { page, limit, total: currentTotal },
       });
     } catch (e) {
       console.error('[CRM] leads-dashboard error:', e);

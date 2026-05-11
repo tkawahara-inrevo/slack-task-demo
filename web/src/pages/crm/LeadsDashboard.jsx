@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, Cell,
+  LineChart, Line, Cell, LabelList, ReferenceLine,
 } from 'recharts';
 import { api } from '../../api/client';
 
@@ -151,49 +151,96 @@ export default function LeadsDashboard() {
             })}
           </div>
 
-          {/* 月次推移 + 流入経路 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 20 }}>
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
-              <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>月次リード推移</div>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={data.trend} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                  <XAxis dataKey="month" tick={TICK} />
-                  <YAxis tick={TICK} allowDecimals={false} />
-                  <Tooltip formatter={v => [`${v}件`]} />
-                  <Line type="monotone" dataKey="cnt" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="リード数" />
-                </LineChart>
-              </ResponsiveContainer>
+          {/* 統計サマリー */}
+          {data.stats && (
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+              {data.stats.diffPct !== null && (
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>前期間比</div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: data.stats.diffPct >= 0 ? '#16a34a' : '#dc2626' }}>
+                    {data.stats.diffPct >= 0 ? '+' : ''}{data.stats.diffPct}%
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>前期間 {data.stats.prev}件</div>
+                </div>
+              )}
+              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
+                <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>12ヶ月平均</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{data.stats.avg12}件</div>
+              </div>
+              {data.stats.vsAvgPct !== null && (
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>平均比</div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: data.stats.vsAvgPct >= 0 ? '#16a34a' : '#dc2626' }}>
+                    {data.stats.vsAvgPct >= 0 ? '+' : ''}{data.stats.vsAvgPct}%
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>今期 {data.stats.current}件 vs 平均 {data.stats.avg12}件</div>
+                </div>
+              )}
             </div>
+          )}
 
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
-              <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>流入経路 TOP10</div>
-              <ResponsiveContainer width="100%" height={Math.max(200, data.bySource.slice(0,10).length * 26)}>
-                <BarChart data={data.bySource.slice(0, 10)} layout="vertical" margin={{ top: 0, right: 16, left: 4, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                  <XAxis type="number" tick={TICK} allowDecimals={false} />
-                  <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={120} />
-                  <Tooltip formatter={v => [`${v}件`]} />
-                  <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
-                    {data.bySource.slice(0,10).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          {/* 月次推移（常に直近12ヶ月） */}
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px', marginBottom: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 4, paddingLeft: 8 }}>月次リード推移（直近12ヶ月）</div>
+            <div style={{ fontSize: '0.72rem', color: '#9ca3af', paddingLeft: 8, marginBottom: 10 }}>点線: 12ヶ月平均 {data.stats?.avg12}件</div>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={data.trend} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                <XAxis dataKey="month" tick={TICK} />
+                <YAxis tick={TICK} allowDecimals={false} />
+                <Tooltip formatter={v => [`${v}件`]} />
+                {data.stats?.avg12 > 0 && (
+                  <ReferenceLine y={data.stats.avg12} stroke="#f59e0b" strokeDasharray="4 3"
+                    label={{ value: `平均 ${data.stats.avg12}`, fill: '#f59e0b', fontSize: 11, position: 'right' }} />
+                )}
+                <Line type="monotone" dataKey="cnt" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="リード数" />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
 
-          {/* 担当者別 */}
+          {/* 流入経路（全件・数値常時表示） */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px', marginBottom: 20 }}>
-            <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>担当者別リード数</div>
-            <ResponsiveContainer width="100%" height={Math.max(120, data.byRep.length * 28)}>
-              <BarChart data={data.byRep} layout="vertical" margin={{ top: 0, right: 16, left: 4, bottom: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>流入経路別（全件）</div>
+            <ResponsiveContainer width="100%" height={Math.max(200, data.bySource.length * 26)}>
+              <BarChart data={data.bySource} layout="vertical" margin={{ top: 0, right: 50, left: 4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                 <XAxis type="number" tick={TICK} allowDecimals={false} />
-                <YAxis type="category" dataKey="rep" tick={{ fontSize: 11, fill: '#6b7280' }} width={100} />
+                <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={130} />
                 <Tooltip formatter={v => [`${v}件`]} />
-                <Bar dataKey="cnt" fill="#3b82f6" radius={[0, 4, 4, 0]} name="件数" />
+                <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
+                  <LabelList dataKey="cnt" position="right" style={{ fontSize: 11, fill: '#374151' }} />
+                  {data.bySource.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </div>
+
+          {/* アポ化/受注 流入経路 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+            {[
+              { title: 'アポ化につながった流入経路', key: 'appoBySource', color: '#3b82f6' },
+              { title: '受注につながった流入経路', key: 'orderBySource', color: '#10b981' },
+            ].map(({ title, key, color }) => (
+              <div key={key} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>{title}</div>
+                {data[key]?.length === 0
+                  ? <div style={{ color: '#9ca3af', fontSize: '0.8rem', textAlign: 'center', padding: 16 }}>データなし</div>
+                  : (
+                    <ResponsiveContainer width="100%" height={Math.max(160, (data[key]?.length || 0) * 26)}>
+                      <BarChart data={data[key]} layout="vertical" margin={{ top: 0, right: 50, left: 4, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                        <XAxis type="number" tick={TICK} allowDecimals={false} />
+                        <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={120} />
+                        <Tooltip formatter={v => [`${v}件`]} />
+                        <Bar dataKey="cnt" fill={color} radius={[0, 4, 4, 0]} name="件数">
+                          <LabelList dataKey="cnt" position="right" style={{ fontSize: 11, fill: '#374151' }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )
+                }
+              </div>
+            ))}
           </div>
 
           {/* リード一覧 */}

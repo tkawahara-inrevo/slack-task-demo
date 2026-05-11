@@ -3014,8 +3014,8 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   // ── 出勤日報 → HRMOS(IEYASU)自動打刻 ─────────────────────────────────────
   // 出退勤日報チャンネルへの投稿を検知して自動打刻する。
   // チャンネルはカンマ区切りで複数指定可能（テスト用チャンネルの追加などに対応）。
-  // WFのbotメッセージはuser_idを持たないため、テキスト中の<@UXXXXX>からユーザーを特定する。
-  // スレッド返信は除外（日報本文への雑談コメントで誤打刻しないため）。
+  // WF botのメッセージのみ打刻する（手動投稿での誤打刻を防止）。
+  // WFのメッセージにはテキスト中の<@UXXXXX>でユーザーを特定する必要がある。
   const toChSet = (envVal) => new Set((envVal || '').split(',').map(s => s.trim()).filter(Boolean));
   const STAMP_IN_CHS  = toChSet(process.env.HRMOS_STAMP_IN_CHANNELS);
   const STAMP_OUT_CHS = toChSet(process.env.HRMOS_STAMP_OUT_CHANNELS);
@@ -3023,15 +3023,14 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   const doStamp = async (client, message, stampType) => {
     // スレッド返信は除外
     if (message.thread_ts && message.thread_ts !== message.ts) return;
+    // WF botのメッセージのみ対象（通常の手動投稿は誤打刻防止のため除外）
+    const isWfBot = !!(message.bot_id || message.subtype === 'bot_message');
+    if (!isWfBot) return;
 
-    // 実行ユーザーを特定: 通常メッセージはmessage.user、WF botはテキストから<@UXXXXX>を抽出
-    let targetUserId = message.user;
-    if (!targetUserId && (message.bot_id || message.subtype === 'bot_message')) {
-      const match = (message.text || '').match(/<@(U[A-Z0-9]+)>/);
-      if (!match) return; // ユーザーIDが取れなければスキップ
-      targetUserId = match[1];
-    }
-    if (!targetUserId) return;
+    // WF botはuser_idを持たないのでテキスト中の<@UXXXXX>からユーザーを特定
+    const match = (message.text || '').match(/<@(U[A-Z0-9]+)>/);
+    if (!match) return;
+    const targetUserId = match[1];
     const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
     const label = stampType === 1 ? '出勤' : '退勤';
     console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${targetUserId}`);

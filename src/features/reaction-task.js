@@ -434,7 +434,7 @@ app.event("reaction_added", async ({ event, client, body }) => {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `✅ *タスク化しました*\n*${noMention(created.title)}*`,
+              text: `✅ *タスク化しました*\n*${noMention(created.title)}*\n_担当者への通知は10分後に送られます。今すぐ変更したい場合は詳細を開いてください。_`,
             },
           },
           {

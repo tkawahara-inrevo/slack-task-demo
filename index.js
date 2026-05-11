@@ -3063,8 +3063,21 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   // ── メンション追跡 ─────────────────────────────────────────────────────────
   // すべてのメッセージを監視し、@メンションをDBに記録する。
   // 返信・リアクションで既読扱い、48時間で自動消滅。
-  const MENTION_RE = /<@(U[A-Z0-9]+)>/g;
+  // @user / @channel / @here / ユーザーグループに対応。
+  const MENTION_RE     = /<@(U[A-Z0-9]+)>/g;
+  const SUBTEAM_RE     = /<!subteam\^([A-Z0-9]+)(?:\|[^>]+)?>/g;
+  const CHANNEL_HERE_RE = /<!channel>|<!here>/;
   const stripMentions = (t) => (t || '').replace(/<@[A-Z0-9]+>/g, '').replace(/<[^>]+>/g, '').trim();
+
+  const saveMention = async (teamId, uid, channelId, msgTs, senderUserId, preview) => {
+    if (uid === senderUserId) return;
+    const { randomUUID } = require('crypto');
+    await dbQuery(`
+      INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+      ON CONFLICT (team_id, mentioned_user_id, channel_id, message_ts) DO NOTHING
+    `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview]).catch(() => {});
+  };
 
   app.event('message', async ({ event, client }) => {
     try {
@@ -3085,20 +3098,35 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         `, [teamId, senderUserId, channelId, event.thread_ts]).catch(() => {});
       }
 
-      // @メンションを抽出して保存
-      const mentioned = [...new Set([...text.matchAll(MENTION_RE)].map(m => m[1]))];
-      if (!mentioned.length) return;
-
       const preview = stripMentions(text).slice(0, 100) || '（本文なし）';
-      const { randomUUID } = require('crypto');
+      const targetIds = new Set();
 
-      for (const uid of mentioned) {
-        if (uid === senderUserId) continue; // 自己メンションは除外
-        await dbQuery(`
-          INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, created_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,now())
-          ON CONFLICT (team_id, mentioned_user_id, channel_id, message_ts) DO NOTHING
-        `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview]).catch(() => {});
+      // 直接@メンション
+      for (const m of text.matchAll(MENTION_RE)) targetIds.add(m[1]);
+
+      // @channel / @here → チャンネルメンバー全員
+      if (CHANNEL_HERE_RE.test(text)) {
+        try {
+          let cursor;
+          do {
+            const r = await client.conversations.members({ channel: channelId, limit: 200, cursor });
+            for (const uid of (r.members || [])) targetIds.add(uid);
+            cursor = r.response_metadata?.next_cursor;
+          } while (cursor);
+        } catch { /* チャンネルメンバー取得失敗は無視 */ }
+      }
+
+      // ユーザーグループメンション
+      for (const m of text.matchAll(SUBTEAM_RE)) {
+        try {
+          const r = await client.usergroups.users.list({ usergroup: m[1] });
+          for (const uid of (r.users || [])) targetIds.add(uid);
+        } catch { /* ユーザーグループ取得失敗は無視 */ }
+      }
+
+      if (!targetIds.size) return;
+      for (const uid of targetIds) {
+        await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview);
       }
     } catch (e) { /* silent */ }
   });

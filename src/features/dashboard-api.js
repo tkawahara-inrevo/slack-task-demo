@@ -1906,6 +1906,17 @@ function registerDashboardApi(deps) {
   });
 
   // ── 未確認メンション ────────────────────────────────────────────────────────
+  expressApp.delete('/api/dashboard/my-mentions/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      await dbQuery(
+        `UPDATE user_mentions SET dismissed_at=now() WHERE id=$1 AND team_id=$2 AND mentioned_user_id=$3`,
+        [req.params.id, teamId, userId]
+      );
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
   expressApp.get('/api/dashboard/my-mentions', authWithRole, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;

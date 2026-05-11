@@ -527,6 +527,7 @@ export const api = {
 
   // メンション
   myMentions: () => apiFetch('/my-mentions'),
+  dismissMention: (id) => apiFetch(`/my-mentions/${id}`, { method: 'DELETE' }),
 
   // HRMOS勤怠
   myAttendance: () => apiFetch('/my-attendance'),

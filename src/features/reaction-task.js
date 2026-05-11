@@ -90,13 +90,7 @@ function registerReactionFeature(deps) {
     teamId, channelId, msgTs, rawText, baseText,
     blocks = null,
     requesterUserId, actorUserId, dueYmd, permalink,
-    // delayNotification=true の場合: タスク作成直後は通知せず10分後に送る。
-    // キーワード/<タスク化>およびリアクション経由で使用。担当者変更の猶予を与えるため。
-    delayNotification = false,
   }) {
-    const notifyScheduledAt = delayNotification
-      ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
-      : null;
     const { userIds, groupIds } = inferTargetsFromMessage(rawText, actorUserId, blocks);
     const isMulti = groupIds.length > 0 || userIds.length > 1;
 
@@ -127,9 +121,7 @@ function registerReactionFeature(deps) {
         task_type: "personal", broadcast_group_handle: null, broadcast_group_id: null,
         total_count: null, completed_count: 0, notified_at: null,
       });
-      if (notifyScheduledAt) {
-        await dbQuery('UPDATE tasks SET notify_scheduled_at=$1 WHERE id=$2', [notifyScheduledAt, taskId]).catch(() => {});
-      } else if (assigneeId && assigneeId !== actorUserId) {
+      if (assigneeId && assigneeId !== actorUserId) {
         await notifyTaskSimpleDM(assigneeId, created, "タスクが割り当てられました").catch(() => {});
       }
       return { created, targetList: [assigneeId] };
@@ -175,12 +167,8 @@ function registerReactionFeature(deps) {
       total_count: targetList.length, completed_count: 0, notified_at: null,
     });
     await dbInsertTaskTargets(teamId, taskId, targetList);
-    if (notifyScheduledAt) {
-      await dbQuery('UPDATE tasks SET notify_scheduled_at=$1 WHERE id=$2', [notifyScheduledAt, taskId]).catch(() => {});
-    } else {
-      for (const uid of targetList.filter(u => u !== actorUserId)) {
-        await notifyTaskSimpleDM(uid, created, "タスクが割り当てられました").catch(() => {});
-      }
+    for (const uid of targetList.filter(u => u !== actorUserId)) {
+      await notifyTaskSimpleDM(uid, created, "タスクが割り当てられました").catch(() => {});
     }
     return { created, targetList };
   }
@@ -408,14 +396,12 @@ app.event("reaction_added", async ({ event, client, body }) => {
     const permalink = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
       .then(r => r?.permalink || "").catch(() => "");
 
-    // メンション情報に基づいてタスク作成（10分後に通知）
     const { created, targetList } = await createTaskFromMentions({
       teamId, channelId, msgTs,
       rawText, baseText: rawText,
       blocks: mm?.blocks || null,
       requesterUserId: effectiveRequester,
       actorUserId, dueYmd, permalink,
-      delayNotification: true,
     });
 
     // 元メッセージがスレッド返信か親かを判定
@@ -434,7 +420,7 @@ app.event("reaction_added", async ({ event, client, body }) => {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `✅ *タスク化しました*\n*${noMention(created.title)}*\n_担当者への通知は10分後に送られます。今すぐ変更したい場合は詳細を開いてください。_`,
+              text: `✅ *タスク化しました*\n*${noMention(created.title)}*`,
             },
           },
           {
@@ -549,14 +535,12 @@ app.event("message", async ({ event, client, body }) => {
     const permalink = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
       .then((r) => r?.permalink || "").catch(() => "");
 
-    // メンション情報に基づいてタスク作成（10分後に通知）
     const { created, targetList } = await createTaskFromMentions({
       teamId, channelId, msgTs,
       rawText, baseText: cleanText,
       blocks: event?.blocks || null,
       requesterUserId: actorUserId,
       actorUserId, dueYmd, permalink,
-      delayNotification: true,
     });
 
     // 元メッセージがスレッド返信か親かを判定
@@ -574,7 +558,7 @@ app.event("message", async ({ event, client, body }) => {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `✅ *タスク化しました*\n*${noMention(created.title)}*\n_担当者への通知は10分後に送られます。今すぐ変更したい場合は詳細を開いてください。_`,
+              text: `✅ *タスク化しました*\n*${noMention(created.title)}*`,
             },
           },
           {

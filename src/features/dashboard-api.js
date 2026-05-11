@@ -1989,24 +1989,16 @@ function registerDashboardApi(deps) {
 
         await Promise.all(members.filter(m => m.email).map(async (m) => {
           try {
-            const [todayR, weekR] = await Promise.all([
-              calendar.events.list({ calendarId: m.email, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 10 }),
-              calendar.events.list({ calendarId: m.email, timeMin: weekStart.toISOString(), timeMax: weekEnd.toISOString(), singleEvents: true, maxResults: 50 }),
-            ]);
+            const todayR = await calendar.events.list({ calendarId: m.email, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 10 });
             const todayEvents = (todayR.data.items || []).filter(e => e.start?.dateTime).map(e => ({
               title: e.summary || '（タイトルなし）',
               start: e.start.dateTime,
               end: e.end.dateTime,
             }));
-            // 今週MTG合計分
-            const weekMinutes = (weekR.data.items || []).filter(e => e.start?.dateTime).reduce((s, e) => {
-              return s + (new Date(e.end.dateTime) - new Date(e.start.dateTime)) / 60000;
-            }, 0);
-            // 今会議中か
             const nowIso = new Date().toISOString();
             const currentEvent = todayEvents.find(e => e.start <= nowIso && e.end >= nowIso) || null;
-            calMap[m.user_id] = { todayEvents, weekMinutes: Math.round(weekMinutes), currentEvent };
-          } catch { calMap[m.user_id] = { todayEvents: [], weekMinutes: 0, currentEvent: null }; }
+            calMap[m.user_id] = { todayEvents, currentEvent };
+          } catch { calMap[m.user_id] = { todayEvents: [], currentEvent: null }; }
         }));
       }
 
@@ -2017,7 +2009,7 @@ function registerDashboardApi(deps) {
         clockedIn:   clockedIn.has(m.user_id),
         clockedOut:  clockedOut.has(m.user_id),
         taskCount:   taskMap[m.user_id] || 0,
-        ...(calMap[m.user_id] || { todayEvents: [], weekMinutes: null, currentEvent: null }),
+        ...(calMap[m.user_id] || { todayEvents: [], currentEvent: null }),
       }));
 
       res.json({ canView: true, members: result, calendarConnected: !!auth });

@@ -926,11 +926,6 @@ function TeamDetailWidget() {
   };
 
   const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Tokyo' }) : '';
-  const fmtHour = (min) => {
-    if (min == null) return '—';
-    const h = Math.floor(min / 60), m2 = min % 60;
-    return h > 0 ? `${h}h${m2 > 0 ? m2 + 'm' : ''}` : `${m2}m`;
-  };
   const nowIso = new Date().toISOString();
 
   if (!data || !data.canView || !data.members.length) return null;
@@ -952,7 +947,6 @@ function TeamDetailWidget() {
                 <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>タスク</th>
                 {data.calendarConnected && <>
                   <th style={{ padding:'7px 10px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>今日の予定</th>
-                  <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>今週MTG</th>
                 </>}
               </tr>
             </thead>
@@ -999,9 +993,6 @@ function TeamDetailWidget() {
                               </button>
                             )}
                           </div>
-                        </td>
-                        <td style={{ padding:'7px 10px', textAlign:'right', color:'#64748b', fontSize:'0.75rem', whiteSpace:'nowrap' }}>
-                          {fmtHour(m.weekMinutes)}
                         </td>
                       </>}
                     </tr>

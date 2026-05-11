@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Cell, LabelList, ReferenceLine,
+  PieChart, Pie, Legend,
 } from 'recharts';
 import { api } from '../../api/client';
 
@@ -202,40 +203,77 @@ export default function LeadsDashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* 流入経路（全件・割合付き・クリックでドリルダウン） */}
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px', marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, paddingLeft: 8 }}>
-              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>流入経路別</span>
-              <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>クリックで詳細</span>
-            </div>
-            {(() => {
-              const total = data.bySource.reduce((s, r) => s + r.cnt, 0);
-              const srcData = data.bySource.map(r => ({ ...r, pct: total > 0 ? Math.round(r.cnt / total * 100) : 0 }));
-              return (
-                <ResponsiveContainer width="100%" height={Math.max(200, srcData.length * 26)}>
-                  <BarChart data={srcData} layout="vertical" margin={{ top: 0, right: 80, left: 4, bottom: 0 }}
-                    onClick={e => e?.activePayload?.[0] && openDrill(e.activePayload[0].payload.source)}
-                    style={{ cursor: 'pointer' }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                    <XAxis type="number" tick={TICK} allowDecimals={false} />
-                    <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={130} />
-                    <Tooltip formatter={(v, _, p) => [`${v}件 (${p.payload.pct}%)`]} cursor={{ fill: '#eff6ff' }} />
-                    <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
-                      <LabelList content={({ x, y, width, height, value, index }) => {
-                        const pct = srcData[index]?.pct;
-                        return (
-                          <text x={x + width + 6} y={y + height / 2} dominantBaseline="middle" fontSize={11} fill="#374151">
-                            {value}件 <tspan fill="#9ca3af">({pct}%)</tspan>
-                          </text>
-                        );
-                      }} />
-                      {srcData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              );
-            })()}
-          </div>
+          {/* 流入経路: 円グラフ + 失注率テーブル */}
+          {(() => {
+            const total = data.bySource.reduce((s, r) => s + r.cnt, 0);
+            const srcData = data.bySource.map(r => ({
+              ...r,
+              pct:      total > 0 ? Math.round(r.cnt / total * 100) : 0,
+              lost_rate: r.cnt > 0 ? Math.round(r.lost_cnt / r.cnt * 100) : 0,
+            }));
+            const top10 = srcData.slice(0, 10);
+            const othersTotal = srcData.slice(10).reduce((s, r) => s + r.cnt, 0);
+            const pieData = othersTotal > 0 ? [...top10, { source: 'その他', cnt: othersTotal, pct: Math.round(othersTotal / total * 100) }] : top10;
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+                {/* 円グラフ */}
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8, paddingLeft: 8 }}>
+                    流入経路 <span style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 400 }}>クリックで詳細</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie data={pieData} dataKey="cnt" nameKey="source" cx="50%" cy="45%" outerRadius={90}
+                        label={({ name, percent }) => percent > 0.04 ? `${(percent*100).toFixed(0)}%` : ''}
+                        labelLine={false} style={{ cursor: 'pointer' }}
+                        onClick={d => d?.source && d.source !== 'その他' && openDrill(d.source)}>
+                        {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v, n) => [`${v}件`, n]} />
+                      <Legend wrapperStyle={{ fontSize: '0.72rem' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* 失注率テーブル */}
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', fontWeight: 700, fontSize: '0.85rem' }}>
+                    流入経路別 失注率
+                  </div>
+                  <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                          {['経路', '件数', '割合', '失注数', '失注率'].map(h => (
+                            <th key={h} style={{ padding: '7px 10px', textAlign: h === '経路' ? 'left' : 'right', fontWeight: 600, color: '#64748b', fontSize: '0.7rem', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {srcData.map((r, i) => (
+                          <tr key={i} onClick={() => openDrill(r.source)}
+                            style={{ borderBottom: '1px solid #f8fafc', cursor: 'pointer', background: i%2===0?'#fff':'#fafafa' }}
+                            onMouseEnter={e => e.currentTarget.style.background='#eff6ff'}
+                            onMouseLeave={e => e.currentTarget.style.background=i%2===0?'#fff':'#fafafa'}>
+                            <td style={{ padding: '6px 10px', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.source}</td>
+                            <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600 }}>{r.cnt}</td>
+                            <td style={{ padding: '6px 10px', textAlign: 'right', color: '#6b7280' }}>{r.pct}%</td>
+                            <td style={{ padding: '6px 10px', textAlign: 'right', color: '#ef4444' }}>{r.lost_cnt}</td>
+                            <td style={{ padding: '6px 10px', textAlign: 'right' }}>
+                              <span style={{ color: r.lost_rate >= 50 ? '#ef4444' : r.lost_rate >= 30 ? '#f59e0b' : '#6b7280', fontWeight: r.lost_rate >= 30 ? 600 : 400 }}>
+                                {r.lost_rate}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* アポ化/受注 流入経路 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>

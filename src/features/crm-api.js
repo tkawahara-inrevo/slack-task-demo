@@ -1707,10 +1707,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
           GROUP BY yomi ORDER BY cnt DESC
         `, params),
 
-        // 流入経路別（全件・文字化け除外）
+        // 流入経路別（全件・失注数含む・文字化け除外）
         dbQuery(`
-          SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
-                 COUNT(*)::int AS cnt
+          SELECT
+            COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
+            COUNT(*)::int AS cnt,
+            COUNT(*) FILTER (WHERE data->>'ヨミ' LIKE '失注%' OR data->>'ヨミ' = '失注')::int AS lost_cnt
           FROM kintone_cache
           WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
             AND (data->>'流入経路' IS NULL OR data->>'流入経路' = ''

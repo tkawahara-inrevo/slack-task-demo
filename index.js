@@ -3092,10 +3092,12 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
 
       // スレッド返信 → 自分がメンションされたスレッドへの返信なら既読
       if (event.thread_ts && event.thread_ts !== msgTs) {
-        await dbQuery(`
+        console.log(`[mention-dismiss] reply: user=${senderUserId} ch=${channelId} thread=${event.thread_ts}`);
+        const r = await dbQuery(`
           UPDATE user_mentions SET dismissed_at=now()
           WHERE mentioned_user_id=$1 AND channel_id=$2 AND message_ts=$3 AND dismissed_at IS NULL
-        `, [senderUserId, channelId, event.thread_ts]).catch(() => {});
+        `, [senderUserId, channelId, event.thread_ts]).catch(e => { console.error('[mention-dismiss] err:', e.message); return { rowCount: 0 }; });
+        console.log(`[mention-dismiss] updated: ${r?.rowCount ?? 0}件`);
       }
 
       const preview = stripMentions(text).slice(0, 100) || '（本文なし）';

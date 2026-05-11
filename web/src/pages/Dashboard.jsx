@@ -755,8 +755,12 @@ function TaskCard({ t, members, onClick }) {
 function MentionWidget() {
   const [mentions, setMentions] = useState(null);
 
+  const load = () => api.myMentions().then(d => setMentions(d.mentions || [])).catch(() => setMentions([]));
+
   useEffect(() => {
-    api.myMentions().then(d => setMentions(d.mentions || [])).catch(() => setMentions([]));
+    load();
+    const t = setInterval(load, 30000); // 30秒ごとに自動更新
+    return () => clearInterval(t);
   }, []);
 
   const dismiss = (id, e) => {
@@ -782,6 +786,7 @@ function MentionWidget() {
         <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a' }}>未確認メンション</span>
         <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
         <span style={{ fontSize:'0.68rem', color:'#94a3b8', marginLeft:2 }}>返信・リアクション・× で消えます</span>
+        <button onClick={load} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:'0.75rem', padding:'2px 6px' }} title="更新">↻</button>
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:200, overflowY:'auto' }}>
         {mentions.map(m => {

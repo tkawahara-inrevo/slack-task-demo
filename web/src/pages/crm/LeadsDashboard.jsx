@@ -15,11 +15,34 @@ const YOMI_COLOR = {
   '商談中': '#10b981',
 };
 
+const pad = n => String(n).padStart(2, '0');
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const endOfMonth = (y, m) => ymd(new Date(y, m, 0)); // month is 1-based
+
+function getPreset(key) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth() + 1;
+  switch (key) {
+    case 'this_month':   return { from: `${y}-${pad(m)}-01`, to: endOfMonth(y, m) };
+    case 'last_month': {
+      const ly = m === 1 ? y-1 : y, lm = m === 1 ? 12 : m-1;
+      return { from: `${ly}-${pad(lm)}-01`, to: endOfMonth(ly, lm) };
+    }
+    case 'last3': {
+      const d3 = new Date(now); d3.setMonth(d3.getMonth()-3);
+      return { from: ymd(d3), to: ymd(now) };
+    }
+    case 'this_year': return { from: `${y}-04-01`, to: `${y+1}-03-31` };
+    default: return { from: '', to: '' };
+  }
+}
+
 export default function LeadsDashboard() {
-  const [data, setData]   = useState(null);
+  const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
-  const [from, setFrom]   = useState('');
-  const [to, setTo]       = useState('');
+  const [from, setFrom]     = useState('');
+  const [to, setTo]         = useState('');
+  const [activePreset, setActivePreset] = useState(null);
 
   const load = useCallback(async (f, t) => {
     setLoading(true);
@@ -32,8 +55,21 @@ export default function LeadsDashboard() {
 
   useEffect(() => { load('', ''); }, []);
 
-  const handleSearch = () => load(from, to);
-  const handleReset  = () => { setFrom(''); setTo(''); load('', ''); };
+  const applyPreset = (key) => {
+    const { from: f, to: t } = getPreset(key);
+    setFrom(f); setTo(t); setActivePreset(key);
+    load(f, t);
+  };
+
+  const handleSearch = () => { setActivePreset(null); load(from, to); };
+  const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', ''); };
+
+  const presets = [
+    { key: 'this_month', label: '今月' },
+    { key: 'last_month', label: '先月' },
+    { key: 'last3',      label: '直近3ヶ月' },
+    { key: 'this_year',  label: '今年度' },
+  ];
 
   const total = data?.funnel?.reduce((s, r) => s + r.cnt, 0) || 0;
 
@@ -49,23 +85,37 @@ export default function LeadsDashboard() {
       </div>
 
       {/* 期間フィルター */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-        <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#374151' }}>流入日</label>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-          style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem' }} />
-        <span style={{ color: '#9ca3af' }}>〜</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)}
-          style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 10px', fontSize: '0.82rem' }} />
-        <button onClick={handleSearch}
-          style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 16px', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 600 }}>
-          絞り込む
-        </button>
-        {(from || to) && (
-          <button onClick={handleReset}
-            style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 12px', fontSize: '0.8rem', cursor: 'pointer', color: '#6b7280' }}>
-            リセット
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>
+        {/* クイック選択 */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {presets.map(p => (
+            <button key={p.key} onClick={() => applyPreset(p.key)} style={{
+              padding: '4px 12px', borderRadius: 20, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+              background: activePreset === p.key ? '#3b82f6' : '#f1f5f9',
+              color: activePreset === p.key ? '#fff' : '#374151',
+              border: 'none',
+            }}>{p.label}</button>
+          ))}
+        </div>
+        {/* カスタム期間 */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>カスタム</span>
+          <input type="date" value={from} onChange={e => { setFrom(e.target.value); setActivePreset(null); }}
+            style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '4px 8px', fontSize: '0.82rem' }} />
+          <span style={{ color: '#9ca3af' }}>〜</span>
+          <input type="date" value={to} onChange={e => { setTo(e.target.value); setActivePreset(null); }}
+            style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '4px 8px', fontSize: '0.82rem' }} />
+          <button onClick={handleSearch}
+            style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 14px', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 600 }}>
+            適用
           </button>
-        )}
+          {(from || to || activePreset) && (
+            <button onClick={handleReset}
+              style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, padding: '4px 10px', fontSize: '0.8rem', cursor: 'pointer', color: '#6b7280' }}>
+              リセット
+            </button>
+          )}
+        </div>
       </div>
 
       {loading && <div style={{ color: '#9ca3af', marginBottom: 16 }}>読み込み中...</div>}

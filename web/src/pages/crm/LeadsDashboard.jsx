@@ -228,7 +228,6 @@ export default function LeadsDashboard() {
                 </tbody>
               </table>
             </div>
-          </div>
             {/* ページング */}
             {data.pagination && data.pagination.total > data.pagination.limit && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 16px', borderTop: '1px solid #f3f4f6' }}>
@@ -246,7 +245,7 @@ export default function LeadsDashboard() {
               </div>
             )}
           </div>
-          </>
+        </>
       )}
     </div>
   );

@@ -1707,12 +1707,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
           GROUP BY yomi ORDER BY cnt DESC
         `, params),
 
-        // 流入経路別（全件）
+        // 流入経路別（全件・文字化け除外）
         dbQuery(`
           SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
                  COUNT(*)::int AS cnt
           FROM kintone_cache
           WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+            AND (data->>'流入経路' IS NULL OR data->>'流入経路' = ''
+                 OR data->>'流入経路' NOT LIKE '%' || chr(65533) || '%')
           GROUP BY source ORDER BY cnt DESC
         `, params),
 
@@ -1801,6 +1803,28 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const avg12 = trend12R.rows.length > 0
         ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
         : 0;
+
+      // 流入経路ドリルダウン（source指定時）
+      const sourceFilter = req.query.source;
+      if (sourceFilter) {
+        const drillParams = [...params];
+        const srcCond = sourceFilter === '不明'
+          ? `AND (data->>'流入経路' IS NULL OR data->>'流入経路' = '')`
+          : `AND data->>'流入経路' = $${drillParams.push(sourceFilter)}`;
+        const drillR = await dbQuery(`
+          SELECT
+            data->>'顧客' AS customer,
+            data->>'ヨミ' AS yomi,
+            COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
+            COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep,
+            data->>'案件名' AS deal_name
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter} ${srcCond}
+          ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
+          LIMIT 200
+        `, drillParams);
+        return res.json({ drilldown: drillR.rows, source: sourceFilter });
+      }
 
       res.json({
         period: { from: rangeFrom, to: rangeTo },

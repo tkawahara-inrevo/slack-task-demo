@@ -39,12 +39,14 @@ function getPreset(key) {
 }
 
 export default function LeadsDashboard() {
-  const [data, setData]     = useState(null);
+  const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(false);
-  const [from, setFrom]     = useState('');
-  const [to, setTo]         = useState('');
+  const [from, setFrom]       = useState('');
+  const [to, setTo]           = useState('');
   const [activePreset, setActivePreset] = useState(null);
-  const [page, setPage]     = useState(1);
+  const [page, setPage]       = useState(1);
+  const [drill, setDrill]     = useState(null); // { source, rows }
+  const [drillLoading, setDrillLoading] = useState(false);
 
   const load = useCallback(async (f, t, p = 1) => {
     setLoading(true);
@@ -66,6 +68,16 @@ export default function LeadsDashboard() {
 
   const handleSearch = () => { setActivePreset(null); load(from, to, 1); };
   const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', '', 1); };
+
+  const openDrill = async (source) => {
+    setDrill({ source, rows: null });
+    setDrillLoading(true);
+    try {
+      const d = await api.crmLeadsDrilldown(source, from, to);
+      setDrill({ source, rows: d.drilldown || [] });
+    } catch { setDrill({ source, rows: [] }); }
+    setDrillLoading(false);
+  };
 
   const presets = [
     { key: 'this_month', label: '今月' },
@@ -164,15 +176,6 @@ export default function LeadsDashboard() {
           {/* 統計サマリー */}
           {data.stats && (
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
-              {data.stats.diffPct !== null && (
-                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>前期間比</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: data.stats.diffPct >= 0 ? '#16a34a' : '#dc2626' }}>
-                    {data.stats.diffPct >= 0 ? '+' : ''}{data.stats.diffPct}%
-                  </div>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>前期間 {data.stats.prev}件</div>
-                </div>
-              )}
               <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
                 <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>月平均（直近12ヶ月）</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{data.stats.avg12}件/月</div>
@@ -199,21 +202,39 @@ export default function LeadsDashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* 流入経路（全件・数値常時表示） */}
+          {/* 流入経路（全件・割合付き・クリックでドリルダウン） */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px', marginBottom: 20 }}>
-            <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 12, paddingLeft: 8 }}>流入経路別（全件）</div>
-            <ResponsiveContainer width="100%" height={Math.max(200, data.bySource.length * 26)}>
-              <BarChart data={data.bySource} layout="vertical" margin={{ top: 0, right: 50, left: 4, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                <XAxis type="number" tick={TICK} allowDecimals={false} />
-                <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={130} />
-                <Tooltip formatter={v => [`${v}件`]} />
-                <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
-                  <LabelList dataKey="cnt" position="right" style={{ fontSize: 11, fill: '#374151' }} />
-                  {data.bySource.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, paddingLeft: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>流入経路別</span>
+              <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>クリックで詳細</span>
+            </div>
+            {(() => {
+              const total = data.bySource.reduce((s, r) => s + r.cnt, 0);
+              const srcData = data.bySource.map(r => ({ ...r, pct: total > 0 ? Math.round(r.cnt / total * 100) : 0 }));
+              return (
+                <ResponsiveContainer width="100%" height={Math.max(200, srcData.length * 26)}>
+                  <BarChart data={srcData} layout="vertical" margin={{ top: 0, right: 80, left: 4, bottom: 0 }}
+                    onClick={e => e?.activePayload?.[0] && openDrill(e.activePayload[0].payload.source)}
+                    style={{ cursor: 'pointer' }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                    <XAxis type="number" tick={TICK} allowDecimals={false} />
+                    <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={130} />
+                    <Tooltip formatter={(v, _, p) => [`${v}件 (${p.payload.pct}%)`]} cursor={{ fill: '#eff6ff' }} />
+                    <Bar dataKey="cnt" radius={[0, 4, 4, 0]} name="件数">
+                      <LabelList content={({ x, y, width, height, value, index }) => {
+                        const pct = srcData[index]?.pct;
+                        return (
+                          <text x={x + width + 6} y={y + height / 2} dominantBaseline="middle" fontSize={11} fill="#374151">
+                            {value}件 <tspan fill="#9ca3af">({pct}%)</tspan>
+                          </text>
+                        );
+                      }} />
+                      {srcData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              );
+            })()}
           </div>
 
           {/* アポ化/受注 流入経路 */}
@@ -243,6 +264,54 @@ export default function LeadsDashboard() {
               </div>
             ))}
           </div>
+
+          {/* 流入経路ドリルダウンパネル */}
+          {drill && (
+            <>
+              <div onClick={() => setDrill(null)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', zIndex:1000 }} />
+              <div style={{ position:'fixed', top:0, right:0, bottom:0, width:560, maxWidth:'94vw', background:'#fff', zIndex:1001, display:'flex', flexDirection:'column', boxShadow:'-4px 0 24px rgba(0,0,0,0.15)' }}>
+                <div style={{ padding:'16px 20px', borderBottom:'1px solid #e5e7eb', display:'flex', alignItems:'center', gap:12 }}>
+                  <div>
+                    <div style={{ fontSize:'0.75rem', color:'#6b7280' }}>流入経路: {drill.source}</div>
+                    <div style={{ fontWeight:700, fontSize:'0.95rem' }}>
+                      {drillLoading ? '読み込み中...' : `${drill.rows?.length || 0}件`}
+                    </div>
+                  </div>
+                  <button onClick={() => setDrill(null)} style={{ marginLeft:'auto', background:'none', border:'none', fontSize:'1.2rem', cursor:'pointer', color:'#6b7280' }}>✕</button>
+                </div>
+                <div style={{ flex:1, overflowY:'auto' }}>
+                  {drillLoading
+                    ? <div style={{ padding:24, color:'#9ca3af', textAlign:'center' }}>読み込み中...</div>
+                    : !drill.rows?.length
+                    ? <div style={{ padding:24, color:'#9ca3af', textAlign:'center' }}>データなし</div>
+                    : (
+                      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+                        <thead>
+                          <tr style={{ background:'#f8fafc', position:'sticky', top:0 }}>
+                            {['流入日','会社名','ヨミ','担当者'].map(h => (
+                              <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {drill.rows.map((r, i) => (
+                            <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'#fff':'#fafafa' }}>
+                              <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'#6b7280' }}>{r.inflow_date?.slice(0,10)||'—'}</td>
+                              <td style={{ padding:'7px 12px', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{r.customer||'—'}</td>
+                              <td style={{ padding:'7px 12px', whiteSpace:'nowrap' }}>
+                                <span style={{ fontSize:'0.72rem', background:'#eff6ff', color:'#3b82f6', borderRadius:4, padding:'2px 6px' }}>{r.yomi}</span>
+                              </td>
+                              <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'#374151' }}>{r.rep||'—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )
+                  }
+                </div>
+              </div>
+            </>
+          )}
 
           {/* リード一覧 */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>

@@ -1928,12 +1928,23 @@ function registerDashboardApi(deps) {
         if (!CHIEF_ROLES.has(repRole)) return res.json({ canView: false });
       }
 
-      // 自分が所属するチームのメンバーを取得
+      // 自分が所属するチーム＋その子チームのメンバーを取得（再帰）
       const myTeamsR = await dbQuery(`
         SELECT dtm.dash_team_id FROM dash_team_members dtm WHERE dtm.team_id=$1 AND dtm.user_id=$2
       `, [teamId, userId]);
       const myTeamIds = myTeamsR.rows.map(r => r.dash_team_id);
       if (!myTeamIds.length) return res.json({ canView: true, members: [] });
+
+      // 子チームも含めてすべてのチームIDを取得
+      const allTeamIdsR = await dbQuery(`
+        WITH RECURSIVE subtree AS (
+          SELECT id FROM dash_teams WHERE id=ANY($1) AND team_id=$2
+          UNION ALL
+          SELECT dt.id FROM dash_teams dt JOIN subtree s ON dt.parent_id=s.id WHERE dt.team_id=$2
+        )
+        SELECT id FROM subtree
+      `, [myTeamIds, teamId]);
+      const allTeamIds = allTeamIdsR.rows.map(r => r.id);
 
       const membersR = await dbQuery(`
         SELECT DISTINCT dtm.user_id, d.display_name, d.profile_json->>'image_48' AS avatar_url,
@@ -1943,7 +1954,7 @@ function registerDashboardApi(deps) {
         WHERE dtm.team_id=$1 AND dtm.dash_team_id=ANY($2) AND dtm.user_id != $3
           AND d.is_active=true
         ORDER BY d.display_name
-      `, [teamId, myTeamIds, userId]);
+      `, [teamId, allTeamIds, userId]);
       const members = membersR.rows;
       if (!members.length) return res.json({ canView: true, members: [] });
 

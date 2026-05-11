@@ -641,6 +641,23 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS tasks_notify_scheduled ON tasks(notify_scheduled_at) WHERE notify_scheduled_at IS NOT NULL AND notified_at IS NULL`).catch(() => {});
 
+  // メンション追跡（未確認メンションをホームに表示するため）
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS user_mentions (
+      id               TEXT PRIMARY KEY,
+      team_id          TEXT NOT NULL,
+      mentioned_user_id TEXT NOT NULL,
+      channel_id       TEXT NOT NULL,
+      message_ts       TEXT NOT NULL,
+      sender_user_id   TEXT,
+      text_preview     TEXT,
+      dismissed_at     TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(team_id, mentioned_user_id, channel_id, message_ts)
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS user_mentions_active ON user_mentions(team_id, mentioned_user_id, created_at) WHERE dismissed_at IS NULL`).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

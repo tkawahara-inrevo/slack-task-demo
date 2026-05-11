@@ -1905,6 +1905,34 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // ── 未確認メンション ────────────────────────────────────────────────────────
+  expressApp.get('/api/dashboard/my-mentions', authWithRole, async (req, res) => {
+    try {
+      const { teamId, userId } = req.dashboardUser;
+      const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+      const r = await dbQuery(`
+        SELECT m.id, m.channel_id, m.message_ts, m.sender_user_id,
+               m.text_preview, m.created_at,
+               d.display_name AS sender_name, d.avatar_url AS sender_avatar
+        FROM user_mentions m
+        LEFT JOIN dashboard_user_directory d
+          ON d.team_id = m.team_id AND d.user_id = m.sender_user_id
+        WHERE m.team_id = $1
+          AND m.mentioned_user_id = $2
+          AND m.dismissed_at IS NULL
+          AND m.created_at >= $3
+        ORDER BY m.created_at DESC
+        LIMIT 30
+      `, [teamId, userId, cutoff]);
+
+      res.json({ mentions: r.rows });
+    } catch (e) {
+      console.error('[mentions] error:', e.message);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
   // --- /members (team-scoped) ---
   expressApp.get("/api/dashboard/members", authWithRole, async (req, res) => {
     try {

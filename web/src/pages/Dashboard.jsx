@@ -751,6 +751,55 @@ function TaskCard({ t, members, onClick }) {
   );
 }
 
+// ── メンションウィジェット ──────────────────────────────────────────
+function MentionWidget() {
+  const [mentions, setMentions] = useState(null);
+
+  useEffect(() => {
+    api.myMentions().then(d => setMentions(d.mentions || [])).catch(() => setMentions([]));
+  }, []);
+
+  const fmtAgo = (iso) => {
+    const m = Math.floor((Date.now() - new Date(iso)) / 60000);
+    if (m < 60) return `${m}分前`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}時間前`;
+    return `${Math.floor(h / 24)}日前`;
+  };
+
+  if (!mentions || mentions.length === 0) return null;
+
+  return (
+    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+        <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a' }}>未確認メンション</span>
+        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
+        <span style={{ fontSize:'0.68rem', color:'#94a3b8', marginLeft:2 }}>返信またはリアクションで消えます</span>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:200, overflowY:'auto' }}>
+        {mentions.map(m => {
+          const slackUrl = `https://slack.com/archives/${m.channel_id}/p${m.message_ts.replace('.', '')}`;
+          return (
+            <a key={m.id} href={slackUrl} target="_blank" rel="noreferrer"
+              style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'7px 10px', borderRadius:8, background:'#fef2f2', border:'1px solid #fecaca', textDecoration:'none', transition:'background 0.1s' }}
+              onMouseEnter={e => e.currentTarget.style.background='#fee2e2'}
+              onMouseLeave={e => e.currentTarget.style.background='#fef2f2'}>
+              {m.sender_avatar
+                ? <img src={m.sender_avatar} alt="" style={{ width:24, height:24, borderRadius:'50%', flexShrink:0, marginTop:1 }} />
+                : <div style={{ width:24, height:24, borderRadius:'50%', background:'#fca5a5', flexShrink:0 }} />}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:'0.75rem', fontWeight:600, color:'#374151' }}>{m.sender_name || 'Unknown'}</div>
+                <div style={{ fontSize:'0.8rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.text_preview}</div>
+              </div>
+              <span style={{ fontSize:'0.68rem', color:'#9ca3af', flexShrink:0, marginTop:2 }}>{fmtAgo(m.created_at)}</span>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── 勤怠ウィジェット ───────────────────────────────────────────────
 function AttendanceWidget() {
   const [myAtt, setMyAtt]         = useState(null);
@@ -1042,6 +1091,9 @@ export default function Dashboard() {
 
       {/* 勤怠ウィジェット */}
       <AttendanceWidget />
+
+      {/* 未確認メンション */}
+      <MentionWidget />
 
       {/* ヘッダー + タブ */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>

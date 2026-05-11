@@ -3061,6 +3061,60 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     });
   }
 
+  // ── メンション追跡 ─────────────────────────────────────────────────────────
+  // すべてのメッセージを監視し、@メンションをDBに記録する。
+  // 返信・リアクションで既読扱い、48時間で自動消滅。
+  const MENTION_RE = /<@(U[A-Z0-9]+)>/g;
+  const stripMentions = (t) => (t || '').replace(/<@[A-Z0-9]+>/g, '').replace(/<[^>]+>/g, '').trim();
+
+  app.event('message', async ({ event, client }) => {
+    try {
+      if (event.bot_id || event.subtype === 'bot_message' || event.subtype === 'message_deleted') return;
+      if (!event.text || !event.user) return;
+
+      const teamId = event.team || '';
+      const channelId = event.channel;
+      const msgTs = event.ts;
+      const senderUserId = event.user;
+      const text = event.text;
+
+      // スレッド返信 → 自分がメンションされたスレッドへの返信なら既読
+      if (event.thread_ts && event.thread_ts !== msgTs) {
+        await dbQuery(`
+          UPDATE user_mentions SET dismissed_at=now()
+          WHERE team_id=$1 AND mentioned_user_id=$2 AND channel_id=$3 AND message_ts=$4 AND dismissed_at IS NULL
+        `, [teamId, senderUserId, channelId, event.thread_ts]).catch(() => {});
+      }
+
+      // @メンションを抽出して保存
+      const mentioned = [...new Set([...text.matchAll(MENTION_RE)].map(m => m[1]))];
+      if (!mentioned.length) return;
+
+      const preview = stripMentions(text).slice(0, 100) || '（本文なし）';
+      const { randomUUID } = require('crypto');
+
+      for (const uid of mentioned) {
+        if (uid === senderUserId) continue; // 自己メンションは除外
+        await dbQuery(`
+          INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, created_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+          ON CONFLICT (team_id, mentioned_user_id, channel_id, message_ts) DO NOTHING
+        `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview]).catch(() => {});
+      }
+    } catch (e) { /* silent */ }
+  });
+
+  // リアクションで既読
+  app.event('reaction_added', async ({ event }) => {
+    try {
+      if (event.item?.type !== 'message') return;
+      await dbQuery(`
+        UPDATE user_mentions SET dismissed_at=now()
+        WHERE team_id=$1 AND mentioned_user_id=$2 AND channel_id=$3 AND message_ts=$4 AND dismissed_at IS NULL
+      `, [event.team || '', event.user, event.item.channel, event.item.ts]).catch(() => {});
+    } catch (e) { /* silent */ }
+  });
+
   await app.start(port);
   console.log(`Slack app is running on port ${port}`);
 

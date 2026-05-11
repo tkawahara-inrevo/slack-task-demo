@@ -821,136 +821,90 @@ function MentionWidget() {
   );
 }
 
-// ── 勤怠ウィジェット ───────────────────────────────────────────────
+// ── 勤怠・稼働状況ウィジェット ─────────────────────────────────────
 function AttendanceWidget() {
   const [myAtt, setMyAtt]         = useState(null);
   const [teamStatus, setTeamStatus] = useState(null);
-  const [showDetail, setShowDetail] = useState(null); // null | 'missing_in' | 'missing_out' | 'all'
+  const [expand, setExpand]        = useState(null); // null | 'in' | 'out'
 
   useEffect(() => {
     api.myAttendance().then(setMyAtt).catch(() => {});
     api.teamReportStatus().then(setTeamStatus).catch(() => {});
   }, []);
 
-  const fmtTime = (isoStr) => {
-    if (!isoStr) return null;
-    return new Date(isoStr).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
-  };
+  const myIn  = myAtt?.clockIn?.ok;
+  const myOut = myAtt?.clockOut?.ok;
 
-  const inTime  = myAtt?.clockIn?.ok  ? fmtTime(myAtt.clockIn.stamped_at)  : null;
-  const outTime = myAtt?.clockOut?.ok ? fmtTime(myAtt.clockOut.stamped_at) : null;
+  const inList  = teamStatus?.members.filter(m => m.clockedIn)  || [];
+  const outList = teamStatus?.members.filter(m => !m.clockedIn) || [];
+  const total   = teamStatus?.summary.total || 0;
 
-  const missing = teamStatus ? {
-    in:  teamStatus.members.filter(m => !m.submittedIn),
-    out: teamStatus.members.filter(m => !m.submittedOut),
-  } : null;
-
-  const detailMembers = showDetail === 'missing_in'  ? missing?.in
-                      : showDetail === 'missing_out' ? missing?.out
-                      : teamStatus?.members;
+  const MemberRow = ({ m }) => (
+    <div style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 8px', borderRadius:7, background:'#f8fafc' }}>
+      {m.avatarUrl
+        ? <img src={m.avatarUrl} alt="" style={{ width:20, height:20, borderRadius:'50%', flexShrink:0 }} />
+        : <div style={{ width:20, height:20, borderRadius:'50%', background:'#e2e8f0', flexShrink:0 }} />}
+      <span style={{ flex:1, fontSize:'0.78rem', color:'#374151', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        {m.displayName}
+      </span>
+      {m.taskCount > 0 && (
+        <span style={{ fontSize:'0.68rem', background:'#eff6ff', color:'#3b82f6', borderRadius:10, padding:'1px 6px', flexShrink:0 }}>
+          {m.taskCount}件
+        </span>
+      )}
+    </div>
+  );
 
   return (
-    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '12px 16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+      {/* 自分の打刻 + チームサマリー */}
+      <div style={{ display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+        <span style={{ fontSize:'0.75rem', fontWeight:700, color:'#374151' }}>本日の勤怠</span>
+        <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : '#94a3b8' }}>
+          {myIn ? '🟢 出勤済み' : '⬜ 未出勤'}
+        </span>
+        <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : '#94a3b8' }}>
+          {myOut ? '🟣 退勤済み' : '⬜ 未退勤'}
+        </span>
 
-        {/* 自分の打刻 */}
-        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151' }}>本日の勤怠</span>
-        <StampBadge label="出勤" time={inTime} />
-        <StampBadge label="退勤" time={outTime} />
-
-        <div style={{ width: 1, height: 20, background: '#e2e8f0', flexShrink: 0 }} />
-
-        {/* チーム打刻状況 */}
-        {teamStatus && missing && (
+        {teamStatus && (
           <>
-            <MissingBadge
-              label="出勤未打刻"
-              count={missing.in.length}
-              total={teamStatus.summary.total}
-              color="#ef4444"
-              active={showDetail === 'missing_in'}
-              onClick={() => setShowDetail(v => v === 'missing_in' ? null : 'missing_in')}
-            />
-            <MissingBadge
-              label="退勤未打刻"
-              count={missing.out.length}
-              total={teamStatus.summary.total}
-              color="#f59e0b"
-              active={showDetail === 'missing_out'}
-              onClick={() => setShowDetail(v => v === 'missing_out' ? null : 'missing_out')}
-            />
-            <button onClick={() => setShowDetail(v => v === 'all' ? null : 'all')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.72rem', color: '#94a3b8', padding: 0 }}>
-              全員 {showDetail === 'all' ? '▲' : '▼'}
-            </button>
+            <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+              <button onClick={() => setExpand(v => v === 'in' ? null : 'in')} style={{
+                background: expand === 'in' ? '#dcfce7' : '#f0fdf4',
+                border:'1px solid #bbf7d0', borderRadius:20, padding:'3px 12px',
+                cursor:'pointer', fontSize:'0.75rem', fontWeight:600, color:'#15803d',
+              }}>
+                🟢 出勤 {inList.length}/{total}人 {expand === 'in' ? '▲' : '▼'}
+              </button>
+              <button onClick={() => setExpand(v => v === 'out' ? null : 'out')} style={{
+                background: expand === 'out' ? '#fef2f2' : '#fff',
+                border:`1px solid ${outList.length === 0 ? '#bbf7d0' : '#fecaca'}`,
+                borderRadius:20, padding:'3px 12px',
+                cursor:'pointer', fontSize:'0.75rem', fontWeight:600,
+                color: outList.length === 0 ? '#15803d' : '#dc2626',
+              }}>
+                ⬜ 未出勤 {outList.length}人 {expand === 'out' ? '▲' : '▼'}
+              </button>
+            </div>
           </>
         )}
       </div>
 
-      {/* 詳細一覧 */}
-      {showDetail && teamStatus && detailMembers && (
-        <div style={{ marginTop: 10, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
-          <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginBottom: 8 }}>
-            {showDetail === 'missing_in'  && `出勤未打刻 ${missing.in.length}人`}
-            {showDetail === 'missing_out' && `退勤未打刻 ${missing.out.length}人`}
-            {showDetail === 'all'         && `全員 ${teamStatus.summary.total}人`}
+      {/* 展開リスト */}
+      {expand && teamStatus && (
+        <div style={{ marginTop:10, borderTop:'1px solid #f1f5f9', paddingTop:10 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:4, maxHeight:240, overflowY:'auto' }}>
+            {(expand === 'in' ? inList : outList).map(m => <MemberRow key={m.userId} m={m} />)}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
-            {detailMembers.map(m => (
-              <div key={m.userId} style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px',
-                borderRadius: 7, background: (!m.submittedIn && showDetail === 'all') ? '#fef2f2' : '#f8fafc',
-              }}>
-                {m.avatarUrl
-                  ? <img src={m.avatarUrl} alt="" style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }} />
-                  : <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#e2e8f0', flexShrink: 0 }} />}
-                <span style={{ fontSize: '0.75rem', color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {m.displayName}
-                </span>
-                {showDetail === 'all' && (
-                  <>
-                    <span title="出勤" style={{ fontSize: '0.65rem', color: m.submittedIn ? '#3b82f6' : '#e5e7eb' }}>
-                      {m.submittedIn ? `▶${fmtTime(m.clockInAt) || ''}` : '─'}
-                    </span>
-                    <span title="退勤" style={{ fontSize: '0.65rem', color: m.submittedOut ? '#8b5cf6' : '#e5e7eb' }}>
-                      {m.submittedOut ? `◀${fmtTime(m.clockOutAt) || ''}` : '─'}
-                    </span>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+          {(expand === 'in' ? inList : outList).length === 0 && (
+            <div style={{ color:'#94a3b8', fontSize:'0.8rem', textAlign:'center', padding:8 }}>
+              {expand === 'in' ? 'まだ出勤者なし' : '全員出勤済み'}
+            </div>
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-function StampBadge({ label, time }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{label}</span>
-      {time
-        ? <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a' }}>{time}</span>
-        : <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>未打刻</span>}
-    </div>
-  );
-}
-
-function MissingBadge({ label, count, total, color, active, onClick }) {
-  const allOk = count === 0;
-  return (
-    <button onClick={onClick} style={{
-      background: allOk ? '#f0fdf4' : (active ? color : '#fff'),
-      border: `1px solid ${allOk ? '#bbf7d0' : color}`,
-      borderRadius: 20, padding: '3px 10px', cursor: 'pointer',
-      display: 'flex', alignItems: 'center', gap: 5,
-    }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: allOk ? '#22c55e' : color, flexShrink: 0 }} />
-      <span style={{ fontSize: '0.72rem', fontWeight: 600, color: allOk ? '#16a34a' : (active ? '#fff' : color) }}>
-        {allOk ? `${label} 全員OK` : `${label} ${count}人`}
-      </span>
-    </button>
   );
 }
 

@@ -1857,12 +1857,27 @@ function registerDashboardApi(deps) {
       const todayJst = jstNow.toISOString().slice(0, 10);
       const dayStart = new Date(todayJst + 'T00:00:00+09:00');
 
-      // 対象メンバー取得
-      const membersR = await dbQuery(
-        `SELECT user_id, display_name, avatar_url FROM daily_report_members WHERE team_id=$1 AND is_target=true ORDER BY display_name`,
-        [teamId]
-      );
+      // 対象メンバー取得（avatarはdashboard_user_directoryから）
+      const membersR = await dbQuery(`
+        SELECT m.user_id, m.display_name,
+               d.profile_json->>'image_48' AS avatar_url
+        FROM daily_report_members m
+        LEFT JOIN dashboard_user_directory d
+          ON d.team_id = m.team_id AND d.user_id = m.user_id
+        WHERE m.team_id=$1 AND m.is_target=true
+        ORDER BY m.display_name
+      `, [teamId]);
       const members = membersR.rows;
+
+      // 進行中タスク数（personal）
+      const taskR = await dbQuery(`
+        SELECT assignee_id, COUNT(*)::int AS cnt
+        FROM tasks
+        WHERE team_id=$1 AND status='in_progress'
+        GROUP BY assignee_id
+      `, [teamId]);
+      const taskMap = {};
+      for (const r of taskR.rows) taskMap[r.assignee_id] = r.cnt;
 
       // 今日の打刻状況をDBから取得
       const stampsR = await dbQuery(`
@@ -1884,19 +1899,18 @@ function registerDashboardApi(deps) {
         userId: m.user_id,
         displayName: m.display_name,
         avatarUrl: m.avatar_url,
-        submittedIn:  stampedIn.has(m.user_id),
-        submittedOut: stampedOut.has(m.user_id),
-        clockInAt:  stampTimes[m.user_id]?.[1] || null,
-        clockOutAt: stampTimes[m.user_id]?.[2] || null,
+        clockedIn:  stampedIn.has(m.user_id),
+        clockedOut: stampedOut.has(m.user_id),
+        taskCount:  taskMap[m.user_id] || 0,
       }));
 
       res.json({
         today: todayJst,
         members: status,
         summary: {
-          total: members.length,
-          submittedIn:  status.filter(s => s.submittedIn).length,
-          submittedOut: status.filter(s => s.submittedOut).length,
+          total:      members.length,
+          clockedIn:  status.filter(s => s.clockedIn).length,
+          clockedOut: status.filter(s => s.clockedOut).length,
         },
       });
     } catch (e) {

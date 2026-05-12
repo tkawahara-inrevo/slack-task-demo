@@ -456,7 +456,11 @@ export default function LeadsDashboard() {
                       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
                         <thead>
                           <tr style={{ background:'#f8fafc', position:'sticky', top:0 }}>
-                            {['流入日','会社名','初回ヨミ','現在ヨミ','担当者'].map(h => (
+                            {/* アポ取得済のドリルダウンは現在ヨミ・初回ヨミを非表示（自明のため） */}
+                            {(drill.yomiType === 'apo_got'
+                              ? ['流入日','会社名','現在ヨミ','担当者']
+                              : ['流入日','会社名','流入経路','現在ヨミ','担当者']
+                            ).map(h => (
                               <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem' }}>{h}</th>
                             ))}
                           </tr>
@@ -466,9 +470,9 @@ export default function LeadsDashboard() {
                             <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'#fff':'#fafafa' }}>
                               <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'#6b7280' }}>{r.inflow_date?.slice(0,10)||'—'}</td>
                               <td style={{ padding:'7px 12px', maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontWeight:500 }}>{r.customer||'—'}</td>
-                              <td style={{ padding:'7px 12px', whiteSpace:'nowrap' }}>
-                                <span style={{ fontSize:'0.7rem', background:'#f1f5f9', color:'#64748b', borderRadius:4, padding:'2px 6px' }}>{r.first_yomi||'—'}</span>
-                              </td>
+                              {drill.yomiType !== 'apo_got' && (
+                                <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'#374151', fontSize:'0.78rem' }}>{r.source||'—'}</td>
+                              )}
                               <td style={{ padding:'7px 12px', whiteSpace:'nowrap' }}>
                                 <span style={{ fontSize:'0.7rem', background:'#eff6ff', color:'#3b82f6', borderRadius:4, padding:'2px 6px' }}>{r.yomi}</span>
                               </td>

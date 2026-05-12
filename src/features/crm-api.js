@@ -1712,8 +1712,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
                EXISTS (
                  SELECT 1 FROM kintone_cache k2
                  WHERE k2.data->>'顧客' = kc.data->>'顧客'
-                   AND k2.data->>'初回商談日_コンサルチーム' IS NOT NULL
-                   AND k2.data->>'初回商談日_コンサルチーム' != ''
+                   AND k2.data->>'ヨミ_経過フロー' LIKE '%アポ化済商談前%'
                ) AS has_appo
         FROM kintone_cache kc
         WHERE kc.data->>'顧客' IS NOT NULL AND kc.data->>'ヨミ' IS NOT NULL

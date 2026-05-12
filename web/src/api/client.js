@@ -231,7 +231,7 @@ export const api = {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries({ from, to }).filter(([,v]) => v))).toString();
     return crmFetch(`/channel-performance${qs ? '?' + qs : ''}`);
   },
-  crmChannelTargetUpdate: (body) => crmFetch('/channel-targets', { method: 'PUT', body: JSON.stringify(body) }),
+  crmChannelTargetUpdate: (body) => crmPut('/channel-targets', body),
   crmPipelineSummary: () => crmFetch('/pipeline-summary'),
   crmMonthlySummary: (month, salesUser) => {
     const p = new URLSearchParams();

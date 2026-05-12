@@ -51,8 +51,15 @@ export default function LeadsDashboard() {
   const [listLoading, setListLoading] = useState(false);
   const [drill, setDrill]       = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
-  const [target, setTarget]     = useState(() => Number(localStorage.getItem('lead_monthly_target') || 0));
+  const [targets, setTargets]   = useState(() => { try { return JSON.parse(localStorage.getItem('lead_month_targets') || '{}'); } catch { return {}; } });
   const [editTarget, setEditTarget] = useState(false);
+  const monthKey = from ? from.slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const target = targets[monthKey] || 0;
+  const saveTarget = (v) => {
+    const next = { ...targets, [monthKey]: Number(v) || 0 };
+    setTargets(next);
+    localStorage.setItem('lead_month_targets', JSON.stringify(next));
+  };
 
   const load = useCallback(async (f, t) => {
     setLoading(true);
@@ -192,11 +199,12 @@ export default function LeadsDashboard() {
           {/* 目標設定 */}
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, flexWrap:'wrap' }}>
             <span style={{ fontSize:'0.8rem', fontWeight:700, color:'#374151' }}>月次目標</span>
+            <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>{monthKey}</span>
             {editTarget ? (
               <>
                 <input type="number" defaultValue={target} id="target-input"
                   style={{ border:'1px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:'0.85rem', width:100 }} />
-                <button onClick={() => { const v = Number(document.getElementById('target-input').value)||0; setTarget(v); localStorage.setItem('lead_monthly_target', v); setEditTarget(false); }}
+                <button onClick={() => { saveTarget(document.getElementById('target-input').value); setEditTarget(false); }}
                   style={{ background:'#3b82f6', color:'#fff', border:'none', borderRadius:6, padding:'4px 12px', fontSize:'0.8rem', cursor:'pointer' }}>保存</button>
                 <button onClick={() => setEditTarget(false)} style={{ background:'none', border:'1px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:'0.8rem', cursor:'pointer', color:'#6b7280' }}>キャンセル</button>
               </>
@@ -243,6 +251,19 @@ export default function LeadsDashboard() {
                   )}
                 </div>
 
+                {/* アポ化カード（MK最重要KPI）*/}
+                <div style={{ background:'#f0fdf4', border:'2px solid #86efac', borderRadius:10, padding:'14px 18px', minWidth:160, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                  onClick={() => openYomiDrill('apo_got', 'アポ取得済')}
+                  onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                  onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                  <div style={{ fontSize:'0.72rem', color:'#15803d', fontWeight:700, marginBottom:4 }}>アポ化済（初回商談日あり）</div>
+                  <div style={{ fontSize:'2rem', fontWeight:800, color:'#15803d' }}>{(data.appoTotal||0).toLocaleString()}</div>
+                  <div style={{ fontSize:'0.75rem', color:'#16a34a', marginTop:2 }}>
+                    {data.periodTotal > 0 ? `アポ化率 ${Math.round((data.appoTotal||0)/data.periodTotal*100)}%` : '—'}
+                  </div>
+                  {proj && <div style={{ fontSize:'0.7rem', color:'#4ade80', marginTop:1 }}>月末予測 {Math.round((data.appoTotal||0)/proj.ratio)}件</div>}
+                </div>
+
                 {/* ファネルカード */}
                 {data.funnel.map((f) => {
                   const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
@@ -281,12 +302,14 @@ export default function LeadsDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="month" tick={TICK} />
                 <YAxis tick={TICK} allowDecimals={false} />
-                <Tooltip formatter={v => [`${v}件`]} />
+                <Tooltip formatter={(v, n) => [`${v}件`, n === 'cnt' ? '全リード' : 'アポ化済']} />
                 {data.stats?.avg12 > 0 && (
                   <ReferenceLine y={data.stats.avg12} stroke="#f59e0b" strokeDasharray="4 3"
                     label={{ value: `平均 ${data.stats.avg12}`, fill: '#f59e0b', fontSize: 11, position: 'right' }} />
                 )}
-                <Line type="monotone" dataKey="cnt" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="リード数" />
+                <Line type="monotone" dataKey="cnt"  stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="全リード" />
+                <Line type="monotone" dataKey="appo" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="アポ化済" strokeDasharray="5 3" />
+                <Legend wrapperStyle={{ fontSize:'0.72rem' }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

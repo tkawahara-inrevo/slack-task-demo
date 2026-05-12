@@ -1699,19 +1699,26 @@ function registerCrmApi({ expressApp, authWithRole }) {
         )
       `;
 
-      // リード集計は顧客（会社名）ベースでDISTINCT（同一顧客の複数案件を1件とカウント）
+      // リード集計は顧客（会社名）ベースでDISTINCT
+      // has_appo: 初回商談日が入っている = アポ化できている（MK目線の最重要KPI）
       const customerBase = `
-        SELECT DISTINCT ON (data->>'顧客') data->>'顧客' AS customer,
-               COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
-               COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
-               data->>'ヨミ' AS yomi,
-               data->>'ヨミ_経過フロー' AS yomi_flow,
-               data->>'受注日' AS order_date,
-               COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep
-        FROM kintone_cache
-        WHERE data->>'顧客' IS NOT NULL AND data->>'ヨミ' IS NOT NULL
-          AND data->>'顧客' != ''
-        ORDER BY data->>'顧客', COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') ASC
+        SELECT DISTINCT ON (kc.data->>'顧客') kc.data->>'顧客' AS customer,
+               COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム') AS inflow_date,
+               COALESCE(NULLIF(kc.data->>'流入経路',''), '不明') AS source,
+               kc.data->>'ヨミ' AS yomi,
+               kc.data->>'ヨミ_経過フロー' AS yomi_flow,
+               kc.data->>'受注日' AS order_date,
+               COALESCE(NULLIF(kc.data->>'商談獲得者',''), kc.data->>'担当営業_0') AS rep,
+               EXISTS (
+                 SELECT 1 FROM kintone_cache k2
+                 WHERE k2.data->>'顧客' = kc.data->>'顧客'
+                   AND k2.data->>'初回商談日_コンサルチーム' IS NOT NULL
+                   AND k2.data->>'初回商談日_コンサルチーム' != ''
+               ) AS has_appo
+        FROM kintone_cache kc
+        WHERE kc.data->>'顧客' IS NOT NULL AND kc.data->>'ヨミ' IS NOT NULL
+          AND kc.data->>'顧客' != ''
+        ORDER BY kc.data->>'顧客', COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム') ASC
       `;
       const customerDateFilter = `
         AND (
@@ -1739,10 +1746,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
           GROUP BY source ORDER BY cnt DESC
         `, params),
 
-        // 月次推移（顧客ベース・直近12ヶ月）
+        // 月次推移（顧客ベース・直近12ヶ月・アポ化数を含む）
         dbQuery(`
           WITH base AS (${customerBase})
-          SELECT TO_CHAR(inflow_date::date, 'YYYY-MM') AS month, COUNT(*)::int AS cnt
+          SELECT TO_CHAR(inflow_date::date, 'YYYY-MM') AS month,
+                 COUNT(*)::int AS cnt,
+                 COUNT(*) FILTER (WHERE has_appo)::int AS appo
           FROM base WHERE inflow_date IS NOT NULL AND inflow_date != ''
             AND inflow_date::date >= (CURRENT_DATE - INTERVAL '12 months')
           GROUP BY month ORDER BY month
@@ -1757,10 +1766,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
           LIMIT $3 OFFSET $4
         `, [...params, limit, offset]),
 
-        // 総件数（顧客ベース）
+        // 総件数 + アポ化数（顧客ベース）
         dbQuery(`
           WITH base AS (${customerBase})
-          SELECT COUNT(*)::int AS total FROM base WHERE 1=1 ${customerDateFilter}
+          SELECT COUNT(*)::int AS total,
+                 COUNT(*) FILTER (WHERE has_appo)::int AS appo
+          FROM base WHERE 1=1 ${customerDateFilter}
         `, params),
 
         // 前期間件数（顧客ベース）
@@ -1820,6 +1831,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       ];
 
       const currentTotal = totalR.rows[0]?.total || 0;
+      const appoTotal = totalR.rows[0]?.appo || 0;
       const prevTotal    = prevTotalR.rows[0]?.total || 0;
       const avg12 = trend12R.rows.length > 0
         ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
@@ -1900,6 +1912,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         period: { from: rangeFrom, to: rangeTo },
         funnel,
         periodTotal,
+        appoTotal,
         stats: {
           current:  currentTotal,
           prev:     prevTotal,

@@ -81,28 +81,33 @@ const YOMI_COLOR = {
   '受注':      '#10b981',
 };
 
-// チャンネル管理テーブルの行定義（スプレッドシートと同順）
+// チャンネル管理テーブルの行定義（セクション区切り付き）
 const CHANNEL_ROWS = [
-  { key: '_expected_appo_cpa', label: '想定アポCPA',        editable: false },
-  { key: 'lead_unit_price',    label: 'リード獲得単価',      editable: true,  type: 'money' },
-  { key: '_cost_per_month',    label: 'コスト/月',           editable: false },
-  { key: 'vendor_note',        label: 'ベンダーより',         editable: true,  type: 'text'  },
-  { key: 'expected_leads',     label: '想定獲得リード',       editable: true,  type: 'num'   },
-  { key: 'actual_leads',       label: '獲得リード',           editable: false, isActual: true },
-  { key: 'expected_appo_count',label: '想定獲得アポ数',      editable: true,  type: 'num'   },
-  { key: 'actual_appo',        label: '初回商談数',           editable: false, isActual: true },
-  { key: '_leads_progress',    label: '進捗率',               editable: false },
-  { key: 'expected_appo_rate', label: '想定アポ割合',         editable: true,  type: 'pct'   },
-  { key: '_actual_appo_rate',  label: 'アポ割合',             editable: false },
-  { key: 'expected_order_rate',label: '想定受注率',           editable: true,  type: 'pct'   },
-  { key: '_expected_orders',   label: '想定受注数',           editable: false },
-  { key: 'expected_unit_price',label: '想定受注単価',         editable: true,  type: 'money', yellow: true },
-  { key: '_expected_revenue',  label: '想定売上',             editable: false, yellow: true  },
-  { key: '_expected_roi',      label: '想定ROI',              editable: false, yellow: true  },
-  { key: 'actual_orders',      label: '受注数',               editable: false, isActual: true },
-  { key: 'actual_revenue',     label: '受注金額',             editable: false, isActual: true },
-  { key: '_roi',               label: 'ROI',                  editable: false },
-  { key: '_appo_diff',         label: '想定アポ－初回商談',   editable: false },
+  { key: '_sec_cost',          label: 'コスト',              isSection: true  },
+  { key: '_expected_appo_cpa', label: '想定アポCPA',          editable: false  },
+  { key: 'lead_unit_price',    label: 'リード獲得単価',        editable: true,  type: 'money' },
+  { key: '_cost_per_month',    label: 'コスト/月',             editable: false  },
+  { key: 'vendor_note',        label: 'ベンダーより',           editable: true,  type: 'text'  },
+  { key: '_sec_lead',          label: 'リード',               isSection: true  },
+  { key: 'expected_leads',     label: '想定獲得リード',         editable: true,  type: 'num'   },
+  { key: 'actual_leads',       label: '獲得リード',             editable: false, isActual: true },
+  { key: '_leads_progress',    label: '進捗率',                 editable: false  },
+  { key: '_sec_appo',          label: 'アポ',                 isSection: true  },
+  { key: 'expected_appo_count',label: '想定獲得アポ数',        editable: true,  type: 'num'   },
+  { key: 'actual_appo',        label: '初回商談数',             editable: false, isActual: true },
+  { key: 'expected_appo_rate', label: '想定アポ割合',           editable: true,  type: 'pct'   },
+  { key: '_actual_appo_rate',  label: 'アポ割合',               editable: false  },
+  { key: '_sec_order',         label: '受注',                 isSection: true  },
+  { key: 'expected_order_rate',label: '想定受注率',             editable: true,  type: 'pct'   },
+  { key: '_expected_orders',   label: '想定受注数',             editable: false  },
+  { key: 'expected_unit_price',label: '想定受注単価',           editable: true,  type: 'money' },
+  { key: 'actual_orders',      label: '受注数',                 editable: false, isActual: true },
+  { key: 'actual_revenue',     label: '受注金額',               editable: false, isActual: true },
+  { key: '_sec_result',        label: '成果',                 isSection: true  },
+  { key: '_expected_revenue',  label: '想定売上',               editable: false, yellow: true  },
+  { key: '_expected_roi',      label: '想定ROI',               editable: false, yellow: true  },
+  { key: '_roi',               label: 'ROI',                   editable: false  },
+  { key: '_appo_diff',         label: '想定アポ－初回商談',     editable: false  },
 ];
 
 const pad = n => String(n).padStart(2, '0');
@@ -843,82 +848,116 @@ export default function LeadsDashboard() {
               }
             };
 
-            const TH_STYLE = { padding:'6px 12px', textAlign:'left', fontWeight:700, color:'#374151', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', background:'#f8fafc', fontSize:'0.78rem', position:'sticky', top:0, zIndex:2 };
-            const ROW_LABEL_STYLE = (row) => ({
-              padding:'5px 12px', whiteSpace:'nowrap', fontWeight:600, fontSize:'0.75rem',
-              color: row.editable ? '#1d4ed8' : row.isActual ? '#0f172a' : '#64748b',
-              background: row.yellow ? '#fef9c3' : row.isActual ? '#f0fdf4' : '#f8fafc',
-              position:'sticky', left:0, zIndex:1, borderRight:'1px solid #e5e7eb',
-            });
-            const CELL_BG = (row) => row.yellow ? '#fffbeb' : row.isActual ? '#f0fdf4' : '#fff';
+            // 行タイプ別スタイル定義
+            const rowBg = (row) => {
+              if (row.yellow)    return '#fffbeb';
+              if (row.isActual)  return '#f0fdf4';
+              if (row.editable)  return '#f8faff';
+              return '#fafafa';
+            };
+            const labelColor = (row) => {
+              if (row.yellow)    return '#92400e';
+              if (row.isActual)  return '#064e3b';
+              if (row.editable)  return '#1d4ed8';
+              return '#6b7280';
+            };
 
             return (
               <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
-                <div style={{ padding:'12px 16px', borderBottom:'1px solid #f3f4f6', display:'flex', alignItems:'center', gap:10 }}>
+                {/* ヘッダー */}
+                <div style={{ padding:'12px 16px', borderBottom:'1px solid #e5e7eb', display:'flex', alignItems:'center', gap:10 }}>
                   <span style={{ fontWeight:700, fontSize:'0.85rem' }}>流入経路別パフォーマンス</span>
-                  <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>青字行は編集可 / フォーカスを外すと自動保存</span>
-                  <button onClick={() => loadChannels(from, to)} style={{ marginLeft:'auto', background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>
+                  <div style={{ display:'flex', gap:10, fontSize:'0.7rem', color:'#9ca3af' }}>
+                    <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:8, height:8, borderRadius:2, background:'#dbeafe', display:'inline-block' }}/>入力</span>
+                    <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:8, height:8, borderRadius:2, background:'#dcfce7', display:'inline-block' }}/>実績</span>
+                    <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:8, height:8, borderRadius:2, background:'#fef9c3', display:'inline-block' }}/>成果</span>
+                  </div>
+                  <button onClick={() => loadChannels(from, to)} style={{ marginLeft:'auto', background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.72rem', cursor:'pointer', color:'#6b7280' }}>
                     再読み込み
                   </button>
                 </div>
-                <div style={{ overflowX:'auto', maxHeight:'75vh', overflowY:'auto' }}>
-                  <table style={{ borderCollapse:'collapse', fontSize:'0.78rem', minWidth: `${140 + channels.length * 130}px` }}>
+
+                <div style={{ overflowX:'auto', overflowY:'auto', maxHeight:'80vh' }}>
+                  <table style={{ borderCollapse:'collapse', fontSize:'0.78rem', minWidth: `${170 + channels.length * 120}px` }}>
                     <thead>
-                      <tr>
-                        <th style={{ ...TH_STYLE, minWidth:130, borderRight:'1px solid #e5e7eb' }}>項目</th>
-                        {channels.map(ch => (
-                          <th key={ch.source} style={{ ...TH_STYLE, textAlign:'center', minWidth:120 }}>
-                            <div style={{ maxWidth:110, overflow:'hidden', textOverflow:'ellipsis', margin:'0 auto' }} title={ch.source}>
-                              {ch.source}
-                            </div>
-                            {(chSaving[ch.source]) && <div style={{ fontSize:'0.65rem', color:'#9ca3af' }}>保存中...</div>}
-                            {(chEdits[ch.source] && Object.keys(chEdits[ch.source]).length > 0 && !chSaving[ch.source]) && (
-                              <div style={{ fontSize:'0.65rem', color:'#3b82f6' }}>未保存</div>
-                            )}
-                          </th>
-                        ))}
+                      <tr style={{ background:'#f1f5f9' }}>
+                        <th style={{ padding:'8px 14px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap', borderBottom:'2px solid #e2e8f0', borderRight:'2px solid #e2e8f0', position:'sticky', left:0, top:0, zIndex:3, background:'#f1f5f9', minWidth:165 }}>
+                          流入経路
+                        </th>
+                        {channels.map(ch => {
+                          const dirty  = chEdits[ch.source] && Object.keys(chEdits[ch.source]).length > 0;
+                          const saving = chSaving[ch.source];
+                          return (
+                            <th key={ch.source} style={{ padding:'6px 10px', textAlign:'center', fontWeight:600, color:'#374151', fontSize:'0.75rem', whiteSpace:'nowrap', borderBottom:'2px solid #e2e8f0', borderRight:'1px solid #e5e7eb', position:'sticky', top:0, zIndex:2, background:'#f1f5f9', minWidth:115, maxWidth:140 }}>
+                              <div style={{ overflow:'hidden', textOverflow:'ellipsis', maxWidth:130, margin:'0 auto', lineHeight:1.3 }} title={ch.source}>
+                                {ch.source}
+                              </div>
+                              {saving && <div style={{ fontSize:'0.6rem', color:'#9ca3af', fontWeight:400, marginTop:2 }}>保存中...</div>}
+                              {dirty && !saving && <div style={{ fontSize:'0.6rem', color:'#3b82f6', fontWeight:400, marginTop:2 }}>● 未保存</div>}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
-                      {CHANNEL_ROWS.map(row => (
-                        <tr key={row.key} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                          <td style={ROW_LABEL_STYLE(row)}>
-                            {row.label}{row.editable ? ' ✎' : ''}
-                          </td>
-                          {channels.map(ch => {
-                            const cv = calc(ch);
-                            const cellBg = CELL_BG(row);
-                            if (row.editable) {
-                              const e = chEdits[ch.source] || {};
-                              const currentVal = e[row.key] !== undefined ? e[row.key] : (ch[row.key] || '');
-                              const isDirty = e[row.key] !== undefined;
+                      {CHANNEL_ROWS.map((row, ri) => {
+                        // セクションヘッダー行
+                        if (row.isSection) {
+                          return (
+                            <tr key={row.key}>
+                              <td colSpan={channels.length + 1} style={{ padding:'5px 14px 4px', background:'#334155', color:'#94a3b8', fontSize:'0.62rem', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', borderTop: ri > 0 ? '1px solid #1e293b' : 'none' }}>
+                                {row.label}
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        const bg = rowBg(row);
+                        const lc = labelColor(row);
+                        return (
+                          <tr key={row.key} style={{ borderBottom:'1px solid #e5e7eb' }}>
+                            {/* 行ラベル（sticky） */}
+                            <td style={{ padding:'6px 14px', whiteSpace:'nowrap', fontWeight: row.isActual ? 700 : 500, fontSize:'0.75rem', color: lc, background: bg, position:'sticky', left:0, zIndex:1, borderRight:'2px solid #e2e8f0', borderLeft: row.editable ? '3px solid #93c5fd' : row.isActual ? '3px solid #6ee7b7' : row.yellow ? '3px solid #fcd34d' : '3px solid transparent' }}>
+                              {row.label}
+                            </td>
+                            {/* データセル */}
+                            {channels.map(ch => {
+                              const cv = calc(ch);
+                              if (row.editable) {
+                                const e = chEdits[ch.source] || {};
+                                const currentVal = e[row.key] !== undefined ? e[row.key] : (ch[row.key] || '');
+                                const isDirty = e[row.key] !== undefined;
+                                return (
+                                  <td key={ch.source} style={{ padding:'4px 8px', textAlign:'right', background: isDirty ? '#eff6ff' : bg, borderRight:'1px solid #e5e7eb' }}>
+                                    <input
+                                      type={row.type === 'text' ? 'text' : 'number'}
+                                      value={currentVal}
+                                      onChange={ev => setChEdit(ch.source, row.key, ev.target.value)}
+                                      onBlur={() => saveChannelTarget(ch.source)}
+                                      placeholder="—"
+                                      style={{
+                                        width: row.type === 'text' ? 90 : row.type === 'money' ? 84 : 56,
+                                        border: `1px solid ${isDirty ? '#93c5fd' : '#e2e8f0'}`,
+                                        borderRadius:5, padding:'3px 6px', fontSize:'0.75rem',
+                                        textAlign: row.type === 'text' ? 'left' : 'right',
+                                        outline:'none', background: isDirty ? '#fff' : '#fff',
+                                        color:'#1e293b',
+                                      }}
+                                    />
+                                  </td>
+                                );
+                              }
+                              const val = dispCell(row, cv, ch);
+                              const isZero = val === '—' || val === '¥0' || val === '0';
                               return (
-                                <td key={ch.source} style={{ padding:'3px 6px', textAlign:'right', background: isDirty ? '#eff6ff' : cellBg }}>
-                                  <input
-                                    type={row.type === 'text' ? 'text' : 'number'}
-                                    value={currentVal}
-                                    onChange={ev => setChEdit(ch.source, row.key, ev.target.value)}
-                                    onBlur={() => saveChannelTarget(ch.source)}
-                                    placeholder="—"
-                                    style={{
-                                      width: row.type === 'text' ? 100 : row.type === 'money' ? 88 : 64,
-                                      border: `1px solid ${isDirty ? '#3b82f6' : '#e5e7eb'}`,
-                                      borderRadius:4, padding:'3px 5px', fontSize:'0.75rem',
-                                      textAlign: row.type === 'text' ? 'left' : 'right',
-                                      outline:'none', background:'transparent',
-                                    }}
-                                  />
+                                <td key={ch.source} style={{ padding:'6px 12px', textAlign:'right', whiteSpace:'nowrap', background: bg, borderRight:'1px solid #e5e7eb', color: isZero ? '#d1d5db' : row.isActual ? '#064e3b' : row.yellow ? '#92400e' : '#374151', fontWeight: row.isActual ? 600 : 400, fontSize:'0.78rem' }}>
+                                  {val}
                                 </td>
                               );
-                            }
-                            return (
-                              <td key={ch.source} style={{ padding:'5px 12px', textAlign:'right', whiteSpace:'nowrap', background: cellBg }}>
-                                {dispCell(row, cv, ch)}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
+                            })}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

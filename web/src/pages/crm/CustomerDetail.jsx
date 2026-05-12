@@ -374,27 +374,43 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
     </Field>
   );
 
+  // ヨミ別の左ボーダーカラー
+  const yomiBorderColor = {
+    'アポ化前':'#d1d5db','アポ化済商談前':'#94a3b8',
+    'E 5％':'#bfdbfe','D 15％':'#93c5fd',
+    'C 30％':'#60a5fa','B 50％':'#3b82f6',
+    'A 70％':'#1d4ed8','S 90％':'#1e3a8a',
+    '受注':'#10b981','失注':'#ef4444',
+  }[deal.yomi] || '#e5e7eb';
+
+  const InfoChip = ({ label, value, color = '#f1f5f9', textColor = '#334155' }) => value ? (
+    <div style={{ display:'flex', flexDirection:'column', gap:2, padding:'8px 12px', background:color, borderRadius:8, minWidth:0 }}>
+      <span style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>{label}</span>
+      <span style={{ fontSize:'0.85rem', fontWeight:700, color:textColor, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{value}</span>
+    </div>
+  ) : null;
+
   const card = (
-    <div style={{ border:'1px solid #e5e7eb', borderRadius:12, background:'#fff', marginBottom:12, overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
+    <div style={{ border:'1px solid #e2e8f0', borderLeft:`4px solid ${yomiBorderColor}`, borderRadius:12, background:'#fff', marginBottom:14, overflow:'hidden', boxShadow:'0 2px 6px rgba(0,0,0,0.06)' }}>
       {/* カードヘッダー */}
-      <div style={{ padding:'14px 18px' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', flex:1 }}>
-            <span style={{ fontWeight:700, fontSize:'0.95rem', color:'#111827' }}>{deal.name}</span>
+      <div style={{ padding:'14px 18px 0' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, marginBottom:10 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', flex:1 }}>
+            <span style={{ fontWeight:800, fontSize:'0.98rem', color:'#0f172a' }}>{deal.name}</span>
             <YomiBadge yomi={deal.yomi} />
             {rpoId && (
               <Link to={`/rpo/${rpoId}`} onClick={e=>e.stopPropagation()}
-                style={{ fontSize:'0.75rem', padding:'2px 8px', borderRadius:4, background:'#ede9fe', color:'#6d28d9', textDecoration:'none', fontWeight:600 }}>
+                style={{ fontSize:'0.72rem', padding:'2px 8px', borderRadius:4, background:'#ede9fe', color:'#6d28d9', textDecoration:'none', fontWeight:600 }}>
                 → 案件管理
               </Link>
             )}
           </div>
           <div style={{ display:'flex', gap:6, flexShrink:0 }}>
-            <button style={{ padding:'5px 14px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.82rem', fontWeight:600, cursor:'pointer' }}
+            <button style={{ padding:'5px 14px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
               onClick={() => { setForm({...deal,...deal.data}); setSavedAt(null); setEditing(v=>!v); }}>
               {editing ? 'キャンセル' : '編集'}
             </button>
-            <button style={{ padding:'5px 10px', border:'1.5px solid #fca5a5', borderRadius:8, background:'#fff', color:'#ef4444', fontSize:'0.82rem', fontWeight:600, cursor:'pointer' }}
+            <button style={{ padding:'5px 10px', border:'1.5px solid #fca5a5', borderRadius:8, background:'#fff', color:'#ef4444', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
               onClick={() => { if(window.confirm('この商談を削除しますか？')) onDelete(deal.id); }}>
               削除
             </button>
@@ -402,26 +418,39 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
         </div>
 
         {!editing && (
-          <div style={{ marginTop:12 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 24px', fontSize:'0.83rem' }}>
-              {[
-                ['契約形態', deal.contract_type],
-                ['支払方式', deal.payment_type],
-                ['担当営業', deal.sales_user_id],
-                ['NA担当者', deal.na_user_id],
-                ['初期費用', fmt(deal.initial_fee)],
-                ['月額費用', fmt(deal.monthly_fee)],
-                ['契約月数', deal.contract_months ? `${deal.contract_months}ヶ月` : null],
-                ['採用目標', deal.hiring_target ? `${deal.hiring_target}人` : null],
-              ].filter(([,v])=>v).map(([k,v])=>(
-                <div key={k} style={{ display:'flex', gap:8, alignItems:'baseline' }}>
-                  <span style={{ color:'#9ca3af', fontSize:'0.78rem', flexShrink:0 }}>{k}</span>
-                  <span style={{ color:'#374151', fontWeight:500 }}>{v}</span>
-                </div>
-              ))}
+          <div style={{ paddingBottom:14 }}>
+            {/* 費用セクション */}
+            {(deal.initial_fee || deal.monthly_fee || deal.unit_price) && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(120px,1fr))', gap:8, marginBottom:10 }}>
+                <InfoChip label="初期費用" value={fmt(deal.initial_fee)} color="#eff6ff" textColor="#1d4ed8" />
+                <InfoChip label="月額費用" value={fmt(deal.monthly_fee)} color="#f0fdf4" textColor="#15803d" />
+                <InfoChip label="単価" value={fmt(deal.unit_price)} color="#f5f3ff" textColor="#6d28d9" />
+                <InfoChip label="契約月数" value={deal.contract_months ? `${deal.contract_months}ヶ月` : null} color="#f8fafc" />
+              </div>
+            )}
+            {/* 契約・担当セクション */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px,1fr))', gap:6, marginBottom:10 }}>
+              <InfoChip label="契約形態" value={deal.contract_type} color="#f8fafc" />
+              <InfoChip label="支払方式" value={deal.payment_type} color="#f8fafc" />
+              <InfoChip label="担当営業" value={deal.sales_user_id} color="#fef9c3" textColor="#92400e" />
+              <InfoChip label="NA担当者" value={deal.na_user_id} color="#fef9c3" textColor="#92400e" />
+              <InfoChip label="採用目標" value={deal.hiring_target ? `${deal.hiring_target}人` : null} color="#f0fdf4" textColor="#15803d" />
+              <InfoChip label="採用単価" value={deal.guarantee_salary ? `¥${Number(deal.guarantee_salary).toLocaleString()}` : null} color="#f0fdf4" textColor="#15803d" />
+              <InfoChip label="保証人数" value={deal.guarantee_count ? `${deal.guarantee_count}人` : null} color="#f0fdf4" />
+              <InfoChip label="料率" value={deal.rate ? `${deal.rate}%` : null} color="#faf5ff" textColor="#6d28d9" />
             </div>
+            {/* 日程セクション */}
+            {(deal.first_meeting_date || deal.order_date || deal.next_action_date) && (
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
+                {deal.first_meeting_date && <span style={{ fontSize:'0.75rem', background:'#f1f5f9', color:'#475569', padding:'3px 10px', borderRadius:99 }}>初回商談: {deal.first_meeting_date}</span>}
+                {deal.order_date && <span style={{ fontSize:'0.75rem', background:'#f0fdf4', color:'#15803d', padding:'3px 10px', borderRadius:99, fontWeight:600 }}>受注日: {deal.order_date}</span>}
+                {deal.next_action_date && <span style={{ fontSize:'0.75rem', background:'#fffbeb', color:'#b45309', padding:'3px 10px', borderRadius:99 }}>次アクション: {deal.next_action_date}</span>}
+                {deal.next_action_content && <span style={{ fontSize:'0.75rem', color:'#64748b' }}>{deal.next_action_content}</span>}
+              </div>
+            )}
+            {/* メモ折り畳み */}
             {deal.memo && (
-              <div style={{ marginTop:10 }}>
+              <div>
                 <button onClick={() => setMemoOpen(v => !v)}
                   style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, color:'#6366f1', padding:0, display:'flex', alignItems:'center', gap:3 }}>
                   {memoOpen ? '▼' : '▶'} メモ
@@ -643,18 +672,13 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                 </Field>
               </div>
 
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-                <Field label="流入日">
-                  <InputF type="date" value={form.inflowDate||form.inflow_date||''} onChange={e=>setAuto('inflowDate',e.target.value)} />
-                </Field>
-                <Field label="流入経路">
-                  {fieldOptions.inflow_source?.length > 0
-                    ? <SelectF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} options={fieldOptions.inflow_source} />
-                    : <InputF value={form.inflowSource||form.inflow_source||''} onChange={e=>setAuto('inflowSource',e.target.value)} placeholder="例: 問い合わせ" />}
-                </Field>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                 <Field label="初回商談日">
                   <InputF type="date" value={form.firstMeetingDate||form.first_meeting_date||''} onChange={e=>setAuto('firstMeetingDate',e.target.value)} />
                 </Field>
+              </div>
+              <div style={{ padding:'8px 12px', background:'#f1f5f9', borderRadius:8, fontSize:'0.75rem', color:'#64748b' }}>
+                ※ 流入日・流入経路は顧客情報側で管理します
               </div>
             </div>
           </div>

@@ -1699,86 +1699,104 @@ function registerCrmApi({ expressApp, authWithRole }) {
         )
       `;
 
+      // リード集計は顧客（会社名）ベースでDISTINCT（同一顧客の複数案件を1件とカウント）
+      const customerBase = `
+        SELECT DISTINCT ON (data->>'顧客') data->>'顧客' AS customer,
+               COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
+               COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
+               data->>'ヨミ' AS yomi,
+               data->>'ヨミ_経過フロー' AS yomi_flow,
+               data->>'受注日' AS order_date,
+               COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep
+        FROM kintone_cache
+        WHERE data->>'顧客' IS NOT NULL AND data->>'ヨミ' IS NOT NULL
+          AND data->>'顧客' != ''
+        ORDER BY data->>'顧客', COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') ASC
+      `;
+      const customerDateFilter = `
+        AND (
+          (inflow_date IS NOT NULL AND inflow_date != '' AND inflow_date::date BETWEEN $1::date AND $2::date)
+        )
+      `;
+
       const [funnelR, sourceR, trendAllR, recentR, totalR, prevTotalR, trend12R, appoSourceR, orderSourceR] = await Promise.all([
-        // ファネル（期間フィルター込み）
+        // ファネル（顧客ベース・期間フィルター）
         dbQuery(`
-          SELECT COALESCE(NULLIF(data->>'ヨミ',''), '不明') AS yomi, COUNT(*)::int AS cnt
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
+          WITH base AS (${customerBase})
+          SELECT COALESCE(NULLIF(yomi,''), '不明') AS yomi, COUNT(*)::int AS cnt
+          FROM base WHERE 1=1 ${customerDateFilter}
           GROUP BY yomi ORDER BY cnt DESC
         `, params),
 
-        // 流入経路別（全件・失注数含む・文字化け除外）
+        // 流入経路別（顧客ベース・失注数含む・文字化け除外）
         dbQuery(`
-          SELECT
-            COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
-            COUNT(*)::int AS cnt,
-            COUNT(*) FILTER (WHERE data->>'ヨミ' LIKE '失注%' OR data->>'ヨミ' = '失注')::int AS lost_cnt
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
-            AND (data->>'流入経路' IS NULL OR data->>'流入経路' = ''
-                 OR data->>'流入経路' NOT LIKE '%' || chr(65533) || '%')
+          WITH base AS (${customerBase})
+          SELECT source,
+                 COUNT(*)::int AS cnt,
+                 COUNT(*) FILTER (WHERE yomi LIKE '失注%' OR yomi = '失注')::int AS lost_cnt
+          FROM base WHERE 1=1 ${customerDateFilter}
+            AND source NOT LIKE '%' || chr(65533) || '%'
           GROUP BY source ORDER BY cnt DESC
         `, params),
 
-        // 月次推移（常に直近12ヶ月 + 選択期間）
+        // 月次推移（顧客ベース・直近12ヶ月）
         dbQuery(`
-          SELECT TO_CHAR(COALESCE(
-            NULLIF(data->>'流入日',''),
-            NULLIF(data->>'商談獲得日_マーケチーム','')
-          )::date, 'YYYY-MM') AS month,
-          COUNT(*)::int AS cnt
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL
-            AND COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム','')) IS NOT NULL
-            AND COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム',''))::date >= (CURRENT_DATE - INTERVAL '12 months')
+          WITH base AS (${customerBase})
+          SELECT TO_CHAR(inflow_date::date, 'YYYY-MM') AS month, COUNT(*)::int AS cnt
+          FROM base WHERE inflow_date IS NOT NULL AND inflow_date != ''
+            AND inflow_date::date >= (CURRENT_DATE - INTERVAL '12 months')
           GROUP BY month ORDER BY month
         `, []),
 
-        // リード一覧（ページング）
+        // リード一覧（顧客ベース・ページング）
         dbQuery(`
-          SELECT
-            data->>'顧客' AS customer,
-            data->>'ヨミ' AS yomi,
-            data->>'流入経路' AS source,
-            COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep,
-            COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
-            data->>'案件名' AS deal_name
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
-          ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
+          WITH base AS (${customerBase})
+          SELECT customer, yomi, source, rep, inflow_date
+          FROM base WHERE 1=1 ${customerDateFilter}
+          ORDER BY inflow_date DESC NULLS LAST
           LIMIT $3 OFFSET $4
         `, [...params, limit, offset]),
 
-        // 総件数
-        dbQuery(`SELECT COUNT(*)::int AS total FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}`, params),
-
-        // 前期間件数（先月比用）
-        dbQuery(`SELECT COUNT(*)::int AS total FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${prevDateFilter}`, prevParams),
-
-        // 12ヶ月平均用
+        // 総件数（顧客ベース）
         dbQuery(`
-          SELECT TO_CHAR(COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム',''))::date, 'YYYY-MM') AS month,
-                 COUNT(*)::int AS cnt
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL
-            AND COALESCE(NULLIF(data->>'流入日',''), NULLIF(data->>'商談獲得日_マーケチーム',''))::date >= (CURRENT_DATE - INTERVAL '12 months')
+          WITH base AS (${customerBase})
+          SELECT COUNT(*)::int AS total FROM base WHERE 1=1 ${customerDateFilter}
+        `, params),
+
+        // 前期間件数（顧客ベース）
+        dbQuery(`
+          WITH base AS (${customerBase})
+          SELECT COUNT(*)::int AS total FROM base
+          WHERE inflow_date IS NOT NULL AND inflow_date != ''
+            AND inflow_date::date BETWEEN $1::date AND $2::date
+        `, prevParams),
+
+        // 12ヶ月平均用（顧客ベース）
+        dbQuery(`
+          WITH base AS (${customerBase})
+          SELECT TO_CHAR(inflow_date::date, 'YYYY-MM') AS month, COUNT(*)::int AS cnt
+          FROM base WHERE inflow_date IS NOT NULL AND inflow_date != ''
+            AND inflow_date::date >= (CURRENT_DATE - INTERVAL '12 months')
           GROUP BY month
         `, []),
 
-        // アポ化につながった流入経路（経過フローにアポ化済が含まれる）
+        // アポ化につながった流入経路（顧客ベース）
         dbQuery(`
-          SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source, COUNT(*)::int AS cnt
-          FROM kintone_cache
-          WHERE data->>'ヨミ_経過フロー' LIKE '%アポ化済商談前%' ${dateFilter}
+          WITH base AS (${customerBase})
+          SELECT source, COUNT(*)::int AS cnt
+          FROM base WHERE 1=1 ${customerDateFilter}
+            AND yomi_flow LIKE '%アポ化済商談前%'
+            AND source NOT LIKE '%' || chr(65533) || '%'
           GROUP BY source ORDER BY cnt DESC LIMIT 15
         `, params),
 
-        // 受注につながった流入経路
+        // 受注につながった流入経路（顧客ベース）
         dbQuery(`
-          SELECT COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source, COUNT(*)::int AS cnt
-          FROM kintone_cache
-          WHERE (data->>'受注日' IS NOT NULL AND data->>'受注日' != '') ${dateFilter}
+          WITH base AS (${customerBase})
+          SELECT source, COUNT(*)::int AS cnt
+          FROM base WHERE 1=1 ${customerDateFilter}
+            AND order_date IS NOT NULL AND order_date != ''
+            AND source NOT LIKE '%' || chr(65533) || '%'
           GROUP BY source ORDER BY cnt DESC LIMIT 15
         `, params),
       ]);
@@ -1811,15 +1829,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
       if (listOnly) {
         const [recentR, totalR] = await Promise.all([
           dbQuery(`
-            SELECT data->>'顧客' AS customer, data->>'ヨミ' AS yomi,
-                   data->>'流入経路' AS source,
-                   COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep,
-                   COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date
-            FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}
-            ORDER BY COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') DESC NULLS LAST
+            WITH base AS (${customerBase})
+            SELECT customer, yomi, source, rep, inflow_date
+            FROM base WHERE 1=1 ${customerDateFilter}
+            ORDER BY inflow_date DESC NULLS LAST
             LIMIT $3 OFFSET $4
           `, [...params, limit, offset]),
-          dbQuery(`SELECT COUNT(*)::int AS total FROM kintone_cache WHERE data->>'ヨミ' IS NOT NULL ${dateFilter}`, params),
+          dbQuery(`
+            WITH base AS (${customerBase})
+            SELECT COUNT(*)::int AS total FROM base WHERE 1=1 ${customerDateFilter}
+          `, params),
         ]);
         return res.json({ recent: recentR.rows, pagination: { page, limit, total: totalR.rows[0]?.total || 0 } });
       }

@@ -303,6 +303,7 @@ function DealActivitySection({ deal, activitySettings }) {
 function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, customFields = [], fieldOptions = {} }) {
   const [editing, setEditing] = useState(false);
   const [showActivities, setShowActivities] = useState(false);
+  const [memoOpen, setMemoOpen] = useState(false);
   const [form, setForm] = useState({ ...deal, ...deal.data });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
@@ -420,8 +421,16 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
               ))}
             </div>
             {deal.memo && (
-              <div style={{ marginTop:10, padding:'10px 14px', background:'#f9fafb', borderRadius:8, fontSize:'0.83rem', color:'#374151', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.7, borderLeft:'3px solid #e5e7eb' }}>
-                {deal.memo}
+              <div style={{ marginTop:10 }}>
+                <button onClick={() => setMemoOpen(v => !v)}
+                  style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.75rem', fontWeight:600, color:'#6366f1', padding:0, display:'flex', alignItems:'center', gap:3 }}>
+                  {memoOpen ? '▼' : '▶'} メモ
+                </button>
+                {memoOpen && (
+                  <div style={{ marginTop:6, padding:'10px 14px', background:'#fffbeb', borderRadius:8, fontSize:'0.83rem', color:'#374151', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.7, border:'1px solid #fef08a' }}>
+                    {deal.memo}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -946,19 +955,11 @@ export default function CustomerDetail() {
               </p>
             )}
 
-            {/* メモ（折り畳み） */}
+            {/* メモ */}
             {customer.memo && (
-              <div style={{ marginBottom:12 }}>
-                <button onClick={() => setMemoOpen(v => !v)}
-                  style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.78rem', fontWeight:600, color:'#6366f1', padding:0, display:'flex', alignItems:'center', gap:4 }}>
-                  {memoOpen ? '▼' : '▶'} メモ
-                </button>
-                {memoOpen && (
-                  <div style={{ marginTop:6, fontSize:'0.83rem', color:'#374151', lineHeight:1.7, background:'#fffbeb', padding:'10px 14px', borderRadius:8, border:'1px solid #fef08a', whiteSpace:'pre-wrap' }}>
-                    {customer.memo}
-                  </div>
-                )}
-              </div>
+              <p style={{ margin:'0 0 12px', fontSize:'0.83rem', color:'#334155', lineHeight:1.7, background:'#f8fafc', padding:'10px 14px', borderRadius:8, whiteSpace:'pre-wrap', border:'1px solid #e2e8f0' }}>
+                {customer.memo}
+              </p>
             )}
 
             {/* 競合 */}

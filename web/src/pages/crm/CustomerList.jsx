@@ -26,7 +26,7 @@ const QUICK_FILTERS = [
   { key:'yomi_mgmt',    label:'ヨミ管理中' },
   { key:'watch',         label:'要注視' },
 ];
-const fmtM = n => { if(!n)return '—'; const m=Number(n); if(m>=1e8)return `¥${(m/1e8).toLocaleString(undefined,{maximumFractionDigits:1})}億`; if(m>=1e4)return `¥${Math.round(m/1e4).toLocaleString()}万`; return `¥${m.toLocaleString()}`; };
+const fmtM = n => { if(!n)return '—'; const m=Number(n); if(m>=1e8)return `¥${(m/1e8).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}億`; if(m>=1e4)return `¥${Math.round(m/1e4).toLocaleString()}万`; return `¥${m.toLocaleString()}`; };
 const daysSince = dt => Math.floor((Date.now()-new Date(dt))/86400000);
 
 // ── ヘルスバー ─────────────────────────────────────────────────

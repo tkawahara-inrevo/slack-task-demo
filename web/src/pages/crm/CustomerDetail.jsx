@@ -300,11 +300,28 @@ function DealActivitySection({ deal, activitySettings }) {
   );
 }
 
+// ISO日付文字列 → YYYY-MM-DD（date inputの value 用）
+function toDateInput(v) {
+  if (!v) return '';
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+// deal/form の日付フィールドを一括変換
+function normalizeDealDates(obj) {
+  const DATE_FIELDS = ['first_meeting_date','firstMeetingDate','order_date','orderDate','conclusion_date','conclusionDate','next_action_date','nextActionDate','acquisition_date','acquisitionDate','contract_approval_date','contract_send_date','inflow_date','inflowDate'];
+  const out = { ...obj };
+  for (const f of DATE_FIELDS) {
+    if (out[f]) out[f] = toDateInput(out[f]);
+  }
+  return out;
+}
+
 function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, customFields = [], fieldOptions = {} }) {
   const [editing, setEditing] = useState(false);
   const [showActivities, setShowActivities] = useState(false);
   const [memoOpen, setMemoOpen] = useState(false);
-  const [form, setForm] = useState({ ...deal, ...deal.data });
+  const [form, setForm] = useState(() => normalizeDealDates({ ...deal, ...deal.data }));
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [conflict, setConflict] = useState(null); // { serverUpdatedAt }
@@ -415,7 +432,7 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
           </div>
           <div style={{ display:'flex', gap:6, flexShrink:0 }}>
             <button style={{ padding:'5px 14px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
-              onClick={() => { setForm({...deal,...deal.data}); setSavedAt(null); setEditing(v=>!v); }}>
+              onClick={() => { setForm(normalizeDealDates({...deal,...deal.data})); setSavedAt(null); setEditing(v=>!v); }}>
               {editing ? 'キャンセル' : '編集'}
             </button>
             <button style={{ padding:'5px 10px', border:'1.5px solid #fca5a5', borderRadius:8, background:'#fff', color:'#ef4444', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}

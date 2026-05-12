@@ -2026,17 +2026,22 @@ function registerChannelTargetsApi({ expressApp, authWithRole }) {
       const rows = Array.from(sources).map(src => {
         const a = actualsR.rows.find(r => r.source === src) || {};
         const t = targetMap[src] || {};
+        const leadUp   = Number(t.lead_unit_price)     || 0;
+        const expAppo  = Number(t.expected_appo_count) || 0;
         return {
-          source:             src,
-          cost_per_month:     Number(t.cost_per_month)     || 0,
-          expected_leads:     Number(t.expected_leads)     || 0,
-          expected_appo_rate: Number(t.expected_appo_rate) || 0,
-          expected_order_rate:Number(t.expected_order_rate)|| 0,
-          expected_unit_price:Number(t.expected_unit_price)|| 0,
-          actual_leads:       Number(a.actual_leads)  || 0,
-          actual_appo:        Number(a.actual_appo)   || 0,
-          actual_orders:      Number(a.actual_orders) || 0,
-          actual_revenue:     revenueMap[src]         || 0,
+          source:              src,
+          lead_unit_price:     leadUp,
+          cost_per_month:      leadUp * expAppo,
+          vendor_note:         t.vendor_note            || '',
+          expected_leads:      Number(t.expected_leads)     || 0,
+          expected_appo_count: expAppo,
+          expected_appo_rate:  Number(t.expected_appo_rate) || 0,
+          expected_order_rate: Number(t.expected_order_rate)|| 0,
+          expected_unit_price: Number(t.expected_unit_price)|| 0,
+          actual_leads:        Number(a.actual_leads)  || 0,
+          actual_appo:         Number(a.actual_appo)   || 0,
+          actual_orders:       Number(a.actual_orders) || 0,
+          actual_revenue:      revenueMap[src]         || 0,
         };
       }).sort((a, b) => b.actual_leads - a.actual_leads);
 
@@ -2047,23 +2052,39 @@ function registerChannelTargetsApi({ expressApp, authWithRole }) {
     }
   });
 
-  // PUT /api/crm/channel-targets  {source, cost_per_month, expected_leads, ...}
+  // PUT /api/crm/channel-targets  全フィールドをまとめて保存
   expressApp.put('/api/crm/channel-targets', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { source, cost_per_month = 0, expected_leads = 0, expected_appo_rate = 0, expected_order_rate = 0, expected_unit_price = 0 } = req.body;
+      const {
+        source,
+        lead_unit_price   = 0,
+        vendor_note       = '',
+        expected_leads    = 0,
+        expected_appo_count  = 0,
+        expected_appo_rate   = 0,
+        expected_order_rate  = 0,
+        expected_unit_price  = 0,
+      } = req.body;
       if (!source) return res.status(400).json({ error: 'source required' });
+      const cost_per_month = Number(lead_unit_price) * Number(expected_appo_count);
       await dbQuery(`
-        INSERT INTO crm_channel_targets (team_id, source, cost_per_month, expected_leads, expected_appo_rate, expected_order_rate, expected_unit_price, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+        INSERT INTO crm_channel_targets
+          (team_id, source, lead_unit_price, cost_per_month, vendor_note,
+           expected_leads, expected_appo_count, expected_appo_rate, expected_order_rate, expected_unit_price, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
         ON CONFLICT (team_id, source) DO UPDATE SET
+          lead_unit_price=EXCLUDED.lead_unit_price,
           cost_per_month=EXCLUDED.cost_per_month,
+          vendor_note=EXCLUDED.vendor_note,
           expected_leads=EXCLUDED.expected_leads,
+          expected_appo_count=EXCLUDED.expected_appo_count,
           expected_appo_rate=EXCLUDED.expected_appo_rate,
           expected_order_rate=EXCLUDED.expected_order_rate,
           expected_unit_price=EXCLUDED.expected_unit_price,
           updated_at=now()
-      `, [teamId, source, cost_per_month, expected_leads, expected_appo_rate, expected_order_rate, expected_unit_price]);
+      `, [teamId, source, lead_unit_price, cost_per_month, vendor_note,
+          expected_leads, expected_appo_count, expected_appo_rate, expected_order_rate, expected_unit_price]);
       res.json({ ok: true });
     } catch (e) {
       console.error('[CRM] channel-targets PUT error:', e);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Cell, LabelList, ReferenceLine,
@@ -80,6 +80,30 @@ const YOMI_COLOR = {
   '商談中':    '#f59e0b',
   '受注':      '#10b981',
 };
+
+// チャンネル管理テーブルの行定義（スプレッドシートと同順）
+const CHANNEL_ROWS = [
+  { key: '_expected_appo_cpa', label: '想定アポCPA',        editable: false },
+  { key: 'lead_unit_price',    label: 'リード獲得単価',      editable: true,  type: 'money' },
+  { key: '_cost_per_month',    label: 'コスト/月',           editable: false },
+  { key: 'vendor_note',        label: 'ベンダーより',         editable: true,  type: 'text'  },
+  { key: 'expected_leads',     label: '想定獲得リード',       editable: true,  type: 'num'   },
+  { key: 'actual_leads',       label: '獲得リード',           editable: false, isActual: true },
+  { key: 'expected_appo_count',label: '想定獲得アポ数',      editable: true,  type: 'num'   },
+  { key: 'actual_appo',        label: '初回商談数',           editable: false, isActual: true },
+  { key: '_leads_progress',    label: '進捗率',               editable: false },
+  { key: 'expected_appo_rate', label: '想定アポ割合',         editable: true,  type: 'pct'   },
+  { key: '_actual_appo_rate',  label: 'アポ割合',             editable: false },
+  { key: 'expected_order_rate',label: '想定受注率',           editable: true,  type: 'pct'   },
+  { key: '_expected_orders',   label: '想定受注数',           editable: false },
+  { key: 'expected_unit_price',label: '想定受注単価',         editable: true,  type: 'money', yellow: true },
+  { key: '_expected_revenue',  label: '想定売上',             editable: false, yellow: true  },
+  { key: '_expected_roi',      label: '想定ROI',              editable: false, yellow: true  },
+  { key: 'actual_orders',      label: '受注数',               editable: false, isActual: true },
+  { key: 'actual_revenue',     label: '受注金額',             editable: false, isActual: true },
+  { key: '_roi',               label: 'ROI',                  editable: false },
+  { key: '_appo_diff',         label: '想定アポ－初回商談',   editable: false },
+];
 
 const pad = n => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -216,20 +240,28 @@ export default function LeadsDashboard() {
     if (!Object.keys(edits).length) return;
     setChSaving(p => ({ ...p, [source]: true }));
     const row = chData?.rows?.find(r => r.source === source) || {};
+    const vn = (k) => Number(edits[k] !== undefined ? edits[k] : (row[k] || 0));
+    const vt = (k) => String(edits[k] !== undefined ? edits[k] : (row[k] || ''));
+    const lead_unit_price    = vn('lead_unit_price');
+    const expected_appo_count = vn('expected_appo_count');
     const body = {
       source,
-      cost_per_month:      Number(edits.cost_per_month      ?? row.cost_per_month)      || 0,
-      expected_leads:      Number(edits.expected_leads      ?? row.expected_leads)      || 0,
-      expected_appo_rate:  Number(edits.expected_appo_rate  ?? row.expected_appo_rate)  || 0,
-      expected_order_rate: Number(edits.expected_order_rate ?? row.expected_order_rate) || 0,
-      expected_unit_price: Number(edits.expected_unit_price ?? row.expected_unit_price) || 0,
+      lead_unit_price,
+      vendor_note:         vt('vendor_note'),
+      expected_leads:      vn('expected_leads'),
+      expected_appo_count,
+      expected_appo_rate:  vn('expected_appo_rate'),
+      expected_order_rate: vn('expected_order_rate'),
+      expected_unit_price: vn('expected_unit_price'),
     };
     try {
       await api.crmChannelTargetUpdate(body);
-      // ローカル state に反映
       setChData(p => p ? {
         ...p,
-        rows: p.rows.map(r => r.source === source ? { ...r, ...body } : r),
+        rows: p.rows.map(r => r.source === source ? {
+          ...r, ...body,
+          cost_per_month: lead_unit_price * expected_appo_count,
+        } : r),
       } : p);
       setChEdits(p => { const n = { ...p }; delete n[source]; return n; });
     } catch (e) { console.error(e); }
@@ -735,126 +767,158 @@ export default function LeadsDashboard() {
         </>
       )}
 
-      {/* チャンネル管理タブ */}
+      {/* チャンネル管理タブ（転置テーブル：縦=項目・横=チャンネル） */}
       {activeTab === 'channels' && (
         <div>
           {chLoading && <div style={{ color:'#9ca3af', marginBottom:16 }}>読み込み中...</div>}
           {chData && !chLoading && (() => {
-            const pct = (n, d) => d > 0 ? Math.round(n / d * 100) : null;
-            const fmtPct = v => v == null ? '—' : `${v}%`;
-            const fmtN = v => v ? v.toLocaleString() : '—';
-            const fmtMon = v => !v ? '—' : v >= 1000000 ? `${(v/10000).toFixed(0)}万` : v.toLocaleString();
-            const COLS = [
-              { key:'cost_per_month',      label:'コスト/月',      editable:true, unit:'円', type:'money' },
-              { key:'expected_leads',      label:'想定獲得L',      editable:true, unit:'件', type:'num' },
-              { key:'actual_leads',        label:'獲得L',          editable:false },
-              { key:'_leads_pct',          label:'進捗',           editable:false },
-              { key:'expected_appo_rate',  label:'想定アポ率',     editable:true, unit:'%', type:'pct' },
-              { key:'actual_appo',         label:'アポ化数',       editable:false },
-              { key:'_appo_pct',           label:'アポ率',         editable:false },
-              { key:'expected_order_rate', label:'想定受注率',     editable:true, unit:'%', type:'pct' },
-              { key:'actual_orders',       label:'受注数',         editable:false },
-              { key:'_order_pct',          label:'受注率',         editable:false },
-              { key:'expected_unit_price', label:'想定単価',       editable:true, unit:'円', type:'money' },
-              { key:'actual_revenue',      label:'受注金額',       editable:false },
-              { key:'_expected_revenue',   label:'想定売上',       editable:false },
-              { key:'_roi',                label:'ROI',            editable:false },
-              { key:'_expected_roi',       label:'想定ROI',        editable:false },
-            ];
+            const channels = chData.rows;
+            const safeN = v => Number(v) || 0;
+            const fmtYen = v => !v ? '—' : `¥${Math.round(v).toLocaleString()}`;
+            const fmtPct = v => (v == null || isNaN(v)) ? '—' : `${v}%`;
+            const fmtNum = v => v != null ? String(v) : '—';
+
+            // チャンネルごとの全計算値を返す
+            const calc = (ch) => {
+              const e = chEdits[ch.source] || {};
+              const vn = (k) => safeN(e[k] !== undefined ? e[k] : ch[k]);
+              const vt = (k) => String(e[k] !== undefined ? e[k] : (ch[k] || ''));
+              const leadUp     = vn('lead_unit_price');
+              const expAppo    = vn('expected_appo_count');
+              const cost       = leadUp * expAppo;
+              const expLeads   = vn('expected_leads');
+              const expAR      = vn('expected_appo_rate');
+              const expOR      = vn('expected_order_rate');
+              const expUP      = vn('expected_unit_price');
+              const expOrders  = expAppo * (expOR / 100);
+              const expRev     = expOrders * expUP;
+              return {
+                lead_unit_price:     leadUp,
+                vendor_note:         vt('vendor_note'),
+                cost_per_month:      cost,
+                expected_leads:      expLeads,
+                expected_appo_count: expAppo,
+                expected_appo_rate:  vn('expected_appo_rate'),
+                expected_order_rate: vn('expected_order_rate'),
+                expected_unit_price: expUP,
+                _expected_appo_cpa:  expAppo > 0 ? cost / expAppo : null,
+                _cost_per_month:     cost,
+                _leads_progress:     expLeads > 0 ? Math.round(ch.actual_leads / expLeads * 100) : null,
+                _actual_appo_rate:   ch.actual_leads > 0 ? Math.round(ch.actual_appo / ch.actual_leads * 100) : null,
+                _expected_orders:    expOrders > 0 ? expOrders.toFixed(1) : null,
+                _expected_revenue:   expRev > 0 ? expRev : null,
+                _expected_roi:       cost > 0 && expRev > 0 ? expRev / cost : null,
+                _roi:                cost > 0 && ch.actual_revenue > 0 ? ch.actual_revenue / cost : null,
+                _appo_diff:          expAppo - ch.actual_appo,
+                actual_leads:        ch.actual_leads,
+                actual_appo:         ch.actual_appo,
+                actual_orders:       ch.actual_orders,
+                actual_revenue:      ch.actual_revenue,
+              };
+            };
+
+            const dispCell = (rowDef, cv, ch) => {
+              const k = rowDef.key;
+              const v = cv[k];
+              if (rowDef.editable) return null; // handled separately
+              switch (k) {
+                case '_expected_appo_cpa': return fmtYen(v);
+                case '_cost_per_month':    return fmtYen(v);
+                case '_leads_progress':    return fmtPct(v);
+                case '_actual_appo_rate':  return fmtPct(v);
+                case '_expected_orders':   return v != null ? String(v) : '—';
+                case '_expected_revenue':  return fmtYen(v);
+                case '_expected_roi':      return v != null ? `${v.toFixed(1)}x` : '—';
+                case '_roi':               return v != null ? `${v.toFixed(1)}x` : '—';
+                case '_appo_diff': {
+                  if (v == null) return '—';
+                  const style = v < 0 ? { color:'#ef4444', fontWeight:700 } : v === 0 ? {} : { color:'#059669', fontWeight:700 };
+                  return <span style={style}>{v > 0 ? `+${v}` : String(v)}</span>;
+                }
+                case 'actual_leads':   return fmtNum(ch.actual_leads);
+                case 'actual_appo':    return fmtNum(ch.actual_appo);
+                case 'actual_orders':  return fmtNum(ch.actual_orders);
+                case 'actual_revenue': return fmtYen(ch.actual_revenue);
+                default: return '—';
+              }
+            };
+
+            const TH_STYLE = { padding:'6px 12px', textAlign:'left', fontWeight:700, color:'#374151', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', background:'#f8fafc', fontSize:'0.78rem', position:'sticky', top:0, zIndex:2 };
+            const ROW_LABEL_STYLE = (row) => ({
+              padding:'5px 12px', whiteSpace:'nowrap', fontWeight:600, fontSize:'0.75rem',
+              color: row.editable ? '#1d4ed8' : row.isActual ? '#0f172a' : '#64748b',
+              background: row.yellow ? '#fef9c3' : row.isActual ? '#f0fdf4' : '#f8fafc',
+              position:'sticky', left:0, zIndex:1, borderRight:'1px solid #e5e7eb',
+            });
+            const CELL_BG = (row) => row.yellow ? '#fffbeb' : row.isActual ? '#f0fdf4' : '#fff';
+
             return (
               <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
                 <div style={{ padding:'12px 16px', borderBottom:'1px solid #f3f4f6', display:'flex', alignItems:'center', gap:10 }}>
                   <span style={{ fontWeight:700, fontSize:'0.85rem' }}>チャンネル別パフォーマンス</span>
-                  <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>想定値は編集可（フォーカスを外すと自動保存）</span>
+                  <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>青字行は編集可 / フォーカスを外すと自動保存</span>
                   <button onClick={() => loadChannels(from, to)} style={{ marginLeft:'auto', background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>
                     再読み込み
                   </button>
                 </div>
-                <div style={{ overflowX:'auto' }}>
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.78rem' }}>
+                <div style={{ overflowX:'auto', maxHeight:'75vh', overflowY:'auto' }}>
+                  <table style={{ borderCollapse:'collapse', fontSize:'0.78rem', minWidth: `${140 + channels.length * 130}px` }}>
                     <thead>
-                      <tr style={{ background:'#f8fafc' }}>
-                        <th style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem', position:'sticky', left:0, background:'#f8fafc', zIndex:1 }}>チャンネル</th>
-                        {COLS.map(c => (
-                          <th key={c.key} style={{ padding:'8px 10px', textAlign:'right', fontWeight:600, color: c.editable ? '#1d4ed8' : '#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem' }}>
-                            {c.label}{c.editable ? ' ✎' : ''}
+                      <tr>
+                        <th style={{ ...TH_STYLE, minWidth:130, borderRight:'1px solid #e5e7eb' }}>項目</th>
+                        {channels.map(ch => (
+                          <th key={ch.source} style={{ ...TH_STYLE, textAlign:'center', minWidth:120 }}>
+                            <div style={{ maxWidth:110, overflow:'hidden', textOverflow:'ellipsis', margin:'0 auto' }} title={ch.source}>
+                              {ch.source}
+                            </div>
+                            {(chSaving[ch.source]) && <div style={{ fontSize:'0.65rem', color:'#9ca3af' }}>保存中...</div>}
+                            {(chEdits[ch.source] && Object.keys(chEdits[ch.source]).length > 0 && !chSaving[ch.source]) && (
+                              <div style={{ fontSize:'0.65rem', color:'#3b82f6' }}>未保存</div>
+                            )}
                           </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {chData.rows.map((row, i) => {
-                        const edits = chEdits[row.source] || {};
-                        const val = (k) => edits[k] !== undefined ? edits[k] : row[k];
-                        const cost = Number(val('cost_per_month')) || 0;
-                        const expL = Number(val('expected_leads')) || 0;
-                        const expAR = Number(val('expected_appo_rate')) || 0;
-                        const expOR = Number(val('expected_order_rate')) || 0;
-                        const expUP = Number(val('expected_unit_price')) || 0;
-                        const expRev = expL * (expAR/100) * (expOR/100) * expUP;
-                        const saving = chSaving[row.source];
-                        const dirty = Object.keys(edits).length > 0;
-                        const cellVal = (k) => {
-                          switch (k) {
-                            case '_leads_pct':    return fmtPct(pct(row.actual_leads, expL));
-                            case '_appo_pct':     return fmtPct(pct(row.actual_appo, row.actual_leads));
-                            case '_order_pct':    return fmtPct(pct(row.actual_orders, row.actual_appo));
-                            case '_expected_revenue': return expRev > 0 ? fmtMon(Math.round(expRev)) : '—';
-                            case '_roi':          return cost > 0 && row.actual_revenue > 0 ? `${(row.actual_revenue / cost).toFixed(1)}x` : '—';
-                            case '_expected_roi': return cost > 0 && expRev > 0 ? `${(expRev / cost).toFixed(1)}x` : '—';
-                            case 'actual_revenue':return fmtMon(row.actual_revenue);
-                            case 'actual_leads':  return row.actual_leads || '—';
-                            case 'actual_appo':   return row.actual_appo || '—';
-                            case 'actual_orders': return row.actual_orders || '—';
-                            default:              return null;
-                          }
-                        };
-                        const inputStyle = (k) => ({
-                          width: k === 'cost_per_month' || k === 'expected_unit_price' ? 90 : 64,
-                          border: '1px solid ' + (edits[k] !== undefined ? '#3b82f6' : '#e5e7eb'),
-                          borderRadius: 5,
-                          padding: '3px 6px',
-                          fontSize: '0.78rem',
-                          textAlign: 'right',
-                          outline: 'none',
-                          background: edits[k] !== undefined ? '#eff6ff' : '#fff',
-                        });
-                        return (
-                          <tr key={row.source} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'#fff':'#fafafa' }}>
-                            <td style={{ padding:'7px 12px', whiteSpace:'nowrap', fontWeight:500, position:'sticky', left:0, background: i%2===0?'#fff':'#fafafa', zIndex:1, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis' }}>
-                              {row.source}
-                              {saving && <span style={{ fontSize:'0.68rem', color:'#9ca3af', marginLeft:6 }}>保存中...</span>}
-                              {dirty && !saving && <span style={{ fontSize:'0.68rem', color:'#3b82f6', marginLeft:6 }}>未保存</span>}
-                            </td>
-                            {COLS.map(c => {
-                              if (!c.editable) {
-                                const disp = cellVal(c.key);
-                                const isHighlight = c.key === '_roi' && row.actual_revenue > 0 && cost > 0 && (row.actual_revenue/cost) >= 1;
-                                return (
-                                  <td key={c.key} style={{ padding:'7px 10px', textAlign:'right', whiteSpace:'nowrap', color: isHighlight ? '#059669' : '#374151', fontWeight: isHighlight ? 700 : 400 }}>
-                                    {disp}
-                                  </td>
-                                );
-                              }
+                      {CHANNEL_ROWS.map(row => (
+                        <tr key={row.key} style={{ borderBottom:'1px solid #f3f4f6' }}>
+                          <td style={ROW_LABEL_STYLE(row)}>
+                            {row.label}{row.editable ? ' ✎' : ''}
+                          </td>
+                          {channels.map(ch => {
+                            const cv = calc(ch);
+                            const cellBg = CELL_BG(row);
+                            if (row.editable) {
+                              const e = chEdits[ch.source] || {};
+                              const currentVal = e[row.key] !== undefined ? e[row.key] : (ch[row.key] || '');
+                              const isDirty = e[row.key] !== undefined;
                               return (
-                                <td key={c.key} style={{ padding:'4px 6px', textAlign:'right', whiteSpace:'nowrap' }}>
+                                <td key={ch.source} style={{ padding:'3px 6px', textAlign:'right', background: isDirty ? '#eff6ff' : cellBg }}>
                                   <input
-                                    type="number"
-                                    value={val(c.key) || ''}
-                                    onChange={e => setChEdit(row.source, c.key, e.target.value)}
-                                    onBlur={() => saveChannelTarget(row.source)}
-                                    style={inputStyle(c.key)}
-                                    placeholder="0"
+                                    type={row.type === 'text' ? 'text' : 'number'}
+                                    value={currentVal}
+                                    onChange={ev => setChEdit(ch.source, row.key, ev.target.value)}
+                                    onBlur={() => saveChannelTarget(ch.source)}
+                                    placeholder="—"
+                                    style={{
+                                      width: row.type === 'text' ? 100 : row.type === 'money' ? 88 : 64,
+                                      border: `1px solid ${isDirty ? '#3b82f6' : '#e5e7eb'}`,
+                                      borderRadius:4, padding:'3px 5px', fontSize:'0.75rem',
+                                      textAlign: row.type === 'text' ? 'left' : 'right',
+                                      outline:'none', background:'transparent',
+                                    }}
                                   />
                                 </td>
                               );
-                            })}
-                          </tr>
-                        );
-                      })}
-                      {chData.rows.length === 0 && (
-                        <tr><td colSpan={COLS.length+1} style={{ padding:24, textAlign:'center', color:'#9ca3af' }}>データなし</td></tr>
-                      )}
+                            }
+                            return (
+                              <td key={ch.source} style={{ padding:'5px 12px', textAlign:'right', whiteSpace:'nowrap', background: cellBg }}>
+                                {dispCell(row, cv, ch)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

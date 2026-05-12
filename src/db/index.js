@@ -707,8 +707,11 @@ async function dbEnsureSettingsSchema() {
     CREATE TABLE IF NOT EXISTS crm_channel_targets (
       team_id              TEXT NOT NULL,
       source               TEXT NOT NULL,
+      lead_unit_price      BIGINT   NOT NULL DEFAULT 0,
       cost_per_month       BIGINT   NOT NULL DEFAULT 0,
+      vendor_note          TEXT     NOT NULL DEFAULT '',
       expected_leads       INTEGER  NOT NULL DEFAULT 0,
+      expected_appo_count  INTEGER  NOT NULL DEFAULT 0,
       expected_appo_rate   NUMERIC(5,2) NOT NULL DEFAULT 0,
       expected_order_rate  NUMERIC(5,2) NOT NULL DEFAULT 0,
       expected_unit_price  BIGINT   NOT NULL DEFAULT 0,
@@ -716,6 +719,9 @@ async function dbEnsureSettingsSchema() {
       PRIMARY KEY (team_id, source)
     )
   `).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_channel_targets ADD COLUMN IF NOT EXISTS lead_unit_price BIGINT NOT NULL DEFAULT 0`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_channel_targets ADD COLUMN IF NOT EXISTS vendor_note TEXT NOT NULL DEFAULT ''`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_channel_targets ADD COLUMN IF NOT EXISTS expected_appo_count INTEGER NOT NULL DEFAULT 0`).catch(() => {});
 
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";

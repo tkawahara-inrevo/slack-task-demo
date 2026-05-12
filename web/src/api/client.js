@@ -215,6 +215,10 @@ export const api = {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))).toString();
     return crmFetch(`/leads-dashboard${qs ? '?' + qs : ''}`);
   },
+  crmLeadsYomiDrill: (yomiType, from, to) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries({ yomiType, from, to }).filter(([,v]) => v))).toString();
+    return crmFetch(`/leads-dashboard?${qs}`);
+  },
   crmLeadsDrilldown: (source, from, to, drillType) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries({ source, from, to, drillType }).filter(([,v]) => v))).toString();
     return crmFetch(`/leads-dashboard?${qs}`);

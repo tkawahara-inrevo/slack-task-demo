@@ -1843,6 +1843,30 @@ function registerCrmApi({ expressApp, authWithRole }) {
         return res.json({ recent: recentR.rows, pagination: { page, limit, total: totalR.rows[0]?.total || 0 } });
       }
 
+      // yomiTypeによるドリルダウン（KPIカードクリック用）
+      const yomiType = req.query.yomiType;
+      if (yomiType) {
+        const ymCond =
+          yomiType === 'apo_before' ? `AND (data->>'ヨミ' = 'アポ化前' OR data->>'ヨミ' LIKE 'アポ化前%')`
+          : yomiType === 'apo_got'  ? `AND (data->>'ヨミ' = 'アポ化済商談前' OR data->>'ヨミ' LIKE 'アポ化済%')`
+          : yomiType === 'in_deal'  ? `AND data->>'ヨミ' SIMILAR TO '(E|D|C|B|A|S) [0-9]%'`
+          : yomiType === 'order'    ? `AND (data->>'ヨミ' = '受注' OR data->>'ヨミ' = '受注済み' OR data->>'ヨミ' LIKE '受注%')`
+          : '';
+        const drillR = await dbQuery(`
+          SELECT DISTINCT ON (data->>'顧客') data->>'顧客' AS customer,
+            data->>'ヨミ' AS yomi,
+            COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
+            split_part(COALESCE(NULLIF(data->>'ヨミ_経過フロー',''), data->>'ヨミ'), ', ', 1) AS first_yomi,
+            COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
+            COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep
+          FROM kintone_cache
+          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter} ${ymCond}
+          ORDER BY data->>'顧客', COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') ASC
+          LIMIT 200
+        `, params);
+        return res.json({ drilldown: drillR.rows, source: yomiType });
+      }
+
       // ドリルダウン（source/type指定時）
       const sourceFilter = req.query.source;
       const drillType    = req.query.drillType; // 'appo' | 'order' | null

@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Cell, LabelList, ReferenceLine,
-  PieChart, Pie, Legend,
+  PieChart, Pie, Legend, Legend as RechartLegend,
 } from 'recharts';
+import { useEffect as useStorageEffect } from 'react';
 import { api } from '../../api/client';
 
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1'];
@@ -44,12 +45,14 @@ export default function LeadsDashboard() {
   const [loading, setLoading]   = useState(false);
   const [from, setFrom]         = useState('');
   const [to, setTo]             = useState('');
-  const [activePreset, setActivePreset] = useState(null);
+  const [activePreset, setActivePreset] = useState('this_month');
   const [page, setPage]         = useState(1);
-  const [listData, setListData] = useState(null); // ページング専用
+  const [listData, setListData] = useState(null);
   const [listLoading, setListLoading] = useState(false);
   const [drill, setDrill]       = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
+  const [target, setTarget]     = useState(() => Number(localStorage.getItem('lead_monthly_target') || 0));
+  const [editTarget, setEditTarget] = useState(false);
 
   const load = useCallback(async (f, t) => {
     setLoading(true);
@@ -72,7 +75,12 @@ export default function LeadsDashboard() {
     setListLoading(false);
   }, []);
 
-  useEffect(() => { load('', '', 1); }, []);
+  // 初期表示: 今月
+  useEffect(() => {
+    const { from: f, to: t } = getPreset('this_month');
+    setFrom(f); setTo(t);
+    load(f, t);
+  }, []);
 
   const applyPreset = (key) => {
     const { from: f, to: t } = getPreset(key);
@@ -91,6 +99,27 @@ export default function LeadsDashboard() {
       setDrill({ source, drillType, rows: d.drilldown || [] });
     } catch { setDrill({ source, drillType, rows: [] }); }
     setDrillLoading(false);
+  };
+
+  const openYomiDrill = async (yomiType, label) => {
+    setDrill({ source: label, yomiType, rows: null });
+    setDrillLoading(true);
+    try {
+      const d = await api.crmLeadsYomiDrill(yomiType, from, to);
+      setDrill({ source: label, yomiType, rows: d.drilldown || [] });
+    } catch { setDrill({ source: label, yomiType, rows: [] }); }
+    setDrillLoading(false);
+  };
+
+  // 当月の経過日数ベースの予測計算
+  const calcProjection = () => {
+    const now = new Date();
+    const isThisMonth = from && new Date(from).getMonth() === now.getMonth() && new Date(from).getFullYear() === now.getFullYear();
+    if (!isThisMonth) return null;
+    const day = now.getDate();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const ratio = day / daysInMonth;
+    return { day, daysInMonth, ratio };
   };
 
   const presets = [
@@ -160,32 +189,78 @@ export default function LeadsDashboard() {
 
       {data && !loading && (
         <>
-          {/* ファネル KPI — 全て期間合計を分母にした割合 */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
-              <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>期間内合計</div>
-              <div style={{ fontSize: '2rem', fontWeight: 800, color: '#374151' }}>
-                {(data.periodTotal || 0).toLocaleString()}
-              </div>
-            </div>
-            {data.funnel.map((f) => {
-              const label = f.label === 'リード（アポ化前）' ? 'アポ化前' : f.label;
-              const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : null;
-              return (
-                <div key={f.label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 20px', minWidth: 150, flex: 1 }}>
-                  <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: '2rem', fontWeight: 800, color: YOMI_COLOR[f.label] || '#374151' }}>
-                    {f.cnt.toLocaleString()}
-                  </div>
-                  {rate !== null && (
-                    <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2 }}>
-                      {rate}%
+          {/* 目標設定 */}
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.8rem', fontWeight:700, color:'#374151' }}>月次目標</span>
+            {editTarget ? (
+              <>
+                <input type="number" defaultValue={target} id="target-input"
+                  style={{ border:'1px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:'0.85rem', width:100 }} />
+                <button onClick={() => { const v = Number(document.getElementById('target-input').value)||0; setTarget(v); localStorage.setItem('lead_monthly_target', v); setEditTarget(false); }}
+                  style={{ background:'#3b82f6', color:'#fff', border:'none', borderRadius:6, padding:'4px 12px', fontSize:'0.8rem', cursor:'pointer' }}>保存</button>
+                <button onClick={() => setEditTarget(false)} style={{ background:'none', border:'1px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:'0.8rem', cursor:'pointer', color:'#6b7280' }}>キャンセル</button>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize:'0.88rem', fontWeight:700, color:'#0f172a' }}>{target > 0 ? `${target.toLocaleString()}件` : '未設定'}</span>
+                <button onClick={() => setEditTarget(true)} style={{ background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>編集</button>
+              </>
+            )}
+          </div>
+
+          {/* ファネル KPI */}
+          {(() => {
+            const proj = calcProjection();
+            const projected = proj ? Math.round(data.periodTotal / proj.ratio) : null;
+            const dayAdjAvg = proj ? Math.round(data.stats.avg12 * proj.ratio) : null;
+            const vsDayAvg = dayAdjAvg > 0 ? Math.round((data.periodTotal - dayAdjAvg) / dayAdjAvg * 100) : null;
+            const achievement = target > 0 ? Math.round(data.periodTotal / target * 100) : null;
+            const yomiMap = { 'アポ化前':'apo_before','アポ取得済':'apo_got','商談中':'in_deal','受注':'order' };
+            return (
+              <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
+                {/* 期間内合計 */}
+                <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:160, flex:1, cursor:'pointer' }}
+                  onClick={() => openYomiDrill('all', '全件')}
+                  onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                  onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                  <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>期間内合計</div>
+                  <div style={{ fontSize:'2rem', fontWeight:800, color:'#0f172a' }}>{data.periodTotal.toLocaleString()}</div>
+                  {proj && <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginTop:2 }}>{proj.day}日経過 / 月末予測 {projected}件</div>}
+                  {vsDayAvg !== null && (
+                    <div style={{ fontSize:'0.75rem', fontWeight:600, color: vsDayAvg >= 0 ? '#16a34a' : '#dc2626', marginTop:2 }}>
+                      日割平均比 {vsDayAvg >= 0 ? '+' : ''}{vsDayAvg}%
+                    </div>
+                  )}
+                  {achievement !== null && (
+                    <div style={{ marginTop:6 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.7rem', color:'#6b7280', marginBottom:2 }}>
+                        <span>目標達成率 {achievement}%</span><span>目標{target}件</span>
+                      </div>
+                      <div style={{ height:5, background:'#f1f5f9', borderRadius:3 }}>
+                        <div style={{ width:`${Math.min(100,achievement)}%`, height:'100%', background: achievement>=100?'#10b981':achievement>=70?'#f59e0b':'#3b82f6', borderRadius:3, transition:'width 0.4s' }} />
+                      </div>
                     </div>
                   )}
                 </div>
-              );
-            })}
-          </div>
+
+                {/* ファネルカード */}
+                {data.funnel.map((f) => {
+                  const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
+                  const yt = yomiMap[f.label];
+                  return (
+                    <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:130, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                      onClick={() => yt && openYomiDrill(yt, f.label)}
+                      onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>{f.label}</div>
+                      <div style={{ fontSize:'2rem', fontWeight:800, color: YOMI_COLOR[f.label] || '#374151' }}>{f.cnt.toLocaleString()}</div>
+                      <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{rate}%</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* 統計サマリー */}
           {data.stats && (
@@ -288,38 +363,52 @@ export default function LeadsDashboard() {
             );
           })()}
 
-          {/* アポ化/受注 流入経路 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
-            {[
-              { title: 'アポ化につながった流入経路', key: 'appoBySource', color: '#3b82f6', type: 'appo' },
-              { title: '受注につながった流入経路',   key: 'orderBySource', color: '#10b981', type: 'order' },
-            ].map(({ title, key, color, type }) => (
-              <div key={key} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, paddingLeft:8 }}>
-                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>{title}</span>
+          {/* アポ化・受注 統合グラフ */}
+          {(() => {
+            const sources = new Set([...(data.appoBySource||[]).map(r=>r.source), ...(data.orderBySource||[]).map(r=>r.source)]);
+            const merged = Array.from(sources).map(src => ({
+              source: src,
+              appo: data.appoBySource?.find(r=>r.source===src)?.cnt || 0,
+              order: data.orderBySource?.find(r=>r.source===src)?.cnt || 0,
+            })).sort((a,b) => (b.appo+b.order)-(a.appo+a.order)).slice(0,15);
+            return (
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'16px 12px', marginBottom:20 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, paddingLeft:8 }}>
+                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>アポ化・受注につながった流入経路</span>
                   <span style={{ fontSize:'0.7rem', color:'#9ca3af' }}>クリックで詳細</span>
+                  <div style={{ marginLeft:'auto', display:'flex', gap:12, fontSize:'0.72rem' }}>
+                    <span><span style={{ display:'inline-block', width:10, height:10, background:'#3b82f6', borderRadius:2, marginRight:4 }}/>アポ化</span>
+                    <span><span style={{ display:'inline-block', width:10, height:10, background:'#10b981', borderRadius:2, marginRight:4 }}/>受注</span>
+                  </div>
                 </div>
-                {data[key]?.length === 0
-                  ? <div style={{ color: '#9ca3af', fontSize: '0.8rem', textAlign: 'center', padding: 16 }}>データなし</div>
+                {merged.length === 0
+                  ? <div style={{ color:'#9ca3af', fontSize:'0.8rem', textAlign:'center', padding:16 }}>データなし</div>
                   : (
-                    <ResponsiveContainer width="100%" height={Math.max(160, (data[key]?.length || 0) * 26)}>
-                      <BarChart data={data[key]} layout="vertical" margin={{ top: 0, right: 50, left: 4, bottom: 0 }}
-                        onClick={e => e?.activePayload?.[0] && openDrill(e.activePayload[0].payload.source, type)}
-                        style={{ cursor: 'pointer' }}>
+                    <ResponsiveContainer width="100%" height={Math.max(160, merged.length * 36)}>
+                      <BarChart data={merged} layout="vertical" margin={{ top:0, right:60, left:4, bottom:0 }}
+                        onClick={e => {
+                          const src = e?.activePayload?.[0]?.payload?.source;
+                          const key = e?.activePayload?.[0]?.dataKey;
+                          if (src) openDrill(src, key === 'order' ? 'order' : 'appo');
+                        }}
+                        style={{ cursor:'pointer' }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                         <XAxis type="number" tick={TICK} allowDecimals={false} />
-                        <YAxis type="category" dataKey="source" tick={{ fontSize: 11, fill: '#6b7280' }} width={120} />
-                        <Tooltip formatter={v => [`${v}件`]} cursor={{ fill: '#f0fdf4' }} />
-                        <Bar dataKey="cnt" fill={color} radius={[0, 4, 4, 0]} name="件数">
-                          <LabelList dataKey="cnt" position="right" style={{ fontSize: 11, fill: '#374151' }} />
+                        <YAxis type="category" dataKey="source" tick={{ fontSize:11, fill:'#6b7280' }} width={130} />
+                        <Tooltip formatter={(v, n) => [`${v}件`, n === 'appo' ? 'アポ化' : '受注']} cursor={{ fill:'#f8fafc' }} />
+                        <Bar dataKey="appo" fill="#3b82f6" radius={[0,0,0,0]} name="appo" barSize={10}>
+                          <LabelList dataKey="appo" position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
+                        </Bar>
+                        <Bar dataKey="order" fill="#10b981" radius={[0,4,4,0]} name="order" barSize={10}>
+                          <LabelList dataKey="order" position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   )
                 }
               </div>
-            ))}
-          </div>
+            );
+          })()}
 
           {/* 流入経路ドリルダウンパネル */}
           {drill && (

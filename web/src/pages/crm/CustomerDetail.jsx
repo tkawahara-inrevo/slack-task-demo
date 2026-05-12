@@ -427,29 +427,42 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
 
         {!editing && (
           <div style={{ paddingBottom:14 }}>
-            {/* ボールホルダー・次アクション（最重要）*/}
-            <div style={{ background: deal.next_action_date ? '#fffbeb' : '#fef2f2', border:`1px solid ${deal.next_action_date ? '#fef08a' : '#fecaca'}`, borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
-              <div style={{ display:'flex', gap:16, flexWrap:'wrap', alignItems:'flex-start' }}>
-                <div>
-                  <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>ボールホルダー</div>
-                  <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.na_user_id ? '#0f172a' : '#ef4444' }}>
-                    {deal.na_user_id || '⚠ 未設定'}
-                  </div>
+            {/* 失注/見送りは理由を表示 */}
+            {(deal.status === 'lost' || deal.status === 'dormant') ? (
+              <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
+                <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:4 }}>
+                  {deal.status === 'lost' ? '失注理由' : '見送り理由'}
                 </div>
-                <div>
-                  <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション期日</div>
-                  <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.next_action_date ? '#b45309' : '#ef4444' }}>
-                    {fmtD(deal.next_action_date) || '⚠ 未設定'}
-                  </div>
+                <div style={{ fontSize:'0.88rem', fontWeight:600, color:'#dc2626' }}>
+                  {deal.lost_reason || '—'}
                 </div>
-                {deal.next_action_content && (
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション内容</div>
-                    <div style={{ fontSize:'0.83rem', color:'#374151' }}>{deal.next_action_content}</div>
-                  </div>
-                )}
+                {deal.loss_reason_detail && <div style={{ fontSize:'0.8rem', color:'#64748b', marginTop:4 }}>{deal.loss_reason_detail}</div>}
               </div>
-            </div>
+            ) : (
+              /* ボールホルダー・次アクション（最重要）*/
+              <div style={{ background: deal.next_action_date ? '#fffbeb' : '#fef2f2', border:`1px solid ${deal.next_action_date ? '#fef08a' : '#fecaca'}`, borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
+                <div style={{ display:'flex', gap:16, flexWrap:'wrap', alignItems:'flex-start' }}>
+                  <div>
+                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>ボールホルダー</div>
+                    <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.na_user_id ? '#0f172a' : '#ef4444' }}>
+                      {deal.na_user_id || '⚠ 未設定'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション期日</div>
+                    <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.next_action_date ? '#b45309' : '#ef4444' }}>
+                      {fmtD(deal.next_action_date) || '⚠ 未設定'}
+                    </div>
+                  </div>
+                  {deal.next_action_content && (
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション内容</div>
+                      <div style={{ fontSize:'0.83rem', color:'#374151' }}>{deal.next_action_content}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* ヨミ推移 */}
             {deal.data?.yomi_flow && (
@@ -473,13 +486,20 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                 <InfoChip label="契約月数" value={deal.contract_months ? `${deal.contract_months}ヶ月` : null} color="#f8fafc" />
               </div>
             )}
-            {/* 契約・採用情報 */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px,1fr))', gap:6, marginBottom:10 }}>
-              <InfoChip label="担当営業" value={deal.sales_user_id} color="#fef9c3" textColor="#92400e" />
-              <InfoChip label="採用目標" value={deal.guarantee_count ? `${deal.guarantee_count}人` : (deal.hiring_target ? `${deal.hiring_target}人` : null)} color="#f0fdf4" textColor="#15803d" />
-              <InfoChip label="採用単価" value={deal.guarantee_salary ? `¥${Number(deal.guarantee_salary).toLocaleString()}` : null} color="#f0fdf4" textColor="#15803d" />
-              <InfoChip label="料率" value={deal.rate ? `${deal.rate}%` : null} color="#faf5ff" textColor="#6d28d9" />
-              <InfoChip label="前払い" value={deal.advance_payment} color="#f8fafc" />
+            {/* 採用情報（常時表示）*/}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(130px,1fr))', gap:6, marginBottom:10 }}>
+              {[
+                { label:'採用目標人数', value: deal.guarantee_count ? `${deal.guarantee_count}人` : (deal.hiring_target ? `${deal.hiring_target}人` : null), color:'#f0fdf4', textColor:'#15803d' },
+                { label:'採用月数/契約月数', value: deal.contract_months ? `${deal.contract_months}ヶ月` : null, color:'#f0fdf4', textColor:'#15803d' },
+                { label:'採用単価', value: deal.guarantee_salary ? `¥${Number(deal.guarantee_salary).toLocaleString()}` : null, color:'#f0fdf4', textColor:'#15803d' },
+                { label:'料率', value: deal.rate ? `${deal.rate}%` : null, color:'#faf5ff', textColor:'#6d28d9' },
+                { label:'前払い', value: deal.advance_payment, color:'#f8fafc', textColor:'#334155' },
+              ].map(({ label, value, color, textColor }) => (
+                <div key={label} style={{ display:'flex', flexDirection:'column', gap:2, padding:'8px 12px', background: value ? color : '#f8fafc', borderRadius:8 }}>
+                  <span style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600 }}>{label}</span>
+                  <span style={{ fontSize:'0.85rem', fontWeight: value ? 700 : 400, color: value ? textColor : '#cbd5e1' }}>{value || '—'}</span>
+                </div>
+              ))}
             </div>
             {/* 日程バッジ */}
             <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>

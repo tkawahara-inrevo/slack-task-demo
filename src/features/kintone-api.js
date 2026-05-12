@@ -5,20 +5,24 @@ const { dbQuery } = require('../db/index');
 
 // kintone App102 フィールド → deals カラム のマッピング定義
 const KINTONE_DEAL_FIELD_MAP = {
-  '受注日':                         'order_date',
-  '結論日':                         'conclusion_date',
-  '支払方式':                        'contract_type',
-  '担当営業_0':                     'sales_user_id',
-  '見込売り上げ_税抜き':             'initial_fee',
-  '初回商談日_コンサルチーム':       'first_meeting_date',
-  '商談獲得日_マーケチーム':         'inflow_date',
-  '流入日':                         'inflow_date',
-  '流入経路':                        'inflow_source',
-  'ヨミ':                           'yomi',
-  '失注理由':                        'lost_reason',
-  'NextAction日':                   'next_action_date',
-  '案件名':                         'name',
-  '従業員数':                        'employment_type', // 仮マッピング
+  '受注日':                             'order_date',
+  '結論日':                             'conclusion_date',
+  'ヨミ_2':                             'contract_type',      // 採用保証/月額の契約形態
+  '担当営業_0':                         'sales_user_id',
+  'IS用最終対応日付':                    'inflow_date',        // 流入日（商談獲得日）
+  '見込売り上げ_税抜き':                 'initial_fee',
+  '初回商談日_コンサルチーム':           'first_meeting_date',
+  '商談獲得日_マーケチーム':             'inflow_date',
+  '流入日':                             'inflow_date',
+  '流入経路':                           'inflow_source',
+  'ヨミ':                               'yomi',
+  'ヨミ_経過フロー':                     'yomi_flow',          // ヨミ推移履歴
+  '失注理由':                           'lost_reason',
+  'NextAction日':                       'next_action_date',
+  '案件名':                             'name',
+  '_1ヶ月or1名_当たりの単価_税抜き':    'guarantee_salary',   // 採用単価
+  '契約月数or採用人数_税抜き':          'contract_months',    // 採用目標人数or契約月数
+  '担当営業':                           'na_user_id',         // NA担当者（担当営業_0と別）
 };
 
 // kintone_cache から deals テーブルへマッピングを反映

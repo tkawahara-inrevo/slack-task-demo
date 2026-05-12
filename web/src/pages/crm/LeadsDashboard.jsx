@@ -326,7 +326,7 @@ export default function LeadsDashboard() {
             const dayAdjAvg = proj ? Math.round(data.stats.avg12 * proj.ratio) : null;
             const vsDayAvg = dayAdjAvg > 0 ? Math.round((data.periodTotal - dayAdjAvg) / dayAdjAvg * 100) : null;
             const achievement = target > 0 ? Math.round(data.periodTotal / target * 100) : null;
-            const yomiMap = { 'アポ化前':'apo_before','アポ取得済':'apo_got','商談中':'in_deal','受注':'order' };
+            const yomiMap = { 'アポ化前':'apo_before','アポ化済み':'appo_active','失注':'lost_with_appo','見送り':'miokuri','受注':'ordered' };
             return (
               <>
               <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom: data.byLostReason?.length > 0 ? 6 : 20 }}>
@@ -355,60 +355,43 @@ export default function LeadsDashboard() {
                   )}
                 </div>
 
-                {/* アポ化前カード */}
-                {data.funnel.filter(f => f.label === 'アポ化前').map((f) => {
+                {/* ファネルカード（5枚＋フロー未記入）*/}
+                {data.funnel.map((f) => {
                   const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
+                  const colors = {
+                    'アポ化前':  { bg:'#fff',     border:'1px solid #e5e7eb', text:'#94a3b8' },
+                    'アポ化済み':{ bg:'#f0fdf4',  border:'2px solid #86efac', text:'#15803d' },
+                    '失注':      { bg:'#fef2f2',  border:'2px solid #fca5a5', text:'#dc2626' },
+                    '見送り':    { bg:'#fff7ed',  border:'1px solid #fed7aa', text:'#c2410c' },
+                    '受注':      { bg:'#f0fdf4',  border:'1px solid #bbf7d0', text:'#059669' },
+                  };
+                  const c = colors[f.label] || { bg:'#fff', border:'1px solid #e5e7eb', text:'#374151' };
                   return (
-                    <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:120, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
-                      onClick={() => openYomiDrill('apo_before', f.label)}
+                    <div key={f.label} style={{ background:c.bg, border:c.border, borderRadius:10, padding:'14px 18px', minWidth:110, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                      onClick={() => openYomiDrill(f.key, f.label)}
+                      title={f.desc}
                       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
                       onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>アポ化前</div>
-                      <div style={{ fontSize:'2rem', fontWeight:800, color:'#94a3b8' }}>{f.cnt.toLocaleString()}</div>
+                      <div style={{ fontSize:'0.72rem', color:c.text, fontWeight:700, marginBottom:4 }}>{f.label}</div>
+                      <div style={{ fontSize:'2rem', fontWeight:800, color:c.text }}>{f.cnt.toLocaleString()}</div>
                       <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{rate}%</div>
+                      {f.label === 'アポ化済み' && proj && f.cnt > 0 && (
+                        <div style={{ fontSize:'0.68rem', color:'#4ade80', marginTop:1 }}>月末予測 {Math.round(f.cnt/proj.ratio)}件</div>
+                      )}
                     </div>
                   );
                 })}
-
-                {/* アポ化済みカード */}
-                <div style={{ background:'#f0fdf4', border:'2px solid #86efac', borderRadius:10, padding:'14px 18px', minWidth:150, flex:1.2, cursor:'pointer', transition:'box-shadow 0.15s' }}
-                  onClick={() => openYomiDrill('apo_got', 'アポ化済み')}
-                  onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
-                  onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                  <div style={{ fontSize:'0.72rem', color:'#15803d', fontWeight:700, marginBottom:4 }}>アポ化済み</div>
-                  <div style={{ fontSize:'2rem', fontWeight:800, color:'#15803d' }}>{(data.appoTotal||0).toLocaleString()}</div>
-                  <div style={{ fontSize:'0.75rem', color:'#16a34a', marginTop:2 }}>
-                    {data.periodTotal > 0 ? `アポ化率 ${Math.round((data.appoTotal||0)/data.periodTotal*100)}%` : '—'}
+                {/* フロー未記入 */}
+                {(data.noFlowTotal > 0) && (
+                  <div style={{ background:'#f8fafc', border:'1px dashed #cbd5e1', borderRadius:10, padding:'14px 18px', minWidth:90, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                    onClick={() => openYomiDrill('no_flow', 'フロー未記入')}
+                    title="ヨミ経過フロー未記入のため分類不明"
+                    onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                    onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:4 }}>フロー未記入</div>
+                    <div style={{ fontSize:'1.6rem', fontWeight:800, color:'#94a3b8' }}>{data.noFlowTotal}</div>
                   </div>
-                  {proj && <div style={{ fontSize:'0.7rem', color:'#4ade80', marginTop:1 }}>月末予測 {Math.round((data.appoTotal||0)/proj.ratio)}件</div>}
-                </div>
-
-                {/* 失注カード */}
-                <div style={{ background:'#fef2f2', border:'2px solid #fca5a5', borderRadius:10, padding:'14px 18px', minWidth:120, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
-                  onClick={() => openYomiDrill('lost', '失注')}
-                  onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
-                  onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                  <div style={{ fontSize:'0.72rem', color:'#dc2626', fontWeight:700, marginBottom:4 }}>失注</div>
-                  <div style={{ fontSize:'2rem', fontWeight:800, color:'#dc2626' }}>{(data.lostTotal||0).toLocaleString()}</div>
-                  <div style={{ fontSize:'0.75rem', color:'#ef4444', marginTop:2 }}>
-                    {data.periodTotal > 0 ? `失注率 ${Math.round((data.lostTotal||0)/data.periodTotal*100)}%` : '—'}
-                  </div>
-                </div>
-
-                {/* 受注カード */}
-                {data.funnel.filter(f => f.label === '受注').map((f) => {
-                  const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
-                  return (
-                    <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:120, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
-                      onClick={() => openYomiDrill('order', f.label)}
-                      onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
-                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>受注<span style={{ fontSize:'0.62rem', color:'#10b981', marginLeft:4 }}>（アポ化済み内数）</span></div>
-                      <div style={{ fontSize:'2rem', fontWeight:800, color:'#10b981' }}>{f.cnt.toLocaleString()}</div>
-                      <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{rate}%</div>
-                    </div>
-                  );
-                })}
+                )}
               </div>
 
               {/* 失注理由タグ（カード行の下に） */}

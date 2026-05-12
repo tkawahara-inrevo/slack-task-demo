@@ -1772,12 +1772,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
           LIMIT $${lp+1} OFFSET $${lp+2}
         `, [...allParams, limit, offset]),
 
-        // 総件数 + アポ化数 + 失注数（顧客ベース）
+        // 全カテゴリ集計（相互排他的な定義）
         dbQuery(`
           WITH ${customerBase}
-          SELECT COUNT(*)::int AS total,
-                 COUNT(*) FILTER (WHERE has_appo)::int AS appo,
-                 COUNT(*) FILTER (WHERE has_lost)::int AS lost
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE has_appo = FALSE AND has_lost = FALSE)::int AS apo_before,
+            COUNT(*) FILTER (WHERE has_appo = TRUE  AND has_lost = FALSE AND (order_date IS NULL OR order_date = ''))::int AS appo_active,
+            COUNT(*) FILTER (WHERE has_appo = TRUE  AND has_lost = TRUE)::int AS lost_with_appo,
+            COUNT(*) FILTER (WHERE has_appo = FALSE AND has_lost = TRUE)::int AS miokuri,
+            COUNT(*) FILTER (WHERE order_date IS NOT NULL AND order_date != '')::int AS ordered,
+            COUNT(*) FILTER (WHERE (yomi_flow IS NULL OR yomi_flow = '') AND has_lost = FALSE AND (order_date IS NULL OR order_date = ''))::int AS no_flow
           FROM base WHERE 1=1 ${customerDateFilter}
         `, allParams),
 
@@ -1828,25 +1833,21 @@ function registerCrmApi({ expressApp, authWithRole }) {
         `, allParams),
       ]);
 
-      // ファネル集計（ヨミ値は説明付き "E 5％ (〜)" 形式なので先頭文字で判定）
-      let cntApoBefore = 0, cntApoGot = 0, cntDeal = 0, cntOrder = 0, cntLost = 0;
-      for (const r of funnelR.rows) {
-        const y = r.yomi || '';
-        if (y === 'アポ化前' || y.startsWith('アポ化前')) cntApoBefore += r.cnt;
-        else if (y === 'アポ化済商談前' || y.startsWith('アポ化済')) cntApoGot += r.cnt;
-        else if (/^[EDCBAS]\s*\d/.test(y) || y.includes('％')) cntDeal += r.cnt;
-        else if (y === '受注' || y === '受注済み' || y.startsWith('受注')) cntOrder += r.cnt;
-        else if (y === '失注' || y.startsWith('失注')) cntLost += r.cnt;
-      }
-      const periodTotal = funnelR.rows.reduce((s, r) => s + r.cnt, 0);
-      const funnel = [
-        { label: 'アポ化前',  cnt: cntApoBefore },
-        { label: '受注',      cnt: cntOrder },
-      ];
+      // ファネル集計（相互排他的な新定義）
+      const tr = totalR.rows[0] || {};
+      const currentTotal = tr.total       || 0;
+      const appoTotal    = tr.appo_active || 0;  // アポ取得済み・継続中
+      const lostTotal    = (tr.lost_with_appo || 0) + (tr.miokuri || 0);
+      const periodTotal  = currentTotal;
 
-      const currentTotal = totalR.rows[0]?.total || 0;
-      const appoTotal    = totalR.rows[0]?.appo  || 0;
-      const lostTotal    = totalR.rows[0]?.lost  || 0;
+      const funnel = [
+        { label: 'アポ化前',  cnt: tr.apo_before     || 0, key: 'apo_before',     desc: 'アポ未取得・継続中' },
+        { label: 'アポ化済み', cnt: tr.appo_active   || 0, key: 'appo_active',    desc: 'アポ取得済み・継続中' },
+        { label: '失注',      cnt: tr.lost_with_appo || 0, key: 'lost_with_appo', desc: 'アポ取得後に失注' },
+        { label: '見送り',    cnt: tr.miokuri        || 0, key: 'miokuri',        desc: 'アポ未取得で失注/見送り' },
+        { label: '受注',      cnt: tr.ordered        || 0, key: 'ordered',        desc: '受注済み' },
+      ];
+      const noFlowTotal = tr.no_flow || 0;
       const prevTotal    = prevTotalR.rows[0]?.total || 0;
       const avg12 = trend12R.rows.length > 0
         ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
@@ -1879,10 +1880,15 @@ function registerCrmApi({ expressApp, authWithRole }) {
       if (yomiType) {
         // customerBaseを使って正確な期間フィルター適用（流入日ベースで絞る）
         const ymCond =
-          yomiType === 'apo_before' ? `AND (yomi = 'アポ化前' OR yomi LIKE 'アポ化前%')`
-          : yomiType === 'apo_got'  ? `AND has_appo = TRUE`
-          : yomiType === 'in_deal'  ? `AND yomi SIMILAR TO '(E|D|C|B|A|S) [0-9]%'`
-          : yomiType === 'order'    ? `AND (yomi = '受注' OR yomi = '受注済み' OR yomi LIKE '受注%')`
+          yomiType === 'apo_before'     ? `AND has_appo = FALSE AND has_lost = FALSE`
+          : yomiType === 'appo_active'  ? `AND has_appo = TRUE AND has_lost = FALSE AND (order_date IS NULL OR order_date = '')`
+          : yomiType === 'apo_got'      ? `AND has_appo = TRUE AND has_lost = FALSE`
+          : yomiType === 'lost_with_appo' ? `AND has_appo = TRUE AND has_lost = TRUE`
+          : yomiType === 'miokuri'      ? `AND has_appo = FALSE AND has_lost = TRUE`
+          : yomiType === 'in_deal'      ? `AND yomi SIMILAR TO '(E|D|C|B|A|S) [0-9]%'`
+          : yomiType === 'order'        ? `AND order_date IS NOT NULL AND order_date != ''`
+          : yomiType === 'ordered'      ? `AND order_date IS NOT NULL AND order_date != ''`
+          : yomiType === 'no_flow'      ? `AND (yomi_flow IS NULL OR yomi_flow = '') AND has_lost = FALSE AND (order_date IS NULL OR order_date = '')`
           : '';
         const drillR = await dbQuery(`
           WITH ${customerBase}
@@ -1929,8 +1935,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
         periodTotal,
         appoTotal,
         lostTotal,
+        noFlowTotal,
         byLostReason: lostReasonR.rows,
-        filterOptions: { reps: [], sources: [] }, // フロントのドロップダウン用（別途実装可）
+        filterOptions: { reps: [], sources: [] },
         avg12Appo,
         stats: {
           current:  currentTotal,

@@ -104,6 +104,7 @@ function getPreset(key) {
 }
 
 export default function LeadsDashboard() {
+  const [activeTab, setActiveTab]   = useState('dashboard'); // 'dashboard' | 'channels'
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(false);
   const [from, setFrom]         = useState('');
@@ -158,10 +159,15 @@ export default function LeadsDashboard() {
   const applyPreset = (key) => {
     const { from: f, to: t } = getPreset(key);
     setFrom(f); setTo(t); setActivePreset(key);
-    load(f, t, repFilter, srcFilter, appoOnly);
+    if (activeTab === 'channels') { loadChannels(f, t); }
+    else { load(f, t, repFilter, srcFilter, appoOnly); }
   };
 
-  const handleSearch = () => { setActivePreset(null); load(from, to, repFilter, srcFilter, appoOnly); };
+  const handleSearch = () => {
+    setActivePreset(null);
+    if (activeTab === 'channels') { loadChannels(from, to); }
+    else { load(from, to, repFilter, srcFilter, appoOnly); }
+  };
   const handleReset  = () => { setFrom(''); setTo(''); setRepFilter(''); setSrcFilter(''); setAppoOnly(false); setActivePreset(null); load('', '', '', '', false); };
   const applyFilters = () => load(from, to, repFilter, srcFilter, appoOnly);
 
@@ -185,6 +191,54 @@ export default function LeadsDashboard() {
     setDrillLoading(false);
   };
 
+  // チャンネル管理
+  const [chData, setChData]         = useState(null);
+  const [chLoading, setChLoading]   = useState(false);
+  const [chEdits, setChEdits]       = useState({}); // {source: {field: value}}
+  const [chSaving, setChSaving]     = useState({}); // {source: bool}
+
+  const loadChannels = useCallback(async (f, t) => {
+    setChLoading(true);
+    try {
+      const d = await api.crmChannelPerformance(f, t);
+      setChData(d);
+    } catch (e) { console.error(e); }
+    setChLoading(false);
+  }, []);
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    if (tab === 'channels' && !chData) loadChannels(from, to);
+  };
+
+  const saveChannelTarget = async (source) => {
+    const edits = chEdits[source] || {};
+    if (!Object.keys(edits).length) return;
+    setChSaving(p => ({ ...p, [source]: true }));
+    const row = chData?.rows?.find(r => r.source === source) || {};
+    const body = {
+      source,
+      cost_per_month:      Number(edits.cost_per_month      ?? row.cost_per_month)      || 0,
+      expected_leads:      Number(edits.expected_leads      ?? row.expected_leads)      || 0,
+      expected_appo_rate:  Number(edits.expected_appo_rate  ?? row.expected_appo_rate)  || 0,
+      expected_order_rate: Number(edits.expected_order_rate ?? row.expected_order_rate) || 0,
+      expected_unit_price: Number(edits.expected_unit_price ?? row.expected_unit_price) || 0,
+    };
+    try {
+      await api.crmChannelTargetUpdate(body);
+      // ローカル state に反映
+      setChData(p => p ? {
+        ...p,
+        rows: p.rows.map(r => r.source === source ? { ...r, ...body } : r),
+      } : p);
+      setChEdits(p => { const n = { ...p }; delete n[source]; return n; });
+    } catch (e) { console.error(e); }
+    setChSaving(p => { const n = { ...p }; delete n[source]; return n; });
+  };
+
+  const setChEdit = (source, field, value) =>
+    setChEdits(p => ({ ...p, [source]: { ...(p[source]||{}), [field]: value } }));
+
   // 当月の経過日数ベースの予測計算
   const calcProjection = () => {
     const now = new Date();
@@ -207,16 +261,24 @@ export default function LeadsDashboard() {
 
   return (
     <div style={{ padding: '0 0 32px' }}>
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 16, display:'flex', alignItems:'center', gap:16 }}>
         <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#111827' }}>リード管理</h2>
-        {data?.period && (
-          <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: '#6b7280' }}>
+        <div style={{ display:'flex', gap:4 }}>
+          {[{key:'dashboard',label:'ダッシュボード'},{key:'channels',label:'チャンネル管理'}].map(t => (
+            <button key={t.key} onClick={() => handleTabChange(t.key)} style={{
+              padding:'4px 14px', borderRadius:20, fontSize:'0.8rem', fontWeight:600, cursor:'pointer', border:'none',
+              background: activeTab===t.key ? '#1e293b' : '#f1f5f9',
+              color: activeTab===t.key ? '#fff' : '#374151',
+            }}>{t.label}</button>
+          ))}
+        </div>
+        {activeTab==='dashboard' && data?.period && (
+          <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b7280' }}>
             {(() => {
               const f = data.period.from, t = data.period.to;
               if (!f || !t) return null;
               const fd = new Date(f), td = new Date(t);
               const fmt = d => `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
-              // 同月なら "2026年5月" 表記
               if (fd.getFullYear() === td.getFullYear() && fd.getMonth() === td.getMonth())
                 return `${fd.getFullYear()}年${fd.getMonth()+1}月`;
               return `${fmt(fd)} 〜 ${fmt(td)}`;
@@ -259,8 +321,8 @@ export default function LeadsDashboard() {
         </div>
       </div>
 
-      {/* 絞り込みフィルター */}
-      <div style={{ marginBottom:16 }}>
+      {/* 絞り込みフィルター（ダッシュボードタブのみ） */}
+      {activeTab === 'dashboard' && <div style={{ marginBottom:16 }}>
         <button onClick={() => setFilterOpen(v => !v)}
           style={{ background: (repFilter||srcFilter||appoOnly)?'#eff6ff':'none', border:'1px solid '+(repFilter||srcFilter||appoOnly?'#3b82f6':'#e2e8f0'), borderRadius:8, padding:'5px 14px', fontSize:'0.8rem', cursor:'pointer', color: (repFilter||srcFilter||appoOnly)?'#1d4ed8':'#374151', fontWeight:600 }}>
           絞り込み {(repFilter||srcFilter||appoOnly) ? '●' : ''} {filterOpen ? '▲' : '▼'}
@@ -299,11 +361,11 @@ export default function LeadsDashboard() {
             )}
           </div>
         )}
-      </div>
+      </div>}
 
-      {loading && <div style={{ color: '#9ca3af', marginBottom: 16 }}>読み込み中...</div>}
+      {activeTab === 'dashboard' && loading && <div style={{ color: '#9ca3af', marginBottom: 16 }}>読み込み中...</div>}
 
-      {data && !loading && (
+      {activeTab === 'dashboard' && data && !loading && (
         <>
           {/* 目標設定 */}
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, flexWrap:'wrap' }}>
@@ -518,7 +580,7 @@ export default function LeadsDashboard() {
               appo:  data.appoBySource?.find(r=>r.source===src)?.cnt || 0,
               order: data.orderBySource?.find(r=>r.source===src)?.cnt || 0,
               lost:  data.bySource?.find(r=>r.source===src)?.lost_cnt || 0,
-            })).sort((a,b) => (b.appo+b.order+b.lost)-(a.appo+a.order+a.lost)).slice(0,15);
+            })).sort((a,b) => (b.appo+b.order+b.lost)-(a.appo+a.order+a.lost));
             return (
               <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'16px 12px', marginBottom:20 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, paddingLeft:8 }}>
@@ -671,6 +733,135 @@ export default function LeadsDashboard() {
             })()}
           </div>
         </>
+      )}
+
+      {/* チャンネル管理タブ */}
+      {activeTab === 'channels' && (
+        <div>
+          {chLoading && <div style={{ color:'#9ca3af', marginBottom:16 }}>読み込み中...</div>}
+          {chData && !chLoading && (() => {
+            const pct = (n, d) => d > 0 ? Math.round(n / d * 100) : null;
+            const fmtPct = v => v == null ? '—' : `${v}%`;
+            const fmtN = v => v ? v.toLocaleString() : '—';
+            const fmtMon = v => !v ? '—' : v >= 1000000 ? `${(v/10000).toFixed(0)}万` : v.toLocaleString();
+            const COLS = [
+              { key:'cost_per_month',      label:'コスト/月',      editable:true, unit:'円', type:'money' },
+              { key:'expected_leads',      label:'想定獲得L',      editable:true, unit:'件', type:'num' },
+              { key:'actual_leads',        label:'獲得L',          editable:false },
+              { key:'_leads_pct',          label:'進捗',           editable:false },
+              { key:'expected_appo_rate',  label:'想定アポ率',     editable:true, unit:'%', type:'pct' },
+              { key:'actual_appo',         label:'アポ化数',       editable:false },
+              { key:'_appo_pct',           label:'アポ率',         editable:false },
+              { key:'expected_order_rate', label:'想定受注率',     editable:true, unit:'%', type:'pct' },
+              { key:'actual_orders',       label:'受注数',         editable:false },
+              { key:'_order_pct',          label:'受注率',         editable:false },
+              { key:'expected_unit_price', label:'想定単価',       editable:true, unit:'円', type:'money' },
+              { key:'actual_revenue',      label:'受注金額',       editable:false },
+              { key:'_expected_revenue',   label:'想定売上',       editable:false },
+              { key:'_roi',                label:'ROI',            editable:false },
+              { key:'_expected_roi',       label:'想定ROI',        editable:false },
+            ];
+            return (
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+                <div style={{ padding:'12px 16px', borderBottom:'1px solid #f3f4f6', display:'flex', alignItems:'center', gap:10 }}>
+                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>チャンネル別パフォーマンス</span>
+                  <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>想定値は編集可（フォーカスを外すと自動保存）</span>
+                  <button onClick={() => loadChannels(from, to)} style={{ marginLeft:'auto', background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>
+                    再読み込み
+                  </button>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.78rem' }}>
+                    <thead>
+                      <tr style={{ background:'#f8fafc' }}>
+                        <th style={{ padding:'8px 12px', textAlign:'left', fontWeight:600, color:'#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem', position:'sticky', left:0, background:'#f8fafc', zIndex:1 }}>チャンネル</th>
+                        {COLS.map(c => (
+                          <th key={c.key} style={{ padding:'8px 10px', textAlign:'right', fontWeight:600, color: c.editable ? '#1d4ed8' : '#64748b', whiteSpace:'nowrap', borderBottom:'1px solid #e5e7eb', fontSize:'0.72rem' }}>
+                            {c.label}{c.editable ? ' ✎' : ''}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chData.rows.map((row, i) => {
+                        const edits = chEdits[row.source] || {};
+                        const val = (k) => edits[k] !== undefined ? edits[k] : row[k];
+                        const cost = Number(val('cost_per_month')) || 0;
+                        const expL = Number(val('expected_leads')) || 0;
+                        const expAR = Number(val('expected_appo_rate')) || 0;
+                        const expOR = Number(val('expected_order_rate')) || 0;
+                        const expUP = Number(val('expected_unit_price')) || 0;
+                        const expRev = expL * (expAR/100) * (expOR/100) * expUP;
+                        const saving = chSaving[row.source];
+                        const dirty = Object.keys(edits).length > 0;
+                        const cellVal = (k) => {
+                          switch (k) {
+                            case '_leads_pct':    return fmtPct(pct(row.actual_leads, expL));
+                            case '_appo_pct':     return fmtPct(pct(row.actual_appo, row.actual_leads));
+                            case '_order_pct':    return fmtPct(pct(row.actual_orders, row.actual_appo));
+                            case '_expected_revenue': return expRev > 0 ? fmtMon(Math.round(expRev)) : '—';
+                            case '_roi':          return cost > 0 && row.actual_revenue > 0 ? `${(row.actual_revenue / cost).toFixed(1)}x` : '—';
+                            case '_expected_roi': return cost > 0 && expRev > 0 ? `${(expRev / cost).toFixed(1)}x` : '—';
+                            case 'actual_revenue':return fmtMon(row.actual_revenue);
+                            case 'actual_leads':  return row.actual_leads || '—';
+                            case 'actual_appo':   return row.actual_appo || '—';
+                            case 'actual_orders': return row.actual_orders || '—';
+                            default:              return null;
+                          }
+                        };
+                        const inputStyle = (k) => ({
+                          width: k === 'cost_per_month' || k === 'expected_unit_price' ? 90 : 64,
+                          border: '1px solid ' + (edits[k] !== undefined ? '#3b82f6' : '#e5e7eb'),
+                          borderRadius: 5,
+                          padding: '3px 6px',
+                          fontSize: '0.78rem',
+                          textAlign: 'right',
+                          outline: 'none',
+                          background: edits[k] !== undefined ? '#eff6ff' : '#fff',
+                        });
+                        return (
+                          <tr key={row.source} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'#fff':'#fafafa' }}>
+                            <td style={{ padding:'7px 12px', whiteSpace:'nowrap', fontWeight:500, position:'sticky', left:0, background: i%2===0?'#fff':'#fafafa', zIndex:1, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis' }}>
+                              {row.source}
+                              {saving && <span style={{ fontSize:'0.68rem', color:'#9ca3af', marginLeft:6 }}>保存中...</span>}
+                              {dirty && !saving && <span style={{ fontSize:'0.68rem', color:'#3b82f6', marginLeft:6 }}>未保存</span>}
+                            </td>
+                            {COLS.map(c => {
+                              if (!c.editable) {
+                                const disp = cellVal(c.key);
+                                const isHighlight = c.key === '_roi' && row.actual_revenue > 0 && cost > 0 && (row.actual_revenue/cost) >= 1;
+                                return (
+                                  <td key={c.key} style={{ padding:'7px 10px', textAlign:'right', whiteSpace:'nowrap', color: isHighlight ? '#059669' : '#374151', fontWeight: isHighlight ? 700 : 400 }}>
+                                    {disp}
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={c.key} style={{ padding:'4px 6px', textAlign:'right', whiteSpace:'nowrap' }}>
+                                  <input
+                                    type="number"
+                                    value={val(c.key) || ''}
+                                    onChange={e => setChEdit(row.source, c.key, e.target.value)}
+                                    onBlur={() => saveChannelTarget(row.source)}
+                                    style={inputStyle(c.key)}
+                                    placeholder="0"
+                                  />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                      {chData.rows.length === 0 && (
+                        <tr><td colSpan={COLS.length+1} style={{ padding:24, textAlign:'center', color:'#9ca3af' }}>データなし</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
       )}
     </div>
   );

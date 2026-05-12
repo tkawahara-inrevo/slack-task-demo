@@ -227,6 +227,11 @@ export const api = {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries({ ...params, listOnly: '1' }).filter(([,v]) => v != null && v !== ''))).toString();
     return crmFetch(`/leads-dashboard?${qs}`);
   },
+  crmChannelPerformance: (from, to) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries({ from, to }).filter(([,v]) => v))).toString();
+    return crmFetch(`/channel-performance${qs ? '?' + qs : ''}`);
+  },
+  crmChannelTargetUpdate: (body) => crmFetch('/channel-targets', { method: 'PUT', body: JSON.stringify(body) }),
   crmPipelineSummary: () => crmFetch('/pipeline-summary'),
   crmMonthlySummary: (month, salesUser) => {
     const p = new URLSearchParams();

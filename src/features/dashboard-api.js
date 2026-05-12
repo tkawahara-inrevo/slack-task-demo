@@ -3,7 +3,7 @@ const { randomUUID } = require("crypto");
 const { registerRpoApi } = require("./rpo-api");
 const { registerKintoneApi } = require("./kintone-api");
 const { registerDriveApi } = require("./drive-api");
-const { registerCrmApi, registerDailyReportApi } = require("./crm-api");
+const { registerCrmApi, registerDailyReportApi, registerChannelTargetsApi } = require("./crm-api");
 const { registerChannelMappingApi } = require("./channel-mapping");
 const { registerPermissionsApi } = require("./permissions");
 const { registerRankingApi } = require("./ranking");
@@ -4114,6 +4114,9 @@ function registerDashboardApi(deps) {
 
   // 日報メンバー管理API
   registerDailyReportApi({ expressApp, authWithRole, slackClient });
+
+  // チャンネル別目標設定API
+  registerChannelTargetsApi({ expressApp, authWithRole });
 
   // 権限管理API
   registerPermissionsApi({ expressApp, authWithRole, adminOnly });

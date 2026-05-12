@@ -702,6 +702,21 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_applicants_team_date ON hrmos_applicants(team_id, applied_date)`).catch(() => {});
   await dbQuery(`CREATE UNIQUE INDEX IF NOT EXISTS hrmos_applicants_team_appid ON hrmos_applicants(team_id, app_id) WHERE app_id IS NOT NULL`).catch(() => {});
 
+  // チャンネル別目標設定（リード管理ダッシュボード）
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS crm_channel_targets (
+      team_id              TEXT NOT NULL,
+      source               TEXT NOT NULL,
+      cost_per_month       BIGINT   NOT NULL DEFAULT 0,
+      expected_leads       INTEGER  NOT NULL DEFAULT 0,
+      expected_appo_rate   NUMERIC(5,2) NOT NULL DEFAULT 0,
+      expected_order_rate  NUMERIC(5,2) NOT NULL DEFAULT 0,
+      expected_unit_price  BIGINT   NOT NULL DEFAULT 0,
+      updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (team_id, source)
+    )
+  `).catch(() => {});
+
   // 初期admin を設定（存在しなければ）
   const INITIAL_ADMIN_ID = process.env.DASHBOARD_ADMIN_USER_ID || "U0A6JPMKVRR";
   if (INITIAL_ADMIN_ID) {

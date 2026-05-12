@@ -1810,7 +1810,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           FROM base WHERE 1=1 ${customerDateFilter}
             AND yomi_flow LIKE '%アポ化済商談前%'
             AND source NOT LIKE '%' || chr(65533) || '%'
-          GROUP BY source ORDER BY cnt DESC LIMIT 15
+          GROUP BY source ORDER BY cnt DESC
         `, allParams),
 
         // 受注につながった流入経路（顧客ベース）
@@ -1820,7 +1820,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           FROM base WHERE 1=1 ${customerDateFilter}
             AND order_date IS NOT NULL AND order_date != ''
             AND source NOT LIKE '%' || chr(65533) || '%'
-          GROUP BY source ORDER BY cnt DESC LIMIT 15
+          GROUP BY source ORDER BY cnt DESC
         `, allParams),
 
         // 失注理由内訳
@@ -1960,4 +1960,116 @@ function registerCrmApi({ expressApp, authWithRole }) {
   });
 }
 
-module.exports = { registerCrmApi, registerDailyReportApi, YOMI_OPTIONS, CONTRACT_TYPES, PAYMENT_TYPES, LOST_REASONS };
+function registerChannelTargetsApi({ expressApp, authWithRole }) {
+  // GET /api/crm/channel-performance?from=...&to=...
+  expressApp.get('/api/crm/channel-performance', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { from, to } = req.query;
+      const periodR = await dbQuery('SELECT curr_start, curr_end FROM crm_period_settings WHERE team_id=$1', [teamId]);
+      const ps = periodR.rows[0] || { curr_start: '2025-12-01', curr_end: '2026-05-31' };
+      const rangeFrom = from || ps.curr_start;
+      const rangeTo   = to   || ps.curr_end;
+
+      // 流入経路別 実績（mv_lead_customers + mv_lead_flags）
+      const actualsR = await dbQuery(`
+        WITH base AS (
+          SELECT lc.customer, lc.inflow_date, lc.source, lc.order_date,
+                 lf.has_appo
+          FROM mv_lead_customers lc
+          JOIN mv_lead_flags lf ON lf.customer = lc.customer
+          WHERE lc.inflow_date IS NOT NULL AND lc.inflow_date != ''
+            AND lc.inflow_date::date BETWEEN $1::date AND $2::date
+            AND lc.source NOT LIKE '%' || chr(65533) || '%'
+        )
+        SELECT
+          source,
+          COUNT(*)::int                                              AS actual_leads,
+          COUNT(*) FILTER (WHERE has_appo)::int                     AS actual_appo,
+          COUNT(*) FILTER (WHERE order_date IS NOT NULL AND order_date != '')::int AS actual_orders
+        FROM base
+        GROUP BY source
+        ORDER BY actual_leads DESC
+      `, [rangeFrom, rangeTo]);
+
+      // 受注金額（kintone_cache から期間内受注分を source 別に集計）
+      const revenueR = await dbQuery(`
+        SELECT
+          data->>'流入経路' AS source,
+          SUM(NULLIF(NULLIF(data->>'見込売り上げ_税抜き',''), '-')::numeric)::bigint AS revenue
+        FROM kintone_cache
+        WHERE app_id = '102'
+          AND data->>'受注日' IS NOT NULL AND data->>'受注日' != ''
+          AND (
+            (data->>'流入日' IS NOT NULL AND data->>'流入日' != '' AND (data->>'流入日')::date BETWEEN $1::date AND $2::date)
+            OR (data->>'商談獲得日_マーケチーム' IS NOT NULL AND data->>'商談獲得日_マーケチーム' != '' AND (data->>'商談獲得日_マーケチーム')::date BETWEEN $1::date AND $2::date)
+          )
+          AND data->>'流入経路' IS NOT NULL AND data->>'流入経路' != ''
+          AND data->>'流入経路' NOT LIKE '%' || chr(65533) || '%'
+        GROUP BY source
+      `, [rangeFrom, rangeTo]);
+      const revenueMap = {};
+      for (const r of revenueR.rows) revenueMap[r.source] = Number(r.revenue) || 0;
+
+      // チャンネル目標設定
+      const targetsR = await dbQuery(
+        `SELECT * FROM crm_channel_targets WHERE team_id=$1`, [teamId]
+      );
+      const targetMap = {};
+      for (const t of targetsR.rows) targetMap[t.source] = t;
+
+      // マージ: targets に登録されているが実績がないチャンネルも含める
+      const sources = new Set([
+        ...actualsR.rows.map(r => r.source),
+        ...targetsR.rows.map(r => r.source),
+      ]);
+      const rows = Array.from(sources).map(src => {
+        const a = actualsR.rows.find(r => r.source === src) || {};
+        const t = targetMap[src] || {};
+        return {
+          source:             src,
+          cost_per_month:     Number(t.cost_per_month)     || 0,
+          expected_leads:     Number(t.expected_leads)     || 0,
+          expected_appo_rate: Number(t.expected_appo_rate) || 0,
+          expected_order_rate:Number(t.expected_order_rate)|| 0,
+          expected_unit_price:Number(t.expected_unit_price)|| 0,
+          actual_leads:       Number(a.actual_leads)  || 0,
+          actual_appo:        Number(a.actual_appo)   || 0,
+          actual_orders:      Number(a.actual_orders) || 0,
+          actual_revenue:     revenueMap[src]         || 0,
+        };
+      }).sort((a, b) => b.actual_leads - a.actual_leads);
+
+      res.json({ rows, period: { from: rangeFrom, to: rangeTo } });
+    } catch (e) {
+      console.error('[CRM] channel-performance error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // PUT /api/crm/channel-targets  {source, cost_per_month, expected_leads, ...}
+  expressApp.put('/api/crm/channel-targets', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { source, cost_per_month = 0, expected_leads = 0, expected_appo_rate = 0, expected_order_rate = 0, expected_unit_price = 0 } = req.body;
+      if (!source) return res.status(400).json({ error: 'source required' });
+      await dbQuery(`
+        INSERT INTO crm_channel_targets (team_id, source, cost_per_month, expected_leads, expected_appo_rate, expected_order_rate, expected_unit_price, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+        ON CONFLICT (team_id, source) DO UPDATE SET
+          cost_per_month=EXCLUDED.cost_per_month,
+          expected_leads=EXCLUDED.expected_leads,
+          expected_appo_rate=EXCLUDED.expected_appo_rate,
+          expected_order_rate=EXCLUDED.expected_order_rate,
+          expected_unit_price=EXCLUDED.expected_unit_price,
+          updated_at=now()
+      `, [teamId, source, cost_per_month, expected_leads, expected_appo_rate, expected_order_rate, expected_unit_price]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[CRM] channel-targets PUT error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+}
+
+module.exports = { registerCrmApi, registerDailyReportApi, registerChannelTargetsApi, YOMI_OPTIONS, CONTRACT_TYPES, PAYMENT_TYPES, LOST_REASONS };

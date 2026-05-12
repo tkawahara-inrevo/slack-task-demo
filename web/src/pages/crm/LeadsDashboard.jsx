@@ -8,6 +8,69 @@ import { useEffect as useStorageEffect } from 'react';
 import { api } from '../../api/client';
 
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1'];
+
+function TargetModal({ targets, onSave, onClose }) {
+  const curYear = new Date().getFullYear();
+  const [year, setYear] = useState(curYear);
+  const [vals, setVals] = useState({});
+
+  useEffect(() => {
+    const v = {};
+    for (let m = 1; m <= 12; m++) {
+      const k = `${year}-${String(m).padStart(2,'0')}`;
+      v[m] = targets[k] || '';
+    }
+    setVals(v);
+  }, [year, targets]);
+
+  const handleSave = () => {
+    const next = { ...targets };
+    for (let m = 1; m <= 12; m++) {
+      const k = `${year}-${String(m).padStart(2,'0')}`;
+      const n = Number(vals[m]);
+      if (n > 0) next[k] = n; else delete next[k];
+    }
+    onSave(next);
+    onClose();
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', zIndex:2000 }} />
+      <div style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#fff', borderRadius:14, boxShadow:'0 8px 40px rgba(0,0,0,0.18)', zIndex:2001, width:420, maxWidth:'94vw', overflow:'hidden' }}>
+        <div style={{ padding:'16px 20px', borderBottom:'1px solid #e5e7eb', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>月次目標設定</div>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <select value={year} onChange={e => setYear(Number(e.target.value))}
+              style={{ border:'1px solid #d1d5db', borderRadius:6, padding:'4px 8px', fontSize:'0.85rem' }}>
+              {[curYear-1, curYear, curYear+1].map(y => <option key={y} value={y}>{y}年</option>)}
+            </select>
+            <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'1.2rem', cursor:'pointer', color:'#9ca3af' }}>✕</button>
+          </div>
+        </div>
+        <div style={{ padding:'16px 20px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+            {Array.from({length:12}, (_,i) => i+1).map(m => (
+              <div key={m}>
+                <div style={{ fontSize:'0.72rem', color:'#6b7280', fontWeight:600, marginBottom:4 }}>{m}月</div>
+                <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <input type="number" value={vals[m]||''} onChange={e => setVals(p => ({...p, [m]: e.target.value}))}
+                    placeholder="未設定"
+                    style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:6, padding:'5px 8px', fontSize:'0.85rem', outline:'none' }} />
+                  <span style={{ fontSize:'0.72rem', color:'#9ca3af', flexShrink:0 }}>件</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding:'12px 20px', borderTop:'1px solid #e5e7eb', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button onClick={onClose} style={{ padding:'7px 16px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#6b7280', fontSize:'0.85rem', cursor:'pointer' }}>キャンセル</button>
+          <button onClick={handleSave} style={{ padding:'7px 20px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}>保存</button>
+        </div>
+      </div>
+    </>
+  );
+}
 const fmtM = n => { if (!n) return '—'; const m = Math.round(Number(n)); return m >= 10000 ? `${Math.round(m/10000).toLocaleString()}万` : m.toLocaleString(); };
 const TICK = { fontSize: 11, fill: '#6b7280' };
 
@@ -51,12 +114,11 @@ export default function LeadsDashboard() {
   const [listLoading, setListLoading] = useState(false);
   const [drill, setDrill]       = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
-  const [targets, setTargets]   = useState(() => { try { return JSON.parse(localStorage.getItem('lead_month_targets') || '{}'); } catch { return {}; } });
-  const [editTarget, setEditTarget] = useState(false);
+  const [targets, setTargets]      = useState(() => { try { return JSON.parse(localStorage.getItem('lead_month_targets') || '{}'); } catch { return {}; } });
+  const [showTargetModal, setShowTargetModal] = useState(false);
   const monthKey = from ? from.slice(0, 7) : new Date().toISOString().slice(0, 7);
   const target = targets[monthKey] || 0;
-  const saveTarget = (v) => {
-    const next = { ...targets, [monthKey]: Number(v) || 0 };
+  const saveTargets = (next) => {
     setTargets(next);
     localStorage.setItem('lead_month_targets', JSON.stringify(next));
   };
@@ -200,21 +262,15 @@ export default function LeadsDashboard() {
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, flexWrap:'wrap' }}>
             <span style={{ fontSize:'0.8rem', fontWeight:700, color:'#374151' }}>月次目標</span>
             <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>{monthKey}</span>
-            {editTarget ? (
-              <>
-                <input type="number" defaultValue={target} id="target-input"
-                  style={{ border:'1px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:'0.85rem', width:100 }} />
-                <button onClick={() => { saveTarget(document.getElementById('target-input').value); setEditTarget(false); }}
-                  style={{ background:'#3b82f6', color:'#fff', border:'none', borderRadius:6, padding:'4px 12px', fontSize:'0.8rem', cursor:'pointer' }}>保存</button>
-                <button onClick={() => setEditTarget(false)} style={{ background:'none', border:'1px solid #d1d5db', borderRadius:6, padding:'4px 10px', fontSize:'0.8rem', cursor:'pointer', color:'#6b7280' }}>キャンセル</button>
-              </>
-            ) : (
-              <>
-                <span style={{ fontSize:'0.88rem', fontWeight:700, color:'#0f172a' }}>{target > 0 ? `${target.toLocaleString()}件` : '未設定'}</span>
-                <button onClick={() => setEditTarget(true)} style={{ background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>編集</button>
-              </>
-            )}
+            <span style={{ fontSize:'0.88rem', fontWeight:700, color:'#0f172a' }}>{target > 0 ? `${target.toLocaleString()}件` : '未設定'}</span>
+            <button onClick={() => setShowTargetModal(true)}
+              style={{ background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 12px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>
+              目標を設定
+            </button>
           </div>
+
+          {/* 目標設定モーダル */}
+          {showTargetModal && <TargetModal targets={targets} onSave={saveTargets} onClose={() => setShowTargetModal(false)} />}
 
           {/* ファネル KPI */}
           {(() => {
@@ -251,12 +307,12 @@ export default function LeadsDashboard() {
                   )}
                 </div>
 
-                {/* アポ化カード（MK最重要KPI）*/}
+                {/* アポ化済みカード（ヨミ経過フロー = 一度でもアポ化に到達）*/}
                 <div style={{ background:'#f0fdf4', border:'2px solid #86efac', borderRadius:10, padding:'14px 18px', minWidth:160, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
-                  onClick={() => openYomiDrill('apo_got', 'アポ取得済')}
+                  onClick={() => openYomiDrill('apo_got', 'アポ化済み')}
                   onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
                   onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                  <div style={{ fontSize:'0.72rem', color:'#15803d', fontWeight:700, marginBottom:4 }}>アポ化済（初回商談日あり）</div>
+                  <div style={{ fontSize:'0.72rem', color:'#15803d', fontWeight:700, marginBottom:4 }}>アポ化済み</div>
                   <div style={{ fontSize:'2rem', fontWeight:800, color:'#15803d' }}>{(data.appoTotal||0).toLocaleString()}</div>
                   <div style={{ fontSize:'0.75rem', color:'#16a34a', marginTop:2 }}>
                     {data.periodTotal > 0 ? `アポ化率 ${Math.round((data.appoTotal||0)/data.periodTotal*100)}%` : '—'}
@@ -264,8 +320,8 @@ export default function LeadsDashboard() {
                   {proj && <div style={{ fontSize:'0.7rem', color:'#4ade80', marginTop:1 }}>月末予測 {Math.round((data.appoTotal||0)/proj.ratio)}件</div>}
                 </div>
 
-                {/* ファネルカード */}
-                {data.funnel.map((f) => {
+                {/* ファネルカード（アポ取得済は削除、商談中・受注のみ）*/}
+                {data.funnel.filter(f => f.label !== 'アポ取得済').map((f) => {
                   const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
                   const yt = yomiMap[f.label];
                   return (

@@ -115,6 +115,10 @@ export default function LeadsDashboard() {
   const [drill, setDrill]       = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [targets, setTargets]      = useState(() => { try { return JSON.parse(localStorage.getItem('lead_month_targets') || '{}'); } catch { return {}; } });
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [repFilter, setRepFilter]   = useState('');
+  const [srcFilter, setSrcFilter]   = useState('');
+  const [appoOnly, setAppoOnly]     = useState(false);
   const [showTargetModal, setShowTargetModal] = useState(false);
   const monthKey = from ? from.slice(0, 7) : new Date().toISOString().slice(0, 7);
   const target = targets[monthKey] || 0;
@@ -123,10 +127,10 @@ export default function LeadsDashboard() {
     localStorage.setItem('lead_month_targets', JSON.stringify(next));
   };
 
-  const load = useCallback(async (f, t) => {
+  const load = useCallback(async (f, t, rep, src, appo) => {
     setLoading(true);
     try {
-      const d = await api.crmLeadsDashboard({ from: f, to: t, page: 1 });
+      const d = await api.crmLeadsDashboard({ from: f, to: t, page: 1, rep: rep||'', source_filter: src||'', appo_only: appo||'' });
       setData(d);
       setListData({ recent: d.recent, pagination: d.pagination });
       setPage(1);
@@ -148,17 +152,18 @@ export default function LeadsDashboard() {
   useEffect(() => {
     const { from: f, to: t } = getPreset('this_month');
     setFrom(f); setTo(t);
-    load(f, t);
+    load(f, t, '', '', false);
   }, []);
 
   const applyPreset = (key) => {
     const { from: f, to: t } = getPreset(key);
     setFrom(f); setTo(t); setActivePreset(key);
-    load(f, t);
+    load(f, t, repFilter, srcFilter, appoOnly);
   };
 
-  const handleSearch = () => { setActivePreset(null); load(from, to); };
-  const handleReset  = () => { setFrom(''); setTo(''); setActivePreset(null); load('', ''); };
+  const handleSearch = () => { setActivePreset(null); load(from, to, repFilter, srcFilter, appoOnly); };
+  const handleReset  = () => { setFrom(''); setTo(''); setRepFilter(''); setSrcFilter(''); setAppoOnly(false); setActivePreset(null); load('', '', '', '', false); };
+  const applyFilters = () => load(from, to, repFilter, srcFilter, appoOnly);
 
   const openDrill = async (source, drillType) => {
     setDrill({ source, drillType, rows: null });
@@ -254,6 +259,48 @@ export default function LeadsDashboard() {
         </div>
       </div>
 
+      {/* 絞り込みフィルター */}
+      <div style={{ marginBottom:16 }}>
+        <button onClick={() => setFilterOpen(v => !v)}
+          style={{ background: (repFilter||srcFilter||appoOnly)?'#eff6ff':'none', border:'1px solid '+(repFilter||srcFilter||appoOnly?'#3b82f6':'#e2e8f0'), borderRadius:8, padding:'5px 14px', fontSize:'0.8rem', cursor:'pointer', color: (repFilter||srcFilter||appoOnly)?'#1d4ed8':'#374151', fontWeight:600 }}>
+          絞り込み {(repFilter||srcFilter||appoOnly) ? '●' : ''} {filterOpen ? '▲' : '▼'}
+        </button>
+        {filterOpen && (
+          <div style={{ marginTop:10, background:'#fff', border:'1px solid #e2e8f0', borderRadius:10, padding:'14px 16px', display:'flex', gap:14, flexWrap:'wrap', alignItems:'flex-end' }}>
+            <div>
+              <div style={{ fontSize:'0.72rem', color:'#6b7280', fontWeight:600, marginBottom:4 }}>担当者</div>
+              <select value={repFilter} onChange={e => setRepFilter(e.target.value)}
+                style={{ border:'1px solid #d1d5db', borderRadius:6, padding:'5px 10px', fontSize:'0.82rem', minWidth:140 }}>
+                <option value="">すべて</option>
+                {(data?.byRep||[]).map(r => <option key={r.rep} value={r.rep}>{r.rep}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:'0.72rem', color:'#6b7280', fontWeight:600, marginBottom:4 }}>流入経路</div>
+              <select value={srcFilter} onChange={e => setSrcFilter(e.target.value)}
+                style={{ border:'1px solid #d1d5db', borderRadius:6, padding:'5px 10px', fontSize:'0.82rem', minWidth:140 }}>
+                <option value="">すべて</option>
+                {(data?.bySource||[]).slice(0,30).map(r => <option key={r.source} value={r.source}>{r.source}</option>)}
+              </select>
+            </div>
+            <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', fontSize:'0.82rem', color:'#374151' }}>
+              <input type="checkbox" checked={appoOnly} onChange={e => setAppoOnly(e.target.checked)} />
+              アポ化済みのみ
+            </label>
+            <button onClick={applyFilters}
+              style={{ background:'#3b82f6', color:'#fff', border:'none', borderRadius:7, padding:'6px 16px', fontSize:'0.82rem', fontWeight:600, cursor:'pointer' }}>
+              適用
+            </button>
+            {(repFilter||srcFilter||appoOnly) && (
+              <button onClick={() => { setRepFilter(''); setSrcFilter(''); setAppoOnly(false); load(from, to, '', '', false); }}
+                style={{ background:'none', border:'1px solid #d1d5db', borderRadius:7, padding:'5px 12px', fontSize:'0.8rem', cursor:'pointer', color:'#6b7280' }}>
+                リセット
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {loading && <div style={{ color: '#9ca3af', marginBottom: 16 }}>読み込み中...</div>}
 
       {data && !loading && (
@@ -343,6 +390,34 @@ export default function LeadsDashboard() {
               </div>
             );
           })()}
+
+          {/* 失注カード + 失注理由テーブル */}
+          {(data.lostTotal > 0 || data.byLostReason?.length > 0) && (
+            <div style={{ display:'grid', gridTemplateColumns:'180px 1fr', gap:16, marginBottom:20 }}>
+              <div style={{ background:'#fef2f2', border:'2px solid #fca5a5', borderRadius:10, padding:'14px 18px', cursor:'pointer' }}
+                onClick={() => openYomiDrill('lost', '失注')}
+                onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                <div style={{ fontSize:'0.72rem', color:'#dc2626', fontWeight:700, marginBottom:4 }}>失注</div>
+                <div style={{ fontSize:'2rem', fontWeight:800, color:'#dc2626' }}>{(data.lostTotal||0).toLocaleString()}</div>
+                <div style={{ fontSize:'0.75rem', color:'#ef4444', marginTop:2 }}>
+                  {data.periodTotal > 0 ? `失注率 ${Math.round((data.lostTotal||0)/data.periodTotal*100)}%` : '—'}
+                </div>
+              </div>
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
+                <div style={{ padding:'8px 14px', borderBottom:'1px solid #f1f5f9', fontSize:'0.78rem', fontWeight:700, color:'#374151' }}>失注理由</div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:6, padding:'10px 14px' }}>
+                  {(data.byLostReason||[]).map((r,i) => (
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:6, background:'#fef2f2', borderRadius:20, padding:'3px 10px' }}>
+                      <span style={{ fontSize:'0.75rem', color:'#dc2626', fontWeight:600 }}>{r.reason}</span>
+                      <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>{r.cnt}件</span>
+                    </div>
+                  ))}
+                  {(!data.byLostReason?.length) && <span style={{ fontSize:'0.78rem', color:'#d1d5db' }}>データなし</span>}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 統計サマリー */}
           {data.stats && (

@@ -212,7 +212,7 @@ export const api = {
 
   // CRM: Pipeline summary
   crmLeadsDashboard: (params = {}) => {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))).toString();
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== '' && v !== false))).toString();
     return crmFetch(`/leads-dashboard${qs ? '?' + qs : ''}`);
   },
   crmLeadsYomiDrill: (yomiType, from, to) => {

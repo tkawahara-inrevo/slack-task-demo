@@ -1713,37 +1713,60 @@ function registerCrmApi({ expressApp, authWithRole }) {
                  SELECT 1 FROM kintone_cache k2
                  WHERE k2.data->>'顧客' = kc.data->>'顧客'
                    AND k2.data->>'ヨミ_経過フロー' LIKE '%アポ化済商談前%'
-               ) AS has_appo
+               ) AS has_appo,
+               (SELECT k2.data->>'ヨミ'
+                FROM kintone_cache k2
+                WHERE k2.data->>'顧客' = kc.data->>'顧客'
+                  AND (k2.data->>'ヨミ' = '失注' OR k2.data->>'ヨミ' LIKE '失注%')
+                LIMIT 1) IS NOT NULL AS has_lost,
+               (SELECT NULLIF(k2.data->>'失注理由','')
+                FROM kintone_cache k2
+                WHERE k2.data->>'顧客' = kc.data->>'顧客'
+                  AND k2.data->>'失注理由' IS NOT NULL AND k2.data->>'失注理由' != ''
+                LIMIT 1) AS lost_reason
         FROM kintone_cache kc
         WHERE kc.data->>'顧客' IS NOT NULL AND kc.data->>'ヨミ' IS NOT NULL
           AND kc.data->>'顧客' != ''
         ORDER BY kc.data->>'顧客', COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム') ASC
       `;
+      // 追加フィルター（担当者・流入経路・アポ化済みのみ）
+      const repFilter   = req.query.rep || '';
+      const srcFilter   = req.query.source_filter || '';
+      const appoOnly    = req.query.appo_only === 'true';
+      const extraParams = [];
+      let extraCond = '';
+      if (repFilter)  { extraParams.push(repFilter);  extraCond += ` AND rep = $${params.length + extraParams.length}`; }
+      if (srcFilter)  { extraParams.push(srcFilter);  extraCond += ` AND source = $${params.length + extraParams.length}`; }
+      if (appoOnly)   { extraCond += ` AND has_appo = TRUE`; }
+      const allParams = [...params, ...extraParams];
+
       const customerDateFilter = `
         AND (
           (inflow_date IS NOT NULL AND inflow_date != '' AND inflow_date::date BETWEEN $1::date AND $2::date)
-        )
+        )${extraCond}
       `;
 
-      const [funnelR, sourceR, trendAllR, recentR, totalR, prevTotalR, trend12R, appoSourceR, orderSourceR] = await Promise.all([
+      const lp = allParams.length; // LIMITのパラメータ位置計算用
+
+      const [funnelR, sourceR, trendAllR, recentR, totalR, prevTotalR, trend12R, appoSourceR, orderSourceR, lostReasonR] = await Promise.all([
         // ファネル（顧客ベース・期間フィルター）
         dbQuery(`
           WITH base AS (${customerBase})
           SELECT COALESCE(NULLIF(yomi,''), '不明') AS yomi, COUNT(*)::int AS cnt
           FROM base WHERE 1=1 ${customerDateFilter}
           GROUP BY yomi ORDER BY cnt DESC
-        `, params),
+        `, allParams),
 
         // 流入経路別（顧客ベース・失注数含む・文字化け除外）
         dbQuery(`
           WITH base AS (${customerBase})
           SELECT source,
                  COUNT(*)::int AS cnt,
-                 COUNT(*) FILTER (WHERE yomi LIKE '失注%' OR yomi = '失注')::int AS lost_cnt
+                 COUNT(*) FILTER (WHERE has_lost)::int AS lost_cnt
           FROM base WHERE 1=1 ${customerDateFilter}
             AND source NOT LIKE '%' || chr(65533) || '%'
           GROUP BY source ORDER BY cnt DESC
-        `, params),
+        `, allParams),
 
         // 月次推移（顧客ベース・直近12ヶ月・アポ化数を含む）
         dbQuery(`
@@ -1762,16 +1785,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
           SELECT customer, yomi, source, rep, inflow_date
           FROM base WHERE 1=1 ${customerDateFilter}
           ORDER BY inflow_date DESC NULLS LAST
-          LIMIT $3 OFFSET $4
-        `, [...params, limit, offset]),
+          LIMIT $${lp+1} OFFSET $${lp+2}
+        `, [...allParams, limit, offset]),
 
-        // 総件数 + アポ化数（顧客ベース）
+        // 総件数 + アポ化数 + 失注数（顧客ベース）
         dbQuery(`
           WITH base AS (${customerBase})
           SELECT COUNT(*)::int AS total,
-                 COUNT(*) FILTER (WHERE has_appo)::int AS appo
+                 COUNT(*) FILTER (WHERE has_appo)::int AS appo,
+                 COUNT(*) FILTER (WHERE has_lost)::int AS lost
           FROM base WHERE 1=1 ${customerDateFilter}
-        `, params),
+        `, allParams),
 
         // 前期間件数（顧客ベース）
         dbQuery(`
@@ -1798,7 +1822,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
             AND yomi_flow LIKE '%アポ化済商談前%'
             AND source NOT LIKE '%' || chr(65533) || '%'
           GROUP BY source ORDER BY cnt DESC LIMIT 15
-        `, params),
+        `, allParams),
 
         // 受注につながった流入経路（顧客ベース）
         dbQuery(`
@@ -1808,7 +1832,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
             AND order_date IS NOT NULL AND order_date != ''
             AND source NOT LIKE '%' || chr(65533) || '%'
           GROUP BY source ORDER BY cnt DESC LIMIT 15
-        `, params),
+        `, allParams),
+
+        // 失注理由内訳
+        dbQuery(`
+          WITH base AS (${customerBase})
+          SELECT COALESCE(NULLIF(lost_reason,''), '理由不明') AS reason, COUNT(*)::int AS cnt
+          FROM base WHERE 1=1 ${customerDateFilter}
+            AND has_lost = TRUE
+          GROUP BY reason ORDER BY cnt DESC LIMIT 10
+        `, allParams),
       ]);
 
       // ファネル集計（ヨミ値は説明付き "E 5％ (〜)" 形式なので先頭文字で判定）
@@ -1824,13 +1857,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const periodTotal = funnelR.rows.reduce((s, r) => s + r.cnt, 0);
       const funnel = [
         { label: 'アポ化前',  cnt: cntApoBefore },
-        { label: 'アポ取得済', cnt: cntApoGot },
-        { label: '商談中',    cnt: cntDeal },
         { label: '受注',      cnt: cntOrder },
       ];
 
       const currentTotal = totalR.rows[0]?.total || 0;
-      const appoTotal = totalR.rows[0]?.appo || 0;
+      const appoTotal    = totalR.rows[0]?.appo  || 0;
+      const lostTotal    = totalR.rows[0]?.lost  || 0;
       const prevTotal    = prevTotalR.rows[0]?.total || 0;
       const avg12 = trend12R.rows.length > 0
         ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
@@ -1908,6 +1940,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
         funnel,
         periodTotal,
         appoTotal,
+        lostTotal,
+        byLostReason: lostReasonR.rows,
+        filterOptions: { reps: [], sources: [] }, // フロントのドロップダウン用（別途実装可）
         stats: {
           current:  currentTotal,
           prev:     prevTotal,

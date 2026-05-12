@@ -296,7 +296,7 @@ export default function LeadsDashboard() {
       <div style={{ marginBottom: 16, display:'flex', alignItems:'center', gap:16 }}>
         <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#111827' }}>リード管理</h2>
         <div style={{ display:'flex', gap:4 }}>
-          {[{key:'dashboard',label:'ダッシュボード'},{key:'channels',label:'チャンネル管理'}].map(t => (
+          {[{key:'dashboard',label:'ダッシュボード'},{key:'channels',label:'流入経路管理'}].map(t => (
             <button key={t.key} onClick={() => handleTabChange(t.key)} style={{
               padding:'4px 14px', borderRadius:20, fontSize:'0.8rem', fontWeight:600, cursor:'pointer', border:'none',
               background: activeTab===t.key ? '#1e293b' : '#f1f5f9',
@@ -855,7 +855,7 @@ export default function LeadsDashboard() {
             return (
               <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
                 <div style={{ padding:'12px 16px', borderBottom:'1px solid #f3f4f6', display:'flex', alignItems:'center', gap:10 }}>
-                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>チャンネル別パフォーマンス</span>
+                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>流入経路別パフォーマンス</span>
                   <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>青字行は編集可 / フォーカスを外すと自動保存</span>
                   <button onClick={() => loadChannels(from, to)} style={{ marginLeft:'auto', background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'3px 10px', fontSize:'0.75rem', cursor:'pointer', color:'#6b7280' }}>
                     再読み込み

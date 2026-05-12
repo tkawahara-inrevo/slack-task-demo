@@ -2018,8 +2018,19 @@ function registerChannelTargetsApi({ expressApp, authWithRole }) {
       const targetMap = {};
       for (const t of targetsR.rows) targetMap[t.source] = t;
 
-      // マージ: targets に登録されているが実績がないチャンネルも含める
+      // kintone 全期間の流入経路一覧（期間フィルターなし）
+      const allSourcesR = await dbQuery(`
+        SELECT DISTINCT data->>'流入経路' AS source
+        FROM kintone_cache
+        WHERE app_id = '102'
+          AND data->>'流入経路' IS NOT NULL AND data->>'流入経路' != ''
+          AND data->>'流入経路' NOT LIKE '%' || chr(65533) || '%'
+        ORDER BY source
+      `, []);
+
+      // マージ: kintone全流入経路 + 期間内実績 + 目標設定
       const sources = new Set([
+        ...allSourcesR.rows.map(r => r.source),
         ...actualsR.rows.map(r => r.source),
         ...targetsR.rows.map(r => r.source),
       ]);

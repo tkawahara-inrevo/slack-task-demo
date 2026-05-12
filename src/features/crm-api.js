@@ -1857,22 +1857,18 @@ function registerCrmApi({ expressApp, authWithRole }) {
       // yomiTypeによるドリルダウン（KPIカードクリック用）
       const yomiType = req.query.yomiType;
       if (yomiType) {
+        // customerBaseを使って正確な期間フィルター適用（流入日ベースで絞る）
         const ymCond =
-          yomiType === 'apo_before' ? `AND (data->>'ヨミ' = 'アポ化前' OR data->>'ヨミ' LIKE 'アポ化前%')`
-          : yomiType === 'apo_got'  ? `AND (data->>'ヨミ' = 'アポ化済商談前' OR data->>'ヨミ' LIKE 'アポ化済%')`
-          : yomiType === 'in_deal'  ? `AND data->>'ヨミ' SIMILAR TO '(E|D|C|B|A|S) [0-9]%'`
-          : yomiType === 'order'    ? `AND (data->>'ヨミ' = '受注' OR data->>'ヨミ' = '受注済み' OR data->>'ヨミ' LIKE '受注%')`
+          yomiType === 'apo_before' ? `AND (yomi = 'アポ化前' OR yomi LIKE 'アポ化前%')`
+          : yomiType === 'apo_got'  ? `AND has_appo = TRUE`
+          : yomiType === 'in_deal'  ? `AND yomi SIMILAR TO '(E|D|C|B|A|S) [0-9]%'`
+          : yomiType === 'order'    ? `AND (yomi = '受注' OR yomi = '受注済み' OR yomi LIKE '受注%')`
           : '';
         const drillR = await dbQuery(`
-          SELECT DISTINCT ON (data->>'顧客') data->>'顧客' AS customer,
-            data->>'ヨミ' AS yomi,
-            COALESCE(NULLIF(data->>'流入経路',''), '不明') AS source,
-            split_part(COALESCE(NULLIF(data->>'ヨミ_経過フロー',''), data->>'ヨミ'), ', ', 1) AS first_yomi,
-            COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') AS inflow_date,
-            COALESCE(NULLIF(data->>'商談獲得者',''), data->>'担当営業_0') AS rep
-          FROM kintone_cache
-          WHERE data->>'ヨミ' IS NOT NULL ${dateFilter} ${ymCond}
-          ORDER BY data->>'顧客', COALESCE(NULLIF(data->>'流入日',''), data->>'商談獲得日_マーケチーム') ASC
+          WITH base AS (${customerBase})
+          SELECT customer, yomi, source, inflow_date, rep
+          FROM base WHERE 1=1 ${customerDateFilter} ${ymCond}
+          ORDER BY inflow_date DESC NULLS LAST
           LIMIT 200
         `, params);
         return res.json({ drilldown: drillR.rows, source: yomiType });

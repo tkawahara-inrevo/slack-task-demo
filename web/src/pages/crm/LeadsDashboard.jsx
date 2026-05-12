@@ -320,16 +320,21 @@ export default function LeadsDashboard() {
                   {proj && <div style={{ fontSize:'0.7rem', color:'#4ade80', marginTop:1 }}>月末予測 {Math.round((data.appoTotal||0)/proj.ratio)}件</div>}
                 </div>
 
-                {/* ファネルカード（アポ取得済は削除、商談中・受注のみ）*/}
+                {/* ファネルカード（アポ化前・商談中・受注）*/}
                 {data.funnel.filter(f => f.label !== 'アポ取得済').map((f) => {
                   const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
                   const yt = yomiMap[f.label];
+                  // 商談中・受注はアポ化済みに含まれるため ※を付ける
+                  const isSubset = f.label === '商談中' || f.label === '受注';
                   return (
                     <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:130, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
                       onClick={() => yt && openYomiDrill(yt, f.label)}
                       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
-                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>{f.label}</div>
+                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
+                      title={isSubset ? 'アポ化済みの内数' : ''}>
+                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>
+                        {f.label}{isSubset && <span style={{ fontSize:'0.65rem', color:'#10b981', marginLeft:4 }}>（アポ化済み内数）</span>}
+                      </div>
                       <div style={{ fontSize:'2rem', fontWeight:800, color: YOMI_COLOR[f.label] || '#374151' }}>{f.cnt.toLocaleString()}</div>
                       <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{rate}%</div>
                     </div>
@@ -358,7 +363,7 @@ export default function LeadsDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="month" tick={TICK} />
                 <YAxis tick={TICK} allowDecimals={false} />
-                <Tooltip formatter={(v, n) => [`${v}件`, n === 'cnt' ? '全リード' : 'アポ化済']} />
+                <Tooltip formatter={(v, n) => [`${v}件`, n]} />
                 {data.stats?.avg12 > 0 && (
                   <ReferenceLine y={data.stats.avg12} stroke="#f59e0b" strokeDasharray="4 3"
                     label={{ value: `平均 ${data.stats.avg12}`, fill: '#f59e0b', fontSize: 11, position: 'right' }} />

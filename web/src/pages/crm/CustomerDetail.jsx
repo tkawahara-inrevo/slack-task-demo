@@ -1038,6 +1038,7 @@ export default function CustomerDetail() {
                   {customer.prefecture && <span style={{ background:'#f8fafc', color:'#475569', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid #e2e8f0' }}>{customer.prefecture}</span>}
                   {customer.employee_count && <span style={{ background:'#f8fafc', color:'#475569', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid #e2e8f0' }}>{customer.employee_count}名</span>}
                   {customer.inflow_source && <span style={{ background:'#eff6ff', color:'#1d4ed8', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', fontWeight:600 }}>{customer.inflow_source}</span>}
+                  {customer.inflow_date && <span style={{ background:'#f1f5f9', color:'#475569', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid #e2e8f0' }}>流入日: {customer.inflow_date}</span>}
                   {customer.website && <a href={customer.website} target="_blank" rel="noreferrer" style={{ color:'#6366f1', fontSize:'0.78rem', textDecoration:'none', fontWeight:500 }}>{customer.website}</a>}
                 </div>
               </div>

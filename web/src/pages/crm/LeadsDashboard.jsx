@@ -328,7 +328,8 @@ export default function LeadsDashboard() {
             const achievement = target > 0 ? Math.round(data.periodTotal / target * 100) : null;
             const yomiMap = { 'アポ化前':'apo_before','アポ取得済':'apo_got','商談中':'in_deal','受注':'order' };
             return (
-              <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
+              <>
+              <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom: data.byLostReason?.length > 0 ? 6 : 20 }}>
                 {/* 期間内合計 */}
                 <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:160, flex:1, cursor:'pointer' }}
                   onClick={() => openYomiDrill('all', '全件')}
@@ -422,6 +423,7 @@ export default function LeadsDashboard() {
                   ))}
                 </div>
               )}
+              </>
             );
           })()}
 

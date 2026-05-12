@@ -678,9 +678,6 @@ function registerCrmApi({ expressApp, authWithRole }) {
         const si = salesUser ? 3 : 2;
         const baseP = salesUser ? [teamId, salesUser, start, end] : [teamId, start, end];
 
-        // アライアンスフィルター（特定担当者指定時はスキップ）
-        const allianceWhere = !salesUser ? ` AND ${allianceExclude}` : '';
-
         const [wonRes, meetingRes, payRes, alliancePayRes] = await Promise.all([
           // 受注件数・金額
           dbQuery(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(d.initial_fee),0)::bigint AS amount
@@ -690,14 +687,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
           dbQuery(`SELECT COUNT(*)::int AS cnt FROM deals d
             WHERE d.team_id=$1${pf}
             AND d.first_meeting_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 入金額 & インセン（アライアンス除外）
-          dbQuery(`SELECT COALESCE(SUM(kp.amount),0)::bigint AS total_amount,
-                          COALESCE(SUM(kp.incentive_amount),0)::bigint AS incentive_amount
+          // 入金額（全員込み） & インセン（KPI用・アライアンス除外）
+          // ※ 入金額はアライアンス/リファラル含む実際の入金総額、インセンはチームKPI計算用
+          dbQuery(`SELECT
+              COALESCE(SUM(kp.amount),0)::bigint AS total_amount,
+              COALESCE(SUM(kp.incentive_amount) FILTER (WHERE ${!salesUser ? allianceExclude : 'TRUE'}),0)::bigint AS incentive_amount
             FROM kintone_payments kp
             WHERE kp.payment_date BETWEEN $1::date AND $2::date
-            ${salesUser ? `AND kp.staff=$3` : allianceWhere}`,
+            ${salesUser ? `AND kp.staff=$3` : ''}`,
             salesUser ? [start, end, salesUser] : [start, end]),
-          // アライアンスのインセン（担当者フィルターなし時のみ）
+          // アライアンスのインセン（担当者フィルターなし時のみ・参考値）
           !salesUser ? dbQuery(`SELECT COALESCE(SUM(kp.incentive_amount),0)::bigint AS incentive_amount
             FROM kintone_payments kp
             WHERE kp.payment_date BETWEEN $1::date AND $2::date
@@ -831,9 +830,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
-      // プラン別入金内訳（1顧客=1件でカウント、担当者フィルタ対応）
-      // ※ allianceExclude と同一条件で絞る（入金額カードとの合計一致のため）
-      const allianceExcludeNoAlias = ALLIANCE_REPS.map(n => `staff NOT ILIKE '%${n}%'`).join(' AND ');
+      // プラン別入金内訳（アライアンス・リファラル含む全員）
       const planBreakdownRes = await dbQuery(`
         SELECT COALESCE(plan, '未設定') AS plan,
                COUNT(DISTINCT company)::int AS cnt,
@@ -841,7 +838,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
           AND amount > 0
-          ${salesUser ? 'AND staff=$3' : `AND (${allianceExcludeNoAlias})`}
+          ${salesUser ? 'AND staff=$3' : ''}
         GROUP BY 1 ORDER BY amount DESC
       `, salesUser ? [rangeStart, rangeEnd, salesUser] : [rangeStart, rangeEnd]);
 

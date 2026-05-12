@@ -354,8 +354,23 @@ export default function LeadsDashboard() {
                   )}
                 </div>
 
-                {/* アポ化済みカード（ヨミ経過フロー = 一度でもアポ化に到達）*/}
-                <div style={{ background:'#f0fdf4', border:'2px solid #86efac', borderRadius:10, padding:'14px 18px', minWidth:160, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                {/* アポ化前カード */}
+                {data.funnel.filter(f => f.label === 'アポ化前').map((f) => {
+                  const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
+                  return (
+                    <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:120, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                      onClick={() => openYomiDrill('apo_before', f.label)}
+                      onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>アポ化前</div>
+                      <div style={{ fontSize:'2rem', fontWeight:800, color:'#94a3b8' }}>{f.cnt.toLocaleString()}</div>
+                      <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{rate}%</div>
+                    </div>
+                  );
+                })}
+
+                {/* アポ化済みカード */}
+                <div style={{ background:'#f0fdf4', border:'2px solid #86efac', borderRadius:10, padding:'14px 18px', minWidth:150, flex:1.2, cursor:'pointer', transition:'box-shadow 0.15s' }}
                   onClick={() => openYomiDrill('apo_got', 'アポ化済み')}
                   onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
                   onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
@@ -367,65 +382,62 @@ export default function LeadsDashboard() {
                   {proj && <div style={{ fontSize:'0.7rem', color:'#4ade80', marginTop:1 }}>月末予測 {Math.round((data.appoTotal||0)/proj.ratio)}件</div>}
                 </div>
 
-                {/* ファネルカード（アポ化前・商談中・受注）*/}
-                {data.funnel.filter(f => f.label !== 'アポ取得済').map((f) => {
+                {/* 失注カード */}
+                <div style={{ background:'#fef2f2', border:'2px solid #fca5a5', borderRadius:10, padding:'14px 18px', minWidth:120, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                  onClick={() => openYomiDrill('lost', '失注')}
+                  onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
+                  onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                  <div style={{ fontSize:'0.72rem', color:'#dc2626', fontWeight:700, marginBottom:4 }}>失注</div>
+                  <div style={{ fontSize:'2rem', fontWeight:800, color:'#dc2626' }}>{(data.lostTotal||0).toLocaleString()}</div>
+                  <div style={{ fontSize:'0.75rem', color:'#ef4444', marginTop:2 }}>
+                    {data.periodTotal > 0 ? `失注率 ${Math.round((data.lostTotal||0)/data.periodTotal*100)}%` : '—'}
+                  </div>
+                </div>
+
+                {/* 受注カード */}
+                {data.funnel.filter(f => f.label === '受注').map((f) => {
                   const rate = data.periodTotal > 0 ? Math.round(f.cnt / data.periodTotal * 100) : 0;
-                  const yt = yomiMap[f.label];
-                  // 商談中・受注はアポ化済みに含まれるため ※を付ける
-                  const isSubset = f.label === '商談中' || f.label === '受注';
                   return (
-                    <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:130, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
-                      onClick={() => yt && openYomiDrill(yt, f.label)}
+                    <div key={f.label} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'14px 18px', minWidth:120, flex:1, cursor:'pointer', transition:'box-shadow 0.15s' }}
+                      onClick={() => openYomiDrill('order', f.label)}
                       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
-                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
-                      title={isSubset ? 'アポ化済みの内数' : ''}>
-                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>
-                        {f.label}{isSubset && <span style={{ fontSize:'0.65rem', color:'#10b981', marginLeft:4 }}>（アポ化済み内数）</span>}
-                      </div>
-                      <div style={{ fontSize:'2rem', fontWeight:800, color: YOMI_COLOR[f.label] || '#374151' }}>{f.cnt.toLocaleString()}</div>
+                      onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+                      <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:4 }}>受注<span style={{ fontSize:'0.62rem', color:'#10b981', marginLeft:4 }}>（アポ化済み内数）</span></div>
+                      <div style={{ fontSize:'2rem', fontWeight:800, color:'#10b981' }}>{f.cnt.toLocaleString()}</div>
                       <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{rate}%</div>
                     </div>
                   );
                 })}
               </div>
+
+              {/* 失注理由タグ（カード行の下に） */}
+              {(data.byLostReason?.length > 0) && (
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8, alignItems:'center' }}>
+                  <span style={{ fontSize:'0.72rem', color:'#dc2626', fontWeight:600 }}>失注理由:</span>
+                  {data.byLostReason.map((r,i) => (
+                    <div key={i} style={{ background:'#fef2f2', borderRadius:20, padding:'2px 9px', display:'flex', gap:5, alignItems:'center' }}>
+                      <span style={{ fontSize:'0.73rem', color:'#dc2626', fontWeight:600 }}>{r.reason}</span>
+                      <span style={{ fontSize:'0.68rem', color:'#9ca3af' }}>{r.cnt}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             );
           })()}
 
-          {/* 失注カード + 失注理由テーブル（常時表示）*/}
-          {true && (
-            <div style={{ display:'grid', gridTemplateColumns:'180px 1fr', gap:16, marginBottom:20 }}>
-              <div style={{ background:'#fef2f2', border:'2px solid #fca5a5', borderRadius:10, padding:'14px 18px', cursor:'pointer' }}
-                onClick={() => openYomiDrill('lost', '失注')}
-                onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'}
-                onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                <div style={{ fontSize:'0.72rem', color:'#dc2626', fontWeight:700, marginBottom:4 }}>失注</div>
-                <div style={{ fontSize:'2rem', fontWeight:800, color:'#dc2626' }}>{(data.lostTotal||0).toLocaleString()}</div>
-                <div style={{ fontSize:'0.75rem', color:'#ef4444', marginTop:2 }}>
-                  {data.periodTotal > 0 ? `失注率 ${Math.round((data.lostTotal||0)/data.periodTotal*100)}%` : '—'}
-                </div>
-              </div>
-              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden' }}>
-                <div style={{ padding:'8px 14px', borderBottom:'1px solid #f1f5f9', fontSize:'0.78rem', fontWeight:700, color:'#374151' }}>失注理由</div>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:6, padding:'10px 14px' }}>
-                  {(data.byLostReason||[]).map((r,i) => (
-                    <div key={i} style={{ display:'flex', alignItems:'center', gap:6, background:'#fef2f2', borderRadius:20, padding:'3px 10px' }}>
-                      <span style={{ fontSize:'0.75rem', color:'#dc2626', fontWeight:600 }}>{r.reason}</span>
-                      <span style={{ fontSize:'0.72rem', color:'#9ca3af' }}>{r.cnt}件</span>
-                    </div>
-                  ))}
-                  {(!data.byLostReason?.length) && <span style={{ fontSize:'0.78rem', color:'#d1d5db' }}>データなし</span>}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 統計サマリー */}
+          {/* 月平均（全リード・アポ化済み） */}
           {data.stats && (
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 18px' }}>
-                <div style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: 2 }}>月平均（直近12ヶ月）</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{data.stats.avg12}件/月</div>
+            <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginBottom:20 }}>
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'12px 18px' }}>
+                <div style={{ fontSize:'0.72rem', color:'#6b7280', marginBottom:2 }}>月平均・全リード（直近12ヶ月）</div>
+                <div style={{ fontSize:'1.4rem', fontWeight:800, color:'#374151' }}>{data.stats.avg12}件/月</div>
               </div>
+              {data.avg12Appo > 0 && (
+                <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'12px 18px' }}>
+                  <div style={{ fontSize:'0.72rem', color:'#15803d', marginBottom:2 }}>月平均・アポ化済み（直近12ヶ月）</div>
+                  <div style={{ fontSize:'1.4rem', fontWeight:800, color:'#15803d' }}>{data.avg12Appo}件/月</div>
+                </div>
+              )}
             </div>
           )}
 
@@ -438,7 +450,16 @@ export default function LeadsDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="month" tick={TICK} />
                 <YAxis tick={TICK} allowDecimals={false} />
-                <Tooltip formatter={(v, n) => [`${v}件`, n]} />
+                <Tooltip content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const sorted = [...payload].sort((a, b) => b.value - a.value);
+                  return (
+                    <div style={{ background:'#fff', border:'1px solid #e5e7eb', padding:'8px 12px', borderRadius:8, fontSize:'0.8rem' }}>
+                      <div style={{ fontWeight:700, marginBottom:4, color:'#374151' }}>{label}</div>
+                      {sorted.map((p, i) => <div key={i} style={{ color: p.color }}>{p.name}: {p.value.toLocaleString()}件</div>)}
+                    </div>
+                  );
+                }} />
                 {data.stats?.avg12 > 0 && (
                   <ReferenceLine y={data.stats.avg12} stroke="#f59e0b" strokeDasharray="4 3"
                     label={{ value: `平均 ${data.stats.avg12}`, fill: '#f59e0b', fontSize: 11, position: 'right' }} />
@@ -450,94 +471,78 @@ export default function LeadsDashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* 流入経路: 円グラフ + 失注率テーブル */}
+          {/* 流入経路別 総合テーブル（円グラフ廃止）*/}
           {(() => {
             const total = data.bySource.reduce((s, r) => s + r.cnt, 0);
             const srcData = data.bySource.map(r => ({
               ...r,
-              pct:      total > 0 ? Math.round(r.cnt / total * 100) : 0,
-              lost_rate: r.cnt > 0 ? Math.round(r.lost_cnt / r.cnt * 100) : 0,
+              pct:       total > 0 ? Math.round(r.cnt / total * 100) : 0,
+              appo_rate: r.cnt > 0 ? Math.round((r.appo_cnt||0) / r.cnt * 100) : 0,
+              order_rate:r.cnt > 0 ? Math.round((r.order_cnt||0) / r.cnt * 100) : 0,
+              lost_rate: r.cnt > 0 ? Math.round((r.lost_cnt||0) / r.cnt * 100) : 0,
             }));
-            const top10 = srcData.slice(0, 10);
-            const othersTotal = srcData.slice(10).reduce((s, r) => s + r.cnt, 0);
-            const pieData = othersTotal > 0 ? [...top10, { source: 'その他', cnt: othersTotal, pct: Math.round(othersTotal / total * 100) }] : top10;
-
             return (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
-                {/* 円グラフ */}
-                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px 12px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8, paddingLeft: 8 }}>
-                    流入経路 <span style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 400 }}>クリックで詳細</span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
-                      <Pie data={pieData} dataKey="cnt" nameKey="source" cx="50%" cy="50%" outerRadius={85}
-                        label={({ percent }) => percent > 0.05 ? `${(percent*100).toFixed(0)}%` : ''}
-                        labelLine style={{ cursor: 'pointer' }}
-                        onClick={d => d?.source && d.source !== 'その他' && openDrill(d.source)}>
-                        {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip formatter={(v, n) => [`${v}件`, n]} />
-                      <Legend wrapperStyle={{ fontSize: '0.7rem' }} layout="vertical" align="right" verticalAlign="middle" />
-                    </PieChart>
-                  </ResponsiveContainer>
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:20 }}>
+                <div style={{ padding:'12px 16px', borderBottom:'1px solid #f3f4f6', fontWeight:700, fontSize:'0.85rem' }}>
+                  流入経路別 <span style={{ fontSize:'0.72rem', color:'#9ca3af', fontWeight:400 }}>クリックで詳細</span>
                 </div>
-
-                {/* 失注率テーブル */}
-                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', fontWeight: 700, fontSize: '0.85rem' }}>
-                    流入経路別 失注率
-                  </div>
-                  <div style={{ overflowY: 'auto', maxHeight: 320 }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
-                      <thead>
-                        <tr style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
-                          {['経路', '件数', '割合', '失注数', '失注率'].map(h => (
-                            <th key={h} style={{ padding: '7px 10px', textAlign: h === '経路' ? 'left' : 'right', fontWeight: 600, color: '#64748b', fontSize: '0.7rem', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {srcData.map((r, i) => (
-                          <tr key={i} onClick={() => openDrill(r.source)}
-                            style={{ borderBottom: '1px solid #f8fafc', cursor: 'pointer', background: i%2===0?'#fff':'#fafafa' }}
-                            onMouseEnter={e => e.currentTarget.style.background='#eff6ff'}
-                            onMouseLeave={e => e.currentTarget.style.background=i%2===0?'#fff':'#fafafa'}>
-                            <td style={{ padding: '6px 10px', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.source}</td>
-                            <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600 }}>{r.cnt}</td>
-                            <td style={{ padding: '6px 10px', textAlign: 'right', color: '#6b7280' }}>{r.pct}%</td>
-                            <td style={{ padding: '6px 10px', textAlign: 'right', color: '#ef4444' }}>{r.lost_cnt}</td>
-                            <td style={{ padding: '6px 10px', textAlign: 'right' }}>
-                              <span style={{ color: r.lost_rate >= 50 ? '#ef4444' : r.lost_rate >= 30 ? '#f59e0b' : '#6b7280', fontWeight: r.lost_rate >= 30 ? 600 : 400 }}>
-                                {r.lost_rate}%
-                              </span>
-                            </td>
-                          </tr>
+                <div style={{ overflowY:'auto', maxHeight:360 }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.78rem' }}>
+                    <thead>
+                      <tr style={{ background:'#f8fafc', position:'sticky', top:0 }}>
+                        {['経路','件数','割合','アポ化数','アポ化率','受注数','受注率','失注数','失注率'].map(h => (
+                          <th key={h} style={{ padding:'7px 10px', textAlign:h==='経路'?'left':'right', fontWeight:600, color:'#64748b', fontSize:'0.68rem', borderBottom:'1px solid #e5e7eb', whiteSpace:'nowrap' }}>{h}</th>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {srcData.map((r, i) => (
+                        <tr key={i} onClick={() => openDrill(r.source)}
+                          style={{ borderBottom:'1px solid #f8fafc', cursor:'pointer', background:i%2===0?'#fff':'#fafafa' }}
+                          onMouseEnter={e => e.currentTarget.style.background='#eff6ff'}
+                          onMouseLeave={e => e.currentTarget.style.background=i%2===0?'#fff':'#fafafa'}>
+                          <td style={{ padding:'6px 10px', maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.source}</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', fontWeight:600 }}>{r.cnt}</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:'#6b7280' }}>{r.pct}%</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:'#3b82f6' }}>{r.appo_cnt||0}</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:'#3b82f6', fontWeight:600 }}>{r.appo_rate}%</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:'#10b981' }}>{r.order_cnt||0}</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:'#10b981', fontWeight:600 }}>{r.order_rate}%</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right', color:'#ef4444' }}>{r.lost_cnt||0}</td>
+                          <td style={{ padding:'6px 10px', textAlign:'right' }}>
+                            <span style={{ color:r.lost_rate>=50?'#ef4444':r.lost_rate>=30?'#f59e0b':'#6b7280', fontWeight:r.lost_rate>=30?600:400 }}>{r.lost_rate}%</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             );
           })()}
 
-          {/* アポ化・受注 統合グラフ */}
+          {/* アポ化・受注・失注 統合グラフ */}
           {(() => {
-            const sources = new Set([...(data.appoBySource||[]).map(r=>r.source), ...(data.orderBySource||[]).map(r=>r.source)]);
+            const sources = new Set([
+              ...(data.appoBySource||[]).map(r=>r.source),
+              ...(data.orderBySource||[]).map(r=>r.source),
+              ...(data.bySource||[]).filter(r=>r.lost_cnt>0).map(r=>r.source),
+            ]);
             const merged = Array.from(sources).map(src => ({
               source: src,
-              appo: data.appoBySource?.find(r=>r.source===src)?.cnt || 0,
+              appo:  data.appoBySource?.find(r=>r.source===src)?.cnt || 0,
               order: data.orderBySource?.find(r=>r.source===src)?.cnt || 0,
-            })).sort((a,b) => (b.appo+b.order)-(a.appo+a.order)).slice(0,15);
+              lost:  data.bySource?.find(r=>r.source===src)?.lost_cnt || 0,
+            })).sort((a,b) => (b.appo+b.order+b.lost)-(a.appo+a.order+a.lost)).slice(0,15);
             return (
               <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'16px 12px', marginBottom:20 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, paddingLeft:8 }}>
-                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>アポ化・受注につながった流入経路</span>
+                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>アポ化・受注・失注 流入経路別</span>
                   <span style={{ fontSize:'0.7rem', color:'#9ca3af' }}>クリックで詳細</span>
                   <div style={{ marginLeft:'auto', display:'flex', gap:12, fontSize:'0.72rem' }}>
                     <span><span style={{ display:'inline-block', width:10, height:10, background:'#3b82f6', borderRadius:2, marginRight:4 }}/>アポ化</span>
                     <span><span style={{ display:'inline-block', width:10, height:10, background:'#10b981', borderRadius:2, marginRight:4 }}/>受注</span>
+                    <span><span style={{ display:'inline-block', width:10, height:10, background:'#ef4444', borderRadius:2, marginRight:4 }}/>失注</span>
                   </div>
                 </div>
                 {merged.length === 0
@@ -554,12 +559,15 @@ export default function LeadsDashboard() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
                         <XAxis type="number" tick={TICK} allowDecimals={false} />
                         <YAxis type="category" dataKey="source" tick={{ fontSize:11, fill:'#6b7280' }} width={130} />
-                        <Tooltip formatter={(v, n) => [`${v}件`, n === 'appo' ? 'アポ化' : '受注']} cursor={{ fill:'#f8fafc' }} />
-                        <Bar dataKey="appo" fill="#3b82f6" radius={[0,0,0,0]} name="appo" barSize={10}>
-                          <LabelList dataKey="appo" position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
+                        <Tooltip formatter={(v, n) => [`${v}件`, n === 'appo' ? 'アポ化' : n === 'order' ? '受注' : '失注']} cursor={{ fill:'#f8fafc' }} />
+                        <Bar dataKey="appo"  fill="#3b82f6" radius={[0,0,0,0]} name="appo"  barSize={8}>
+                          <LabelList dataKey="appo"  position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
                         </Bar>
-                        <Bar dataKey="order" fill="#10b981" radius={[0,4,4,0]} name="order" barSize={10}>
+                        <Bar dataKey="order" fill="#10b981" radius={[0,0,0,0]} name="order" barSize={8}>
                           <LabelList dataKey="order" position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
+                        </Bar>
+                        <Bar dataKey="lost"  fill="#ef4444" radius={[0,4,4,0]} name="lost"  barSize={8}>
+                          <LabelList dataKey="lost"  position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>

@@ -1739,11 +1739,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
           GROUP BY yomi ORDER BY cnt DESC
         `, allParams),
 
-        // 流入経路別（顧客ベース・失注数含む・文字化け除外）
+        // 流入経路別（顧客ベース・アポ化率/受注率/失注率含む・文字化け除外）
         dbQuery(`
           WITH ${customerBase}
           SELECT source,
                  COUNT(*)::int AS cnt,
+                 COUNT(*) FILTER (WHERE has_appo)::int AS appo_cnt,
+                 COUNT(*) FILTER (WHERE order_date IS NOT NULL AND order_date != '')::int AS order_cnt,
                  COUNT(*) FILTER (WHERE has_lost)::int AS lost_cnt
           FROM base WHERE 1=1 ${customerDateFilter}
             AND source NOT LIKE '%' || chr(65533) || '%'
@@ -1849,6 +1851,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const avg12 = trend12R.rows.length > 0
         ? Math.round(trend12R.rows.reduce((s, r) => s + r.cnt, 0) / trend12R.rows.length)
         : 0;
+      // アポ化済みの12ヶ月平均（trendAllR から計算）
+      const avg12Appo = trendAllR.rows.length > 0
+        ? Math.round(trendAllR.rows.reduce((s, r) => s + (r.appo || 0), 0) / trendAllR.rows.length)
+        : 0;
 
       // リスト専用（ページング用）
       if (listOnly) {
@@ -1925,6 +1931,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         lostTotal,
         byLostReason: lostReasonR.rows,
         filterOptions: { reps: [], sources: [] }, // フロントのドロップダウン用（別途実装可）
+        avg12Appo,
         stats: {
           current:  currentTotal,
           prev:     prevTotal,

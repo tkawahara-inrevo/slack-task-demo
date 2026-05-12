@@ -832,6 +832,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       `, personParams);
 
       // プラン別入金内訳（1顧客=1件でカウント、担当者フィルタ対応）
+      // ※ allianceExclude と同一条件で絞る（入金額カードとの合計一致のため）
+      const allianceExcludeNoAlias = ALLIANCE_REPS.map(n => `staff NOT ILIKE '%${n}%'`).join(' AND ');
       const planBreakdownRes = await dbQuery(`
         SELECT COALESCE(plan, '未設定') AS plan,
                COUNT(DISTINCT company)::int AS cnt,
@@ -839,7 +841,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
           AND amount > 0
-          ${salesUser ? 'AND staff=$3' : ''}
+          ${salesUser ? 'AND staff=$3' : `AND (${allianceExcludeNoAlias})`}
         GROUP BY 1 ORDER BY amount DESC
       `, salesUser ? [rangeStart, rangeEnd, salesUser] : [rangeStart, rangeEnd]);
 

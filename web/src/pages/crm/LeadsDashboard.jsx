@@ -391,8 +391,8 @@ export default function LeadsDashboard() {
             );
           })()}
 
-          {/* 失注カード + 失注理由テーブル */}
-          {(data.lostTotal > 0 || data.byLostReason?.length > 0) && (
+          {/* 失注カード + 失注理由テーブル（常時表示）*/}
+          {true && (
             <div style={{ display:'grid', gridTemplateColumns:'180px 1fr', gap:16, marginBottom:20 }}>
               <div style={{ background:'#fef2f2', border:'2px solid #fca5a5', borderRadius:10, padding:'14px 18px', cursor:'pointer' }}
                 onClick={() => openYomiDrill('lost', '失注')}
@@ -443,8 +443,8 @@ export default function LeadsDashboard() {
                   <ReferenceLine y={data.stats.avg12} stroke="#f59e0b" strokeDasharray="4 3"
                     label={{ value: `平均 ${data.stats.avg12}`, fill: '#f59e0b', fontSize: 11, position: 'right' }} />
                 )}
-                <Line type="monotone" dataKey="cnt"  stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="全リード" />
                 <Line type="monotone" dataKey="appo" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="アポ化済" strokeDasharray="5 3" />
+                <Line type="monotone" dataKey="cnt"  stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="全リード" />
                 <Legend wrapperStyle={{ fontSize:'0.72rem' }} />
               </LineChart>
             </ResponsiveContainer>

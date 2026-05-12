@@ -73,6 +73,10 @@ async function runSync() {
     }
     // deals テーブルへのフィールドマッピング
     await syncDealsFromKintoneCache();
+    // リード管理ダッシュボード用マテリアライズドビューをリフレッシュ
+    await dbQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_lead_customers').catch(() => {});
+    await dbQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_lead_flags').catch(() => {});
+    console.log('[kintone] lead views refreshed');
   } catch (e) {
     console.error('[kintone] sync error:', e.message);
   } finally {

@@ -1699,35 +1699,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
         )
       `;
 
-      // リード集計は顧客（会社名）ベースでDISTINCT
-      // has_appo: 初回商談日が入っている = アポ化できている（MK目線の最重要KPI）
+      // マテリアライズドビューを使って高速集計
+      // mv_lead_customers: 顧客ごとの基本情報（DISTINCT ON済み）
+      // mv_lead_flags: 顧客ごとのフラグ（has_appo, has_lost, lost_reason）
       const customerBase = `
-        SELECT DISTINCT ON (kc.data->>'顧客') kc.data->>'顧客' AS customer,
-               COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム') AS inflow_date,
-               COALESCE(NULLIF(kc.data->>'流入経路',''), '不明') AS source,
-               kc.data->>'ヨミ' AS yomi,
-               kc.data->>'ヨミ_経過フロー' AS yomi_flow,
-               kc.data->>'受注日' AS order_date,
-               COALESCE(NULLIF(kc.data->>'商談獲得者',''), kc.data->>'担当営業_0') AS rep,
-               EXISTS (
-                 SELECT 1 FROM kintone_cache k2
-                 WHERE k2.data->>'顧客' = kc.data->>'顧客'
-                   AND k2.data->>'ヨミ_経過フロー' LIKE '%アポ化済商談前%'
-               ) AS has_appo,
-               (SELECT k2.data->>'ヨミ'
-                FROM kintone_cache k2
-                WHERE k2.data->>'顧客' = kc.data->>'顧客'
-                  AND (k2.data->>'ヨミ' = '失注' OR k2.data->>'ヨミ' LIKE '失注%')
-                LIMIT 1) IS NOT NULL AS has_lost,
-               (SELECT NULLIF(k2.data->>'失注理由','')
-                FROM kintone_cache k2
-                WHERE k2.data->>'顧客' = kc.data->>'顧客'
-                  AND k2.data->>'失注理由' IS NOT NULL AND k2.data->>'失注理由' != ''
-                LIMIT 1) AS lost_reason
-        FROM kintone_cache kc
-        WHERE kc.data->>'顧客' IS NOT NULL AND kc.data->>'ヨミ' IS NOT NULL
-          AND kc.data->>'顧客' != ''
-        ORDER BY kc.data->>'顧客', COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム') ASC
+        base AS (
+          SELECT lc.customer, lc.inflow_date, lc.source, lc.yomi,
+                 lc.yomi_flow, lc.order_date, lc.rep,
+                 lf.has_appo, lf.has_lost, lf.lost_reason
+          FROM mv_lead_customers lc
+          JOIN mv_lead_flags lf ON lf.customer = lc.customer
+        )
       `;
       // 追加フィルター（担当者・流入経路・アポ化済みのみ）
       const repFilter   = req.query.rep || '';
@@ -1751,7 +1733,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const [funnelR, sourceR, trendAllR, recentR, totalR, prevTotalR, trend12R, appoSourceR, orderSourceR, lostReasonR] = await Promise.all([
         // ファネル（顧客ベース・期間フィルター）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT COALESCE(NULLIF(yomi,''), '不明') AS yomi, COUNT(*)::int AS cnt
           FROM base WHERE 1=1 ${customerDateFilter}
           GROUP BY yomi ORDER BY cnt DESC
@@ -1759,7 +1741,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 流入経路別（顧客ベース・失注数含む・文字化け除外）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT source,
                  COUNT(*)::int AS cnt,
                  COUNT(*) FILTER (WHERE has_lost)::int AS lost_cnt
@@ -1770,7 +1752,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 月次推移（顧客ベース・直近12ヶ月・アポ化数を含む）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT TO_CHAR(inflow_date::date, 'YYYY-MM') AS month,
                  COUNT(*)::int AS cnt,
                  COUNT(*) FILTER (WHERE has_appo)::int AS appo
@@ -1781,7 +1763,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // リード一覧（顧客ベース・ページング）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT customer, yomi, source, rep, inflow_date
           FROM base WHERE 1=1 ${customerDateFilter}
           ORDER BY inflow_date DESC NULLS LAST
@@ -1790,7 +1772,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 総件数 + アポ化数 + 失注数（顧客ベース）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT COUNT(*)::int AS total,
                  COUNT(*) FILTER (WHERE has_appo)::int AS appo,
                  COUNT(*) FILTER (WHERE has_lost)::int AS lost
@@ -1799,7 +1781,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 前期間件数（顧客ベース）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT COUNT(*)::int AS total FROM base
           WHERE inflow_date IS NOT NULL AND inflow_date != ''
             AND inflow_date::date BETWEEN $1::date AND $2::date
@@ -1807,7 +1789,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 12ヶ月平均用（顧客ベース）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT TO_CHAR(inflow_date::date, 'YYYY-MM') AS month, COUNT(*)::int AS cnt
           FROM base WHERE inflow_date IS NOT NULL AND inflow_date != ''
             AND inflow_date::date >= (CURRENT_DATE - INTERVAL '12 months')
@@ -1816,7 +1798,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // アポ化につながった流入経路（顧客ベース）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT source, COUNT(*)::int AS cnt
           FROM base WHERE 1=1 ${customerDateFilter}
             AND yomi_flow LIKE '%アポ化済商談前%'
@@ -1826,7 +1808,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 受注につながった流入経路（顧客ベース）
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT source, COUNT(*)::int AS cnt
           FROM base WHERE 1=1 ${customerDateFilter}
             AND order_date IS NOT NULL AND order_date != ''
@@ -1836,7 +1818,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
         // 失注理由内訳
         dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT COALESCE(NULLIF(lost_reason,''), '理由不明') AS reason, COUNT(*)::int AS cnt
           FROM base WHERE 1=1 ${customerDateFilter}
             AND has_lost = TRUE
@@ -1872,14 +1854,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
       if (listOnly) {
         const [recentR, totalR] = await Promise.all([
           dbQuery(`
-            WITH base AS (${customerBase})
+            WITH ${customerBase}
             SELECT customer, yomi, source, rep, inflow_date
             FROM base WHERE 1=1 ${customerDateFilter}
             ORDER BY inflow_date DESC NULLS LAST
             LIMIT $3 OFFSET $4
           `, [...params, limit, offset]),
           dbQuery(`
-            WITH base AS (${customerBase})
+            WITH ${customerBase}
             SELECT COUNT(*)::int AS total FROM base WHERE 1=1 ${customerDateFilter}
           `, params),
         ]);
@@ -1897,7 +1879,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           : yomiType === 'order'    ? `AND (yomi = '受注' OR yomi = '受注済み' OR yomi LIKE '受注%')`
           : '';
         const drillR = await dbQuery(`
-          WITH base AS (${customerBase})
+          WITH ${customerBase}
           SELECT customer, yomi, source, inflow_date, rep
           FROM base WHERE 1=1 ${customerDateFilter} ${ymCond}
           ORDER BY inflow_date DESC NULLS LAST

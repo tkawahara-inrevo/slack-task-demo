@@ -107,7 +107,7 @@ const CHANNEL_ROWS = [
   { key: '_expected_revenue',  label: '想定売上',               editable: false, yellow: true  },
   { key: '_expected_roi',      label: '想定ROI',               editable: false, yellow: true  },
   { key: '_roi',               label: 'ROI',                   editable: false  },
-  { key: '_appo_diff',         label: '想定アポ－初回商談',     editable: false  },
+  { key: '_appo_diff',         label: '初回商談 vs 想定アポ',   editable: false  },
 ];
 
 const pad = n => String(n).padStart(2, '0');
@@ -814,7 +814,7 @@ export default function LeadsDashboard() {
                 _expected_revenue:   expRev > 0 ? expRev : null,
                 _expected_roi:       cost > 0 && expRev > 0 ? expRev / cost : null,
                 _roi:                cost > 0 && ch.actual_revenue > 0 ? ch.actual_revenue / cost : null,
-                _appo_diff:          expAppo - ch.actual_appo,
+                _appo_diff:          ch.actual_appo - expAppo,
                 actual_leads:        ch.actual_leads,
                 actual_appo:         ch.actual_appo,
                 actual_orders:       ch.actual_orders,

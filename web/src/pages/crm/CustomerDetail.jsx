@@ -374,6 +374,14 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
     </Field>
   );
 
+  // 日付フォーマット（ISO文字列 → YYYY/M/D）
+  const fmtD = (d) => {
+    if (!d) return null;
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return String(d).slice(0, 10);
+    return `${date.getFullYear()}/${date.getMonth()+1}/${date.getDate()}`;
+  };
+
   // ヨミ別の左ボーダーカラー
   const yomiBorderColor = {
     'アポ化前':'#d1d5db','アポ化済商談前':'#94a3b8',
@@ -419,6 +427,43 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
 
         {!editing && (
           <div style={{ paddingBottom:14 }}>
+            {/* ボールホルダー・次アクション（最重要）*/}
+            <div style={{ background: deal.next_action_date ? '#fffbeb' : '#fef2f2', border:`1px solid ${deal.next_action_date ? '#fef08a' : '#fecaca'}`, borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap', alignItems:'flex-start' }}>
+                <div>
+                  <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>ボールホルダー</div>
+                  <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.na_user_id ? '#0f172a' : '#ef4444' }}>
+                    {deal.na_user_id || '⚠ 未設定'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション期日</div>
+                  <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.next_action_date ? '#b45309' : '#ef4444' }}>
+                    {fmtD(deal.next_action_date) || '⚠ 未設定'}
+                  </div>
+                </div>
+                {deal.next_action_content && (
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション内容</div>
+                    <div style={{ fontSize:'0.83rem', color:'#374151' }}>{deal.next_action_content}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ヨミ推移 */}
+            {deal.data?.yomi_flow && (
+              <div style={{ marginBottom:10, fontSize:'0.75rem', color:'#64748b' }}>
+                <span style={{ fontWeight:600, marginRight:6 }}>推移:</span>
+                {deal.data.yomi_flow.split(',').map((y, i) => (
+                  <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:2 }}>
+                    {i > 0 && <span style={{ color:'#d1d5db', margin:'0 2px' }}>→</span>}
+                    <span style={{ background:'#f1f5f9', padding:'1px 7px', borderRadius:99 }}>{y.trim()}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* 費用セクション */}
             {(deal.initial_fee || deal.monthly_fee || deal.unit_price) && (
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(120px,1fr))', gap:8, marginBottom:10 }}>
@@ -428,26 +473,19 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                 <InfoChip label="契約月数" value={deal.contract_months ? `${deal.contract_months}ヶ月` : null} color="#f8fafc" />
               </div>
             )}
-            {/* 契約・担当セクション */}
+            {/* 契約・採用情報 */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px,1fr))', gap:6, marginBottom:10 }}>
-              <InfoChip label="契約形態" value={deal.contract_type} color="#f8fafc" />
-              <InfoChip label="支払方式" value={deal.payment_type} color="#f8fafc" />
               <InfoChip label="担当営業" value={deal.sales_user_id} color="#fef9c3" textColor="#92400e" />
-              <InfoChip label="NA担当者" value={deal.na_user_id} color="#fef9c3" textColor="#92400e" />
-              <InfoChip label="採用目標" value={deal.hiring_target ? `${deal.hiring_target}人` : null} color="#f0fdf4" textColor="#15803d" />
+              <InfoChip label="採用目標" value={deal.guarantee_count ? `${deal.guarantee_count}人` : (deal.hiring_target ? `${deal.hiring_target}人` : null)} color="#f0fdf4" textColor="#15803d" />
               <InfoChip label="採用単価" value={deal.guarantee_salary ? `¥${Number(deal.guarantee_salary).toLocaleString()}` : null} color="#f0fdf4" textColor="#15803d" />
-              <InfoChip label="保証人数" value={deal.guarantee_count ? `${deal.guarantee_count}人` : null} color="#f0fdf4" />
               <InfoChip label="料率" value={deal.rate ? `${deal.rate}%` : null} color="#faf5ff" textColor="#6d28d9" />
+              <InfoChip label="前払い" value={deal.advance_payment} color="#f8fafc" />
             </div>
-            {/* 日程セクション */}
-            {(deal.first_meeting_date || deal.order_date || deal.next_action_date) && (
-              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
-                {deal.first_meeting_date && <span style={{ fontSize:'0.75rem', background:'#f1f5f9', color:'#475569', padding:'3px 10px', borderRadius:99 }}>初回商談: {deal.first_meeting_date}</span>}
-                {deal.order_date && <span style={{ fontSize:'0.75rem', background:'#f0fdf4', color:'#15803d', padding:'3px 10px', borderRadius:99, fontWeight:600 }}>受注日: {deal.order_date}</span>}
-                {deal.next_action_date && <span style={{ fontSize:'0.75rem', background:'#fffbeb', color:'#b45309', padding:'3px 10px', borderRadius:99 }}>次アクション: {deal.next_action_date}</span>}
-                {deal.next_action_content && <span style={{ fontSize:'0.75rem', color:'#64748b' }}>{deal.next_action_content}</span>}
-              </div>
-            )}
+            {/* 日程バッジ */}
+            <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>
+              {deal.first_meeting_date && <span style={{ fontSize:'0.73rem', background:'#f1f5f9', color:'#475569', padding:'3px 10px', borderRadius:99 }}>初回商談: {fmtD(deal.first_meeting_date)}</span>}
+              {deal.order_date && <span style={{ fontSize:'0.73rem', background:'#f0fdf4', color:'#15803d', padding:'3px 10px', borderRadius:99, fontWeight:600 }}>受注日: {fmtD(deal.order_date)}</span>}
+            </div>
             {/* メモ折り畳み */}
             {deal.memo && (
               <div>

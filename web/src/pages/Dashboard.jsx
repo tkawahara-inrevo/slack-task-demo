@@ -776,12 +776,13 @@ function Foldable({ id, label, badge, badgeColor = '#dc2626', defaultOpen = true
 // ── メンションウィジェット ──────────────────────────────────────────
 function MentionWidget() {
   const [mentions, setMentions] = useState(null);
+  const [directOnly, setDirectOnly] = useState(() => localStorage.getItem('mention_direct_only') === '1');
 
   const load = () => api.myMentions().then(d => setMentions(d.mentions || [])).catch(() => setMentions([]));
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 30000); // 30秒ごとに自動更新
+    const t = setInterval(load, 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -800,18 +801,52 @@ function MentionWidget() {
     return `${Math.floor(h / 24)}日前`;
   };
 
+  const toggleDirectOnly = () => setDirectOnly(v => {
+    localStorage.setItem('mention_direct_only', v ? '0' : '1');
+    return !v;
+  });
+
   if (!mentions || mentions.length === 0) return null;
+
+  const isDirectMention = m => m.mention_type !== 'channel' && m.mention_type !== 'group';
+  const displayed = directOnly ? mentions.filter(isDirectMention) : mentions;
+  const directCount = mentions.filter(isDirectMention).length;
+
+  if (displayed.length === 0 && directOnly) {
+    return (
+      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a' }}>未確認メンション</span>
+          <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
+          <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color:'#6b7280' }}>
+            <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />
+            個別のみ
+          </label>
+        </div>
+        <div style={{ fontSize:'0.78rem', color:'#94a3b8', marginTop:8, textAlign:'center' }}>個別メンションなし（@channel等 {mentions.length}件）</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, flexWrap:'wrap' }}>
         <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a' }}>未確認メンション</span>
-        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
-        <span style={{ fontSize:'0.68rem', color:'#94a3b8', marginLeft:2 }}>返信・リアクション・× で消えます</span>
-        <button onClick={load} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:'0.75rem', padding:'2px 6px' }} title="更新">↻</button>
+        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>
+          {directOnly ? directCount : mentions.length}
+        </span>
+        {directOnly && mentions.length !== directCount && (
+          <span style={{ fontSize:'0.68rem', color:'#9ca3af' }}>（全{mentions.length}件中）</span>
+        )}
+        <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>返信・リアクション・× で消えます</span>
+        <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color: directOnly ? '#1d4ed8' : '#6b7280', fontWeight: directOnly ? 600 : 400 }}>
+          <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />
+          個別のみ
+        </label>
+        <button onClick={load} style={{ background:'none', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:'0.75rem', padding:'2px 6px' }} title="更新">↻</button>
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:200, overflowY:'auto' }}>
-        {mentions.map(m => {
+        {displayed.map(m => {
           const slackUrl = `https://slack.com/archives/${m.channel_id}/p${m.message_ts.replace('.', '')}`;
           return (
             <div key={m.id} style={{ display:'flex', alignItems:'center', gap:6 }}>

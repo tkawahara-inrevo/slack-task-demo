@@ -2168,7 +2168,7 @@ function registerDashboardApi(deps) {
 
       const r = await dbQuery(`
         SELECT m.id, m.channel_id, m.message_ts, m.sender_user_id,
-               m.text_preview, m.created_at,
+               m.text_preview, m.created_at, m.mention_type,
                d.display_name AS sender_name,
                d.profile_json->>'image_48' AS sender_avatar
         FROM user_mentions m

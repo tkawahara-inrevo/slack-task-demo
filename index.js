@@ -3069,14 +3069,14 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   const CHANNEL_HERE_RE = /<!channel>|<!here>/;
   const stripMentions = (t) => (t || '').replace(/<@[A-Z0-9]+>/g, '').replace(/<[^>]+>/g, '').trim();
 
-  const saveMention = async (teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot) => {
+  const saveMention = async (teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot, mentionType = 'direct') => {
     if (uid === senderUserId) return;
     const { randomUUID } = require('crypto');
     await dbQuery(`
-      INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, thread_ts_root, created_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+      INSERT INTO user_mentions (id, team_id, mentioned_user_id, channel_id, message_ts, sender_user_id, text_preview, thread_ts_root, mention_type, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
       ON CONFLICT (team_id, mentioned_user_id, channel_id, message_ts) DO NOTHING
-    `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot || msgTs]).catch(() => {});
+    `, [randomUUID(), teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot || msgTs, mentionType]).catch(() => {});
   };
 
   app.event('message', async ({ event, client, body }) => {
@@ -3101,10 +3101,14 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       }
 
       const preview = stripMentions(text).slice(0, 100) || '（本文なし）';
-      const targetIds = new Set();
+      const threadTsRoot = event.thread_ts || msgTs;
 
-      // 直接@メンション
-      for (const m of text.matchAll(MENTION_RE)) targetIds.add(m[1]);
+      // 直接@メンション（個別ユーザー）
+      const directIds = new Set();
+      for (const m of text.matchAll(MENTION_RE)) directIds.add(m[1]);
+      for (const uid of directIds) {
+        await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot, 'direct');
+      }
 
       // @channel / @here → チャンネルメンバー全員
       if (CHANNEL_HERE_RE.test(text)) {
@@ -3112,7 +3116,9 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
           let cursor;
           do {
             const r = await client.conversations.members({ channel: channelId, limit: 200, cursor });
-            for (const uid of (r.members || [])) targetIds.add(uid);
+            for (const uid of (r.members || [])) {
+              await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot, 'channel');
+            }
             cursor = r.response_metadata?.next_cursor;
           } while (cursor);
         } catch { /* チャンネルメンバー取得失敗は無視 */ }
@@ -3122,16 +3128,13 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       for (const m of text.matchAll(SUBTEAM_RE)) {
         try {
           const r = await client.usergroups.users.list({ usergroup: m[1] });
-          for (const uid of (r.users || [])) targetIds.add(uid);
+          for (const uid of (r.users || [])) {
+            await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot, 'group');
+          }
         } catch { /* ユーザーグループ取得失敗は無視 */ }
       }
 
-      if (!targetIds.size) return;
-      // thread_ts_root: スレッド内メッセージはルートtsを、ルートメッセージはそのtsを保存
-      const threadTsRoot = event.thread_ts || msgTs;
-      for (const uid of targetIds) {
-        await saveMention(teamId, uid, channelId, msgTs, senderUserId, preview, threadTsRoot);
-      }
+      if (!directIds.size && !CHANNEL_HERE_RE.test(text) && !text.match(SUBTEAM_RE)) return;
     } catch (e) { /* silent */ }
   });
 

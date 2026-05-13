@@ -657,6 +657,7 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS user_mentions_active ON user_mentions(team_id, mentioned_user_id, created_at) WHERE dismissed_at IS NULL`).catch(() => {});
+  await dbQuery(`ALTER TABLE user_mentions ADD COLUMN IF NOT EXISTS mention_type TEXT NOT NULL DEFAULT 'direct'`).catch(() => {});
 
   // Googleカレンダー連携トークン（admin1アカウントで全員分を取得）
   await dbQuery(`

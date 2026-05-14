@@ -893,21 +893,22 @@ function MentionWidget() {
   );
 }
 
-// ── 勤怠ウィジェット（自分の出勤/退勤状態のみ・1行コンパクト）──────
-function AttendanceWidget() {
+// ── 勤怠ウィジェット（onTeamClick でチーム稼働ボタンを表示）──────
+function AttendanceWidget({ onTeamClick }) {
   const [myAtt, setMyAtt] = useState(null);
   useEffect(() => { api.myAttendance().then(setMyAtt).catch(() => {}); }, []);
   const myIn  = myAtt?.clockIn?.ok;
   const myOut = myAtt?.clockOut?.ok;
   return (
-    <div style={{ ...T.card, padding:'9px 16px', display:'flex', alignItems:'center', gap:16 }}>
+    <div style={{ ...T.card, padding:'9px 16px', display:'flex', alignItems:'center', gap:14 }}>
       <span style={{ fontSize:'0.72rem', fontWeight:700, color:T.textMid, flexShrink:0 }}>本日の勤怠</span>
-      <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : T.textSub }}>
-        {myIn ? '🟢 出勤済み' : '⬜ 未出勤'}
-      </span>
-      <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : T.textSub }}>
-        {myOut ? '🟣 退勤済み' : '⬜ 未退勤'}
-      </span>
+      <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : T.textSub }}>{myIn ? '🟢 出勤済み' : '⬜ 未出勤'}</span>
+      <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : T.textSub }}>{myOut ? '🟣 退勤済み' : '⬜ 未退勤'}</span>
+      {onTeamClick && (
+        <button onClick={onTeamClick} style={{ marginLeft:'auto', padding:'4px 12px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.72rem', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', gap:4 }}>
+          チーム稼働状況 →
+        </button>
+      )}
     </div>
   );
 }
@@ -1119,8 +1120,8 @@ function CalendarWidget({ role }) {
 
 // ── メインダッシュボード ──────────────────────────────────────────
 export default function Dashboard() {
-  const [tab, setTab] = useState('tasks');
   const [me, setMe] = useState(null);
+  const [showTeamModal, setShowTeamModal] = useState(false);
   const [teamOverdue, setTeamOverdue] = useState([]);
   const [alertSelected, setAlertSelected] = useState(new Set());
   const [alertNotifying, setAlertNotifying] = useState(false);
@@ -1309,84 +1310,68 @@ export default function Dashboard() {
     </div>
   );
 
-  // ── KPI + タスクグリッド（左エリア）
-  const taskArea = (
-    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-      {/* KPI 2枚：自然幅（大画面でも伸びすぎない） */}
-      <div style={{ display:'flex', gap:10 }}>
-        {[
-          { label:'進行中', value: mySummary?.in_progress||0, accent:'var(--primary)' },
-          { label:'期限切れ', value: myOverdue, accent: myOverdue > 0 ? '#ef4444' : T.textSub },
-        ].map(k => (
-          <div key={k.label} style={{ ...T.card, padding:'12px 18px', borderTop:`3px solid ${k.accent}`, minWidth:110 }}>
-            <div style={{ fontSize:'0.7rem', color:T.textSub, marginBottom:5 }}>{k.label}</div>
-            <div style={{ fontSize:'1.8rem', fontWeight:900, color:k.accent, lineHeight:1 }}>{k.value}</div>
-          </div>
-        ))}
-      </div>
-      {/* マイタスク */}
-      {card(<>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-          <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>{myName ? `${myName} のタスク` : 'マイタスク'}</div>
-          <button onClick={() => { const w=localStorage.getItem('float_w')||380,h=localStorage.getItem('float_h')||640,x=localStorage.getItem('float_x'),y=localStorage.getItem('float_y'),pos=x&&y?`,left=${x},top=${y}`:''; window.open('/dashboard/floating','taskhub-float',`width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`); }}
-            style={{ padding:'4px 10px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.72rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
-            ↗ ポップアップ
-          </button>
-        </div>
-        {activeTasks.length === 0
-          ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>アクティブなタスクはありません</div>
-          : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px,1fr))', gap:10 }}>
-              {activeTasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}
-            </div>
-        }
-      </>)}
-    </div>
-  );
-
-  // ── カレンダー + メンション（右エリア）
-  const selfSideArea = (
-    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-      <Foldable id="calendar" label="今日の予定" defaultOpen={true}>
-        <CalendarWidget role={me?.role} />
-      </Foldable>
-      <MentionWidget />
-    </div>
-  );
-
-  // ── チームエリア
-  const teamArea = (
-    <div style={{ display:'flex', flexDirection: isMobile ? 'column' : 'row', gap:14, alignItems:'flex-start' }}>
-      <div style={{ flex:1 }}>{overdueAlertBody}</div>
-      <div style={{ flex:1 }}>
-        <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
-          <TeamDetailWidget />
-        </Foldable>
-      </div>
-    </div>
-  );
-
   return (
     <div style={{ padding: isMobile ? '12px' : '20px 24px', background:'var(--gray-50)', minHeight:'100%' }}>
-      {/* 勤怠 */}
-      <div style={{ marginBottom:16 }}><AttendanceWidget /></div>
+      {/* 勤怠（右にチーム稼働ボタン） */}
+      <div style={{ marginBottom:16 }}>
+        <AttendanceWidget onTeamClick={() => setShowTeamModal(true)} />
+      </div>
 
       {/* ── 自分のこと ── */}
       <SectionDivider label="自分のこと" />
-      {isMobile ? (
-        <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:24 }}>
-          {taskArea}
-          {selfSideArea}
-        </div>
-      ) : (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:20, alignItems:'start', marginBottom:28 }}>
-          {taskArea}
-          <div style={{ position:'sticky', top:16 }}>{selfSideArea}</div>
-        </div>
-      )}
+      <div style={{ display:'flex', flexDirection:'column', gap:14, marginBottom:28 }}>
+        {/* 今日の予定 */}
+        <Foldable id="calendar" label="今日の予定" defaultOpen={true}>
+          <CalendarWidget role={me?.role} />
+        </Foldable>
+
+        {/* マイタスク（KPIなし・タイトル行 + カードグリッド） */}
+        {card(<>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+            <span style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>
+              {myName ? `${myName} のタスク` : 'マイタスク'}
+            </span>
+            <button onClick={() => { const w=localStorage.getItem('float_w')||380,h=localStorage.getItem('float_h')||640,x=localStorage.getItem('float_x'),y=localStorage.getItem('float_y'),pos=x&&y?`,left=${x},top=${y}`:''; window.open('/dashboard/floating','taskhub-float',`width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`); }}
+              style={{ padding:'4px 10px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.72rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+              ↗ ポップアップ
+            </button>
+          </div>
+          {activeTasks.length === 0
+            ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>アクティブなタスクはありません</div>
+            : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px,1fr))', gap:10 }}>
+                {activeTasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}
+              </div>
+          }
+        </>)}
+
+        {/* 未確認メンション */}
+        <MentionWidget />
+      </div>
 
       {/* ── チームのこと ── */}
       <SectionDivider label="チームのこと" />
-      {teamArea}
+      {overdueAlertBody || (
+        <div style={{ ...T.card, padding:'12px 16px', color:T.textSub, fontSize:'0.82rem', textAlign:'center' }}>
+          チーム期限切れタスクなし
+        </div>
+      )}
+
+      {/* チーム稼働状況モーダル */}
+      {showTeamModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.45)', zIndex:600, display:'flex', alignItems:'flex-start', justifyContent:'flex-end', padding: isMobile ? '56px 0 0' : '56px 24px 20px' }}
+          onClick={() => setShowTeamModal(false)}>
+          <div style={{ background:'var(--surface)', borderRadius:14, width: isMobile ? '100%' : 'min(720px,85vw)', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+              <span style={{ fontWeight:700, fontSize:'0.95rem', color:T.text }}>チーム稼働状況</span>
+              <button onClick={() => setShowTeamModal(false)} style={{ background:'var(--surface-2)', border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:T.textSub, fontSize:16 }}>×</button>
+            </div>
+            <div style={{ overflowY:'auto', flex:1 }}>
+              <TeamDetailWidget />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* モーダル（タブ外） */}
       {selectedTask && <TaskPanel task={selectedTask} members={members} usergroups={usergroups} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />}

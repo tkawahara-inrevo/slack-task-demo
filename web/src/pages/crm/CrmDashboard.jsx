@@ -29,6 +29,18 @@ const YOMI_COLORS = {
   'B 50％':'#93c5fd','A 70％':'#3b82f6','S 90％':'#1d4ed8',
 };
 
+// CSS変数ベースのスタイル定数（ダークモード対応）
+const C = {
+  surface:  'var(--surface)',
+  surface2: 'var(--surface-2)',
+  bg:       'var(--gray-50)',
+  border:   'var(--gray-200)',
+  text:     'var(--gray-900)',
+  textSub:  'var(--gray-500)',
+  textMid:  'var(--gray-600)',
+  radius:   12,
+};
+
 const fmtM = n => {
   if (!n) return '0万';
   const m = Number(n);
@@ -101,39 +113,39 @@ function Drilldown({ rep, type, start, end, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
-      <div style={{ background:'#f8fafc', borderRadius:16, width:'min(600px,92vw)', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background:C.surface2, borderRadius:16, width:'min(600px,92vw)', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
 
         {/* ヘッダー */}
-        <div style={{ padding:'16px 20px', background:'#fff', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+        <div style={{ padding:'16px 20px', background:C.surface, borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
           <div>
-            <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginBottom:3 }}>
+            <div style={{ fontSize:'0.68rem', color:C.textSub, marginBottom:3 }}>
               {type === 'payments' ? '入金内訳' : '受注案件'}
             </div>
-            <div style={{ fontWeight:800, fontSize:'1rem', color:'#0f172a' }}>{rep}</div>
+            <div style={{ fontWeight:800, fontSize:'1rem', color:C.text }}>{rep}</div>
             {type === 'payments' && rows?.length > 0 && (
               <div style={{ marginTop:3, fontSize:'0.82rem', fontWeight:700, color:'#059669' }}>
                 合計 {fmtMYen(payTotal)} / {rows.length}件
               </div>
             )}
           </div>
-          <button onClick={onClose} style={{ width:30, height:30, borderRadius:8, background:'#f1f5f9', border:'none', cursor:'pointer', color:'#64748b', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+          <button onClick={onClose} style={{ width:30, height:30, borderRadius:8, background:C.surface2, border:'none', cursor:'pointer', color:C.textSub, fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
         </div>
 
         {/* コンテンツ */}
         <div style={{ overflowY:'auto', padding:'8px 16px 16px' }}>
           {rows === null ? (
-            <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>
+            <div style={{ padding:40, textAlign:'center', color:C.textSub, fontSize:'0.85rem' }}>読み込み中…</div>
           ) : rows.length === 0 ? (
-            <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>データがありません</div>
+            <div style={{ padding:40, textAlign:'center', color:C.textSub, fontSize:'0.85rem' }}>データがありません</div>
           ) : type === 'payments' ? (
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
               {rows.map((r, i) => (
-                <div key={i} style={{ background:'#fff', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
-                  <div style={{ width:36, fontSize:'0.68rem', color:'#94a3b8', flexShrink:0, textAlign:'center', background:'#f8fafc', borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
+                <div key={i} style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width:36, fontSize:'0.68rem', color:C.textSub, flexShrink:0, textAlign:'center', background:C.surface2, borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
                     {r.payment_date ? fmtDate(r.payment_date).substring(5) : '—'}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</div>
+                    <div style={{ fontWeight:600, color:C.text, fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</div>
                     {r.plan && (
                       <span style={{ fontSize:'0.62rem', background:'#eff6ff', color:'#1e40af', borderRadius:4, padding:'1px 7px', marginTop:3, display:'inline-block', fontWeight:600 }}>
                         {r.plan?.includes('月額') && r.month_num ? `月額（${r.month_num}ヶ月目）` : r.plan}
@@ -143,7 +155,7 @@ function Drilldown({ rep, type, start, end, onClose }) {
                   <div style={{ textAlign:'right', flexShrink:0 }}>
                     <div style={{ fontWeight:800, color:'#059669', fontSize:'0.9rem' }}>{fmtMYen(r.incentive_amount)}</div>
                     {r.amount > 0 && r.amount !== r.incentive_amount && (
-                      <div style={{ fontSize:'0.62rem', color:'#94a3b8', marginTop:1 }}>入金 {fmtMYen(r.amount)}</div>
+                      <div style={{ fontSize:'0.62rem', color:C.textSub, marginTop:1 }}>入金 {fmtMYen(r.amount)}</div>
                     )}
                   </div>
                 </div>
@@ -152,12 +164,12 @@ function Drilldown({ rep, type, start, end, onClose }) {
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
               {rows.map((r, i) => (
-                <div key={i} style={{ background:'#fff', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
-                  <div style={{ width:36, fontSize:'0.68rem', color:'#94a3b8', flexShrink:0, textAlign:'center', background:'#f8fafc', borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
+                <div key={i} style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width:36, fontSize:'0.68rem', color:C.textSub, flexShrink:0, textAlign:'center', background:C.surface2, borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
                     {r.order_date ? fmtDate(r.order_date).substring(5) : '—'}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.customer_name}</div>
+                    <div style={{ fontWeight:600, color:C.text, fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.customer_name}</div>
                     {r.contract_type && (
                       <span style={{ fontSize:'0.65rem', color:'#6366f1', background:'#eef2ff', borderRadius:4, padding:'1px 6px', marginTop:2, display:'inline-block' }}>
                         {r.contract_type}
@@ -251,7 +263,7 @@ export default function CrmDashboard() {
   };
 
   if (loading && !data) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#94a3b8', fontSize:'0.88rem' }}>
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:C.textSub, fontSize:'0.88rem' }}>
       読み込み中…
     </div>
   );
@@ -311,40 +323,40 @@ export default function CrmDashboard() {
   const termAchieve     = termKpiTarget > 0 ? Math.round((curr.incentiveAmount || 0) / termKpiTarget * 100) : null;
   const prevTermAchieve = (termKpiTarget > 0 && prev) ? Math.round((prev.incentiveAmount || 0) / termKpiTarget * 100) : null;
 
-  const cardStyle = { background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0' };
+  const cardStyle = { background:C.surface, borderRadius:C.radius, padding:'14px 18px', border:`1px solid ${C.border}` };
   const sectionHead = (label, right) => (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
       <div style={{ display:'flex', alignItems:'center', gap:6 }}>
         <span style={{ width:8, height:8, borderRadius:'50%', background:'#6366f1', display:'inline-block' }} />
-        <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>{label}</span>
+        <span style={{ fontWeight:700, fontSize:'0.85rem', color:C.text }}>{label}</span>
       </div>
-      {right && <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>{right}</span>}
+      {right && <span style={{ fontSize:'0.68rem', color:C.textSub }}>{right}</span>}
     </div>
   );
 
   return (
-    <div style={{ padding:'14px 18px', background:'#f1f5f9', minHeight:'100%', display:'flex', flexDirection:'column', gap:10 }}>
+    <div style={{ padding:'14px 18px', background:C.bg, minHeight:'100%', display:'flex', flexDirection:'column', gap:10 }}>
 
       {/* ── フィルターバー ── */}
       <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-        <div style={{ display:'flex', background:'#fff', borderRadius:8, padding:3, border:'1px solid #e2e8f0' }}>
+        <div style={{ display:'flex', background:C.surface, borderRadius:8, padding:3, border:`1px solid ${C.border}` }}>
           {[['custom','指定月'], ['term','今期']].map(([v, l]) => (
             <button key={v} onClick={() => { setPeriod(v); load(salesUser, v, customMonth); }}
               style={{ padding:'4px 16px', borderRadius:6, border:'none', cursor:'pointer', fontSize:'0.8rem',
-                fontWeight:period===v ? 700 : 400, background:period===v ? '#1e40af' : 'transparent',
-                color:period===v ? '#fff' : '#64748b', transition:'all 0.15s' }}>
+                fontWeight:period===v ? 700 : 400, background:period===v ? 'var(--primary)' : 'transparent',
+                color:period===v ? '#fff' : C.textMid, transition:'all 0.15s' }}>
               {l}
             </button>
           ))}
         </div>
         <input type="month" value={customMonth} disabled={period === 'term'}
           onChange={e => { setCustomMonth(e.target.value); load(salesUser, 'custom', e.target.value); }}
-          style={{ padding:'4px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem',
-            background: period === 'term' ? '#f1f5f9' : '#fff',
-            color: period === 'term' ? '#cbd5e1' : '#0f172a',
+          style={{ padding:'4px 10px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.8rem',
+            background: period === 'term' ? C.surface2 : C.surface,
+            color: period === 'term' ? 'var(--gray-300)' : C.text,
             outline:'none', cursor: period === 'term' ? 'not-allowed' : 'auto' }} />
         <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period, customMonth); }}
-          style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.82rem', background:'#fff', cursor:'pointer', color:'#0f172a' }}>
+          style={{ padding:'5px 12px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.82rem', background:C.surface, cursor:'pointer', color:C.text }}>
           <option value="">全員</option>
           {TARGET_REPS.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
@@ -352,7 +364,7 @@ export default function CrmDashboard() {
         {/* kintone同期ボタン（暫定） */}
         <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:4, alignItems:'flex-end' }}>
           <button onClick={handleKintoneSync} disabled={syncing}
-            style={{ padding:'5px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.78rem', fontWeight:600, cursor: syncing ? 'default' : 'pointer',
+            style={{ padding:'5px 14px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.78rem', fontWeight:600, cursor: syncing ? 'default' : 'pointer',
               background: syncDone ? '#f0fdf4' : syncing ? '#f8fafc' : '#fff',
               color: syncDone ? '#059669' : syncing ? '#94a3b8' : '#374151',
               display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
@@ -365,100 +377,85 @@ export default function CrmDashboard() {
             </div>
           )}
           {syncing && (
-            <span style={{ fontSize:'0.62rem', color:'#94a3b8' }}>{syncProgress}%</span>
+            <span style={{ fontSize:'0.62rem', color:C.textSub }}>{syncProgress}%</span>
           )}
         </div>
       </div>
 
-      {/* ── KPIカード 5枚 ── */}
+      {/* ── KPIカード ── */}
       <div style={{ display:'grid', gridTemplateColumns: isTablet ? 'repeat(3,1fr)' : 'repeat(5,1fr)', gap:10 }}>
-        {/* 入金額 — green */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #059669' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>入金額</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#f0fdf4', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.8rem', color:'#059669' }}>¥</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>{fmtM(curr.paymentAmount)}</div>
+        {/* 入金額 */}
+        <div style={{ ...cardStyle, borderTop:'3px solid #059669' }}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>入金額</div>
+          <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>{fmtM(curr.paymentAmount)}</div>
           <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
             <DiffTag diff={prev ? diffPct(curr.paymentAmount, prev.paymentAmount) : null} />
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
+            <span style={{ fontSize:'0.68rem', color:C.textSub }}>前{termLabel}比</span>
           </div>
         </div>
 
-        {/* 受注件数 — blue */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #1e40af' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>受注件数</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#1e40af' }}>件</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
+        {/* 受注件数 */}
+        <div style={{ ...cardStyle, borderTop:'3px solid var(--primary)' }}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>受注件数</div>
+          <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
             {curr.wonCount}<span style={{ fontSize:'1rem', marginLeft:2 }}>件</span>
           </div>
           <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
             <DiffTag diff={prev ? diffPct(curr.wonCount, prev.wonCount) : null} />
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
+            <span style={{ fontSize:'0.68rem', color:C.textSub }}>前{termLabel}比</span>
           </div>
         </div>
 
-        {/* 初回商談数 — amber */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #d97706' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>初回商談数</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#fffbeb', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#d97706' }}>商</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
+        {/* 初回商談数 */}
+        <div style={{ ...cardStyle, borderTop:'3px solid #d97706' }}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>初回商談数</div>
+          <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
             {curr.meetingCount}<span style={{ fontSize:'1rem', marginLeft:2 }}>件</span>
           </div>
           <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
             <DiffTag diff={prev ? diffPct(curr.meetingCount, prev.meetingCount) : null} />
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
+            <span style={{ fontSize:'0.68rem', color:C.textSub }}>前{termLabel}比</span>
           </div>
         </div>
 
-        {/* 受注率 — purple */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0', borderTop:'3px solid #7c3aed' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>受注率</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#f5f3ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#7c3aed' }}>率</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
+        {/* 受注率 */}
+        <div style={{ ...cardStyle, borderTop:'3px solid #7c3aed' }}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>受注率</div>
+          <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
             {winRate}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
           </div>
           <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
             <DiffTag diff={prevWinRate != null ? diffPct(winRate, prevWinRate) : null} />
-            <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>前{termLabel}比</span>
+            <span style={{ fontSize:'0.68rem', color:C.textSub }}>前{termLabel}比</span>
           </div>
         </div>
 
-        {/* KPI達成率 — dynamic color top border */}
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 18px', border:'1px solid #e2e8f0',
-          borderTop:`3px solid ${kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444'}` }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:500 }}>KPI達成率</span>
-            <span style={{ width:28, height:28, borderRadius:8, background:'#fef9c3', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.75rem', color:'#a16207' }}>%</span>
-          </div>
-          <div style={{ fontSize:'1.55rem', fontWeight:800, lineHeight:1.1,
-            color: kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#d97706' : '#dc2626' }}>
-            {kpiAchieve != null ? kpiAchieve : '—'}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
-          </div>
-          {kpiDenom > 0 && (
-            <div style={{ marginTop:6 }}>
-              <div style={{ height:5, background:'#f1f5f9', borderRadius:3, overflow:'hidden' }}>
-                <div style={{ height:'100%', width:`${Math.min(100, kpiAchieve || 0)}%`, borderRadius:3, transition:'width 0.5s',
-                  background: kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444' }} />
+        {/* KPI達成率 */}
+        {(() => {
+          const kpiColor = kpiAchieve == null ? C.textSub : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#d97706' : '#ef4444';
+          return (
+            <div style={{ ...cardStyle, borderTop:`3px solid ${kpiColor}` }}>
+              <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>KPI達成率</div>
+              <div style={{ fontSize:'1.55rem', fontWeight:800, lineHeight:1.1, color:kpiColor }}>
+                {kpiAchieve != null ? kpiAchieve : '—'}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
               </div>
-              <div style={{ fontSize:'0.6rem', color:'#94a3b8', marginTop:2 }}>
-                インセン {fmtM(curr.incentiveAmount || 0)} / 目標 {fmtM(kpiDenom)}
-                {curr.paymentAmount > 0 && <span style={{ marginLeft:6 }}>（入金 {fmtM(curr.paymentAmount)}）</span>}
-              </div>
-              {curr.allianceIncentive > 0 && (
-                <div style={{ fontSize:'0.6rem', color:'#94a3b8', marginTop:1 }}>
-                  ＋アライアンス {fmtM(curr.allianceIncentive)}（KPI除外）
+              {kpiDenom > 0 && (
+                <div style={{ marginTop:6 }}>
+                  <div style={{ height:5, background:C.surface2, borderRadius:3, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${Math.min(100, kpiAchieve || 0)}%`, borderRadius:3, transition:'width 0.5s', background:kpiColor }} />
+                  </div>
+                  <div style={{ fontSize:'0.6rem', color:C.textSub, marginTop:2 }}>
+                    インセン {fmtM(curr.incentiveAmount || 0)} / 目標 {fmtM(kpiDenom)}
+                    {curr.paymentAmount > 0 && <span style={{ marginLeft:6 }}>（入金 {fmtM(curr.paymentAmount)}）</span>}
+                  </div>
+                  {curr.allianceIncentive > 0 && (
+                    <div style={{ fontSize:'0.6rem', color:C.textSub, marginTop:1 }}>＋アライアンス {fmtM(curr.allianceIncentive)}（KPI除外）</div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </div>
 
       {/* ── メイン2カラム ── */}
@@ -468,20 +465,20 @@ export default function CrmDashboard() {
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
 
           {/* 担当者別実績 */}
-          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'10px 16px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ ...cardStyle, padding:0, overflow:'hidden' }}>
+            <div style={{ padding:'10px 16px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                 <span style={{ width:8, height:8, borderRadius:'50%', background:'#6366f1', display:'inline-block' }} />
-                <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>担当者別実績</span>
+                <span style={{ fontWeight:700, fontSize:'0.85rem', color:C.text }}>担当者別実績</span>
               </div>
-              <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>6名　クリックでドリルダウン</span>
+              <span style={{ fontSize:'0.68rem', color:C.textSub }}>6名　クリックでドリルダウン</span>
             </div>
             <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
                 <thead>
-                  <tr style={{ background:'#f8fafc' }}>
+                  <tr style={{ background:C.surface2 }}>
                     {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
-                      <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:'#64748b', borderBottom:'1px solid #f1f5f9', fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
+                      <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:C.textSub, borderBottom:`1px solid ${C.border}`, fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -509,12 +506,12 @@ export default function CrmDashboard() {
                             </span>
                             <div>
                               {r.isOther
-                                ? <span style={{ color:'#94a3b8' }}>その他</span>
+                                ? <span style={{ color:C.textSub }}>その他</span>
                                 : r.groupType === 'alliance'
-                                ? <><span style={{ fontWeight:700, color:'#92400e', fontSize:'0.75rem' }}>アライアンス</span><span style={{ fontSize:'0.65rem', color:'#94a3b8', marginLeft:4 }}>KPI除外</span></>
+                                ? <><span style={{ fontWeight:700, color:'#92400e', fontSize:'0.75rem' }}>アライアンス</span><span style={{ fontSize:'0.65rem', color:C.textSub, marginLeft:4 }}>KPI除外</span></>
                                 : r.groupType === 'adda_ref'
                                 ? <span style={{ fontWeight:700, color:'#059669', fontSize:'0.75rem' }}>添田/リファラル</span>
-                                : <><span style={{ fontWeight:700, color, fontSize:'0.68rem' }}>{fam}</span><span style={{ color:'#374151', fontSize:'0.8rem', marginLeft:3 }}>{given || ''}</span></>
+                                : <><span style={{ fontWeight:700, color, fontSize:'0.68rem' }}>{fam}</span><span style={{ color:C.textMid, fontSize:'0.8rem', marginLeft:3 }}>{given || ''}</span></>
                               }
                             </div>
                           </div>
@@ -522,7 +519,7 @@ export default function CrmDashboard() {
                         <td style={{ padding:'9px 10px', textAlign:'right', color: r.isOther ? '#94a3b8' : '#374151', fontSize:'0.8rem' }}>{fmtM(r.paymentAmount)}</td>
                         <td style={{ padding:'9px 10px', textAlign:'right' }}>
                           {r.isOther
-                            ? <span style={{ color:'#94a3b8' }}>{fmtM(r.incentiveAmount || 0)}</span>
+                            ? <span style={{ color:C.textSub }}>{fmtM(r.incentiveAmount || 0)}</span>
                             : <button onClick={() => setDrill({ rep:r.rep, type:'payments' })}
                                 style={{ background:'none', border:'none', cursor:'pointer', fontWeight:700, color:'#0891b2', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #0891b2' }}>
                                 {fmtM(r.incentiveAmount || 0)}
@@ -530,13 +527,13 @@ export default function CrmDashboard() {
                         </td>
                         <td style={{ padding:'9px 14px', textAlign:'right' }}>
                           {r.isOther
-                            ? <span style={{ color:'#94a3b8' }}>{r.wonCount}件</span>
+                            ? <span style={{ color:C.textSub }}>{r.wonCount}件</span>
                             : <button onClick={() => setDrill({ rep:r.rep, type:'won' })}
                                 style={{ background:'none', border:'none', cursor:'pointer', fontWeight:600, color:'#1e40af', fontSize:'0.8rem', padding:0, borderBottom:'1px dotted #1e40af' }}>
                                 {r.wonCount}件
                               </button>}
                         </td>
-                        <td style={{ padding:'9px 14px', textAlign:'right', color:'#374151' }}>{r.meetingCount}件</td>
+                        <td style={{ padding:'9px 14px', textAlign:'right', color:C.textMid }}>{r.meetingCount}件</td>
                         <td style={{ padding:'9px 14px', textAlign:'right' }}>
                           <span style={{ fontWeight:600, color: repWinRate >= 30 ? '#059669' : repWinRate >= 15 ? '#d97706' : '#94a3b8' }}>{repWinRate}%</span>
                         </td>
@@ -544,7 +541,7 @@ export default function CrmDashboard() {
                           {repAchieve != null
                             ? <div>
                                 <span style={{ fontWeight:700, fontSize:'0.82rem', color: repAchieve >= 100 ? '#059669' : repAchieve >= 70 ? '#d97706' : '#dc2626' }}>{repAchieve}%</span>
-                                <div style={{ fontSize:'0.58rem', color:'#94a3b8', marginTop:1 }}>{repRoleInferred[r.rep] || ''}</div>
+                                <div style={{ fontSize:'0.58rem', color:C.textSub, marginTop:1 }}>{repRoleInferred[r.rep] || ''}</div>
                               </div>
                             : <span style={{ color:'#cbd5e1' }}>—</span>}
                         </td>
@@ -557,20 +554,20 @@ export default function CrmDashboard() {
           </div>
 
           {/* アラート — 常に表示 */}
-          <div style={{ background:'#fff', borderRadius:12, border:`1px solid ${alertCount > 0 ? '#fca5a5' : '#e2e8f0'}`, overflow:'hidden' }}>
+          <div style={{ background:C.surface, borderRadius:12, border:`1px solid ${alertCount > 0 ? '#fca5a5' : '#e2e8f0'}`, overflow:'hidden' }}>
             <button onClick={() => setAlertOpen(v => !v)}
               style={{ width:'100%', padding:'10px 16px', background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:8, textAlign:'left' }}>
               <span style={{ width:8, height:8, borderRadius:'50%', background: alertCount > 0 ? '#ef4444' : '#86efac', display:'inline-block' }} />
-              <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>アラート</span>
+              <span style={{ fontWeight:700, fontSize:'0.85rem', color:C.text }}>アラート</span>
               {alertCount > 0
                 ? <span style={{ background:'#fef2f2', color:'#dc2626', borderRadius:10, padding:'1px 8px', fontSize:'0.72rem', fontWeight:700 }}>{alertCount}件</span>
                 : <span style={{ background:'#f0fdf4', color:'#059669', borderRadius:10, padding:'1px 8px', fontSize:'0.72rem', fontWeight:600 }}>なし</span>
               }
-              <span style={{ marginLeft:'auto', fontSize:'0.72rem', color:'#94a3b8' }}>{alertOpen ? '折りたたむ' : '展開'}</span>
+              <span style={{ marginLeft:'auto', fontSize:'0.72rem', color:C.textSub }}>{alertOpen ? '折りたたむ' : '展開'}</span>
             </button>
             {alertOpen && (
               alertCount === 0
-                ? <div style={{ padding:'10px 16px 14px', fontSize:'0.78rem', color:'#94a3b8', textAlign:'center' }}>期限切れ・停滞中の案件はありません ✓</div>
+                ? <div style={{ padding:'10px 16px 14px', fontSize:'0.78rem', color:C.textSub, textAlign:'center' }}>期限切れ・停滞中の案件はありません ✓</div>
                 : (
                   <div style={{ padding:'0 16px 14px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                     {overdueAlerts.length > 0 && (
@@ -584,9 +581,9 @@ export default function CrmDashboard() {
                             const daysOver = Math.round((new Date() - new Date(d.next_action_date)) / 86400000);
                             return (
                               <div key={d.id} style={{ padding:'7px 10px', background:'#fff9f9', borderRadius:8, borderLeft:'3px solid #fca5a5' }}>
-                                <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.78rem' }}>{d.customer_name}</div>
+                                <div style={{ fontWeight:600, color:C.text, fontSize:'0.78rem' }}>{d.customer_name}</div>
                                 <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
-                                  <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>担当: {d.sales_person}</span>
+                                  <span style={{ fontSize:'0.65rem', color:C.textSub }}>担当: {d.sales_person}</span>
                                   <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:600 }}>{fmtDate(d.next_action_date)} ({daysOver}日超過)</span>
                                 </div>
                               </div>
@@ -604,9 +601,9 @@ export default function CrmDashboard() {
                         <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                           {stagnantAlerts.map(d => (
                             <div key={d.id} style={{ padding:'7px 10px', background:'#fffdf5', borderRadius:8, borderLeft:'3px solid #fcd34d' }}>
-                              <div style={{ fontWeight:600, color:'#0f172a', fontSize:'0.78rem' }}>{d.customer_name}</div>
+                              <div style={{ fontWeight:600, color:C.text, fontSize:'0.78rem' }}>{d.customer_name}</div>
                               <div style={{ display:'flex', justifyContent:'space-between', marginTop:2 }}>
-                                <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>担当: {d.sales_person}</span>
+                                <span style={{ fontSize:'0.65rem', color:C.textSub }}>担当: {d.sales_person}</span>
                                 <span style={{ fontSize:'0.65rem', color:'#b45309', fontWeight:600 }}>{d.days_since_update}日未更新</span>
                               </div>
                             </div>
@@ -629,12 +626,12 @@ export default function CrmDashboard() {
               {sectionHead('今期 KPI達成状況', `${fmtDate(rangeStart)} 〜 ${fmtDate(rangeEnd)}`)}
               <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:14 }}>
                 <div>
-                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>今期インセン合計</div>
-                  <div style={{ fontSize:'1.5rem', fontWeight:800, color:'#0f172a', lineHeight:1.1 }}>
+                  <div style={{ fontSize:'0.65rem', color:C.textSub, marginBottom:2 }}>今期インセン合計</div>
+                  <div style={{ fontSize:'1.5rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
                     {fmtM(curr.incentiveAmount || 0)}
-                    <span style={{ fontSize:'0.78rem', color:'#94a3b8', marginLeft:4 }}>/ {fmtM(termKpiTarget)}</span>
+                    <span style={{ fontSize:'0.78rem', color:C.textSub, marginLeft:4 }}>/ {fmtM(termKpiTarget)}</span>
                   </div>
-                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginTop:2 }}>
+                  <div style={{ fontSize:'0.65rem', color:C.textSub, marginTop:2 }}>
                     入金額 {fmtM(curr.paymentAmount)}
                   </div>
                 </div>
@@ -643,19 +640,19 @@ export default function CrmDashboard() {
                     color: termAchieve == null ? '#94a3b8' : termAchieve >= 100 ? '#059669' : termAchieve >= 70 ? '#d97706' : '#dc2626' }}>
                     {termAchieve != null ? `${termAchieve}%` : '—'}
                   </div>
-                  <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginTop:2 }}>達成率</div>
+                  <div style={{ fontSize:'0.68rem', color:C.textSub, marginTop:2 }}>達成率</div>
                 </div>
               </div>
               {/* 達成プログレスバー */}
-              <div style={{ height:12, background:'#f1f5f9', borderRadius:6, overflow:'hidden', marginBottom:10, position:'relative' }}>
+              <div style={{ height:12, background:C.surface2, borderRadius:6, overflow:'hidden', marginBottom:10, position:'relative' }}>
                 <div style={{ height:'100%', width:`${Math.min(100, termAchieve || 0)}%`, borderRadius:6, transition:'width 0.6s ease',
                   background: termAchieve == null ? '#e2e8f0' : termAchieve >= 100 ? '#059669' : termAchieve >= 70 ? '#f59e0b' : '#ef4444' }} />
               </div>
               {/* 前期比 */}
               {prev && (
-                <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:'#f8fafc', borderRadius:8 }}>
-                  <span style={{ fontSize:'0.72rem', color:'#64748b' }}>前期入金</span>
-                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#374151' }}>{fmtM(prev.paymentAmount)}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:C.surface2, borderRadius:8 }}>
+                  <span style={{ fontSize:'0.72rem', color:C.textSub }}>前期入金</span>
+                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:C.textMid }}>{fmtM(prev.paymentAmount)}</span>
                   {prev.paymentAmount > 0 && (
                     <span style={{ fontSize:'0.72rem', fontWeight:700, marginLeft:4,
                       color: curr.paymentAmount >= prev.paymentAmount ? '#059669' : '#dc2626' }}>
@@ -664,7 +661,7 @@ export default function CrmDashboard() {
                     </span>
                   )}
                   {prevTermAchieve != null && (
-                    <span style={{ fontSize:'0.68rem', color:'#94a3b8', marginLeft:'auto' }}>
+                    <span style={{ fontSize:'0.68rem', color:C.textSub, marginLeft:'auto' }}>
                       前期達成率 {prevTermAchieve}%
                     </span>
                   )}
@@ -679,11 +676,11 @@ export default function CrmDashboard() {
               {sectionHead('収支見込み', '対象月')}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
                 <div>
-                  <div style={{ fontSize:'0.65rem', color:'#94a3b8', marginBottom:2 }}>見込み合計</div>
-                  <div style={{ fontSize:'1.45rem', fontWeight:800, color:'#0f172a' }}>
+                  <div style={{ fontSize:'0.65rem', color:C.textSub, marginBottom:2 }}>見込み合計</div>
+                  <div style={{ fontSize:'1.45rem', fontWeight:800, color:C.text }}>
                     {fmtM(forecastDispTotal)}<span style={{ fontSize:'0.8rem' }}>円</span>
                   </div>
-                  <div style={{ fontSize:'0.62rem', color:'#94a3b8', marginTop:1 }}>
+                  <div style={{ fontSize:'0.62rem', color:C.textSub, marginTop:1 }}>
                     KPI見込み（インセン） {fmtM(forecastTotal)}
                   </div>
                 </div>
@@ -709,16 +706,16 @@ export default function CrmDashboard() {
                         <div style={{ display:'flex', alignItems:'center', gap:5 }}>
                           <span style={{ width:10, height:10, borderRadius:3, background:item.color, display:'inline-block' }} />
                           <div>
-                            <span style={{ fontSize:'0.7rem', color:'#374151' }}>{item.label}</span>
-                            {item.sub && <div style={{ fontSize:'0.6rem', color:'#94a3b8' }}>{item.sub}</div>}
+                            <span style={{ fontSize:'0.7rem', color:C.textMid }}>{item.label}</span>
+                            {item.sub && <div style={{ fontSize:'0.6rem', color:C.textSub }}>{item.sub}</div>}
                           </div>
                         </div>
                         <div style={{ textAlign:'right' }}>
                           <span style={{ fontSize:'0.78rem', fontWeight:700, color:item.color }}>{fmtM(item.amount)}</span>
-                          {item.count != null && <span style={{ fontSize:'0.65rem', color:'#94a3b8', marginLeft:5 }}>{item.count}件</span>}
+                          {item.count != null && <span style={{ fontSize:'0.65rem', color:C.textSub, marginLeft:5 }}>{item.count}件</span>}
                         </div>
                       </div>
-                      <div style={{ height:8, background:'#f1f5f9', borderRadius:4, overflow:'hidden' }}>
+                      <div style={{ height:8, background:C.surface2, borderRadius:4, overflow:'hidden' }}>
                         <div style={{ height:'100%', width:`${pct}%`, background:item.color, borderRadius:4, transition:'width 0.5s' }} />
                       </div>
                     </div>
@@ -737,7 +734,7 @@ export default function CrmDashboard() {
                 <XAxis dataKey="month" tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis tickFormatter={v => `${Math.round(v / 1e4)}万`} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={42} />
                 <Tooltip formatter={v => [`${fmtM(v)}`, '実入金額']}
-                  contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
+                  contentStyle={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
                   <LabelList dataKey="amount" position="top"
                     formatter={v => v > 0 ? `${Math.round(v / 1e4)}万` : ''}
@@ -760,9 +757,9 @@ export default function CrmDashboard() {
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                     <span style={{ width:8, height:8, borderRadius:'50%', background:'#6366f1', display:'inline-block' }} />
-                    <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>受注プラン割合</span>
+                    <span style={{ fontWeight:700, fontSize:'0.85rem', color:C.text }}>受注プラン割合</span>
                   </div>
-                  <div style={{ display:'flex', background:'#f1f5f9', borderRadius:6, padding:2, gap:1 }}>
+                  <div style={{ display:'flex', background:C.surface2, borderRadius:6, padding:2, gap:1 }}>
                     {[['amount','金額'], ['count','件数']].map(([v, l]) => (
                       <button key={v} onClick={() => setPlanMode(v)}
                         style={{ padding:'2px 10px', borderRadius:5, border:'none', cursor:'pointer', fontSize:'0.68rem', fontWeight: planMode===v ? 700 : 400,
@@ -780,7 +777,7 @@ export default function CrmDashboard() {
                         {pieData.map((_, i) => <Cell key={i} fill={PLAN_COLORS[i % PLAN_COLORS.length]} />)}
                       </Pie>
                       <Tooltip formatter={(v, name) => [planMode === 'count' ? `${v}件` : `${fmtM(v)}`, name]}
-                        contentStyle={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, fontSize:11 }} />
+                        contentStyle={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, fontSize:11 }} />
                     </PieChart>
                   </div>
                   <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5 }}>
@@ -790,9 +787,9 @@ export default function CrmDashboard() {
                       return (
                         <div key={p.plan} style={{ display:'flex', alignItems:'center', gap:5 }}>
                           <span style={{ width:8, height:8, borderRadius:2, background:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0 }} />
-                          <span style={{ fontSize:'0.68rem', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
-                          <span style={{ fontSize:'0.65rem', color:'#94a3b8', flexShrink:0 }}>{p.cnt}件</span>
-                          <span style={{ fontSize:'0.65rem', color:'#64748b', flexShrink:0, width:46, textAlign:'right' }}>{fmtM(p.amount)}</span>
+                          <span style={{ fontSize:'0.68rem', color:C.textMid, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.plan}</span>
+                          <span style={{ fontSize:'0.65rem', color:C.textSub, flexShrink:0 }}>{p.cnt}件</span>
+                          <span style={{ fontSize:'0.65rem', color:C.textSub, flexShrink:0, width:46, textAlign:'right' }}>{fmtM(p.amount)}</span>
                           <span style={{ fontSize:'0.72rem', fontWeight:700, color:PLAN_COLORS[i % PLAN_COLORS.length], flexShrink:0, width:34, textAlign:'right' }}>{pctLabel}</span>
                         </div>
                       );

@@ -6,8 +6,8 @@ import { useBreakpoint } from '../../hooks/useWindowWidth';
 const YOMI_ORDER = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
 const BC_MEMBERS = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘','添田 剛'];
 const YOMI_COLOR = {
-  'アポ化前':'#9ca3af','アポ化済商談前':'#6b7280',
-  'E 5％':'#d1d5db','D 15％':'#94a3b8',
+  'アポ化前':'var(--gray-400)','アポ化済商談前':'var(--gray-500)',
+  'E 5％':'#d1d5db','D 15％':'var(--gray-400)',
   'C 30％':'#93c5fd','B 50％':'#60a5fa',
   'A 70％':'#3b82f6','S 90％':'#1d4ed8',
   '受注':'#10b981','失注':'#ef4444',
@@ -18,19 +18,19 @@ const EMP_COUNTS = ['1-10','11-50','51-100','101-300','301-500','501-1000','1000
 
 // ─── 共通スタイル ─────────────────────────────────────────
 const S = {
-  label: { display:'block', fontSize:'0.78rem', fontWeight:700, color:'#374151', marginBottom:5 },
+  label: { display:'block', fontSize:'0.78rem', fontWeight:700, color:'var(--gray-700)', marginBottom:5 },
   input: {
     width:'100%', boxSizing:'border-box', padding:'9px 12px',
-    border:'1.5px solid #e5e7eb', borderRadius:8, fontSize:'0.88rem',
-    outline:'none', background:'#fff', color:'#111827', transition:'border-color 0.15s',
+    border:'1.5px solid var(--gray-200)', borderRadius:8, fontSize:'0.88rem',
+    outline:'none', background:'var(--surface)', color:'var(--gray-900)', transition:'border-color 0.15s',
   },
   select: {
     width:'100%', boxSizing:'border-box', padding:'9px 12px',
-    border:'1.5px solid #e5e7eb', borderRadius:8, fontSize:'0.88rem',
-    background:'#fff', color:'#111827', cursor:'pointer',
+    border:'1.5px solid var(--gray-200)', borderRadius:8, fontSize:'0.88rem',
+    background:'var(--surface)', color:'var(--gray-900)', cursor:'pointer',
   },
-  sectionTitle: { fontSize:'0.88rem', fontWeight:800, color:'#111827', marginBottom:2 },
-  sectionSub: { fontSize:'0.75rem', color:'#9ca3af', marginBottom:14 },
+  sectionTitle: { fontSize:'0.88rem', fontWeight:800, color:'var(--gray-900)', marginBottom:2 },
+  sectionSub: { fontSize:'0.75rem', color:'var(--gray-400)', marginBottom:14 },
   row2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px 16px' }, // override per component with isMobile
 };
 
@@ -45,12 +45,12 @@ function CustomFieldInput({ field, value, onChange }) {
   if (field_type === 'textarea') return (
     <textarea value={value||''} onChange={e => onChange(e.target.value)}
       rows={2} style={{ ...S.input, resize:'vertical' }}
-      onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+      onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='var(--gray-200)'} />
   );
   if (field_type === 'checkbox') return (
     <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginTop:4 }}>
       <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} />
-      <span style={{ fontSize:'0.85rem', color:'#374151' }}>有効</span>
+      <span style={{ fontSize:'0.85rem', color:'var(--gray-700)' }}>有効</span>
     </label>
   );
   return (
@@ -73,7 +73,7 @@ function InputF({ value, onChange, placeholder, type='text', onFocus, onBlur }) 
     <input type={type} value={value||''} onChange={onChange} placeholder={placeholder}
       style={S.input}
       onFocus={e=>{ e.target.style.borderColor='#6366f1'; onFocus?.(); }}
-      onBlur={e=>{ e.target.style.borderColor='#e5e7eb'; onBlur?.(); }}
+      onBlur={e=>{ e.target.style.borderColor='var(--gray-200)'; onBlur?.(); }}
     />
   );
 }
@@ -89,7 +89,7 @@ function SelectF({ value, onChange, options, placeholder='選択してくださ�
 
 function SectionHeader({ title, sub }) {
   return (
-    <div style={{ marginBottom:16, paddingBottom:10, borderBottom:'1px solid #f3f4f6' }}>
+    <div style={{ marginBottom:16, paddingBottom:10, borderBottom:'1px solid var(--gray-200)' }}>
       <div style={S.sectionTitle}>{title}</div>
       {sub && <div style={S.sectionSub}>{sub}</div>}
     </div>
@@ -97,7 +97,7 @@ function SectionHeader({ title, sub }) {
 }
 
 function YomiBadge({ yomi }) {
-  const color = YOMI_COLOR[yomi] || '#9ca3af';
+  const color = YOMI_COLOR[yomi] || 'var(--gray-400)';
   return <span style={{ fontSize:'0.78rem', fontWeight:700, padding:'3px 10px', borderRadius:999, background:color+'22', color, border:`1px solid ${color}44` }}>{yomi}</span>;
 }
 
@@ -146,22 +146,22 @@ function SubTableEditor({ dealId, path, columns }) {
     setRows(prev => prev.filter(r=>r.id!==rowId));
   };
 
-  if (!rows) return <div style={{color:'#9ca3af',fontSize:12,marginBottom:16}}>読み込み中…</div>;
+  if (!rows) return <div style={{color:'var(--gray-400)',fontSize:12,marginBottom:16}}>読み込み中…</div>;
 
   return (
-    <div style={{ marginBottom:20, border:'1px solid #f3f4f6', borderRadius:8, overflow:'hidden' }}>
+    <div style={{ marginBottom:20, border:'1px solid var(--gray-200)', borderRadius:8, overflow:'hidden' }}>
       {rows.length > 0 && (
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
           <thead>
-            <tr style={{ background:'#f9fafb' }}>
-              {columns.map(c=><th key={c.key} style={{ padding:'5px 10px', textAlign:'left', color:'#6b7280', fontWeight:600, borderBottom:'1px solid #f3f4f6' }}>{c.label}</th>)}
+            <tr style={{ background:'var(--surface-2)' }}>
+              {columns.map(c=><th key={c.key} style={{ padding:'5px 10px', textAlign:'left', color:'var(--gray-500)', fontWeight:600, borderBottom:'1px solid var(--gray-200)' }}>{c.label}</th>)}
               <th style={{ width:32 }} />
             </tr>
           </thead>
           <tbody>
             {rows.map(row=>(
-              <tr key={row.id} style={{ borderBottom:'1px solid #f9fafb' }}>
-                {columns.map(c=><td key={c.key} style={{ padding:'5px 10px', color:'#374151' }}>{row[c.key]??'—'}</td>)}
+              <tr key={row.id} style={{ borderBottom:'1px solid var(--gray-200)' }}>
+                {columns.map(c=><td key={c.key} style={{ padding:'5px 10px', color:'var(--gray-700)' }}>{row[c.key]??'—'}</td>)}
                 <td style={{ padding:'5px 8px' }}>
                   <button onClick={()=>handleDelete(row.id)} style={{ background:'none',border:'none',cursor:'pointer',color:'#d1d5db',fontSize:13 }}>×</button>
                 </td>
@@ -174,9 +174,9 @@ function SubTableEditor({ dealId, path, columns }) {
       <div style={{ display:'flex', gap:6, padding:'8px', background:'#fafafa', flexWrap:'wrap', alignItems:'flex-end' }}>
         {columns.map(c=>(
           <div key={c.key} style={{ display:'flex', flexDirection:'column', gap:2 }}>
-            <span style={{ fontSize:'0.68rem', color:'#9ca3af' }}>{c.label}</span>
+            <span style={{ fontSize:'0.68rem', color:'var(--gray-400)' }}>{c.label}</span>
             <input type={c.type||'text'} value={newRow[c.key]||''} onChange={e=>setNewRow(p=>({...p,[c.key]:e.target.value}))}
-              style={{ fontSize:12, padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:6, width:c.type==='text'?110:80, outline:'none' }} />
+              style={{ fontSize:12, padding:'4px 8px', border:'1px solid var(--gray-200)', borderRadius:6, width:c.type==='text'?110:80, outline:'none' }} />
           </div>
         ))}
         <button onClick={handleAdd} disabled={adding}
@@ -228,67 +228,67 @@ function DealActivitySection({ deal, activitySettings }) {
   };
 
   return (
-    <div style={{ borderTop: '1px solid #f3f4f6', padding: '14px 18px', background: '#fafafa' }}>
-      <div style={{ fontWeight: 700, fontSize: '0.82rem', color: '#374151', marginBottom: 12 }}>アクティビティ記録</div>
+    <div style={{ borderTop: '1px solid var(--gray-200)', padding: '14px 18px', background: '#fafafa' }}>
+      <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--gray-700)', marginBottom: 12 }}>アクティビティ記録</div>
 
       {/* 追加フォーム */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14,
-        padding: '10px 12px', background: '#fff', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+        padding: '10px 12px', background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--gray-200)' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>アクション種別</span>
+          <span style={{ fontSize: '0.7rem', color: 'var(--gray-400)' }}>アクション種別</span>
           <select value={form.activityType} onChange={e => setForm(p => ({...p, activityType: e.target.value}))}
-            style={{ padding: '5px 10px', border: '1.5px solid #e5e7eb', borderRadius: 6, fontSize: '0.82rem', background: '#fff', color: '#111827', cursor: 'pointer' }}>
+            style={{ padding: '5px 10px', border: '1.5px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', background: 'var(--surface)', color: 'var(--gray-900)', cursor: 'pointer' }}>
             <option value="">選択</option>
             {activityTypes.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>結果</span>
+          <span style={{ fontSize: '0.7rem', color: 'var(--gray-400)' }}>結果</span>
           <select value={form.result} onChange={e => setForm(p => ({...p, result: e.target.value}))}
-            style={{ padding: '5px 10px', border: '1.5px solid #e5e7eb', borderRadius: 6, fontSize: '0.82rem', background: '#fff', color: '#111827', cursor: 'pointer' }}>
+            style={{ padding: '5px 10px', border: '1.5px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', background: 'var(--surface)', color: 'var(--gray-900)', cursor: 'pointer' }}>
             <option value="">-</option>
             {resultOptions.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 140 }}>
-          <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>メモ</span>
+          <span style={{ fontSize: '0.7rem', color: 'var(--gray-400)' }}>メモ</span>
           <input value={form.content} onChange={e => setForm(p => ({...p, content: e.target.value}))}
             placeholder="詳細メモ（任意）"
-            style={{ padding: '5px 10px', border: '1.5px solid #e5e7eb', borderRadius: 6, fontSize: '0.82rem', outline: 'none', background: '#fff', color: '#111827' }}
+            style={{ padding: '5px 10px', border: '1.5px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', outline: 'none', background: 'var(--surface)', color: 'var(--gray-900)' }}
             onFocus={e => e.target.style.borderColor='#6366f1'}
-            onBlur={e => e.target.style.borderColor='#e5e7eb'}
+            onBlur={e => e.target.style.borderColor='var(--gray-200)'}
             onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
           />
         </div>
         <button onClick={handleAdd} disabled={adding || !form.activityType}
-          style={{ padding: '5px 14px', border: 'none', borderRadius: 6, background: form.activityType ? '#1e293b' : '#e5e7eb',
-            color: form.activityType ? '#fff' : '#9ca3af', fontSize: '0.82rem', cursor: form.activityType ? 'pointer' : 'default', fontWeight: 600, whiteSpace: 'nowrap' }}>
+          style={{ padding: '5px 14px', border: 'none', borderRadius: 6, background: form.activityType ? '#1e293b' : 'var(--gray-200)',
+            color: form.activityType ? '#fff' : 'var(--gray-400)', fontSize: '0.82rem', cursor: form.activityType ? 'pointer' : 'default', fontWeight: 600, whiteSpace: 'nowrap' }}>
           {adding ? '追加中…' : '＋ 記録'}
         </button>
       </div>
 
       {/* ログ */}
       {activities === null ? (
-        <div style={{ color: '#9ca3af', fontSize: '0.78rem' }}>読み込み中…</div>
+        <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem' }}>読み込み中…</div>
       ) : activities.length === 0 ? (
-        <div style={{ color: '#9ca3af', fontSize: '0.78rem' }}>記録がありません</div>
+        <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem' }}>記録がありません</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {activities.map(a => (
             <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 10px',
-              background: '#fff', borderRadius: 7, border: '1px solid #f3f4f6' }}>
-              <span style={{ fontSize: '0.72rem', color: '#6b7280', flexShrink: 0, marginTop: 1 }}>{fmtDate(a.created_at)}</span>
-              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1e293b', flexShrink: 0,
-                background: '#f1f5f9', borderRadius: 4, padding: '1px 7px' }}>{a.activity_type}</span>
+              background: 'var(--surface)', borderRadius: 7, border: '1px solid var(--gray-200)' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', flexShrink: 0, marginTop: 1 }}>{fmtDate(a.created_at)}</span>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-900)', flexShrink: 0,
+                background: 'var(--surface-2)', borderRadius: 4, padding: '1px 7px' }}>{a.activity_type}</span>
               {a.result && (
                 <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#059669',
                   background: '#f0fdf4', borderRadius: 4, padding: '1px 7px', flexShrink: 0 }}>{a.result}</span>
               )}
               {a.yomi_at_time && (
-                <span style={{ fontSize: '0.72rem', color: '#9ca3af', flexShrink: 0 }}>[{a.yomi_at_time}]</span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--gray-400)', flexShrink: 0 }}>[{a.yomi_at_time}]</span>
               )}
               {a.content && (
-                <span style={{ fontSize: '0.78rem', color: '#374151', flex: 1 }}>{a.content}</span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--gray-700)', flex: 1 }}>{a.content}</span>
               )}
               <button onClick={() => handleDelete(a.id)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 12, flexShrink: 0, padding: '0 2px', lineHeight: 1 }}>×</button>
@@ -401,27 +401,27 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
 
   // ヨミ別の左ボーダーカラー
   const yomiBorderColor = {
-    'アポ化前':'#d1d5db','アポ化済商談前':'#94a3b8',
+    'アポ化前':'#d1d5db','アポ化済商談前':'var(--gray-400)',
     'E 5％':'#bfdbfe','D 15％':'#93c5fd',
     'C 30％':'#60a5fa','B 50％':'#3b82f6',
     'A 70％':'#1d4ed8','S 90％':'#1e3a8a',
     '受注':'#10b981','失注':'#ef4444',
-  }[deal.yomi] || '#e5e7eb';
+  }[deal.yomi] || 'var(--gray-200)';
 
-  const InfoChip = ({ label, value, color = '#f1f5f9', textColor = '#334155' }) => value ? (
+  const InfoChip = ({ label, value, color = 'var(--surface-2)', textColor = 'var(--gray-700)' }) => value ? (
     <div style={{ display:'flex', flexDirection:'column', gap:2, padding:'8px 12px', background:color, borderRadius:8, minWidth:0 }}>
-      <span style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>{label}</span>
+      <span style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>{label}</span>
       <span style={{ fontSize:'0.85rem', fontWeight:700, color:textColor, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{value}</span>
     </div>
   ) : null;
 
   const card = (
-    <div style={{ border:'1px solid #e2e8f0', borderLeft:`4px solid ${yomiBorderColor}`, borderRadius:12, background:'#fff', marginBottom:14, overflow:'hidden', boxShadow:'0 2px 6px rgba(0,0,0,0.06)' }}>
+    <div style={{ border:'1px solid var(--gray-200)', borderLeft:`4px solid ${yomiBorderColor}`, borderRadius:12, background:'var(--surface)', marginBottom:14, overflow:'hidden', boxShadow:'0 2px 6px rgba(0,0,0,0.06)' }}>
       {/* カードヘッダー */}
       <div style={{ padding:'14px 18px 0' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, marginBottom:10 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', flex:1 }}>
-            <span style={{ fontWeight:800, fontSize:'0.98rem', color:'#0f172a' }}>{deal.name}</span>
+            <span style={{ fontWeight:800, fontSize:'0.98rem', color:'var(--gray-900)' }}>{deal.name}</span>
             <YomiBadge yomi={deal.yomi} />
             {rpoId && (
               <Link to={`/rpo/${rpoId}`} onClick={e=>e.stopPropagation()}
@@ -431,11 +431,11 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
             )}
           </div>
           <div style={{ display:'flex', gap:6, flexShrink:0 }}>
-            <button style={{ padding:'5px 14px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
+            <button style={{ padding:'5px 14px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'var(--surface)', color:'var(--gray-700)', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
               onClick={() => { setForm(normalizeDealDates({...deal,...deal.data})); setSavedAt(null); setEditing(v=>!v); }}>
               {editing ? 'キャンセル' : '編集'}
             </button>
-            <button style={{ padding:'5px 10px', border:'1.5px solid #fca5a5', borderRadius:8, background:'#fff', color:'#ef4444', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
+            <button style={{ padding:'5px 10px', border:'1.5px solid #fca5a5', borderRadius:8, background:'var(--surface)', color:'#ef4444', fontSize:'0.8rem', fontWeight:600, cursor:'pointer' }}
               onClick={() => { if(window.confirm('この商談を削除しますか？')) onDelete(deal.id); }}>
               削除
             </button>
@@ -447,34 +447,34 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
             {/* 失注/見送りは理由を表示 */}
             {(deal.status === 'lost' || deal.status === 'dormant') ? (
               <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
-                <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:4 }}>
+                <div style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, marginBottom:4 }}>
                   {deal.status === 'lost' ? '失注理由' : '見送り理由'}
                 </div>
                 <div style={{ fontSize:'0.88rem', fontWeight:600, color:'#dc2626' }}>
                   {deal.lost_reason || '—'}
                 </div>
-                {deal.loss_reason_detail && <div style={{ fontSize:'0.8rem', color:'#64748b', marginTop:4 }}>{deal.loss_reason_detail}</div>}
+                {deal.loss_reason_detail && <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginTop:4 }}>{deal.loss_reason_detail}</div>}
               </div>
             ) : (
               /* ボールホルダー・次アクション（最重要）*/
               <div style={{ background: deal.next_action_date ? '#fffbeb' : '#fef2f2', border:`1px solid ${deal.next_action_date ? '#fef08a' : '#fecaca'}`, borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
                 <div style={{ display:'flex', gap:16, flexWrap:'wrap', alignItems:'flex-start' }}>
                   <div>
-                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>ボールホルダー</div>
-                    <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.na_user_id ? '#0f172a' : '#ef4444' }}>
+                    <div style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, marginBottom:2 }}>ボールホルダー</div>
+                    <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.na_user_id ? 'var(--gray-900)' : '#ef4444' }}>
                       {deal.na_user_id || '⚠ 未設定'}
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション期日</div>
+                    <div style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, marginBottom:2 }}>次アクション期日</div>
                     <div style={{ fontSize:'0.9rem', fontWeight:700, color: deal.next_action_date ? '#b45309' : '#ef4444' }}>
                       {fmtD(deal.next_action_date) || '⚠ 未設定'}
                     </div>
                   </div>
                   {deal.next_action_content && (
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600, marginBottom:2 }}>次アクション内容</div>
-                      <div style={{ fontSize:'0.83rem', color:'#374151' }}>{deal.next_action_content}</div>
+                      <div style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, marginBottom:2 }}>次アクション内容</div>
+                      <div style={{ fontSize:'0.83rem', color:'var(--gray-700)' }}>{deal.next_action_content}</div>
                     </div>
                   )}
                 </div>
@@ -483,12 +483,12 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
 
             {/* ヨミ推移 */}
             {deal.data?.yomi_flow && (
-              <div style={{ marginBottom:10, fontSize:'0.75rem', color:'#64748b' }}>
+              <div style={{ marginBottom:10, fontSize:'0.75rem', color:'var(--gray-500)' }}>
                 <span style={{ fontWeight:600, marginRight:6 }}>推移:</span>
                 {deal.data.yomi_flow.split(',').map((y, i) => (
                   <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:2 }}>
                     {i > 0 && <span style={{ color:'#d1d5db', margin:'0 2px' }}>→</span>}
-                    <span style={{ background:'#f1f5f9', padding:'1px 7px', borderRadius:99 }}>{y.trim()}</span>
+                    <span style={{ background:'var(--surface-2)', padding:'1px 7px', borderRadius:99 }}>{y.trim()}</span>
                   </span>
                 ))}
               </div>
@@ -510,17 +510,17 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                 { label:'採用月数/契約月数', value: deal.contract_months ? `${deal.contract_months}ヶ月` : null, color:'#f0fdf4', textColor:'#15803d' },
                 { label:'採用単価', value: deal.guarantee_salary ? `¥${Number(deal.guarantee_salary).toLocaleString()}` : null, color:'#f0fdf4', textColor:'#15803d' },
                 { label:'料率', value: deal.rate ? `${deal.rate}%` : null, color:'#faf5ff', textColor:'#6d28d9' },
-                { label:'前払い', value: deal.advance_payment, color:'#f8fafc', textColor:'#334155' },
+                { label:'前払い', value: deal.advance_payment, color:'var(--surface-2)', textColor:'var(--gray-700)' },
               ].map(({ label, value, color, textColor }) => (
-                <div key={label} style={{ display:'flex', flexDirection:'column', gap:2, padding:'8px 12px', background: value ? color : '#f8fafc', borderRadius:8 }}>
-                  <span style={{ fontSize:'0.68rem', color:'#94a3b8', fontWeight:600 }}>{label}</span>
+                <div key={label} style={{ display:'flex', flexDirection:'column', gap:2, padding:'8px 12px', background: value ? color : 'var(--surface-2)', borderRadius:8 }}>
+                  <span style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600 }}>{label}</span>
                   <span style={{ fontSize:'0.85rem', fontWeight: value ? 700 : 400, color: value ? textColor : '#cbd5e1' }}>{value || '—'}</span>
                 </div>
               ))}
             </div>
             {/* 日程バッジ */}
             <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>
-              {deal.first_meeting_date && <span style={{ fontSize:'0.73rem', background:'#f1f5f9', color:'#475569', padding:'3px 10px', borderRadius:99 }}>初回商談: {fmtD(deal.first_meeting_date)}</span>}
+              {deal.first_meeting_date && <span style={{ fontSize:'0.73rem', background:'var(--surface-2)', color:'var(--gray-500)', padding:'3px 10px', borderRadius:99 }}>初回商談: {fmtD(deal.first_meeting_date)}</span>}
               {deal.order_date && <span style={{ fontSize:'0.73rem', background:'#f0fdf4', color:'#15803d', padding:'3px 10px', borderRadius:99, fontWeight:600 }}>受注日: {fmtD(deal.order_date)}</span>}
             </div>
             {/* メモ折り畳み */}
@@ -531,7 +531,7 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                   {memoOpen ? '▼' : '▶'} メモ
                 </button>
                 {memoOpen && (
-                  <div style={{ marginTop:6, padding:'10px 14px', background:'#fffbeb', borderRadius:8, fontSize:'0.83rem', color:'#374151', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.7, border:'1px solid #fef08a' }}>
+                  <div style={{ marginTop:6, padding:'10px 14px', background:'#fffbeb', borderRadius:8, fontSize:'0.83rem', color:'var(--gray-700)', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.7, border:'1px solid #fef08a' }}>
                     {deal.memo}
                   </div>
                 )}
@@ -542,9 +542,9 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
       </div>
 
       {/* アクティビティ toggle */}
-      <div style={{ borderTop:'1px solid #f3f4f6', padding:'6px 18px', background:'#f9fafb' }}>
+      <div style={{ borderTop:'1px solid var(--gray-200)', padding:'6px 18px', background:'var(--surface-2)' }}>
         <button onClick={() => setShowActivities(v => !v)}
-          style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.78rem', color:'#6b7280', fontWeight:600, padding:'2px 0', display:'flex', alignItems:'center', gap:4 }}>
+          style={{ background:'none', border:'none', cursor:'pointer', fontSize:'0.78rem', color:'var(--gray-500)', fontWeight:600, padding:'2px 0', display:'flex', alignItems:'center', gap:4 }}>
           <span style={{ transform: showActivities ? 'rotate(90deg)' : 'rotate(0deg)', display:'inline-block', transition:'transform 0.15s' }}>▶</span>
           アクティビティ
         </button>
@@ -556,10 +556,10 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
 
   // ─── ヨミ設定 ───────────────────────────────────────────────
   const YOMI_PILLS = [
-    { val:'アポ化前',       label:'アポ前', color:'#64748b', bg:'#f1f5f9' },
-    { val:'アポ化済商談前', label:'商談前', color:'#475569', bg:'#e2e8f0' },
-    { val:'E 5％',         label:'E',      color:'#94a3b8', bg:'#f8fafc' },
-    { val:'D 15％',        label:'D',      color:'#64748b', bg:'#f1f5f9' },
+    { val:'アポ化前',       label:'アポ前', color:'var(--gray-500)', bg:'var(--surface-2)' },
+    { val:'アポ化済商談前', label:'商談前', color:'var(--gray-500)', bg:'var(--gray-200)' },
+    { val:'E 5％',         label:'E',      color:'var(--gray-400)', bg:'var(--surface-2)' },
+    { val:'D 15％',        label:'D',      color:'var(--gray-500)', bg:'var(--surface-2)' },
     { val:'C 30％',        label:'C',      color:'#d97706', bg:'#fef3c7' },
     { val:'B 50％',        label:'B',      color:'#0891b2', bg:'#e0f2fe' },
     { val:'A 70％',        label:'A',      color:'#2563eb', bg:'#dbeafe' },
@@ -662,7 +662,7 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
             </div>
             <div style={{ display:'flex', gap:8, flexShrink:0 }}>
               <button onClick={handleReloadLatest}
-                style={{ padding:'5px 14px', border:'1px solid #d97706', borderRadius:7, background:'#fff', color:'#92400e', fontSize:'0.78rem', fontWeight:600, cursor:'pointer' }}>
+                style={{ padding:'5px 14px', border:'1px solid #d97706', borderRadius:7, background:'var(--surface)', color:'#92400e', fontSize:'0.78rem', fontWeight:600, cursor:'pointer' }}>
                 最新を取得して閉じる
               </button>
               <button onClick={handleForceOverwrite}
@@ -674,15 +674,15 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
         )}
 
         {/* ── フォームエリア ── */}
-        <div style={{ flex:1, overflowY:'auto', background:'#f8fafc' }}>
+        <div style={{ flex:1, overflowY:'auto', background:'var(--surface-2)' }}>
           {/* 01 基本情報 */}
-          <div style={{ margin:'16px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ margin:'16px 20px 0', background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{ width:28, height:28, borderRadius:8, background:'#ede9fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#6d28d9' }}>01</span>
-                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>基本情報</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>基本情報</span>
               </div>
-              <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>商談の概要と担当者</span>
+              <span style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>商談の概要と担当者</span>
             </div>
             <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:14 }}>
               <Field label="商談名" required><InputF value={form.name} onChange={e=>setAuto('name',e.target.value)} /></Field>
@@ -695,8 +695,8 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                     const active = form.yomi === p.val;
                     return (
                       <button key={p.val} onClick={()=>setAuto('yomi', p.val)}
-                        style={{ padding:'5px 14px', borderRadius:99, border:`1.5px solid ${active ? p.color : '#e2e8f0'}`, cursor:'pointer', fontSize:'0.8rem', fontWeight:active?700:500, transition:'all 0.12s',
-                          background: active ? p.color : '#fff', color: active ? '#fff' : '#64748b' }}>
+                        style={{ padding:'5px 14px', borderRadius:99, border:`1.5px solid ${active ? p.color : 'var(--gray-200)'}`, cursor:'pointer', fontSize:'0.8rem', fontWeight:active?700:500, transition:'all 0.12s',
+                          background: active ? p.color : 'var(--surface)', color: active ? '#fff' : 'var(--gray-500)' }}>
                         {p.label}
                       </button>
                     );
@@ -752,20 +752,20 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                   <InputF type="date" value={form.firstMeetingDate||form.first_meeting_date||''} onChange={e=>setAuto('firstMeetingDate',e.target.value)} />
                 </Field>
               </div>
-              <div style={{ padding:'8px 12px', background:'#f1f5f9', borderRadius:8, fontSize:'0.75rem', color:'#64748b' }}>
+              <div style={{ padding:'8px 12px', background:'var(--surface-2)', borderRadius:8, fontSize:'0.75rem', color:'var(--gray-500)' }}>
                 ※ 流入日・流入経路は顧客情報側で管理します
               </div>
             </div>
           </div>
 
           {/* 02 費用・条件 */}
-          <div style={{ margin:'12px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ margin:'12px 20px 0', background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{ width:28, height:28, borderRadius:8, background:'#dcfce7', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#059669' }}>02</span>
-                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>費用・条件</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>費用・条件</span>
               </div>
-              <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>契約金額と採用条件</span>
+              <span style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>契約金額と採用条件</span>
             </div>
             <div style={{ padding:'16px 18px' }}>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12 }}>
@@ -789,38 +789,38 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
           </div>
 
           {/* 03 BANT */}
-          <div style={{ margin:'12px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ margin:'12px 20px 0', background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{ width:28, height:28, borderRadius:8, background:'#fef3c7', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#d97706' }}>03</span>
-                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>BANT</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>BANT</span>
               </div>
-              <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{bantCount}/4 確認済</span>
+              <span style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>{bantCount}/4 確認済</span>
             </div>
             <div style={{ padding:'16px 18px' }}>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginBottom:14 }}>
                 {[['B','budget','予算'],['A','authority','決裁権'],['N','needs','ニーズ'],['T','timeframe','導入時期']].map(([l,k,desc])=>(
                   <button key={k} onClick={()=>setAuto(k,!form[k])}
-                    style={{ padding:'10px 8px', borderRadius:10, border:`2px solid ${form[k]?'#6366f1':'#e2e8f0'}`, cursor:'pointer', textAlign:'center', transition:'all 0.15s',
-                      background:form[k]?'#ede9fe':'#fff' }}>
+                    style={{ padding:'10px 8px', borderRadius:10, border:`2px solid ${form[k]?'#6366f1':'var(--gray-200)'}`, cursor:'pointer', textAlign:'center', transition:'all 0.15s',
+                      background:form[k]?'#ede9fe':'var(--surface)' }}>
                     <div style={{ fontSize:'1.1rem', fontWeight:900, color:form[k]?'#6366f1':'#cbd5e1', marginBottom:2 }}>{l}</div>
-                    <div style={{ fontSize:'0.65rem', color:form[k]?'#6366f1':'#94a3b8', fontWeight:600 }}>{desc}</div>
+                    <div style={{ fontSize:'0.65rem', color:form[k]?'#6366f1':'var(--gray-400)', fontWeight:600 }}>{desc}</div>
                   </button>
                 ))}
               </div>
               <Field label="BANT メモ">
                 <textarea value={form.bantMemo||''} onChange={e=>setAuto('bantMemo',e.target.value)}
                   rows={2} style={{ ...S.input, resize:'vertical' }}
-                  onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+                  onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='var(--gray-200)'} />
               </Field>
             </div>
           </div>
 
           {/* 04 サブテーブル */}
-          <div style={{ margin:'12px 20px 0', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ margin:'12px 20px 0', background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', alignItems:'center', gap:10 }}>
               <span style={{ width:28, height:28, borderRadius:8, background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#0891b2' }}>04</span>
-              <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>費用テーブル</span>
+              <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>費用テーブル</span>
             </div>
             <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:16 }}>
               {[
@@ -830,7 +830,7 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                 { title:'応募予測', path:'app-forecasts', cols:[{key:'position_name',label:'ポジション',type:'text'},{key:'media_name',label:'媒体',type:'text'},{key:'scout_count',label:'スカウト',type:'number'},{key:'application_count',label:'応募',type:'number'},{key:'offer_count',label:'内定',type:'number'}] },
               ].map(({title,path,cols}) => (
                 <div key={path}>
-                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#374151', marginBottom:6 }}>{title}</div>
+                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'var(--gray-700)', marginBottom:6 }}>{title}</div>
                   <SubTableEditor dealId={deal.id} path={path} columns={cols} />
                 </div>
               ))}
@@ -838,20 +838,20 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
           </div>
 
           {/* 05 メモ */}
-          <div style={{ margin:'12px 20px 16px', background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ margin:'12px 20px 16px', background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{ width:28, height:28, borderRadius:8, background:'#fce7f3', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#db2777' }}>05</span>
-                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>メモ</span>
+                <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>メモ</span>
               </div>
             </div>
             <div style={{ padding:'16px 18px' }}>
               <textarea value={form.memo||''} onChange={e=>setAuto('memo',e.target.value)}
                 rows={6} style={{ ...S.input, resize:'vertical', lineHeight:1.7 }}
-                onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+                onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='var(--gray-200)'} />
               {customFields.length > 0 && (
-                <div style={{ marginTop:14, paddingTop:12, borderTop:'1px dashed #e5e7eb' }}>
-                  <div style={{ fontSize:'0.75rem', fontWeight:700, color:'#94a3b8', marginBottom:10 }}>カスタムフィールド</div>
+                <div style={{ marginTop:14, paddingTop:12, borderTop:'1px dashed var(--gray-200)' }}>
+                  <div style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--gray-400)', marginBottom:10 }}>カスタムフィールド</div>
                   <div style={S.row2}>
                     {customFields.map(f => (
                       <Field key={f.field_key} label={f.field_label}>
@@ -867,12 +867,12 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
         </div>
 
         {/* フッター */}
-        <div style={{ padding:'12px 20px', borderTop:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'#fff' }}>
-          <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>
+        <div style={{ padding:'12px 20px', borderTop:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'var(--surface)' }}>
+          <span style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>
             {deal.updated_at ? `最終更新: ${formatUpdatedAt(deal.updated_at)}` : ''}
           </span>
           <div style={{ display:'flex', gap:8 }}>
-            <button style={{ padding:'8px 20px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#64748b', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
+            <button style={{ padding:'8px 20px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'var(--surface)', color:'var(--gray-500)', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
               onClick={()=>{ clearTimeout(autoSaveTimer.current); setEditing(false); }}>キャンセル</button>
             <button style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(79,70,229,0.35)' }}
               onClick={()=>save()} disabled={saving}>
@@ -1024,7 +1024,7 @@ export default function CustomerDetail() {
       <button className="btn-back-inline" onClick={()=>navigate('/crm?tab=customers')} style={{ marginBottom:12 }}>← 顧客一覧</button>
 
       {!editingCustomer && (
-        <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:14, overflow:'hidden', marginBottom:24, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+        <div style={{ background:'var(--surface)', border:'1px solid var(--gray-200)', borderRadius:14, overflow:'hidden', marginBottom:24, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
           {/* カラーバー */}
           <div style={{ height:6, background:'linear-gradient(90deg,#6366f1,#3b82f6,#06b6d4)' }} />
 
@@ -1032,17 +1032,17 @@ export default function CustomerDetail() {
             {/* 企業名 + 編集ボタン */}
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
               <div>
-                <h1 style={{ margin:'0 0 8px', fontSize:'1.55rem', fontWeight:800, color:'#0f172a', letterSpacing:'-0.02em' }}>{customer.name}</h1>
+                <h1 style={{ margin:'0 0 8px', fontSize:'1.55rem', fontWeight:800, color:'var(--gray-900)', letterSpacing:'-0.02em' }}>{customer.name}</h1>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
-                  {customer.industry && <span style={{ background:'#f1f5f9', color:'#334155', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', fontWeight:600 }}>{customer.industry}</span>}
-                  {customer.prefecture && <span style={{ background:'#f8fafc', color:'#475569', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid #e2e8f0' }}>{customer.prefecture}</span>}
-                  {customer.employee_count && <span style={{ background:'#f8fafc', color:'#475569', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid #e2e8f0' }}>{customer.employee_count}名</span>}
+                  {customer.industry && <span style={{ background:'var(--surface-2)', color:'var(--gray-700)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', fontWeight:600 }}>{customer.industry}</span>}
+                  {customer.prefecture && <span style={{ background:'var(--surface-2)', color:'var(--gray-500)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid var(--gray-200)' }}>{customer.prefecture}</span>}
+                  {customer.employee_count && <span style={{ background:'var(--surface-2)', color:'var(--gray-500)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid var(--gray-200)' }}>{customer.employee_count}名</span>}
                   {customer.inflow_source && <span style={{ background:'#eff6ff', color:'#1d4ed8', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', fontWeight:600 }}>{customer.inflow_source}</span>}
-                  {customer.inflow_date && <span style={{ background:'#f1f5f9', color:'#475569', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid #e2e8f0' }}>流入日: {customer.inflow_date}</span>}
+                  {customer.inflow_date && <span style={{ background:'var(--surface-2)', color:'var(--gray-500)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid var(--gray-200)' }}>流入日: {customer.inflow_date}</span>}
                   {customer.website && <a href={customer.website} target="_blank" rel="noreferrer" style={{ color:'#6366f1', fontSize:'0.78rem', textDecoration:'none', fontWeight:500 }}>{customer.website}</a>}
                 </div>
               </div>
-              <button style={{ padding:'7px 18px', border:'1.5px solid #e2e8f0', borderRadius:8, background:'#fff', color:'#374151', fontSize:'0.82rem', fontWeight:600, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}
+              <button style={{ padding:'7px 18px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'var(--surface)', color:'var(--gray-700)', fontSize:'0.82rem', fontWeight:600, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}
                 onClick={() => { setCustForm(customer); setCustSavedAt(null); setEditingCustomer(true); }}>
                 編集
               </button>
@@ -1050,14 +1050,14 @@ export default function CustomerDetail() {
 
             {/* 事業内容 */}
             {customer.business_description && (
-              <p style={{ margin:'0 0 12px', fontSize:'0.85rem', color:'#334155', lineHeight:1.7, background:'#f8fafc', padding:'10px 14px', borderRadius:8, borderLeft:'3px solid #6366f1' }}>
+              <p style={{ margin:'0 0 12px', fontSize:'0.85rem', color:'var(--gray-700)', lineHeight:1.7, background:'var(--surface-2)', padding:'10px 14px', borderRadius:8, borderLeft:'3px solid #6366f1' }}>
                 {customer.business_description}
               </p>
             )}
 
             {/* メモ */}
             {customer.memo && (
-              <p style={{ margin:'0 0 12px', fontSize:'0.83rem', color:'#334155', lineHeight:1.7, background:'#f8fafc', padding:'10px 14px', borderRadius:8, whiteSpace:'pre-wrap', border:'1px solid #e2e8f0' }}>
+              <p style={{ margin:'0 0 12px', fontSize:'0.83rem', color:'var(--gray-700)', lineHeight:1.7, background:'var(--surface-2)', padding:'10px 14px', borderRadius:8, whiteSpace:'pre-wrap', border:'1px solid var(--gray-200)' }}>
                 {customer.memo}
               </p>
             )}
@@ -1065,40 +1065,40 @@ export default function CustomerDetail() {
             {/* 競合 */}
             {Array.isArray(customer.competitors) && customer.competitors.length > 0 && (
               <div style={{ display:'flex', gap:4, flexWrap:'wrap', alignItems:'center', marginBottom:12 }}>
-                <span style={{ fontSize:'0.75rem', color:'#94a3b8', fontWeight:600 }}>競合</span>
+                <span style={{ fontSize:'0.75rem', color:'var(--gray-400)', fontWeight:600 }}>競合</span>
                 {customer.competitors.map(c => <span key={c} style={{ fontSize:'0.75rem', background:'#fff7ed', color:'#c2410c', padding:'2px 8px', borderRadius:99, border:'1px solid #fed7aa' }}>{c}</span>)}
               </div>
             )}
 
             {/* 担当者 */}
-            <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:12 }}>
+            <div style={{ borderTop:'1px solid var(--gray-200)', paddingTop:12 }}>
               <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom: contacts.length > 0 ? 10 : 0 }}>
-                <span style={{ fontSize:'0.78rem', fontWeight:700, color:'#334155' }}>担当者</span>
-                <button style={{ fontSize:'0.72rem', padding:'3px 10px', border:'1px solid #e2e8f0', borderRadius:6, background:'#f8fafc', cursor:'pointer', color:'#334155', fontWeight:600 }}
+                <span style={{ fontSize:'0.78rem', fontWeight:700, color:'var(--gray-700)' }}>担当者</span>
+                <button style={{ fontSize:'0.72rem', padding:'3px 10px', border:'1px solid var(--gray-200)', borderRadius:6, background:'var(--surface-2)', cursor:'pointer', color:'var(--gray-700)', fontWeight:600 }}
                   onClick={() => { setContactForm({}); setEditingContact('new'); }}>+ 追加</button>
               </div>
               {contacts.length > 0 ? (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:8 }}>
                   {contacts.map(c => (
-                    <div key={c.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:'#f8fafc', borderRadius:10, border:'1px solid #e2e8f0', fontSize:'0.82rem' }}>
+                    <div key={c.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:'var(--surface-2)', borderRadius:10, border:'1px solid var(--gray-200)', fontSize:'0.82rem' }}>
                       <div style={{ width:32, height:32, borderRadius:'50%', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:700, fontSize:'0.75rem', flexShrink:0 }}>
                         {(c.last_name||'?')[0]}
                       </div>
                       <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontWeight:700, color:'#0f172a', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        <div style={{ fontWeight:700, color:'var(--gray-900)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                           {c.last_name}{c.first_name}
                           {c.sales_prohibited && <span style={{ fontSize:'0.65rem', background:'#fee2e2', color:'#ef4444', padding:'0 5px', borderRadius:99, marginLeft:5 }}>営業禁止</span>}
                         </div>
-                        <div style={{ fontSize:'0.72rem', color:'#64748b', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        <div style={{ fontSize:'0.72rem', color:'var(--gray-500)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                           {[c.position_title, c.department].filter(Boolean).join(' / ')}
                           {c.email && <span style={{ marginLeft:6, color:'#6366f1' }}>{c.email}</span>}
                         </div>
                       </div>
                       <div style={{ display:'flex', gap:4, flexShrink:0 }}>
                         <button onClick={() => { setContactForm(c); setEditingContact(c); }}
-                          style={{ fontSize:'0.68rem', color:'#475569', background:'#fff', border:'1px solid #e2e8f0', borderRadius:5, padding:'2px 8px', cursor:'pointer' }}>編集</button>
+                          style={{ fontSize:'0.68rem', color:'var(--gray-500)', background:'var(--surface)', border:'1px solid var(--gray-200)', borderRadius:5, padding:'2px 8px', cursor:'pointer' }}>編集</button>
                         <button onClick={() => handleDeleteContact(c.id)}
-                          style={{ fontSize:'0.68rem', color:'#ef4444', background:'#fff', border:'1px solid #fee2e2', borderRadius:5, padding:'2px 8px', cursor:'pointer' }}>削除</button>
+                          style={{ fontSize:'0.68rem', color:'#ef4444', background:'var(--surface)', border:'1px solid #fee2e2', borderRadius:5, padding:'2px 8px', cursor:'pointer' }}>削除</button>
                       </div>
                     </div>
                   ))}
@@ -1115,8 +1115,8 @@ export default function CustomerDetail() {
       {editingContact && (
         <div className="modal-overlay" onClick={() => setEditingContact(null)}>
           <div className="modal-content" onClick={e=>e.stopPropagation()} style={{ maxWidth:480, padding:0, overflow:'hidden' }}>
-            <div style={{ padding:'16px 24px', borderBottom:'1px solid #f3f4f6' }}>
-              <div style={{ fontSize:'0.75rem', color:'#9ca3af', marginBottom:2 }}>担当者情報</div>
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--gray-200)' }}>
+              <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginBottom:2 }}>担当者情報</div>
               <div style={{ fontWeight:800, fontSize:'1rem' }}>{editingContact === 'new' ? '担当者を追加' : '担当者を編集'}</div>
             </div>
             <div style={{ padding:'20px 24px', display:'flex', flexDirection:'column', gap:12 }}>
@@ -1136,8 +1136,8 @@ export default function CustomerDetail() {
                 営業禁止
               </label>
             </div>
-            <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'flex-end', gap:8 }}>
-              <button style={{ padding:'7px 18px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#6b7280', fontSize:'0.83rem', cursor:'pointer' }}
+            <div style={{ padding:'12px 24px', borderTop:'1px solid var(--gray-200)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button style={{ padding:'7px 18px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'var(--surface)', color:'var(--gray-500)', fontSize:'0.83rem', cursor:'pointer' }}
                 onClick={() => setEditingContact(null)}>キャンセル</button>
               <button style={{ padding:'7px 20px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.83rem', fontWeight:700, cursor:'pointer' }}
                 onClick={handleSaveContact} disabled={contactSaving}>{contactSaving ? '保存中...' : '保存'}</button>
@@ -1147,8 +1147,8 @@ export default function CustomerDetail() {
       )}
 
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-        <h2 style={{ margin:0, fontSize:'1rem', fontWeight:700, color:'#374151' }}>
-          案件 <span style={{ fontSize:'0.85rem', color:'#9ca3af', fontWeight:400 }}>{deals.length}件</span>
+        <h2 style={{ margin:0, fontSize:'1rem', fontWeight:700, color:'var(--gray-700)' }}>
+          案件 <span style={{ fontSize:'0.85rem', color:'var(--gray-400)', fontWeight:400 }}>{deals.length}件</span>
         </h2>
         <button style={{ padding:'7px 16px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.83rem', fontWeight:700, cursor:'pointer' }}
           onClick={() => setShowDealModal(true)}>
@@ -1157,7 +1157,7 @@ export default function CustomerDetail() {
       </div>
 
       {deals.length === 0
-        ? <p style={{ color:'#9ca3af', textAlign:'center', padding:32 }}>商談がありません</p>
+        ? <p style={{ color:'var(--gray-400)', textAlign:'center', padding:32 }}>商談がありません</p>
         : deals.map(deal => (
           <DealCard key={deal.id} deal={{...deal, data: deal.data||{}}} meta={meta} members={members}
             onUpdate={handleUpdateDeal} onDelete={handleDeleteDeal} activitySettings={activitySettings}
@@ -1170,10 +1170,10 @@ export default function CustomerDetail() {
         <div className="modal-overlay" onClick={() => setEditingCustomer(false)}>
           <div className="modal-content" onClick={e=>e.stopPropagation()} style={{ maxWidth:580, padding:0, overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'80vh' }}>
             {/* モーダルヘッダー */}
-            <div style={{ padding:'16px 24px', borderBottom:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div>
-                <div style={{ fontSize:'0.75rem', color:'#9ca3af', marginBottom:2 }}>顧客を編集</div>
-                <div style={{ fontWeight:800, fontSize:'1rem', color:'#111827' }}>{customer.name}</div>
+                <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginBottom:2 }}>顧客を編集</div>
+                <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--gray-900)' }}>{customer.name}</div>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:12 }}>
                 {custSavedAt && (
@@ -1182,7 +1182,7 @@ export default function CustomerDetail() {
                     {custSavedAt} に保存済み
                   </span>
                 )}
-                <button onClick={() => setEditingCustomer(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:18, lineHeight:1, padding:4 }}>×</button>
+                <button onClick={() => setEditingCustomer(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--gray-400)', fontSize:18, lineHeight:1, padding:4 }}>×</button>
               </div>
             </div>
 
@@ -1215,7 +1215,7 @@ export default function CustomerDetail() {
                 <Field label="サービスLP URL②"><InputF value={custForm.service_lp_url2||''} onChange={e=>setCustForm(p=>({...p,service_lp_url2:e.target.value}))} placeholder="https://" /></Field>
               </div>
               <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:'0.75rem', fontWeight:600, color:'#374151', marginBottom:4 }}>競合</div>
+                <div style={{ fontSize:'0.75rem', fontWeight:600, color:'var(--gray-700)', marginBottom:4 }}>競合</div>
                 <div style={{ display:'flex', gap:8 }}>
                   {['研修','SaaS','採用'].map(c => (
                     <label key={c} style={{ display:'flex', alignItems:'center', gap:5, cursor:'pointer', fontSize:'0.83rem' }}>
@@ -1242,14 +1242,14 @@ export default function CustomerDetail() {
                 <textarea value={custForm.memo||''} onChange={e=>setCustForm(p=>({...p,memo:e.target.value}))}
                   rows={3} style={{ ...S.input, resize:'vertical' }}
                   onFocus={e=>e.target.style.borderColor='#6366f1'}
-                  onBlur={e=>e.target.style.borderColor='#e5e7eb'}
+                  onBlur={e=>e.target.style.borderColor='var(--gray-200)'}
                 />
               </Field>
 
               {/* カスタムフィールド */}
               {customFields.customer.length > 0 && (
-                <div style={{ marginTop:18, paddingTop:14, borderTop:'1px dashed #e5e7eb' }}>
-                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#94a3b8', marginBottom:12 }}>カスタムフィールド</div>
+                <div style={{ marginTop:18, paddingTop:14, borderTop:'1px dashed var(--gray-200)' }}>
+                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'var(--gray-400)', marginBottom:12 }}>カスタムフィールド</div>
                   <div style={S.row2}>
                     {customFields.customer.map(f => (
                       <Field key={f.field_key} label={f.field_label}>
@@ -1268,7 +1268,7 @@ export default function CustomerDetail() {
                 <span>⚠️</span>
                 <div style={{ flex:1, fontSize:'0.8rem', color:'#78350f', fontWeight:600 }}>他のユーザーが更新しました。編集内容は保持されています。</div>
                 <button onClick={() => { setEditingCustomer(false); setCustConflict(null); window.location.reload(); }}
-                  style={{ padding:'4px 12px', border:'1px solid #d97706', borderRadius:6, background:'#fff', color:'#92400e', fontSize:'0.75rem', fontWeight:600, cursor:'pointer' }}>
+                  style={{ padding:'4px 12px', border:'1px solid #d97706', borderRadius:6, background:'var(--surface)', color:'#92400e', fontSize:'0.75rem', fontWeight:600, cursor:'pointer' }}>
                   最新を取得
                 </button>
                 <button onClick={() => handleSaveCustomer(true)}
@@ -1277,12 +1277,12 @@ export default function CustomerDetail() {
                 </button>
               </div>
             )}
-            <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <span style={{ fontSize:'0.75rem', color:'#9ca3af' }}>
+            <div style={{ padding:'12px 24px', borderTop:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:'0.75rem', color:'var(--gray-400)' }}>
                 {customer.updated_at ? `最終更新: ${formatUpdatedAt(customer.updated_at)}` : ''}
               </span>
               <div style={{ display:'flex', gap:8 }}>
-                <button style={{ padding:'8px 20px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#6b7280', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
+                <button style={{ padding:'8px 20px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'var(--surface)', color:'var(--gray-500)', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
                   onClick={() => setEditingCustomer(false)}>キャンセル</button>
                 <button style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}
                   onClick={() => handleSaveCustomer()} disabled={custSaving}>
@@ -1298,9 +1298,9 @@ export default function CustomerDetail() {
       {showDealModal && (
         <div className="modal-overlay" onClick={()=>setShowDealModal(false)}>
           <div className="modal-content" onClick={e=>e.stopPropagation()} style={{ maxWidth:440, padding:0, overflow:'hidden' }}>
-            <div style={{ padding:'16px 24px', borderBottom:'1px solid #f3f4f6' }}>
-              <div style={{ fontSize:'0.75rem', color:'#9ca3af', marginBottom:2 }}>商談を追加</div>
-              <div style={{ fontWeight:800, fontSize:'1rem', color:'#111827' }}>{customer.name}</div>
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--gray-200)' }}>
+              <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginBottom:2 }}>商談を追加</div>
+              <div style={{ fontWeight:800, fontSize:'1rem', color:'var(--gray-900)' }}>{customer.name}</div>
             </div>
             <div style={{ padding:'20px 24px' }}>
               <div style={{ marginBottom:14 }}>
@@ -1312,8 +1312,8 @@ export default function CustomerDetail() {
                 <SelectF value={dealForm.yomi} onChange={e=>setDealForm(p=>({...p,yomi:e.target.value}))} options={YOMI_ORDER} />
               </Field>
             </div>
-            <div style={{ padding:'12px 24px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'flex-end', gap:8 }}>
-              <button style={{ padding:'8px 20px', border:'1.5px solid #e5e7eb', borderRadius:8, background:'#fff', color:'#6b7280', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
+            <div style={{ padding:'12px 24px', borderTop:'1px solid var(--gray-200)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button style={{ padding:'8px 20px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'var(--surface)', color:'var(--gray-500)', fontSize:'0.85rem', fontWeight:600, cursor:'pointer' }}
                 onClick={()=>setShowDealModal(false)}>キャンセル</button>
               <button style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1e293b', color:'#fff', fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}
                 onClick={handleCreateDeal} disabled={!dealForm.name.trim()||saving}>

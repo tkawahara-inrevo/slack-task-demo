@@ -97,7 +97,7 @@ function FormRow({ label, children, required }) {
 
 const inputSx = {
   width: '100%', padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6,
-  fontSize: 13, boxSizing: 'border-box', background: '#fff',
+  fontSize: 13, boxSizing: 'border-box', background: 'var(--surface)',
 };
 
 function buildInfoForm(deal) {
@@ -404,7 +404,7 @@ export default function DealDetail() {
       </header>
 
       {/* ステージバー */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #eee', padding: '12px 24px', overflowX: 'auto' }}>
+      <div style={{ background: 'var(--surface)', borderBottom: '1px solid #eee', padding: '12px 24px', overflowX: 'auto' }}>
         <div style={{ display: 'flex', gap: 0, minWidth: 600 }}>
           {STAGES.filter(s => s.value !== 'lost').map((s, i) => {
             const active = deal.stage === s.value;
@@ -463,7 +463,7 @@ export default function DealDetail() {
           {/* 活動タブ */}
           {tab === 'activity' && (
             <div>
-              <form onSubmit={handleAddActivity} style={{ background: '#fff', borderRadius: 8, padding: 16, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+              <form onSubmit={handleAddActivity} style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
                   {ACTIVITY_TYPES.filter(a => a.value !== 'stage_change').map(a => (
                     <button key={a.value} type="button"
@@ -505,7 +505,7 @@ export default function DealDetail() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {activities.map(a => (
                     <div key={a.id} style={{
-                      background: '#fff', borderRadius: 8, padding: '12px 16px',
+                      background: 'var(--surface)', borderRadius: 8, padding: '12px 16px',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
                       borderLeft: a.activity_type === 'stage_change' ? '3px solid #1976d2' : '3px solid #eee',
                     }}>
@@ -549,7 +549,7 @@ export default function DealDetail() {
                 <div style={{ color: '#aaa', textAlign: 'center', padding: 24 }}>入出金記録がありません</div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', minWidth: 640 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', background: 'var(--surface)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', minWidth: 640 }}>
                     <thead>
                       <tr style={{ background: '#f5f5f5', textAlign: 'left' }}>
                         {['区分', '項目', '金額', 'インセン', '請求日', '請求書', '入金日', 'ステータス', ''].map(h => (
@@ -670,7 +670,7 @@ export default function DealDetail() {
                 );
               })()}
               {showDeliverable ? (
-                <div style={{ background: '#fff', borderRadius: 8, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 14 }}>
+                <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 14 }}>
                   <h4 style={{ fontSize: 13, marginBottom: 10 }}>納品物を追加</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                     <input placeholder="タイトル *" value={dlvForm.title} onChange={e => setDlvForm(f => ({ ...f, title: e.target.value }))}
@@ -702,7 +702,7 @@ export default function DealDetail() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {deliverables.map(d => (
                     <div key={d.id} style={{
-                      background: '#fff', borderRadius: 8, padding: '12px 16px',
+                      background: 'var(--surface)', borderRadius: 8, padding: '12px 16px',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
                       display: 'flex', alignItems: 'center', gap: 12,
                       opacity: d.status === 'done' ? 0.7 : 1,
@@ -746,7 +746,7 @@ export default function DealDetail() {
                 <div style={{ color: '#aaa', textAlign: 'center', padding: 24 }}>媒体選定データがありません</div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', minWidth: 700 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', background: 'var(--surface)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', minWidth: 700 }}>
                     <thead>
                       <tr style={{ background: '#f5f5f5' }}>
                         {['媒体', '採用ポジション', '採用人数', '掲載費用', '成果報酬', 'マージン', '実質費用', '合計費用', ''].map(h => (
@@ -816,7 +816,7 @@ export default function DealDetail() {
                     const appRate = pos.applications_target ? Math.round((pos.applications_actual || 0) / pos.applications_target * 100) : null;
                     const hireRate = pos.hires_target ? Math.round((pos.hires_actual || 0) / pos.hires_target * 100) : null;
                     return (
-                      <div key={pos.id} style={{ background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                      <div key={pos.id} style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
                           <div>
                             <span style={{ fontWeight: 700, fontSize: 15 }}>{pos.role_name}</span>
@@ -872,7 +872,7 @@ export default function DealDetail() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tasks.map(t => (
-                    <div key={t.id} style={{ background: '#fff', borderRadius: 8, padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div key={t.id} style={{ background: 'var(--surface)', borderRadius: 8, padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <Link to={`/tasks/${t.id}`} style={{ fontWeight: 600, color: '#1976d2' }}>{t.title || '（タイトルなし）'}</Link>
                         <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
@@ -891,7 +891,7 @@ export default function DealDetail() {
           {/* メンバータブ */}
           {tab === 'members' && (
             <div>
-              <div style={{ background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 16 }}>
+              <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 16 }}>
                 <h3 style={{ fontSize: 14, marginBottom: 12 }}>担当メンバー</h3>
                 {members.length === 0 ? (
                   <div style={{ color: '#aaa' }}>未設定</div>
@@ -913,7 +913,7 @@ export default function DealDetail() {
                 )}
               </div>
               {availableToAdd.length > 0 && (
-                <div style={{ background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <h3 style={{ fontSize: 14, marginBottom: 12 }}>メンバー追加</h3>
                   <select className="filter-select" style={{ width: '100%', padding: '6px 10px', marginBottom: 8 }}
                     value={memberInput} onChange={e => setMemberInput(e.target.value)}>
@@ -929,7 +929,7 @@ export default function DealDetail() {
 
         {/* サイドバー */}
         <aside style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ fontSize: 14, margin: 0 }}>案件情報</h3>
               <button style={{ background: 'none', border: 'none', color: '#1976d2', cursor: 'pointer', fontSize: 12 }}
@@ -1054,7 +1054,7 @@ export default function DealDetail() {
           </div>
 
           {payments.length > 0 && (
-            <div style={{ background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <h3 style={{ fontSize: 14, marginBottom: 12 }}>入金状況</h3>
               <div style={{ fontSize: 13 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -1076,7 +1076,7 @@ export default function DealDetail() {
             </div>
           )}
 
-          <div style={{ background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', fontSize: 12, color: '#888' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', fontSize: 12, color: '#888' }}>
             <div>作成：{fmtDate(deal.created_at)}</div>
             <div>更新：{fmtDate(deal.updated_at)}</div>
           </div>

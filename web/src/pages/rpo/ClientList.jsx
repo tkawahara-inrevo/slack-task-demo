@@ -204,7 +204,7 @@ export default function ClientList() {
     setDriveCandidates([]);
   };
 
-  const colorOf = (name) => COLOR_OPTIONS.find(c => c.name === name)?.bg || '#6b7280';
+  const colorOf = (name) => COLOR_OPTIONS.find(c => c.name === name)?.bg || 'var(--gray-500)';
 
   // フルアクセス＆チーム未選択 → チーム選択画面
   if (accessLoaded && access?.fullAccess && !filterTeamId) {
@@ -285,7 +285,7 @@ export default function ClientList() {
         />
         {teamUsers.length > 0 && (
           <>
-            <label style={{ fontSize: '0.8rem', color: '#6b7280', whiteSpace: 'nowrap' }}>HR担当者</label>
+            <label style={{ fontSize: '0.8rem', color: 'var(--gray-500)', whiteSpace: 'nowrap' }}>HR担当者</label>
             <select
               value={filterHrId}
               onChange={e => setFilterHrId(e.target.value)}
@@ -299,7 +299,7 @@ export default function ClientList() {
           </>
         )}
         {(filterName || filterHrId) && (
-          <button onClick={() => { setFilterName(''); setFilterHrId(''); }} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '0.8rem' }}>✕ クリア</button>
+          <button onClick={() => { setFilterName(''); setFilterHrId(''); }} style={{ background: 'none', border: 'none', color: 'var(--gray-400)', cursor: 'pointer', fontSize: '0.8rem' }}>✕ クリア</button>
         )}
       </div>
 
@@ -365,10 +365,10 @@ export default function ClientList() {
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span>📁</span> Driveフォルダ
-                    {driveLoading && <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>検索中...</span>}
+                    {driveLoading && <span style={{ fontSize: '0.75rem', color: 'var(--gray-400)' }}>検索中...</span>}
                   </label>
                   {!driveLoading && driveCandidates.length === 0 && (
-                    <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: '4px 0 0' }}>一致するフォルダが見つかりませんでした</p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--gray-400)', margin: '4px 0 0' }}>一致するフォルダが見つかりませんでした</p>
                   )}
                   {driveCandidates.map((c, i) => (
                     <div
@@ -404,7 +404,7 @@ export default function ClientList() {
                   ))}
                 </select>
                 {!usersLoading && teamUsers.length === 0 && (
-                  <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: '4px 0 0' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--gray-400)', margin: '4px 0 0' }}>
                     チームにメンバーが登録されると選択できます
                   </p>
                 )}
@@ -549,7 +549,7 @@ function ArchivedSection({ children }) {
     <div style={{ marginTop: '32px' }}>
       <button
         onClick={() => setOpen(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '0.875rem', fontWeight: 600, padding: '4px 0', marginBottom: open ? '12px' : 0 }}
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-500)', fontSize: '0.875rem', fontWeight: 600, padding: '4px 0', marginBottom: open ? '12px' : 0 }}
       >
         <span style={{ fontSize: '0.75rem' }}>{open ? '▼' : '▶'}</span>
         終了済み

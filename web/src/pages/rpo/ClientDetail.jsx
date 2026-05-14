@@ -110,7 +110,7 @@ export default function ClientDetail() {
             </div>
             {showColorPicker && (
               <div
-                style={{ position: 'absolute', top: '100%', left: 0, zIndex: 200, background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap', width: '160px', marginTop: '6px' }}
+                style={{ position: 'absolute', top: '100%', left: 0, zIndex: 200, background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: '10px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap', width: '160px', marginTop: '6px' }}
                 onClick={e => e.stopPropagation()}
               >
                 {COLOR_OPTIONS.map(c => (
@@ -173,7 +173,7 @@ function SimpleBarChart({ data, color }) {
       <svg width={totalW + 40} height={H + 50} style={{ overflow: 'visible' }}>
         {[0, 0.5, 1].map((r, i) => (
           <line key={i} x1="0" y1={H * (1 - r)} x2={totalW + 40} y2={H * (1 - r)}
-            stroke="#e5e7eb" strokeDasharray="4 4" />
+            stroke="var(--gray-200)" strokeDasharray="4 4" />
         ))}
         {data.map((d, i) => {
           const bh = Math.max(2, (d.value / maxVal) * H);
@@ -182,9 +182,9 @@ function SimpleBarChart({ data, color }) {
             <g key={i}>
               <rect x={x} y={H - bh} width={barW} height={bh} rx="4" fill={color} opacity="0.85" />
               <text x={x + barW / 2} y={H - bh - 6} textAnchor="middle"
-                style={{ fontSize: 10, fontWeight: 700, fill: '#6b7280' }}>{d.value}</text>
+                style={{ fontSize: 10, fontWeight: 700, fill: 'var(--gray-500)' }}>{d.value}</text>
               <foreignObject x={x - 5} y={H + 8} width={barW + 10} height={36}>
-                <div style={{ fontSize: 10, textAlign: 'center', color: '#6b7280', lineHeight: 1.3 }}>{d.label}</div>
+                <div style={{ fontSize: 10, textAlign: 'center', color: 'var(--gray-500)', lineHeight: 1.3 }}>{d.label}</div>
               </foreignObject>
             </g>
           );
@@ -319,14 +319,14 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
 
       {/* kintone検索結果 */}
       {kintoneResults !== null && (
-        <div style={{ marginBottom: '12px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ marginBottom: '12px', border: '1px solid var(--gray-200)', borderRadius: '8px', overflow: 'hidden' }}>
           {kintoneResults.length === 0 ? (
-            <p style={{ padding: '10px 14px', fontSize: '0.85rem', color: '#6b7280' }}>一致するkintoneレコードがありません</p>
+            <p style={{ padding: '10px 14px', fontSize: '0.85rem', color: 'var(--gray-500)' }}>一致するkintoneレコードがありません</p>
           ) : kintoneResults.map(rec => (
             <div key={rec.record_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid #f3f4f6' }}>
               <div style={{ fontSize: '0.85rem' }}>
                 <strong>{rec.company_name}</strong>
-                <span style={{ marginLeft: '12px', color: '#6b7280' }}>
+                <span style={{ marginLeft: '12px', color: 'var(--gray-500)' }}>
                   受注: {rec.data?.['見込売り上げ_税抜き'] ? Number(rec.data['見込売り上げ_税抜き']).toLocaleString() + '円' : '—'}
                   　採用: {rec.data?.['数値_0'] || '—'}名
                 </span>
@@ -347,7 +347,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
                 const u = teamUsers.find(u => u.userId === e.target.value);
                 onUpdate({ hrAssigneeId: u?.userId || '', hrAssigneeName: u?.displayName || '' });
               }}
-              style={{ padding: '7px 10px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '0.875rem', background: 'white' }}
+              style={{ padding: '7px 10px', border: '1px solid var(--gray-200)', borderRadius: '6px', fontSize: '0.875rem', background: 'var(--surface)' }}
             >
               <option value="">未設定</option>
               {teamUsers.map(u => (
@@ -355,7 +355,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
               ))}
             </select>
           ) : (
-            <div className="info-value" style={{ color: '#9ca3af', background: '#f9fafb', cursor: 'default' }}>
+            <div className="info-value" style={{ color: 'var(--gray-400)', background: 'var(--surface-2)', cursor: 'default' }}>
               {d.hrAssigneeName || '未設定'}
             </div>
           )}
@@ -368,7 +368,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
           onChange={v => onUpdate({ projectInfo: { ...info, hiringTarget: Number(v) } })} />
         <div className="info-field">
           <label className="info-label">受注金額（円）</label>
-          <div className="info-value" style={{ color: contractAmount > 0 ? '#111827' : '#9ca3af', cursor: 'default', background: '#f9fafb' }}>
+          <div className="info-value" style={{ color: contractAmount > 0 ? 'var(--gray-900)' : 'var(--gray-400)', cursor: 'default', background: 'var(--surface-2)' }}>
             {contractAmount > 0 ? contractAmount.toLocaleString('ja-JP') + ' 円' : '—'}
           </div>
         </div>
@@ -467,7 +467,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
         </div>
         <div className="revenue-card" style={{ borderColor: grossProfit >= 0 ? '#10b981' : '#ef4444' }}>
           <span className="revenue-card-label">粗利</span>
-          <span className="revenue-card-value" style={{ color: contractAmount > 0 ? (grossProfit >= 0 ? '#10b981' : '#ef4444') : '#9ca3af' }}>
+          <span className="revenue-card-value" style={{ color: contractAmount > 0 ? (grossProfit >= 0 ? '#10b981' : '#ef4444') : 'var(--gray-400)' }}>
             {contractAmount > 0 ? formatYen(grossProfit) : '—'}
           </span>
         </div>
@@ -475,9 +475,9 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
           <span className="revenue-card-label">内定承諾者数</span>
           <span className="revenue-card-value">{acceptedCount}人</span>
         </div>
-        <div className="revenue-card" style={{ borderColor: latestRevenue !== null && latestRevenue >= 0 ? '#10b981' : '#e5e7eb' }}>
+        <div className="revenue-card" style={{ borderColor: latestRevenue !== null && latestRevenue >= 0 ? '#10b981' : 'var(--gray-200)' }}>
           <span className="revenue-card-label">1名あたり売り上げ（最新）</span>
-          <span className="revenue-card-value" style={{ color: latestRevenue !== null ? (latestRevenue >= 0 ? '#10b981' : '#ef4444') : '#9ca3af' }}>
+          <span className="revenue-card-value" style={{ color: latestRevenue !== null ? (latestRevenue >= 0 ? '#10b981' : '#ef4444') : 'var(--gray-400)' }}>
             {latestRevenue !== null ? formatYen(latestRevenue) : '—'}
           </span>
         </div>
@@ -487,7 +487,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
       {revenuePeriods.length > 0 && contractAmount > 0 && hiringTarget > 0 && (
         <div style={{ marginTop: '20px' }}>
           <h3 className="chart-title" style={{ marginBottom: '10px' }}>期間別売り上げ内訳</h3>
-          <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '10px' }}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--gray-400)', marginBottom: '10px' }}>
             計算式: (受注金額 ÷ 採用予定数) ー (各期間コスト ÷ 残り採用予定数) の累積
           </p>
           <div style={{ overflowX: 'auto' }}>
@@ -502,7 +502,7 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
                 {revenuePeriods.map((m, i) => (
                   <tr key={m.id ?? i}>
                     <td>{m.name}</td>
-                    <td style={{ whiteSpace: 'nowrap', color: '#6b7280', fontSize: '0.78rem' }}>
+                    <td style={{ whiteSpace: 'nowrap', color: 'var(--gray-500)', fontSize: '0.78rem' }}>
                       {m.periodStart || '—'}{m.periodEnd ? ` 〜 ${m.periodEnd}` : ''}
                     </td>
                     <td className="num">{formatYen(Number(m.mediaCost) || 0)}</td>
@@ -665,14 +665,14 @@ function KpiTab({ client, onUpdate, accentColor }) {
 
       {/* フェーズ編集モード */}
       {editPhases && (
-        <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px' }}>
-          <p style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: '8px' }}>不要なフェーズを×で削除。上下の矢印で並び替え。</p>
+        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--gray-200)', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--gray-500)', marginBottom: '8px' }}>不要なフェーズを×で削除。上下の矢印で並び替え。</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {draftPhases.map((p, i) => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '6px 10px' }}>
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: '6px', padding: '6px 10px' }}>
                 <span style={{ flex: 1, fontSize: '0.875rem' }}>{p.label}</span>
-                <button onClick={() => setDraftPhases(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })} disabled={i === 0} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '12px', padding: '2px 4px' }}>↑</button>
-                <button onClick={() => setDraftPhases(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })} disabled={i === draftPhases.length - 1} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '12px', padding: '2px 4px' }}>↓</button>
+                <button onClick={() => setDraftPhases(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })} disabled={i === 0} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--gray-500)', fontSize: '12px', padding: '2px 4px' }}>↑</button>
+                <button onClick={() => setDraftPhases(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })} disabled={i === draftPhases.length - 1} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--gray-500)', fontSize: '12px', padding: '2px 4px' }}>↓</button>
                 <button onClick={() => setDraftPhases(prev => prev.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '14px', padding: '2px 4px' }}>×</button>
               </div>
             ))}
@@ -686,7 +686,7 @@ function KpiTab({ client, onUpdate, accentColor }) {
       )}
 
       {!editPhases && (
-        <p style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: '8px' }}>
+        <p style={{ fontSize: '0.78rem', color: 'var(--gray-500)', marginBottom: '8px' }}>
           フェーズ: {phases.map(p => p.label).join(' → ')}
         </p>
       )}
@@ -1045,7 +1045,7 @@ function TasksTab({ client }) {
   return (
     <div className="tab-section task-sheet-section">
       <div className="section-header">
-        <h2 className="section-title">タスク <span style={{ fontSize: '0.8rem', color: '#9ca3af', fontWeight: 400 }}>{items.length}件</span></h2>
+        <h2 className="section-title">タスク <span style={{ fontSize: '0.8rem', color: 'var(--gray-400)', fontWeight: 400 }}>{items.length}件</span></h2>
         <button className="btn-primary small" onClick={handleAdd}>＋ タスク追加</button>
       </div>
 
@@ -1168,7 +1168,7 @@ function SheetsApplicantTab({ client, onUpdate }) {
       <div className="section-header">
         <h2 className="section-title">応募者データ（スプシ連携）</h2>
         {syncedAt && (
-          <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>最終同期: {fmtSync(syncedAt)}</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--gray-400)' }}>最終同期: {fmtSync(syncedAt)}</span>
         )}
       </div>
 
@@ -1193,7 +1193,7 @@ function SheetsApplicantTab({ client, onUpdate }) {
       </div>
       {syncError && <p className="sheets-error">{syncError}</p>}
 
-      {syncing && <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '12px' }}>スプレッドシートを読み込み中…</p>}
+      {syncing && <p style={{ color: 'var(--gray-500)', fontSize: '0.875rem', marginTop: '12px' }}>スプレッドシートを読み込み中…</p>}
 
       {sheets.length > 0 && (
         <>
@@ -1210,8 +1210,8 @@ function SheetsApplicantTab({ client, onUpdate }) {
       )}
 
       {phaseOptions.length > 0 && (
-        <div style={{ marginTop: '8px', padding: '8px 12px', background: '#f9fafb', borderRadius: '6px', fontSize: '0.8rem', color: '#6b7280' }}>
-          選考フェーズ: {phaseOptions.map(p => <span key={p} style={{ display: 'inline-block', background: '#e5e7eb', borderRadius: '4px', padding: '1px 6px', marginRight: '4px', marginBottom: '2px' }}>{p}</span>)}
+        <div style={{ marginTop: '8px', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px', fontSize: '0.8rem', color: 'var(--gray-500)' }}>
+          選考フェーズ: {phaseOptions.map(p => <span key={p} style={{ display: 'inline-block', background: 'var(--gray-200)', borderRadius: '4px', padding: '1px 6px', marginRight: '4px', marginBottom: '2px' }}>{p}</span>)}
         </div>
       )}
 
@@ -1286,7 +1286,7 @@ function SheetTable({ rows }) {
   return (
     <div onClick={() => { setOpenFilter(null); setShowColMenu(false); }}>
       {/* ステータスバー */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0 6px', fontSize: '0.8rem', color: '#6b7280' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0 6px', fontSize: '0.8rem', color: 'var(--gray-500)' }}>
         <span>{filtered.length} / {body.length} 件</span>
         {hasFilter && (
           <button onClick={e => { e.stopPropagation(); clearAll(); }} style={{ fontSize: '0.78rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
@@ -1297,17 +1297,17 @@ function SheetTable({ rows }) {
         <div style={{ position: 'relative', marginLeft: 'auto' }}>
           <button
             onClick={e => { e.stopPropagation(); setShowColMenu(v => !v); }}
-            style={{ fontSize: '0.78rem', padding: '3px 8px', border: '1px solid #d1d5db', borderRadius: '4px', background: hiddenCols.size ? '#eff6ff' : 'white', cursor: 'pointer', color: '#374151' }}
+            style={{ fontSize: '0.78rem', padding: '3px 8px', border: '1px solid #d1d5db', borderRadius: '4px', background: hiddenCols.size ? '#eff6ff' : 'var(--surface)', cursor: 'pointer', color: 'var(--gray-700)' }}
           >
             列 {hiddenCols.size > 0 ? `(${hiddenCols.size}列非表示)` : '表示設定'}
           </button>
           {showColMenu && (
             <div
               onClick={e => e.stopPropagation()}
-              style={{ position: 'absolute', right: 0, top: '100%', zIndex: 200, background: 'white', border: '1px solid #d1d5db', borderRadius: '8px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: '8px', minWidth: '200px', maxHeight: '320px', overflowY: 'auto' }}
+              style={{ position: 'absolute', right: 0, top: '100%', zIndex: 200, background: 'var(--surface)', border: '1px solid #d1d5db', borderRadius: '8px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: '8px', minWidth: '200px', maxHeight: '320px', overflowY: 'auto' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 600 }}>列の表示/非表示</span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--gray-500)', fontWeight: 600 }}>列の表示/非表示</span>
                 <button onClick={() => setHiddenCols(new Set())} style={{ fontSize: '0.72rem', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>全て表示</button>
               </div>
               {headers.map((h, ci) => (
@@ -1341,16 +1341,16 @@ function SheetTable({ rows }) {
                       <span style={{ flex: 1 }}>{String(headers[ci])}</span>
                       <button
                         onClick={e => { e.stopPropagation(); setOpenFilter(openFilter === ci ? null : ci); }}
-                        style={{ background: active ? '#3b82f6' : '#e5e7eb', color: active ? 'white' : '#374151', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '10px', padding: '1px 4px', lineHeight: 1.4, flexShrink: 0 }}
+                        style={{ background: active ? '#3b82f6' : 'var(--gray-200)', color: active ? 'white' : 'var(--gray-700)', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '10px', padding: '1px 4px', lineHeight: 1.4, flexShrink: 0 }}
                       >▼</button>
                     </div>
                     {openFilter === ci && (
-                      <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100, background: 'white', border: '1px solid #d1d5db', borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', padding: '8px', minWidth: '180px', maxWidth: '240px' }}>
+                      <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100, background: 'var(--surface)', border: '1px solid #d1d5db', borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', padding: '8px', minWidth: '180px', maxWidth: '240px' }}>
                         <input autoFocus type="text" placeholder="テキストで絞り込み…" value={colFilters[ci] || ''}
                           onChange={e => setColFilter(ci, e.target.value)}
                           style={{ width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '0.82rem', boxSizing: 'border-box', marginBottom: '6px' }} />
                         <div style={{ maxHeight: '160px', overflowY: 'auto' }}>
-                          <div style={{ padding: '3px 6px', cursor: 'pointer', borderRadius: '3px', fontSize: '0.82rem', color: '#6b7280' }}
+                          <div style={{ padding: '3px 6px', cursor: 'pointer', borderRadius: '3px', fontSize: '0.82rem', color: 'var(--gray-500)' }}
                             onClick={() => { setColFilter(ci, ''); setOpenFilter(null); }}>（全て表示）</div>
                           {uniqueVals(ci).map(val => (
                             <div key={val} style={{ padding: '3px 6px', cursor: 'pointer', borderRadius: '3px', fontSize: '0.82rem', background: colFilters[ci] === val ? '#eff6ff' : 'transparent' }}

@@ -6,9 +6,9 @@ import { api } from '../../api/client';
 let _dealsCache = null;
 
 const YOMI_STAGES = [
-  { key: 'アポ化前',      color: '#94a3b8', bg: '#f8fafc', dept: 'MK' },
-  { key: 'アポ化済商談前', color: '#64748b', bg: '#f1f5f9', dept: 'BC' },
-  { key: 'E 5％',        color: '#a8b5c8', bg: '#f8fafc', dept: 'BC' },
+  { key: 'アポ化前',      color: 'var(--gray-400)', bg: 'var(--surface-2)', dept: 'MK' },
+  { key: 'アポ化済商談前', color: 'var(--gray-500)', bg: 'var(--surface-2)', dept: 'BC' },
+  { key: 'E 5％',        color: '#a8b5c8', bg: 'var(--surface-2)', dept: 'BC' },
   { key: 'D 15％',       color: '#7c8fa6', bg: '#f0f4f8', dept: 'BC' },
   { key: 'C 30％',       color: '#3b9bdb', bg: '#eff8ff', dept: 'BC' },
   { key: 'B 50％',       color: '#2563eb', bg: '#eff6ff', dept: 'BC' },
@@ -33,7 +33,7 @@ function saveFilters(visibleStages, filterSales) {
 const DEFAULT_VISIBLE = new Set(['D 15％','C 30％','B 50％','A 70％','S 90％']);
 
 const STAGE_GROUPS = [
-  { label: 'MK',    color: '#94a3b8', stages: ['アポ化前'] },
+  { label: 'MK',    color: 'var(--gray-400)', stages: ['アポ化前'] },
   { label: 'BC',    color: '#2563eb', stages: ['アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％'] },
   { label: '受注',  color: '#059669', stages: ['受注'] },
   { label: '失注',  color: '#dc2626', stages: ['失注'] },
@@ -48,7 +48,7 @@ function fmt(n) {
 
 function DealCard({ deal, navigate }) {
   const stage = YOMI_STAGES.find(s => s.key === deal.yomi);
-  const color = stage?.color || '#94a3b8';
+  const color = stage?.color || 'var(--gray-400)';
   const amount = deal.monthly_fee || deal.initial_fee;
 
   return (
@@ -57,14 +57,14 @@ function DealCard({ deal, navigate }) {
       onDragStart={e => e.dataTransfer.setData('dealId', deal.id)}
       onClick={() => navigate(`/crm/customers/${deal.customer_id}`)}
       style={{
-        background: '#fff',
+        background: 'var(--surface)',
         borderRadius: 10,
         padding: '12px 14px',
         marginBottom: 8,
         cursor: 'grab',
         userSelect: 'none',
         boxShadow: '0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05)',
-        border: '1px solid #f1f5f9',
+        border: '1px solid var(--gray-200)',
         transition: 'box-shadow 0.15s, transform 0.15s',
         position: 'relative',
         overflow: 'hidden',
@@ -74,10 +74,10 @@ function DealCard({ deal, navigate }) {
     >
       <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: color, borderRadius: '10px 0 0 10px' }} />
       <div style={{ paddingLeft: 6 }}>
-        <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.85rem', marginBottom: 3, lineHeight: 1.4, wordBreak: 'break-all' }}>
+        <div style={{ fontWeight: 700, color: 'var(--gray-900)', fontSize: '0.85rem', marginBottom: 3, lineHeight: 1.4, wordBreak: 'break-all' }}>
           {deal.customer_name}
         </div>
-        <div style={{ color: '#6b7280', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 6 }}>
+        <div style={{ color: 'var(--gray-500)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 6 }}>
           {deal.name}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -86,7 +86,7 @@ function DealCard({ deal, navigate }) {
             : <span />
           }
           {deal.sales_user_id && (
-            <span style={{ fontSize: '0.68rem', color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>{deal.sales_user_id}</span>
+            <span style={{ fontSize: '0.68rem', color: 'var(--gray-400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>{deal.sales_user_id}</span>
           )}
         </div>
       </div>
@@ -158,31 +158,31 @@ export default function Pipeline({ embedded = false }) {
   const totalAmount = visibleList.reduce((s, stage) => s + stageTotal(stage.key), 0);
 
   return (
-    <div style={{ padding: embedded ? '16px 20px' : '24px 28px', height: embedded ? '100%' : '100vh', display: 'flex', flexDirection: 'column', background: '#f8fafc', overflow: 'hidden' }}>
+    <div style={{ padding: embedded ? '16px 20px' : '24px 28px', height: embedded ? '100%' : '100vh', display: 'flex', flexDirection: 'column', background: 'var(--surface-2)', overflow: 'hidden' }}>
       {/* ヘッダー */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: '#111827', letterSpacing: '-0.02em' }}>パイプライン</h1>
-          <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>商談をヨミ別に管理</p>
+          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--gray-900)', letterSpacing: '-0.02em' }}>パイプライン</h1>
+          <p style={{ margin: '4px 0 0', color: 'var(--gray-500)', fontSize: '0.85rem' }}>商談をヨミ別に管理</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ textAlign: 'right', marginRight: 8 }}>
             <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#1d4ed8' }}>{activeCount}件</div>
-            {totalAmount > 0 && <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{fmt(totalAmount)}</div>}
+            {totalAmount > 0 && <div style={{ fontSize: '0.75rem', color: 'var(--gray-500)' }}>{fmt(totalAmount)}</div>}
           </div>
           <button className="btn-primary" onClick={() => navigate('/crm/customers')}>顧客一覧</button>
         </div>
       </div>
 
       {/* フィルター・ステージ制御 */}
-      <div style={{ background: '#fff', borderRadius: 12, padding: '12px 16px', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #f1f5f9' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 12, padding: '12px 16px', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid var(--gray-200)' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <select value={filterSales} onChange={e => handleSalesFilter(e.target.value)}
-            style={{ padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: '0.82rem', background: '#fff', color: '#374151' }}>
+            style={{ padding: '6px 10px', border: '1px solid var(--gray-200)', borderRadius: 8, fontSize: '0.82rem', background: 'var(--surface)', color: 'var(--gray-700)' }}>
             <option value="">全担当者</option>
             {salesUsers.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
-          <div style={{ width: 1, height: 24, background: '#e5e7eb' }} />
+          <div style={{ width: 1, height: 24, background: 'var(--gray-200)' }} />
           {STAGE_GROUPS.map(group => (
             <div key={group.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {group.stages.map(key => {
@@ -191,8 +191,8 @@ export default function Pipeline({ embedded = false }) {
                 return (
                   <button key={key} onClick={() => toggleStage(key)}
                     style={{ fontSize: '0.72rem', padding: '3px 8px', borderRadius: 99, border: 'none', cursor: 'pointer', fontWeight: on ? 700 : 400, transition: 'all 0.1s',
-                      background: on ? s?.color : '#f1f5f9',
-                      color: on ? '#fff' : '#9ca3af',
+                      background: on ? s?.color : 'var(--surface-2)',
+                      color: on ? '#fff' : 'var(--gray-400)',
                     }}>
                     {key}
                   </button>
@@ -228,7 +228,7 @@ export default function Pipeline({ embedded = false }) {
                 borderRadius: 12,
                 display: 'flex',
                 flexDirection: 'column',
-                border: `2px solid ${isDragOver ? stage.color : '#f1f5f9'}`,
+                border: `2px solid ${isDragOver ? stage.color : 'var(--gray-200)'}`,
                 padding: '0 0 8px',
                 transition: 'all 0.15s',
                 boxShadow: isDragOver ? `0 0 0 3px ${stage.color}30` : '0 1px 3px rgba(0,0,0,0.06)',

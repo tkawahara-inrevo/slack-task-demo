@@ -1311,14 +1311,29 @@ export default function Dashboard() {
     </Foldable>
   );
 
-  // 右サイドバーコンテンツ
+  const SectionLabel = ({ label }) => (
+    <div style={{ fontSize:'0.62rem', fontWeight:800, letterSpacing:'0.1em', color:T.textSub, textTransform:'uppercase', display:'flex', alignItems:'center', gap:8 }}>
+      <span style={{ flex:1, height:1, background:'var(--gray-200)', display:'block' }} />
+      {label}
+      <span style={{ flex:1, height:1, background:'var(--gray-200)', display:'block' }} />
+    </div>
+  );
+
+  // 右サイドバーコンテンツ（自分 / チーム に明確に分割）
   const sidebarContent = (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+      {/* ── 自分のこと ── */}
+      <SectionLabel label="自分のこと" />
       <Foldable id="calendar" label="今日の予定" defaultOpen={true}>
         <CalendarWidget role={me?.role} />
       </Foldable>
       <MentionWidget />
-      {overdueAlertBody}
+
+      {/* ── チームのこと ── */}
+      <SectionLabel label="チームのこと" />
+      {overdueAlertBody || (
+        <div style={{ fontSize:'0.78rem', color:T.textSub, textAlign:'center', padding:'8px 0' }}>期限切れタスクなし</div>
+      )}
       <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
         <TeamDetailWidget />
       </Foldable>
@@ -1415,7 +1430,7 @@ export default function Dashboard() {
           {sidebarContent}
         </div>
       ) : (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:16, alignItems:'start' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:20, alignItems:'start' }}>
           {mainContent}
           <div style={{ position:'sticky', top:16 }}>
             {sidebarContent}

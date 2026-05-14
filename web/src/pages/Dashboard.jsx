@@ -712,50 +712,50 @@ function TaskCard({ t, members, onClick }) {
 
   return (
     <div onClick={onClick}
-      style={{ background:'#fff', borderRadius:10, border:'1px solid #e2e8f0', padding:'12px 14px', cursor:'pointer',
-        transition:'box-shadow 0.15s, border-color 0.15s', display:'flex', flexDirection:'column', gap:8,
+      style={{ background:'var(--surface)', borderRadius:10, border:`1px solid var(--gray-200)`, padding:'11px 13px', cursor:'pointer',
+        transition:'box-shadow 0.15s', display:'flex', flexDirection:'column', gap:7,
         borderLeft: `3px solid ${selfDone ? '#10b981' : st.color}` }}
-      onMouseEnter={e => { e.currentTarget.style.boxShadow='0 3px 10px rgba(0,0,0,0.08)'; e.currentTarget.style.borderColor='#c7d2fe'; }}
-      onMouseLeave={e => { e.currentTarget.style.boxShadow='none'; e.currentTarget.style.borderColor='#e2e8f0'; }}>
+      onMouseEnter={e => { e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'; }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow='none'; }}>
 
       {/* ステータスバッジ */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:6 }}>
-        <span style={{ fontSize:'0.68rem', fontWeight:700, padding:'2px 8px', borderRadius:20,
-          background:st.color+'18', color:st.color, whiteSpace:'nowrap' }}>{st.label}</span>
+        <span style={{ fontSize:'0.67rem', fontWeight:700, padding:'2px 7px', borderRadius:20,
+          background:st.color+'20', color:st.color, whiteSpace:'nowrap' }}>{st.label}</span>
         {t.task_type === 'broadcast' && (
           <span style={{ fontSize:'0.62rem', padding:'1px 6px', borderRadius:3,
-            background: selfDone ? '#d1fae5' : '#fef3c7', color: selfDone ? '#065f46' : '#92400e', fontWeight:600 }}>
+            background: selfDone ? 'var(--success-light)' : 'var(--warning-light)', color: selfDone ? '#065f46' : '#92400e', fontWeight:600 }}>
             {selfDone ? '自分完了済' : '一斉配信'}
           </span>
         )}
       </div>
 
       {/* タイトル */}
-      <div style={{ fontWeight:600, fontSize:'0.85rem', color:'#0f172a', lineHeight:1.45,
+      <div style={{ fontWeight:600, fontSize:'0.85rem', color:'var(--gray-900)', lineHeight:1.45,
         overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
         {title}
       </div>
       {/* 内容プレビュー or 作成元ラベル */}
       {preview ? (
-        <div style={{ fontSize:'0.75rem', color:'#64748b', lineHeight:1.5,
-          overflow:'hidden', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
+        <div style={{ fontSize:'0.74rem', color:'var(--gray-500)', lineHeight:1.5,
+          overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
           {preview}
         </div>
       ) : !t.from_slack ? (
-        <div style={{ fontSize:'0.68rem', color:'#94a3b8', background:'#f8fafc', borderRadius:4, padding:'3px 8px', display:'inline-block' }}>
+        <div style={{ fontSize:'0.67rem', color:'var(--gray-400)', background:'var(--surface-2)', borderRadius:4, padding:'2px 7px', display:'inline-block' }}>
           手動作成
         </div>
       ) : null}
 
       {/* メタ情報 */}
-      <div style={{ display:'flex', flexDirection:'column', gap:3, marginTop:'auto' }}>
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:'auto', alignItems:'center' }}>
         {assigneeName && (
-          <span style={{ fontSize:'0.7rem', color:'#94a3b8', display:'flex', alignItems:'center', gap:3 }}>
+          <span style={{ fontSize:'0.7rem', color:'var(--gray-400)', display:'flex', alignItems:'center', gap:3 }}>
             👤 {assigneeName}
           </span>
         )}
         {t.due_date && (
-          <span style={{ fontSize:'0.7rem', fontWeight: overdue?700:400, color: overdue?'#dc2626':'#94a3b8', display:'flex', alignItems:'center', gap:3 }}>
+          <span style={{ fontSize:'0.7rem', fontWeight: overdue?700:400, color: overdue?'#ef4444':'var(--gray-400)', display:'flex', alignItems:'center', gap:3 }}>
             📅 {fmtDate(t.due_date)}{overdue && ` (${daysSince(t.due_date)}日超過)`}
           </span>
         )}
@@ -1359,7 +1359,72 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {tab === 'analytics' && <AnalyticsTab members={members} usergroups={usergroups} />}
+      {tab === 'analytics' && <>
+        <AnalyticsTab members={members} usergroups={usergroups} />
+        {/* 部署タスク検索（分析タブ） */}
+        {card(<>
+          {sh('タスク検索', '同部署のタスクを検索')}
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: filterApplied ? 14 : 0 }}>
+            <select value={filter.status} onChange={e => setF({status:e.target.value})} style={selStyle}>
+              <option value="">ステータス：すべて</option>
+              <option value="in_progress">進行中</option>
+              <option value="done">完了</option>
+            </select>
+            {deptTeams.length > 0 && (
+              <select value={filter.dept} onChange={e => setF({dept:e.target.value})} style={selStyle}>
+                <option value="">部署：すべて</option>
+                {deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            {childTeams.length > 0 && (
+              <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}>
+                <option value="">チーム：すべて</option>
+                {childTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
+              <option value="">担当者：全員</option>
+              {(teamMemberIds ? members.filter(m => teamMemberIds.has(m.assignee_id)) : members)
+                .map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
+            </select>
+            {projects.length > 0 && (
+              <select value={filter.project} onChange={e => setF({project:e.target.value})} style={selStyle}>
+                <option value="">プロジェクト：すべて</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:'0.8rem', color:T.textMid, cursor:'pointer' }}>
+              <input type="checkbox" checked={filter.overdue} onChange={e => setF({overdue:e.target.checked})} />
+              期限切れのみ
+            </label>
+            <button onClick={applyFilter}
+              style={{ padding:'6px 20px', background:'var(--primary)', color:'#fff', border:'none', borderRadius:7, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
+              検索
+            </button>
+            {filterApplied && (
+              <button onClick={clearFilter}
+                style={{ padding:'6px 12px', border:'1px solid var(--gray-200)', borderRadius:7, fontSize:'0.8rem', background:'var(--surface)', color:T.textSub, cursor:'pointer' }}>
+                クリア
+              </button>
+            )}
+          </div>
+          {filterApplied && (
+            filteredTasks.tasks.length === 0 ? (
+              <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'24px 0' }}>該当するタスクがありません</div>
+            ) : (
+              <>
+                <div style={{ fontSize:'0.72rem', color:T.textSub, marginBottom:10 }}>{filteredTasks.total}件</div>
+                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
+                  {filteredTasks.tasks.map(t => (
+                    <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
+                  ))}
+                </div>
+              </>
+            )
+          )}
+        </>)}
+      </>}
+
       {tab === 'tasks' && <>
 
       {/* KPIカード */}
@@ -1411,75 +1476,6 @@ export default function Dashboard() {
         )}
       </>)}
 
-
-      {/* 部署タスク検索 */}
-      {card(<>
-        {sh('タスク検索', '同部署のタスクを検索')}
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: filterApplied ? 14 : 0 }}>
-          <select value={filter.status} onChange={e => setF({status:e.target.value})} style={selStyle}>
-            <option value="">ステータス：すべて</option>
-            <option value="in_progress">進行中</option>
-            <option value="done">完了</option>
-          </select>
-
-          {deptTeams.length > 0 && (
-            <select value={filter.dept} onChange={e => setF({dept:e.target.value})} style={selStyle}>
-              <option value="">部署：すべて</option>
-              {deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          )}
-          {childTeams.length > 0 && (
-            <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}>
-              <option value="">チーム：すべて</option>
-              {childTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          )}
-
-          <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
-            <option value="">担当者：全員</option>
-            {(teamMemberIds ? members.filter(m => teamMemberIds.has(m.assignee_id)) : members)
-              .map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
-          </select>
-
-          {projects.length > 0 && (
-            <select value={filter.project} onChange={e => setF({project:e.target.value})} style={selStyle}>
-              <option value="">プロジェクト：すべて</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          )}
-
-          <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:'0.8rem', color:'#374151', cursor:'pointer' }}>
-            <input type="checkbox" checked={filter.overdue} onChange={e => setF({overdue:e.target.checked})} />
-            期限切れのみ
-          </label>
-
-          <button onClick={applyFilter}
-            style={{ padding:'6px 20px', background:'#1e40af', color:'#fff', border:'none', borderRadius:7, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
-            検索
-          </button>
-          {filterApplied && (
-            <button onClick={clearFilter}
-              style={{ padding:'6px 12px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', color:'#64748b', cursor:'pointer' }}>
-              クリア
-            </button>
-          )}
-        </div>
-
-        {filterApplied && (
-          filteredTasks.tasks.length === 0 ? (
-            <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'24px 0' }}>該当するタスクがありません</div>
-          ) : (
-            <>
-              <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginBottom:10 }}>{filteredTasks.total}件</div>
-              <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
-                {filteredTasks.tasks.map(t => (
-                  <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
-                ))}
-              </div>
-            </>
-          )
-        )}
-      </>)}
 
       {selectedTask && (
         <TaskPanel task={selectedTask} members={members} usergroups={usergroups} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />

@@ -129,7 +129,25 @@ export default function Layout({ children }) {
   const [user,      setUser]      = useState(null);
   const [rpoAccess, setRpoAccess] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isDark,    setIsDark]    = useState(false);
   const location = useLocation();
+
+  // テーマ初期化
+  useEffect(() => {
+    const saved = localStorage.getItem('th-theme');
+    const dark = saved === 'dark';
+    setIsDark(dark);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  }, []);
+
+  const toggleTheme = () => {
+    setIsDark(v => {
+      const next = !v;
+      localStorage.setItem('th-theme', next ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', next ? 'dark' : 'light');
+      return next;
+    });
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -200,6 +218,12 @@ export default function Layout({ children }) {
             <DropdownNav label="ヒトトレ" matchPaths={['/crm', '/rpo']} items={hitotoreItems} />
             {adminLink && <NavLink to={adminLink} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>Corp</NavLink>}
           </div>
+
+          {/* ダークモード切り替え */}
+          <button onClick={toggleTheme} title={isDark ? 'ライトモード' : 'ダークモード'}
+            style={{ background:'none', border:'1px solid var(--gray-200)', borderRadius:8, width:32, height:32, cursor:'pointer', color:'var(--gray-500)', fontSize:15, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginLeft:8 }}>
+            {isDark ? '☀' : '🌙'}
+          </button>
 
           {user && (
             <div className="global-nav-user">

@@ -2905,3 +2905,110 @@ section h2 {
   .nav-link { padding: 0 10px; font-size: 12px; }
   .global-content { padding: 16px; }
 }
+
+/* =============================================
+   ダークモード
+   ============================================= */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* グレースケール反転 */
+  --gray-50:  #0f172a;
+  --gray-100: #1e293b;
+  --gray-200: #334155;
+  --gray-300: #475569;
+  --gray-400: #64748b;
+  --gray-500: #94a3b8;
+  --gray-600: #cbd5e1;
+  --gray-700: #e2e8f0;
+  --gray-800: #f1f5f9;
+  --gray-900: #f8fafc;
+
+  /* Semantic 色の透過バージョン */
+  --primary-light:  rgba(37,99,235,0.18);
+  --danger-light:   rgba(239,68,68,0.15);
+  --success-light:  rgba(16,185,129,0.15);
+  --warning-light:  rgba(245,158,11,0.15);
+}
+
+[data-theme="dark"] body {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+/* ── ナビゲーション ── */
+[data-theme="dark"] .global-nav {
+  background: #1e293b;
+  border-color: #334155;
+}
+[data-theme="dark"] .global-nav-brand { color: #f1f5f9; }
+[data-theme="dark"] .global-nav-brand::before {
+  background: linear-gradient(135deg,#3b82f6 0%,#818cf8 100%);
+}
+[data-theme="dark"] .global-nav-user {
+  background: #334155;
+  border-color: #475569;
+  color: #cbd5e1;
+}
+[data-theme="dark"] .nav-link { color: #94a3b8; }
+[data-theme="dark"] .nav-link:hover { background: #334155; color: #f1f5f9; }
+[data-theme="dark"] .nav-link.active { background: rgba(37,99,235,.2); color: #60a5fa; }
+
+/* ── カード・テーブル共通 ── */
+[data-theme="dark"] .task-table-wrap,
+[data-theme="dark"] .crm-table-wrap,
+[data-theme="dark"] .admin-table-wrap,
+[data-theme="dark"] .crm-modal,
+[data-theme="dark"] .modal-content,
+[data-theme="dark"] .filter-panel,
+[data-theme="dark"] .kanban-col,
+[data-theme="dark"] .deal-sidebar-card,
+[data-theme="dark"] .activity-body,
+[data-theme="dark"] .analytics-section,
+[data-theme="dark"] .rpo-card,
+[data-theme="dark"] .ap-card,
+[data-theme="dark"] .tab-section {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0;
+}
+[data-theme="dark"] .kanban-card {
+  background: #1e293b;
+  border-color: #334155;
+}
+[data-theme="dark"] .crm-table th,
+[data-theme="dark"] .task-table th,
+[data-theme="dark"] .admin-table th,
+[data-theme="dark"] .rpo-wl-table th,
+[data-theme="dark"] .rpo-summary-table th {
+  background: #0f172a;
+  color: #94a3b8;
+  border-color: #334155;
+}
+[data-theme="dark"] .crm-table td,
+[data-theme="dark"] .task-table td { border-color: #334155; color: #e2e8f0; }
+[data-theme="dark"] .crm-table tr.crm-row:hover,
+[data-theme="dark"] .task-table tbody tr:hover { background: #334155 !important; }
+
+/* ── フォーム要素 ── */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: #1e293b;
+  border-color: #475569;
+  color: #e2e8f0;
+}
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder { color: #64748b; }
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus { border-color: var(--primary); outline: none; }
+
+/* ── ドロップダウン ── */
+[data-theme="dark"] .global-nav div[style*="background: #fff"],
+[data-theme="dark"] .global-nav div[style*="background:#fff"] {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+}
+[data-theme="dark"] .global-nav a[style] { color: #cbd5e1 !important; }
+[data-theme="dark"] .global-nav a[style]:hover { background: #334155 !important; }

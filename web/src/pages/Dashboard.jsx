@@ -828,66 +828,63 @@ function MentionWidget() {
   const displayed = directOnly ? mentions.filter(isDirectMention) : mentions;
   const directCount = mentions.filter(isDirectMention).length;
 
-  const cardStyle = wCard({ padding:'12px 16px' });
+  const count = directOnly ? directCount : mentions.length;
 
-  if (displayed.length === 0 && directOnly) {
+  if (count === 0 && directOnly) {
     return (
-      <div style={cardStyle}>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+      <div style={wCard({ padding:'10px 14px' })}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={wTitle}>未確認メンション</span>
-          <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.63rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
-          <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color:T.textSub }}>
-            <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />
-            個別のみ
+          <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.7rem', color:T.textSub }}>
+            <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />個別のみ
           </label>
         </div>
-        <div style={{ fontSize:'0.78rem', color:T.textSub, marginTop:8, textAlign:'center' }}>個別メンションなし（@channel等 {mentions.length}件）</div>
+        <div style={{ fontSize:'0.75rem', color:T.textSub, marginTop:6, textAlign:'center' }}>
+          個別メンションなし（@channel等 {mentions.length}件）
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={cardStyle}>
-      <div style={{ ...wHead, marginBottom:10, flexWrap:'wrap' }}>
-        <span style={wTitle}>未確認メンション</span>
-        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.63rem', fontWeight:700, padding:'1px 7px' }}>
-          {directOnly ? directCount : mentions.length}
-        </span>
-        {directOnly && mentions.length !== directCount && (
-          <span style={{ fontSize:'0.68rem', color:T.textSub }}>（全{mentions.length}件中）</span>
-        )}
-        <span style={{ fontSize:'0.68rem', color:T.textSub }}>返信・リアクション・× で消えます</span>
-        <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color: directOnly ? 'var(--primary)' : T.textSub, fontWeight: directOnly ? 600 : 400 }}>
-          <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />
-          個別のみ
+    <div style={wCard({ padding:'10px 14px' })}>
+      {/* ヘッダー：タイトル + バッジ + 個別のみ + 更新 */}
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+        <span style={{ fontSize:'0.82rem', fontWeight:700, color:T.text }}>未確認メンション</span>
+        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.63rem', fontWeight:700, padding:'1px 7px', flexShrink:0 }}>{count}</span>
+        <label style={{ display:'flex', alignItems:'center', gap:3, marginLeft:'auto', cursor:'pointer', fontSize:'0.7rem', color: directOnly ? 'var(--primary)' : T.textSub, fontWeight: directOnly ? 600 : 400, flexShrink:0 }}>
+          <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />個別のみ
         </label>
-        <button onClick={load} style={{ background:'none', border:'none', cursor:'pointer', color:T.textSub, fontSize:'0.75rem', padding:'2px 6px' }} title="更新">↻</button>
+        <button onClick={load} style={{ background:'none', border:'none', cursor:'pointer', color:T.textSub, fontSize:'0.8rem', padding:'1px 4px', flexShrink:0 }} title="更新">↻</button>
       </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:5, maxHeight:220, overflowY:'auto' }}>
+      {/* アイテムリスト */}
+      <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:260, overflowY:'auto' }}>
         {displayed.map(m => {
           const slackUrl = `https://slack.com/archives/${m.channel_id}/p${m.message_ts.replace('.', '')}`;
           return (
-            <div key={m.id} style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <div key={m.id} style={{ display:'flex', alignItems:'center', gap:5 }}>
               <a href={slackUrl} target="_blank" rel="noreferrer"
-                style={{ flex:1, display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:8, background:'var(--danger-light)', border:'1px solid rgba(239,68,68,0.2)', textDecoration:'none', minWidth:0, transition:'opacity 0.1s' }}
-                onMouseEnter={e => e.currentTarget.style.opacity='0.8'}
+                style={{ flex:1, display:'flex', alignItems:'center', gap:8, padding:'6px 8px', borderRadius:7, background:'var(--surface-2)', border:'1px solid var(--gray-200)', textDecoration:'none', minWidth:0, transition:'opacity 0.1s' }}
+                onMouseEnter={e => e.currentTarget.style.opacity='0.75'}
                 onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                 {m.sender_avatar
-                  ? <img src={m.sender_avatar} alt="" style={{ width:26, height:26, borderRadius:'50%', flexShrink:0 }} />
-                  : <div style={{ width:26, height:26, borderRadius:'50%', background:'#fca5a5', flexShrink:0 }} />}
+                  ? <img src={m.sender_avatar} alt="" style={{ width:24, height:24, borderRadius:'50%', flexShrink:0 }} />
+                  : <div style={{ width:24, height:24, borderRadius:'50%', background:'var(--gray-200)', flexShrink:0 }} />}
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:'0.75rem', fontWeight:600, color:T.text, display:'flex', alignItems:'center', gap:4 }}>
-                    {m.sender_name || 'Unknown'}
-                    {m.mention_type === 'channel' && <span style={{ fontSize:'0.62rem', color:T.textSub, background:'var(--surface-2)', padding:'1px 5px', borderRadius:4 }}>@channel</span>}
-                    {m.mention_type === 'group' && <span style={{ fontSize:'0.62rem', color:T.textSub, background:'var(--surface-2)', padding:'1px 5px', borderRadius:4 }}>グループ</span>}
+                  <div style={{ display:'flex', alignItems:'center', gap:4, marginBottom:1 }}>
+                    <span style={{ fontSize:'0.73rem', fontWeight:600, color:T.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {m.sender_name || 'Unknown'}
+                    </span>
+                    {m.mention_type === 'channel' && <span style={{ fontSize:'0.6rem', color:T.textSub, background:'var(--surface-3)', padding:'0px 4px', borderRadius:3, flexShrink:0 }}>@ch</span>}
+                    {m.mention_type === 'group' && <span style={{ fontSize:'0.6rem', color:T.textSub, background:'var(--surface-3)', padding:'0px 4px', borderRadius:3, flexShrink:0 }}>GR</span>}
+                    <span style={{ fontSize:'0.63rem', color:T.textSub, marginLeft:'auto', flexShrink:0 }}>{fmtAgo(m.created_at)}</span>
                   </div>
-                  <div style={{ fontSize:'0.78rem', color:T.textMid, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.text_preview}</div>
+                  <div style={{ fontSize:'0.75rem', color:T.textMid, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.text_preview}</div>
                 </div>
-                <span style={{ fontSize:'0.68rem', color:T.textSub, flexShrink:0 }}>{fmtAgo(m.created_at)}</span>
               </a>
               <button onClick={(e) => dismiss(m.id, e)}
-                style={{ flexShrink:0, background:'none', border:'1px solid var(--gray-200)', borderRadius:6, width:24, height:24, cursor:'pointer', color:T.textSub, fontSize:'0.8rem', display:'flex', alignItems:'center', justifyContent:'center' }}
-                title="既読にする">×</button>
+                style={{ flexShrink:0, background:'none', border:'none', cursor:'pointer', color:T.textSub, fontSize:'0.85rem', width:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', opacity:0.5 }}
+                title="既読">×</button>
             </div>
           );
         })}
@@ -1312,16 +1309,15 @@ export default function Dashboard() {
   );
 
   const SectionLabel = ({ label }) => (
-    <div style={{ fontSize:'0.62rem', fontWeight:800, letterSpacing:'0.1em', color:T.textSub, textTransform:'uppercase', display:'flex', alignItems:'center', gap:8 }}>
-      <span style={{ flex:1, height:1, background:'var(--gray-200)', display:'block' }} />
-      {label}
-      <span style={{ flex:1, height:1, background:'var(--gray-200)', display:'block' }} />
+    <div style={{ display:'flex', alignItems:'center', gap:8, padding:'2px 0' }}>
+      <span style={{ fontSize:'0.65rem', fontWeight:700, letterSpacing:'0.08em', color:T.textSub, textTransform:'uppercase', flexShrink:0 }}>{label}</span>
+      <span style={{ flex:1, height:'1px', background:'var(--gray-200)', display:'block' }} />
     </div>
   );
 
   // 右サイドバーコンテンツ（自分 / チーム に明確に分割）
   const sidebarContent = (
-    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
       {/* ── 自分のこと ── */}
       <SectionLabel label="自分のこと" />
       <Foldable id="calendar" label="今日の予定" defaultOpen={true}>
@@ -1330,10 +1326,10 @@ export default function Dashboard() {
       <MentionWidget />
 
       {/* ── チームのこと ── */}
-      <SectionLabel label="チームのこと" />
-      {overdueAlertBody || (
-        <div style={{ fontSize:'0.78rem', color:T.textSub, textAlign:'center', padding:'8px 0' }}>期限切れタスクなし</div>
-      )}
+      <div style={{ marginTop:6 }}>
+        <SectionLabel label="チームのこと" />
+      </div>
+      {overdueAlertBody}
       <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
         <TeamDetailWidget />
       </Foldable>
@@ -1430,7 +1426,7 @@ export default function Dashboard() {
           {sidebarContent}
         </div>
       ) : (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:20, alignItems:'start' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 360px', gap:20, alignItems:'start' }}>
           {mainContent}
           <div style={{ position:'sticky', top:16 }}>
             {sidebarContent}

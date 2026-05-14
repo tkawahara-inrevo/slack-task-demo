@@ -3,6 +3,22 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useBreakpoint } from '../hooks/useWindowWidth';
 
+// ── デザイントークン（CSS変数参照でダークモード対応） ───────────────
+const T = {
+  card:      { background:'var(--surface)',   border:'1px solid var(--gray-200)', borderRadius:12 },
+  cardInner: { background:'var(--surface-2)', border:'1px solid var(--gray-200)', borderRadius:8  },
+  text:      'var(--gray-900)',
+  textSub:   'var(--gray-500)',
+  textMid:   'var(--gray-600)',
+  border:    'var(--gray-200)',
+  bg:        'var(--gray-50)',
+  surface:   'var(--surface)',
+  surface2:  'var(--surface-2)',
+};
+const wCard = (extra = {}) => ({ ...T.card, padding:'16px', ...extra });
+const wHead = { display:'flex', alignItems:'center', gap:8, marginBottom:12 };
+const wTitle = { fontSize:'0.88rem', fontWeight:700, color:T.text, flex:1 };
+
 // ── 分析タブ用コンポーネント ──────────────────────────────────────
 const STATUS_COLORS = { done:'#10b981', in_progress:'#3b82f6', pending:'#f59e0b', cancelled:'#94a3b8', overdue:'#dc2626' };
 
@@ -752,7 +768,7 @@ function TaskCard({ t, members, onClick }) {
 }
 
 // ── 折りたたみラッパー ──────────────────────────────────────────────
-function Foldable({ id, label, badge, badgeColor = '#dc2626', defaultOpen = true, children }) {
+function Foldable({ id, label, badge, badgeColor = '#ef4444', defaultOpen = true, children }) {
   const [open, setOpen] = useState(() => {
     const v = localStorage.getItem(`fold_${id}`);
     return v === null ? defaultOpen : v === '1';
@@ -763,10 +779,10 @@ function Foldable({ id, label, badge, badgeColor = '#dc2626', defaultOpen = true
   });
   return (
     <div>
-      <div onClick={toggle} style={{ display:'flex', alignItems:'center', gap:8, marginBottom: open ? 8 : 0, cursor:'pointer', userSelect:'none', padding:'3px 0' }}>
-        <span style={{ fontSize:'0.75rem', fontWeight:700, color:'#475569', flex:1 }}>{label}</span>
-        {badge > 0 && <span style={{ fontSize:'0.65rem', background:badgeColor, color:'#fff', borderRadius:99, padding:'1px 7px', fontWeight:700 }}>{badge}</span>}
-        <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{open ? '▲ 閉じる' : '▼ 開く'}</span>
+      <div onClick={toggle} style={{ display:'flex', alignItems:'center', gap:8, marginBottom: open ? 8 : 0, cursor:'pointer', userSelect:'none', padding:'4px 2px' }}>
+        <span style={{ fontSize:'0.75rem', fontWeight:700, color:T.textMid, flex:1 }}>{label}</span>
+        {badge > 0 && <span style={{ fontSize:'0.63rem', background:badgeColor, color:'#fff', borderRadius:99, padding:'1px 7px', fontWeight:700 }}>{badge}</span>}
+        <span style={{ fontSize:'0.68rem', color:T.textSub }}>{open ? '▲ 閉じる' : '▼ 開く'}</span>
       </div>
       {open && children}
     </div>
@@ -812,63 +828,65 @@ function MentionWidget() {
   const displayed = directOnly ? mentions.filter(isDirectMention) : mentions;
   const directCount = mentions.filter(isDirectMention).length;
 
+  const cardStyle = wCard({ padding:'12px 16px' });
+
   if (displayed.length === 0 && directOnly) {
     return (
-      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+      <div style={cardStyle}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a' }}>未確認メンション</span>
-          <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
-          <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color:'#6b7280' }}>
+          <span style={wTitle}>未確認メンション</span>
+          <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.63rem', fontWeight:700, padding:'1px 7px' }}>{mentions.length}</span>
+          <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color:T.textSub }}>
             <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />
             個別のみ
           </label>
         </div>
-        <div style={{ fontSize:'0.78rem', color:'#94a3b8', marginTop:8, textAlign:'center' }}>個別メンションなし（@channel等 {mentions.length}件）</div>
+        <div style={{ fontSize:'0.78rem', color:T.textSub, marginTop:8, textAlign:'center' }}>個別メンションなし（@channel等 {mentions.length}件）</div>
       </div>
     );
   }
 
   return (
-    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, flexWrap:'wrap' }}>
-        <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a' }}>未確認メンション</span>
-        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.65rem', fontWeight:700, padding:'1px 7px' }}>
+    <div style={cardStyle}>
+      <div style={{ ...wHead, marginBottom:10, flexWrap:'wrap' }}>
+        <span style={wTitle}>未確認メンション</span>
+        <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.63rem', fontWeight:700, padding:'1px 7px' }}>
           {directOnly ? directCount : mentions.length}
         </span>
         {directOnly && mentions.length !== directCount && (
-          <span style={{ fontSize:'0.68rem', color:'#9ca3af' }}>（全{mentions.length}件中）</span>
+          <span style={{ fontSize:'0.68rem', color:T.textSub }}>（全{mentions.length}件中）</span>
         )}
-        <span style={{ fontSize:'0.68rem', color:'#94a3b8' }}>返信・リアクション・× で消えます</span>
-        <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color: directOnly ? '#1d4ed8' : '#6b7280', fontWeight: directOnly ? 600 : 400 }}>
+        <span style={{ fontSize:'0.68rem', color:T.textSub }}>返信・リアクション・× で消えます</span>
+        <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.72rem', color: directOnly ? 'var(--primary)' : T.textSub, fontWeight: directOnly ? 600 : 400 }}>
           <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />
           個別のみ
         </label>
-        <button onClick={load} style={{ background:'none', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:'0.75rem', padding:'2px 6px' }} title="更新">↻</button>
+        <button onClick={load} style={{ background:'none', border:'none', cursor:'pointer', color:T.textSub, fontSize:'0.75rem', padding:'2px 6px' }} title="更新">↻</button>
       </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:200, overflowY:'auto' }}>
+      <div style={{ display:'flex', flexDirection:'column', gap:5, maxHeight:220, overflowY:'auto' }}>
         {displayed.map(m => {
           const slackUrl = `https://slack.com/archives/${m.channel_id}/p${m.message_ts.replace('.', '')}`;
           return (
             <div key={m.id} style={{ display:'flex', alignItems:'center', gap:6 }}>
               <a href={slackUrl} target="_blank" rel="noreferrer"
-                style={{ flex:1, display:'flex', alignItems:'flex-start', gap:8, padding:'7px 10px', borderRadius:8, background:'#fef2f2', border:'1px solid #fecaca', textDecoration:'none', transition:'background 0.1s', minWidth:0 }}
-                onMouseEnter={e => e.currentTarget.style.background='#fee2e2'}
-                onMouseLeave={e => e.currentTarget.style.background='#fef2f2'}>
+                style={{ flex:1, display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:8, background:'var(--danger-light)', border:'1px solid rgba(239,68,68,0.2)', textDecoration:'none', minWidth:0, transition:'opacity 0.1s' }}
+                onMouseEnter={e => e.currentTarget.style.opacity='0.8'}
+                onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                 {m.sender_avatar
-                  ? <img src={m.sender_avatar} alt="" style={{ width:24, height:24, borderRadius:'50%', flexShrink:0, marginTop:1 }} />
-                  : <div style={{ width:24, height:24, borderRadius:'50%', background:'#fca5a5', flexShrink:0 }} />}
+                  ? <img src={m.sender_avatar} alt="" style={{ width:26, height:26, borderRadius:'50%', flexShrink:0 }} />
+                  : <div style={{ width:26, height:26, borderRadius:'50%', background:'#fca5a5', flexShrink:0 }} />}
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:'0.75rem', fontWeight:600, color:'#374151' }}>
+                  <div style={{ fontSize:'0.75rem', fontWeight:600, color:T.text, display:'flex', alignItems:'center', gap:4 }}>
                     {m.sender_name || 'Unknown'}
-                    {m.mention_type === 'channel' && <span style={{ marginLeft:5, fontSize:'0.65rem', color:'#6b7280', background:'#f3f4f6', padding:'1px 5px', borderRadius:4 }}>@channel</span>}
-                    {m.mention_type === 'group' && <span style={{ marginLeft:5, fontSize:'0.65rem', color:'#6b7280', background:'#f3f4f6', padding:'1px 5px', borderRadius:4 }}>グループ</span>}
+                    {m.mention_type === 'channel' && <span style={{ fontSize:'0.62rem', color:T.textSub, background:'var(--surface-2)', padding:'1px 5px', borderRadius:4 }}>@channel</span>}
+                    {m.mention_type === 'group' && <span style={{ fontSize:'0.62rem', color:T.textSub, background:'var(--surface-2)', padding:'1px 5px', borderRadius:4 }}>グループ</span>}
                   </div>
-                  <div style={{ fontSize:'0.8rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.text_preview}</div>
+                  <div style={{ fontSize:'0.78rem', color:T.textMid, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.text_preview}</div>
                 </div>
-                <span style={{ fontSize:'0.68rem', color:'#9ca3af', flexShrink:0, marginTop:2 }}>{fmtAgo(m.created_at)}</span>
+                <span style={{ fontSize:'0.68rem', color:T.textSub, flexShrink:0 }}>{fmtAgo(m.created_at)}</span>
               </a>
               <button onClick={(e) => dismiss(m.id, e)}
-                style={{ flexShrink:0, background:'none', border:'1px solid #e5e7eb', borderRadius:6, width:24, height:24, cursor:'pointer', color:'#9ca3af', fontSize:'0.8rem', display:'flex', alignItems:'center', justifyContent:'center' }}
+                style={{ flexShrink:0, background:'none', border:'1px solid var(--gray-200)', borderRadius:6, width:24, height:24, cursor:'pointer', color:T.textSub, fontSize:'0.8rem', display:'flex', alignItems:'center', justifyContent:'center' }}
                 title="既読にする">×</button>
             </div>
           );
@@ -897,15 +915,15 @@ function AttendanceWidget() {
   const total   = teamStatus?.summary.total || 0;
 
   const MemberRow = ({ m }) => (
-    <div style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 8px', borderRadius:7, background:'#f8fafc' }}>
+    <div style={{ display:'flex', alignItems:'center', gap:7, padding:'5px 8px', borderRadius:7, background:'var(--surface-2)' }}>
       {m.avatarUrl
         ? <img src={m.avatarUrl} alt="" style={{ width:20, height:20, borderRadius:'50%', flexShrink:0 }} />
-        : <div style={{ width:20, height:20, borderRadius:'50%', background:'#e2e8f0', flexShrink:0 }} />}
-      <span style={{ flex:1, fontSize:'0.78rem', color:'#374151', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        : <div style={{ width:20, height:20, borderRadius:'50%', background:'var(--gray-200)', flexShrink:0 }} />}
+      <span style={{ flex:1, fontSize:'0.78rem', color:T.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
         {m.displayName}
       </span>
       {m.taskCount > 0 && (
-        <span style={{ fontSize:'0.68rem', background:'#eff6ff', color:'#3b82f6', borderRadius:10, padding:'1px 6px', flexShrink:0 }}>
+        <span style={{ fontSize:'0.68rem', background:'var(--primary-light)', color:'var(--primary)', borderRadius:10, padding:'1px 6px', flexShrink:0 }}>
           {m.taskCount}件
         </span>
       )}
@@ -913,49 +931,47 @@ function AttendanceWidget() {
   );
 
   return (
-    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 16px' }}>
+    <div style={wCard({ padding:'12px 16px' })}>
       {/* 自分の打刻 + チームサマリー */}
-      <div style={{ display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
-        <span style={{ fontSize:'0.75rem', fontWeight:700, color:'#374151' }}>本日の勤怠</span>
-        <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : '#94a3b8' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <span style={{ fontSize:'0.75rem', fontWeight:700, color:T.text }}>本日の勤怠</span>
+        <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : T.textSub }}>
           {myIn ? '🟢 出勤済み' : '⬜ 未出勤'}
         </span>
-        <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : '#94a3b8' }}>
+        <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : T.textSub }}>
           {myOut ? '🟣 退勤済み' : '⬜ 未退勤'}
         </span>
 
         {teamStatus && (
-          <>
-            <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-              <button onClick={() => setExpand(v => v === 'in' ? null : 'in')} style={{
-                background: expand === 'in' ? '#dcfce7' : '#f0fdf4',
-                border:'1px solid #bbf7d0', borderRadius:20, padding:'3px 12px',
-                cursor:'pointer', fontSize:'0.75rem', fontWeight:600, color:'#15803d',
-              }}>
-                🟢 出勤 {inList.length}/{total}人 {expand === 'in' ? '▲' : '▼'}
-              </button>
-              <button onClick={() => setExpand(v => v === 'out' ? null : 'out')} style={{
-                background: expand === 'out' ? '#fef2f2' : '#fff',
-                border:`1px solid ${outList.length === 0 ? '#bbf7d0' : '#fecaca'}`,
-                borderRadius:20, padding:'3px 12px',
-                cursor:'pointer', fontSize:'0.75rem', fontWeight:600,
-                color: outList.length === 0 ? '#15803d' : '#dc2626',
-              }}>
-                ⬜ 未出勤 {outList.length}人 {expand === 'out' ? '▲' : '▼'}
-              </button>
-            </div>
-          </>
+          <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+            <button onClick={() => setExpand(v => v === 'in' ? null : 'in')} style={{
+              background: expand === 'in' ? '#dcfce7' : 'var(--success-light)',
+              border:'1px solid #bbf7d0', borderRadius:20, padding:'3px 12px',
+              cursor:'pointer', fontSize:'0.75rem', fontWeight:600, color:'#15803d',
+            }}>
+              🟢 出勤 {inList.length}/{total}人 {expand === 'in' ? '▲' : '▼'}
+            </button>
+            <button onClick={() => setExpand(v => v === 'out' ? null : 'out')} style={{
+              background: expand === 'out' ? 'var(--danger-light)' : 'var(--surface)',
+              border:`1px solid ${outList.length === 0 ? '#bbf7d0' : 'rgba(239,68,68,0.3)'}`,
+              borderRadius:20, padding:'3px 12px',
+              cursor:'pointer', fontSize:'0.75rem', fontWeight:600,
+              color: outList.length === 0 ? '#15803d' : '#dc2626',
+            }}>
+              ⬜ 未出勤 {outList.length}人 {expand === 'out' ? '▲' : '▼'}
+            </button>
+          </div>
         )}
       </div>
 
       {/* 展開リスト */}
       {expand && teamStatus && (
-        <div style={{ marginTop:10, borderTop:'1px solid #f1f5f9', paddingTop:10 }}>
+        <div style={{ marginTop:10, borderTop:'1px solid var(--gray-200)', paddingTop:10 }}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:4, maxHeight:240, overflowY:'auto' }}>
             {(expand === 'in' ? inList : outList).map(m => <MemberRow key={m.userId} m={m} />)}
           </div>
           {(expand === 'in' ? inList : outList).length === 0 && (
-            <div style={{ color:'#94a3b8', fontSize:'0.8rem', textAlign:'center', padding:8 }}>
+            <div style={{ color:T.textSub, fontSize:'0.8rem', textAlign:'center', padding:8 }}>
               {expand === 'in' ? 'まだ出勤者なし' : '全員出勤済み'}
             </div>
           )}
@@ -989,21 +1005,21 @@ function TeamDetailWidget() {
 
   return (
     <>
-      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-        <div style={{ padding:'10px 16px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
-          <span style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a' }}>チームメンバー</span>
-          <span style={{ fontSize:'0.72rem', color:'#94a3b8' }}>{data.members.length}人</span>
+      <div style={{ ...T.card, overflow:'hidden' }}>
+        <div style={{ padding:'10px 16px', borderBottom:'1px solid var(--gray-200)', display:'flex', alignItems:'center', gap:8 }}>
+          <span style={wTitle}>チームメンバー</span>
+          <span style={{ fontSize:'0.72rem', color:T.textSub }}>{data.members.length}人</span>
           {!data.calendarConnected && <span style={{ fontSize:'0.7rem', color:'#f59e0b', marginLeft:'auto' }}>カレンダー未連携</span>}
         </div>
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
             <thead>
-              <tr style={{ background:'#f8fafc' }}>
-                <th style={{ padding:'7px 12px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>メンバー</th>
-                <th style={{ padding:'7px 10px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem', whiteSpace:'nowrap' }}>出勤状況</th>
-                <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>タスク</th>
+              <tr style={{ background:'var(--surface-2)' }}>
+                <th style={{ padding:'7px 12px', textAlign:'left', fontWeight:600, color:T.textSub, fontSize:'0.72rem', whiteSpace:'nowrap' }}>メンバー</th>
+                <th style={{ padding:'7px 10px', textAlign:'left', fontWeight:600, color:T.textSub, fontSize:'0.72rem', whiteSpace:'nowrap' }}>出勤状況</th>
+                <th style={{ padding:'7px 10px', textAlign:'right', fontWeight:600, color:T.textSub, fontSize:'0.72rem' }}>タスク</th>
                 {data.calendarConnected && <>
-                  <th style={{ padding:'7px 10px', textAlign:'left', fontWeight:600, color:'#64748b', fontSize:'0.72rem' }}>今日の予定</th>
+                  <th style={{ padding:'7px 10px', textAlign:'left', fontWeight:600, color:T.textSub, fontSize:'0.72rem' }}>今日の予定</th>
                 </>}
               </tr>
             </thead>
@@ -1013,13 +1029,13 @@ function TeamDetailWidget() {
                 const isExpanded = expandCal === m.userId;
                 return (
                   <React.Fragment key={m.userId}>
-                    <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #f8fafc', background: inMeeting ? '#fefce8' : 'transparent' }}>
+                    <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid var(--gray-200)', background: inMeeting ? 'var(--warning-light)' : 'transparent' }}>
                       <td style={{ padding:'7px 12px' }}>
                         <div style={{ display:'flex', alignItems:'center', gap:7 }}>
                           {m.avatarUrl
                             ? <img src={m.avatarUrl} alt="" style={{ width:22, height:22, borderRadius:'50%', flexShrink:0 }} />
-                            : <div style={{ width:22, height:22, borderRadius:'50%', background:'#e2e8f0', flexShrink:0 }} />}
-                          <span style={{ color:'#0f172a', whiteSpace:'nowrap' }}>{m.displayName}</span>
+                            : <div style={{ width:22, height:22, borderRadius:'50%', background:'var(--gray-200)', flexShrink:0 }} />}
+                          <span style={{ color:T.text, whiteSpace:'nowrap' }}>{m.displayName}</span>
                         </div>
                       </td>
                       <td style={{ padding:'7px 10px' }}>
@@ -1304,27 +1320,27 @@ export default function Dashboard() {
 
   const { isMobile } = useBreakpoint();
 
-  if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'60vh', color:'#94a3b8' }}>読み込み中…</div>;
+  if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'60vh', color:T.textSub }}>読み込み中…</div>;
 
   const card = (children, style={}) => (
-    <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding: isMobile ? '12px 14px' : '16px 20px', ...style }}>{children}</div>
+    <div style={{ ...T.card, padding: isMobile ? '12px 14px' : '16px 20px', ...style }}>{children}</div>
   );
   const sh = (label, sub) => (
     <div style={{ marginBottom:10 }}>
-      <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a' }}>{label}</div>
-      {sub && <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>{sub}</div>}
+      <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>{label}</div>
+      {sub && <div style={{ fontSize:'0.7rem', color:T.textSub, marginTop:1 }}>{sub}</div>}
     </div>
   );
-  const selStyle = { padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.8rem', background:'#fff', outline:'none' };
+  const selStyle = { padding:'6px 10px', border:'1px solid var(--gray-200)', borderRadius:7, fontSize:'0.8rem', background:'var(--surface)', color:T.text, outline:'none' };
   const myName = me?.displayName?.split(/[\s　/]/)[0] || '';
 
   const tabBtnStyle = (active) => ({
-    padding:'6px 20px', border:'none', borderRadius:8, cursor:'pointer', fontSize:'0.85rem', fontWeight: active ? 700 : 500,
-    background: active ? '#1e40af' : 'transparent', color: active ? '#fff' : '#64748b', transition:'all 0.12s',
+    padding:'6px 18px', border:'none', borderRadius:7, cursor:'pointer', fontSize:'0.82rem', fontWeight: active ? 700 : 500,
+    background: active ? 'var(--primary)' : 'transparent', color: active ? '#fff' : T.textSub, transition:'all 0.12s',
   });
 
   return (
-    <div style={{ padding: isMobile ? '0' : '20px 24px', background:'#f8fafc', minHeight:'100%', display:'flex', flexDirection:'column', gap: isMobile ? 10 : 14 }}>
+    <div style={{ padding: isMobile ? '0' : '20px 24px', background:'var(--gray-50)', minHeight:'100%', display:'flex', flexDirection:'column', gap: isMobile ? 10 : 14 }}>
 
       {/* 1. 勤怠ウィジェット */}
       <AttendanceWidget />
@@ -1335,10 +1351,9 @@ export default function Dashboard() {
       </Foldable>
 
       {/* 3. タブ + マイタスク */}
-      {/* ヘッダー + タブ */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
-        {myName && <div style={{ fontSize:'0.82rem', color:'#64748b', fontWeight:600 }}>{myName} のタスク</div>}
-        <div style={{ display:'flex', gap:4, background:'#f1f5f9', borderRadius:10, padding:3 }}>
+        {myName && <div style={{ fontSize:'0.82rem', color:T.textMid, fontWeight:600 }}>{myName} のタスク</div>}
+        <div style={{ display:'flex', gap:2, background:'var(--surface-2)', borderRadius:9, padding:3, border:'1px solid var(--gray-200)' }}>
           <button style={tabBtnStyle(tab==='tasks')}   onClick={() => setTab('tasks')}>マイタスク</button>
           <button style={tabBtnStyle(tab==='analytics')} onClick={() => setTab('analytics')}>分析</button>
         </div>
@@ -1348,26 +1363,26 @@ export default function Dashboard() {
       {tab === 'tasks' && <>
 
       {/* KPIカード */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 8 : 12 }}>
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 8 : 10 }}>
         {[
-          { label:'総タスク数', value: myTotal,                  color:'#6366f1' },
-          { label:'進行中',    value: mySummary?.in_progress||0,  color:'#3b82f6' },
-          { label:'期限切れ',  value: myOverdue,                  color: myOverdue > 0 ? '#dc2626' : '#94a3b8' },
-          { label:'完了',      value: mySummary?.done||0,         color:'#10b981' },
+          { label:'総タスク数', value: myTotal,                  accent:'#6366f1' },
+          { label:'進行中',    value: mySummary?.in_progress||0,  accent:'var(--primary)' },
+          { label:'期限切れ',  value: myOverdue,                  accent: myOverdue > 0 ? '#ef4444' : T.textSub },
+          { label:'完了',      value: mySummary?.done||0,         accent:'#10b981' },
         ].map(k => (
-          <div key={k.label} style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding: isMobile ? '12px 14px' : '14px 18px' }}>
-            <div style={{ fontSize: isMobile ? '0.68rem' : '0.72rem', color:'#64748b', fontWeight:500, marginBottom:4 }}>{k.label}</div>
-            <div style={{ fontSize: isMobile ? '1.6rem' : '1.8rem', fontWeight:900, color:k.color, lineHeight:1 }}>{k.value}</div>
+          <div key={k.label} style={{ ...T.card, padding: isMobile ? '12px 14px' : '14px 18px', borderTop:`3px solid ${k.accent}` }}>
+            <div style={{ fontSize:'0.72rem', color:T.textSub, fontWeight:500, marginBottom:6 }}>{k.label}</div>
+            <div style={{ fontSize: isMobile ? '1.7rem' : '2rem', fontWeight:900, color:k.accent, lineHeight:1 }}>{k.value}</div>
           </div>
         ))}
       </div>
 
-      {/* マイタスク一覧（デフォルト表示） */}
+      {/* マイタスク一覧 */}
       {card(<>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
           <div>
-            <div style={{ fontWeight:700, fontSize:'0.88rem', color:'#0f172a' }}>マイタスク</div>
-            <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
+            <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>マイタスク</div>
+            <div style={{ fontSize:'0.7rem', color:T.textSub, marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
           </div>
           <button
             onClick={() => {
@@ -1378,13 +1393,13 @@ export default function Dashboard() {
               const pos = x && y ? `,left=${x},top=${y}` : '';
               window.open('/dashboard/floating', 'taskhub-float', `width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`);
             }}
-            style={{ padding:'5px 12px', border:'1px solid #e2e8f0', borderRadius:7, background:'#fff', color:'#64748b', fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
+            style={{ padding:'5px 12px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
             title="ポップアップで開く">
             ↗ ポップアップ
           </button>
         </div>
         {activeTasks.length === 0 ? (
-          <div style={{ color:'#94a3b8', fontSize:'0.82rem', textAlign:'center', padding:'16px 0' }}>
+          <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>
             アクティブなタスクはありません
           </div>
         ) : (

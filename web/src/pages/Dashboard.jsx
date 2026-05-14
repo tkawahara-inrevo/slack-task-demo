@@ -896,87 +896,21 @@ function MentionWidget() {
   );
 }
 
-// ── 勤怠・稼働状況ウィジェット ─────────────────────────────────────
+// ── 勤怠ウィジェット（自分の出勤/退勤状態のみ・1行コンパクト）──────
 function AttendanceWidget() {
-  const [myAtt, setMyAtt]         = useState(null);
-  const [teamStatus, setTeamStatus] = useState(null);
-  const [expand, setExpand]        = useState(null); // null | 'in' | 'out'
-
-  useEffect(() => {
-    api.myAttendance().then(setMyAtt).catch(() => {});
-    api.teamReportStatus().then(setTeamStatus).catch(() => {});
-  }, []);
-
+  const [myAtt, setMyAtt] = useState(null);
+  useEffect(() => { api.myAttendance().then(setMyAtt).catch(() => {}); }, []);
   const myIn  = myAtt?.clockIn?.ok;
   const myOut = myAtt?.clockOut?.ok;
-
-  const inList  = teamStatus?.members.filter(m => m.clockedIn)  || [];
-  const outList = teamStatus?.members.filter(m => !m.clockedIn) || [];
-  const total   = teamStatus?.summary.total || 0;
-
-  const MemberRow = ({ m }) => (
-    <div style={{ display:'flex', alignItems:'center', gap:7, padding:'5px 8px', borderRadius:7, background:'var(--surface-2)' }}>
-      {m.avatarUrl
-        ? <img src={m.avatarUrl} alt="" style={{ width:20, height:20, borderRadius:'50%', flexShrink:0 }} />
-        : <div style={{ width:20, height:20, borderRadius:'50%', background:'var(--gray-200)', flexShrink:0 }} />}
-      <span style={{ flex:1, fontSize:'0.78rem', color:T.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-        {m.displayName}
-      </span>
-      {m.taskCount > 0 && (
-        <span style={{ fontSize:'0.68rem', background:'var(--primary-light)', color:'var(--primary)', borderRadius:10, padding:'1px 6px', flexShrink:0 }}>
-          {m.taskCount}件
-        </span>
-      )}
-    </div>
-  );
-
   return (
-    <div style={wCard({ padding:'12px 16px' })}>
-      {/* 自分の打刻 + チームサマリー */}
-      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-        <span style={{ fontSize:'0.75rem', fontWeight:700, color:T.text }}>本日の勤怠</span>
-        <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : T.textSub }}>
-          {myIn ? '🟢 出勤済み' : '⬜ 未出勤'}
-        </span>
-        <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : T.textSub }}>
-          {myOut ? '🟣 退勤済み' : '⬜ 未退勤'}
-        </span>
-
-        {teamStatus && (
-          <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-            <button onClick={() => setExpand(v => v === 'in' ? null : 'in')} style={{
-              background: expand === 'in' ? '#dcfce7' : 'var(--success-light)',
-              border:'1px solid #bbf7d0', borderRadius:20, padding:'3px 12px',
-              cursor:'pointer', fontSize:'0.75rem', fontWeight:600, color:'#15803d',
-            }}>
-              🟢 出勤 {inList.length}/{total}人 {expand === 'in' ? '▲' : '▼'}
-            </button>
-            <button onClick={() => setExpand(v => v === 'out' ? null : 'out')} style={{
-              background: expand === 'out' ? 'var(--danger-light)' : 'var(--surface)',
-              border:`1px solid ${outList.length === 0 ? '#bbf7d0' : 'rgba(239,68,68,0.3)'}`,
-              borderRadius:20, padding:'3px 12px',
-              cursor:'pointer', fontSize:'0.75rem', fontWeight:600,
-              color: outList.length === 0 ? '#15803d' : '#dc2626',
-            }}>
-              ⬜ 未出勤 {outList.length}人 {expand === 'out' ? '▲' : '▼'}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* 展開リスト */}
-      {expand && teamStatus && (
-        <div style={{ marginTop:10, borderTop:'1px solid var(--gray-200)', paddingTop:10 }}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:4, maxHeight:240, overflowY:'auto' }}>
-            {(expand === 'in' ? inList : outList).map(m => <MemberRow key={m.userId} m={m} />)}
-          </div>
-          {(expand === 'in' ? inList : outList).length === 0 && (
-            <div style={{ color:T.textSub, fontSize:'0.8rem', textAlign:'center', padding:8 }}>
-              {expand === 'in' ? 'まだ出勤者なし' : '全員出勤済み'}
-            </div>
-          )}
-        </div>
-      )}
+    <div style={{ ...T.card, padding:'9px 16px', display:'flex', alignItems:'center', gap:16 }}>
+      <span style={{ fontSize:'0.72rem', fontWeight:700, color:T.textMid, flexShrink:0 }}>本日の勤怠</span>
+      <span style={{ fontSize:'0.78rem', color: myIn ? '#16a34a' : T.textSub }}>
+        {myIn ? '🟢 出勤済み' : '⬜ 未出勤'}
+      </span>
+      <span style={{ fontSize:'0.78rem', color: myOut ? '#8b5cf6' : T.textSub }}>
+        {myOut ? '🟣 退勤済み' : '⬜ 未退勤'}
+      </span>
     </div>
   );
 }
@@ -1339,18 +1273,62 @@ export default function Dashboard() {
     background: active ? 'var(--primary)' : 'transparent', color: active ? '#fff' : T.textSub, transition:'all 0.12s',
   });
 
-  return (
-    <div style={{ padding: isMobile ? '0' : '20px 24px', background:'var(--gray-50)', minHeight:'100%', display:'flex', flexDirection:'column', gap: isMobile ? 10 : 14 }}>
+  // チーム期限切れアラートの本体（右サイドバーで共有）
+  const overdueAlertBody = teamOverdue.length > 0 && (
+    <Foldable id="team-overdue" label="チーム期限切れ" badge={teamOverdue.length} defaultOpen={true}>
+      <div style={{ ...T.card, padding:'12px 14px', borderLeft:'3px solid #ef4444' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, flexWrap:'wrap' }}>
+          {alertSelected.size > 0 && (
+            <button onClick={async () => { setAlertNotifying(true); await Promise.all([...alertSelected].map(id => api.taskNotifyOverdue(id).catch(() => {}))); setAlertNotifying(false); setAlertSelected(new Set()); }}
+              disabled={alertNotifying}
+              style={{ padding:'3px 10px', background: alertNotifying ? 'var(--gray-200)' : '#ef4444', color:'#fff', border:'none', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor: alertNotifying ? 'default' : 'pointer' }}>
+              {alertNotifying ? '投稿中…' : `${alertSelected.size}件に通知`}
+            </button>
+          )}
+          <label style={{ fontSize:'0.72rem', color:'#ef4444', cursor:'pointer', display:'flex', alignItems:'center', gap:4, marginLeft:'auto' }}>
+            <input type="checkbox" checked={alertSelected.size === teamOverdue.length && teamOverdue.length > 0} onChange={e => setAlertSelected(e.target.checked ? new Set(teamOverdue.map(t => t.id)) : new Set())} />
+            全選択
+          </label>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+          {teamOverdue.map(t => {
+            const days = Math.floor((Date.now() - new Date(t.due_date)) / 86400000);
+            const rawTitle = t.title || '';
+            const titleLine = (() => { for (const line of rawTitle.split('\n')) { const c = line.replace(/<@[^>]+>/g,'').replace(/@\S+/g,'').replace(/（[^）]*）/g,'').replace(/\s+/g,' ').trim(); if (!c) continue; if (!/[。！？、：]/.test(c) && /[一-鿿]+\/[A-Za-z]/.test(c) && (c.length<40 || (c.match(/\//g)||[]).length>=2)) continue; return c.slice(0,55); } return rawTitle.slice(0,55); })();
+            const checked = alertSelected.has(t.id);
+            return (
+              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:7, padding:'5px 8px', background: checked ? 'var(--danger-light)' : 'var(--surface-2)', borderRadius:7, border:`1px solid ${checked ? 'rgba(239,68,68,0.3)' : 'var(--gray-200)'}` }}>
+                <input type="checkbox" checked={checked} onChange={e => { const s=new Set(alertSelected); e.target.checked?s.add(t.id):s.delete(t.id); setAlertSelected(s); }} style={{ cursor:'pointer', flexShrink:0 }} />
+                <span style={{ fontSize:'0.7rem', fontWeight:700, color:'#ef4444', background:'var(--danger-light)', padding:'1px 6px', borderRadius:99, whiteSpace:'nowrap', cursor:'pointer', flexShrink:0 }} onClick={() => setSelectedTask(t)}>{t.assigneeName}</span>
+                <span style={{ fontSize:'0.78rem', color:T.text, flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }} onClick={() => setSelectedTask(t)}>{titleLine}</span>
+                <span style={{ fontSize:'0.68rem', color:'#ef4444', fontWeight:700, whiteSpace:'nowrap', flexShrink:0 }}>{days}日超過</span>
+                {t.task_type==='broadcast' && <button onClick={() => api.taskIncompleteTargets(t.id).then(r=>setIncompleteModal({task:t,...r})).catch(()=>{})} style={{ fontSize:'0.62rem', padding:'2px 7px', border:'1px solid rgba(239,68,68,0.3)', borderRadius:5, background:'var(--surface)', color:'#ef4444', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}>未完了者</button>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Foldable>
+  );
 
-      {/* 1. 勤怠ウィジェット */}
-      <AttendanceWidget />
-
-      {/* 2. 今日の予定（折りたたみ可） */}
+  // 右サイドバーコンテンツ
+  const sidebarContent = (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
       <Foldable id="calendar" label="今日の予定" defaultOpen={true}>
         <CalendarWidget role={me?.role} />
       </Foldable>
+      <MentionWidget />
+      {overdueAlertBody}
+      <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
+        <TeamDetailWidget />
+      </Foldable>
+    </div>
+  );
 
-      {/* 3. タブ + マイタスク */}
+  // 左メインコンテンツ
+  const mainContent = (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      {/* タブヘッダー */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
         {myName && <div style={{ fontSize:'0.82rem', color:T.textMid, fontWeight:600 }}>{myName} のタスク</div>}
         <div style={{ display:'flex', gap:2, background:'var(--surface-2)', borderRadius:9, padding:3, border:'1px solid var(--gray-200)' }}>
@@ -1359,9 +1337,9 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* 分析タブ */}
       {tab === 'analytics' && <>
         <AnalyticsTab members={members} usergroups={usergroups} />
-        {/* 部署タスク検索（分析タブ） */}
         {card(<>
           {sh('タスク検索', '同部署のタスクを検索')}
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: filterApplied ? 14 : 0 }}>
@@ -1370,215 +1348,100 @@ export default function Dashboard() {
               <option value="in_progress">進行中</option>
               <option value="done">完了</option>
             </select>
-            {deptTeams.length > 0 && (
-              <select value={filter.dept} onChange={e => setF({dept:e.target.value})} style={selStyle}>
-                <option value="">部署：すべて</option>
-                {deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            )}
-            {childTeams.length > 0 && (
-              <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}>
-                <option value="">チーム：すべて</option>
-                {childTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            )}
+            {deptTeams.length > 0 && <select value={filter.dept} onChange={e => setF({dept:e.target.value})} style={selStyle}><option value="">部署：すべて</option>{deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
+            {childTeams.length > 0 && <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}><option value="">チーム：すべて</option>{childTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
             <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
               <option value="">担当者：全員</option>
-              {(teamMemberIds ? members.filter(m => teamMemberIds.has(m.assignee_id)) : members)
-                .map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
+              {(teamMemberIds ? members.filter(m => teamMemberIds.has(m.assignee_id)) : members).map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
             </select>
-            {projects.length > 0 && (
-              <select value={filter.project} onChange={e => setF({project:e.target.value})} style={selStyle}>
-                <option value="">プロジェクト：すべて</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            )}
-            <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:'0.8rem', color:T.textMid, cursor:'pointer' }}>
-              <input type="checkbox" checked={filter.overdue} onChange={e => setF({overdue:e.target.checked})} />
-              期限切れのみ
-            </label>
-            <button onClick={applyFilter}
-              style={{ padding:'6px 20px', background:'var(--primary)', color:'#fff', border:'none', borderRadius:7, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
-              検索
-            </button>
-            {filterApplied && (
-              <button onClick={clearFilter}
-                style={{ padding:'6px 12px', border:'1px solid var(--gray-200)', borderRadius:7, fontSize:'0.8rem', background:'var(--surface)', color:T.textSub, cursor:'pointer' }}>
-                クリア
-              </button>
-            )}
+            {projects.length > 0 && <select value={filter.project} onChange={e => setF({project:e.target.value})} style={selStyle}><option value="">プロジェクト：すべて</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+            <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:'0.8rem', color:T.textMid, cursor:'pointer' }}><input type="checkbox" checked={filter.overdue} onChange={e => setF({overdue:e.target.checked})} />期限切れのみ</label>
+            <button onClick={applyFilter} style={{ padding:'6px 20px', background:'var(--primary)', color:'#fff', border:'none', borderRadius:7, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>検索</button>
+            {filterApplied && <button onClick={clearFilter} style={{ padding:'6px 12px', border:'1px solid var(--gray-200)', borderRadius:7, fontSize:'0.8rem', background:'var(--surface)', color:T.textSub, cursor:'pointer' }}>クリア</button>}
           </div>
-          {filterApplied && (
-            filteredTasks.tasks.length === 0 ? (
-              <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'24px 0' }}>該当するタスクがありません</div>
-            ) : (
-              <>
-                <div style={{ fontSize:'0.72rem', color:T.textSub, marginBottom:10 }}>{filteredTasks.total}件</div>
-                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
-                  {filteredTasks.tasks.map(t => (
-                    <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
-                  ))}
-                </div>
-              </>
-            )
+          {filterApplied && (filteredTasks.tasks.length === 0
+            ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'24px 0' }}>該当するタスクがありません</div>
+            : <><div style={{ fontSize:'0.72rem', color:T.textSub, marginBottom:10 }}>{filteredTasks.total}件</div><div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px,1fr))', gap:10 }}>{filteredTasks.tasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}</div></>
           )}
         </>)}
       </>}
 
+      {/* マイタスクタブ */}
       {tab === 'tasks' && <>
-
-      {/* KPIカード */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 8 : 10 }}>
-        {[
-          { label:'総タスク数', value: myTotal,                  accent:'#6366f1' },
-          { label:'進行中',    value: mySummary?.in_progress||0,  accent:'var(--primary)' },
-          { label:'期限切れ',  value: myOverdue,                  accent: myOverdue > 0 ? '#ef4444' : T.textSub },
-          { label:'完了',      value: mySummary?.done||0,         accent:'#10b981' },
-        ].map(k => (
-          <div key={k.label} style={{ ...T.card, padding: isMobile ? '12px 14px' : '14px 18px', borderTop:`3px solid ${k.accent}` }}>
-            <div style={{ fontSize:'0.72rem', color:T.textSub, fontWeight:500, marginBottom:6 }}>{k.label}</div>
-            <div style={{ fontSize: isMobile ? '1.7rem' : '2rem', fontWeight:900, color:k.accent, lineHeight:1 }}>{k.value}</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10 }}>
+          {[
+            { label:'進行中', value: mySummary?.in_progress||0, accent:'var(--primary)' },
+            { label:'期限切れ', value: myOverdue, accent: myOverdue > 0 ? '#ef4444' : T.textSub },
+          ].map(k => (
+            <div key={k.label} style={{ ...T.card, padding:'14px 18px', borderTop:`3px solid ${k.accent}` }}>
+              <div style={{ fontSize:'0.72rem', color:T.textSub, fontWeight:500, marginBottom:6 }}>{k.label}</div>
+              <div style={{ fontSize:'2rem', fontWeight:900, color:k.accent, lineHeight:1 }}>{k.value}</div>
+            </div>
+          ))}
+        </div>
+        {card(<>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+            <div>
+              <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>マイタスク</div>
+              <div style={{ fontSize:'0.7rem', color:T.textSub, marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
+            </div>
+            <button onClick={() => { const w=localStorage.getItem('float_w')||380,h=localStorage.getItem('float_h')||640,x=localStorage.getItem('float_x'),y=localStorage.getItem('float_y'),pos=x&&y?`,left=${x},top=${y}`:''; window.open('/dashboard/floating','taskhub-float',`width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`); }}
+              style={{ padding:'5px 12px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+              ↗ ポップアップ
+            </button>
           </div>
-        ))}
+          {activeTasks.length === 0
+            ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>アクティブなタスクはありません</div>
+            : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:10 }}>
+                {activeTasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}
+              </div>
+          }
+        </>)}
+      </>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: isMobile ? '12px' : '20px 24px', background:'var(--gray-50)', minHeight:'100%' }}>
+      {/* 勤怠：全幅・最上部 */}
+      <div style={{ marginBottom: isMobile ? 12 : 14 }}>
+        <AttendanceWidget />
       </div>
 
-      {/* マイタスク一覧 */}
-      {card(<>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-          <div>
-            <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>マイタスク</div>
-            <div style={{ fontSize:'0.7rem', color:T.textSub, marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
-          </div>
-          <button
-            onClick={() => {
-              const w = localStorage.getItem('float_w') || 380;
-              const h = localStorage.getItem('float_h') || 640;
-              const x = localStorage.getItem('float_x');
-              const y = localStorage.getItem('float_y');
-              const pos = x && y ? `,left=${x},top=${y}` : '';
-              window.open('/dashboard/floating', 'taskhub-float', `width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`);
-            }}
-            style={{ padding:'5px 12px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
-            title="ポップアップで開く">
-            ↗ ポップアップ
-          </button>
+      {/* 2カラム（モバイルは縦積み） */}
+      {isMobile ? (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          {mainContent}
+          {sidebarContent}
         </div>
-        {activeTasks.length === 0 ? (
-          <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>
-            アクティブなタスクはありません
+      ) : (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:16, alignItems:'start' }}>
+          {mainContent}
+          <div style={{ position:'sticky', top:16 }}>
+            {sidebarContent}
           </div>
-        ) : (
-          <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))', gap:10 }}>
-            {activeTasks.map(t => (
-              <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />
-            ))}
-          </div>
-        )}
-      </>)}
-
-
-      {selectedTask && (
-        <TaskPanel task={selectedTask} members={members} usergroups={usergroups} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />
-      )}
-      </>}
-
-      {/* 4. アラートセクション（メンション＋期限切れ） */}
-      <MentionWidget />
-      {teamOverdue.length > 0 && (
-        <Foldable id="team-overdue" label="チーム期限切れタスク" badge={teamOverdue.length} defaultOpen={true}>
-          <div style={{ background:'#fef2f2', borderRadius:12, border:'1px solid #fca5a5', padding:'12px 16px' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, flexWrap:'wrap' }}>
-              {alertSelected.size > 0 && (
-                <button
-                  onClick={async () => {
-                    setAlertNotifying(true);
-                    await Promise.all([...alertSelected].map(id => api.taskNotifyOverdue(id).catch(() => {})));
-                    setAlertNotifying(false);
-                    setAlertSelected(new Set());
-                  }}
-                  disabled={alertNotifying}
-                  style={{ padding:'4px 12px', background: alertNotifying ? '#e2e8f0' : '#dc2626', color:'#fff', border:'none', borderRadius:7, fontSize:'0.75rem', fontWeight:700, cursor: alertNotifying ? 'default' : 'pointer' }}>
-                  {alertNotifying ? '投稿中…' : `${alertSelected.size}件に通知を投稿`}
-                </button>
-              )}
-              <label style={{ fontSize:'0.72rem', color:'#dc2626', cursor:'pointer', display:'flex', alignItems:'center', gap:4, marginLeft:'auto' }}>
-                <input type="checkbox"
-                  checked={alertSelected.size === teamOverdue.length && teamOverdue.length > 0}
-                  onChange={e => setAlertSelected(e.target.checked ? new Set(teamOverdue.map(t => t.id)) : new Set())} />
-                全選択
-              </label>
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              {teamOverdue.map(t => {
-                const days = Math.floor((Date.now() - new Date(t.due_date)) / 86400000);
-                const rawTitle = t.title || '';
-                const titleLine = (() => {
-                  for (const line of rawTitle.split('\n')) {
-                    const c = line.replace(/<@[^>]+>/g, '').replace(/@\S+/g, '').replace(/（[^）]*）/g, '').replace(/\s+/g, ' ').trim();
-                    if (!c) continue;
-                    const slashes = (c.match(/\//g) || []).length;
-                    const isAddr = !/[。！？、：]/.test(c) && /[一-鿿]+\/[A-Za-z]/.test(c) && (c.length < 40 || slashes >= 2);
-                    if (isAddr) continue;
-                    return c.slice(0, 60);
-                  }
-                  return rawTitle.slice(0, 60);
-                })();
-                const checked = alertSelected.has(t.id);
-                return (
-                  <div key={t.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background: checked ? '#fff7f7' : '#fff', borderRadius:8, border:`1px solid ${checked ? '#fca5a5' : '#fecaca'}` }}>
-                    <input type="checkbox" checked={checked}
-                      onChange={e => { const s = new Set(alertSelected); e.target.checked ? s.add(t.id) : s.delete(t.id); setAlertSelected(s); }}
-                      style={{ cursor:'pointer', flexShrink:0 }} />
-                    <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#dc2626', background:'#fee2e2', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap', cursor:'pointer' }}
-                      onClick={() => setSelectedTask(t)}>{t.assigneeName}</span>
-                    <span style={{ fontSize:'0.8rem', color:'#374151', flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}
-                      onClick={() => setSelectedTask(t)}>{titleLine}</span>
-                    <span style={{ fontSize:'0.7rem', color:'#dc2626', fontWeight:700, whiteSpace:'nowrap' }}>{days}日超過</span>
-                    {t.task_type === 'broadcast' && (
-                      <button onClick={() => api.taskIncompleteTargets(t.id).then(r => setIncompleteModal({ task: t, ...r })).catch(() => {})}
-                        style={{ fontSize:'0.65rem', padding:'2px 8px', border:'1px solid #fca5a5', borderRadius:5, background:'#fff', color:'#dc2626', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}>
-                        未完了者
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </Foldable>
+        </div>
       )}
 
-      {/* 5. チーム稼働状況（折りたたみ、デフォルト閉じ） */}
-      <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
-        <TeamDetailWidget />
-      </Foldable>
-
-      {/* 未完了者モーダル */}
+      {/* モーダル（タブ外） */}
+      {selectedTask && <TaskPanel task={selectedTask} members={members} usergroups={usergroups} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />}
       {incompleteModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={() => setIncompleteModal(null)}>
-          <div style={{ background:'#fff', borderRadius:14, width:'min(440px,90vw)', maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ padding:'16px 20px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={() => setIncompleteModal(null)}>
+          <div style={{ background:'var(--surface)', borderRadius:14, width:'min(440px,90vw)', maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--gray-200)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:'0.9rem', color:'#0f172a' }}>未完了者一覧</div>
-                <div style={{ fontSize:'0.72rem', color:'#94a3b8', marginTop:2 }}>{incompleteModal.total}名中 {incompleteModal.incomplete}名が未完了</div>
+                <div style={{ fontWeight:700, fontSize:'0.9rem', color:T.text }}>未完了者一覧</div>
+                <div style={{ fontSize:'0.72rem', color:T.textSub, marginTop:2 }}>{incompleteModal.total}名中 {incompleteModal.incomplete}名が未完了</div>
               </div>
-              <button onClick={() => setIncompleteModal(null)}
-                style={{ background:'#f1f5f9', border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:'#64748b', fontSize:16 }}>×</button>
+              <button onClick={() => setIncompleteModal(null)} style={{ background:'var(--surface-2)', border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:T.textSub, fontSize:16 }}>×</button>
             </div>
             <div style={{ overflowY:'auto', padding:'12px 16px', display:'flex', flexDirection:'column', gap:8 }}>
               {incompleteModal.users.length === 0
-                ? <div style={{ textAlign:'center', color:'#94a3b8', padding:'20px 0', fontSize:'0.85rem' }}>全員完了済み</div>
+                ? <div style={{ textAlign:'center', color:T.textSub, padding:'20px 0', fontSize:'0.85rem' }}>全員完了済み</div>
                 : incompleteModal.users.map(u => (
-                  <div key={u.user_id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', background:'#fef2f2', borderRadius:8, border:'1px solid #fecaca' }}>
-                    {u.avatar_url
-                      ? <img src={u.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%', objectFit:'cover', flexShrink:0 }} />
-                      : <div style={{ width:32, height:32, borderRadius:'50%', background:'#fee2e2', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.7rem', fontWeight:700, color:'#dc2626' }}>
-                          {(u.displayName||'?').split('/')[0].slice(0,2)}
-                        </div>
-                    }
-                    <span style={{ fontSize:'0.85rem', fontWeight:600, color:'#374151' }}>{(u.displayName||'').split('/')[0].trim()}</span>
+                  <div key={u.user_id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', background:'var(--danger-light)', borderRadius:8, border:'1px solid rgba(239,68,68,0.2)' }}>
+                    {u.avatar_url ? <img src={u.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%', objectFit:'cover', flexShrink:0 }} /> : <div style={{ width:32, height:32, borderRadius:'50%', background:'rgba(239,68,68,0.3)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'0.7rem', fontWeight:700, color:'#ef4444' }}>{(u.displayName||'?').split('/')[0].slice(0,2)}</div>}
+                    <span style={{ fontSize:'0.85rem', fontWeight:600, color:T.text }}>{(u.displayName||'').split('/')[0].trim()}</span>
                   </div>
                 ))
               }

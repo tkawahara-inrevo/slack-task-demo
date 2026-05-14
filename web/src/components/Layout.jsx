@@ -18,7 +18,7 @@ function DropdownNav({ label, items, matchPaths, onNavigate }) {
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(v => !v)}
         className={isActive ? 'nav-link active' : 'nav-link'}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: 'inherit' }}>
         {label}
         <span style={{ fontSize: 9, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
       </button>
@@ -95,7 +95,7 @@ function BrowserTransferButton({ onClose, floating } = {}) {
         </button>
       ) : (
         <button onClick={handleGenerate}
-          style={{ width:'100%', background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:9, color:'#fff', fontSize:'0.85rem', fontWeight:600, padding:'10px 16px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}>
+          style={{ width:'100%', background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:9, color:'#334155', fontSize:'0.85rem', fontWeight:600, padding:'10px 16px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}>
           🔗 <span>Safariで開く（セッション引き継ぎ）</span>
         </button>
       )}
@@ -217,7 +217,7 @@ export default function Layout({ children }) {
 
         {/* モバイルメニュー展開 */}
         {mobileOpen && (
-          <div className="mobile-menu" style={{ background: '#1e2127', borderTop: '1px solid #2d3139', padding: '8px 0' }}>
+          <div className="mobile-menu" style={{ background: '#fff', borderTop: '1px solid #e2e8f0', padding: '4px 0', boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
             {navLinks.map(({ to, label, end }) => (
               <NavLink key={to} to={to} end={end}
                 className={({ isActive }) => isActive ? 'mobile-nav-link active' : 'mobile-nav-link'}
@@ -238,12 +238,12 @@ export default function Layout({ children }) {
             )}
             {/* Safariで開くボタン（モバイルメニュー内） */}
             {user && (
-              <div style={{ padding: '12px 16px', borderTop: '1px solid #2d3139', marginTop: 4 }}>
+              <div style={{ padding: '12px 16px', borderTop: '1px solid #f1f5f9', marginTop: 4 }}>
                 <BrowserTransferButton onClose={() => setMobileOpen(false)} />
               </div>
             )}
             {user && (
-              <div style={{ padding: '10px 20px', fontSize: 13, color: '#9ba1ad', borderTop: '1px solid #2d3139' }}>
+              <div style={{ padding: '10px 20px', fontSize: 13, color: '#64748b', borderTop: '1px solid #f1f5f9' }}>
                 {user.displayName}
                 {user.role === 'admin' && <span className="nav-role-badge" style={{ marginLeft: 8 }}>admin</span>}
               </div>

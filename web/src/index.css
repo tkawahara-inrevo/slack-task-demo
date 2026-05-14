@@ -5,24 +5,43 @@ html, body {
 }
 
 :root {
-  --primary: #1264a3;
-  --primary-light: #e8f5fe;
-  --danger: #e74c3c;
-  --danger-light: #ffeaea;
-  --success: #2ecc71;
-  --success-light: #e8faf0;
-  --warning: #f39c12;
-  --warning-light: #fff8e1;
-  --gray-50: #f8f9fa;
-  --gray-100: #f1f3f5;
-  --gray-200: #e9ecef;
-  --gray-300: #dee2e6;
-  --gray-500: #868e96;
-  --gray-700: #495057;
-  --gray-900: #212529;
-  --radius: 8px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.1);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+  /* Primary */
+  --primary:       #2563eb;
+  --primary-mid:   #3b82f6;
+  --primary-light: #eff6ff;
+  --primary-dark:  #1d4ed8;
+
+  /* Semantic */
+  --danger:        #ef4444;
+  --danger-light:  #fef2f2;
+  --success:       #10b981;
+  --success-light: #f0fdf4;
+  --warning:       #f59e0b;
+  --warning-light: #fffbeb;
+
+  /* Gray scale — unified */
+  --gray-50:  #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+
+  /* Aliases kept for backward compat */
+  --gray-600-compat: #475569;
+
+  /* Design tokens */
+  --radius-sm: 6px;
+  --radius:    10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.1);
 
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   font-size: 14px;
@@ -2740,8 +2759,8 @@ section h2 {
 
 /* ─── Global navigation ─────────────────────────────────────────────────────── */
 .global-nav {
-  background: #1a1d21;
-  border-bottom: 1px solid #2d3139;
+  background: #fff;
+  border-bottom: 1px solid var(--gray-200);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -2757,11 +2776,24 @@ section h2 {
   gap: 0;
 }
 .global-nav-brand {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
   font-weight: 800;
-  color: #fff;
-  letter-spacing: 0.5px;
-  margin-right: 32px;
+  color: var(--gray-900);
+  letter-spacing: -0.3px;
+  margin-right: 28px;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+.global-nav-brand::before {
+  content: '';
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
   flex-shrink: 0;
 }
 .global-nav-links {
@@ -2773,36 +2805,40 @@ section h2 {
 .nav-link {
   display: inline-flex;
   align-items: center;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-size: 13px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
   font-weight: 500;
-  color: #c9cdd5;
+  color: var(--gray-500);
   text-decoration: none;
   transition: background 0.1s, color 0.1s;
   white-space: nowrap;
 }
 .nav-link:hover {
-  background: #2d3139;
-  color: #fff;
+  background: var(--gray-100);
+  color: var(--gray-800);
 }
 .nav-link.active {
-  background: #1264a3;
-  color: #fff;
+  background: var(--primary-light);
+  color: var(--primary);
   font-weight: 600;
 }
 .global-nav-user {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #9ba1ad;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--gray-500);
   flex-shrink: 0;
   margin-left: 16px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
 }
 .nav-role-badge {
-  background: #b91c1c;
+  background: #ef4444;
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -2836,7 +2872,7 @@ section h2 {
   .global-nav-brand { font-size: 14px; margin-right: 12px; }
   .global-nav-links { display: none !important; }
   .global-nav-user  { display: none !important; }
-  .mobile-menu-btn  { display: flex !important; margin-left: auto; }
+  .mobile-menu-btn  { display: flex !important; margin-left: auto; color: var(--gray-500) !important; }
 
   /* コンテンツエリアのモバイル調整 */
   .global-content { padding: 12px 12px; box-sizing: border-box; overflow-x: hidden; }
@@ -2844,16 +2880,17 @@ section h2 {
   /* モバイルメニュー */
   .mobile-nav-link {
     display: block;
-    padding: 12px 20px;
-    font-size: 15px;
+    padding: 11px 20px;
+    font-size: 14.5px;
     font-weight: 500;
-    color: #c9cdd5;
+    color: var(--gray-600);
     text-decoration: none;
+    border-bottom: 1px solid var(--gray-100);
   }
   .mobile-nav-link.active {
-    color: #fff;
-    background: rgba(18, 100, 163, 0.4);
-    font-weight: 700;
+    color: var(--primary);
+    background: var(--primary-light);
+    font-weight: 600;
   }
 }
 

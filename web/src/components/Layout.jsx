@@ -194,6 +194,7 @@ export default function Layout({ children }) {
     { to: '/', label: 'ホーム', end: true },
     { to: '/workload', label: '業務ガント' },
     { to: '/workflows', label: 'WF' },
+    { to: '/analytics', label: '分析' },
     { to: '/org-chart', label: 'チーム設定' },
   ];
 

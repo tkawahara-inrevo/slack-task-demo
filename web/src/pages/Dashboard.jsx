@@ -713,7 +713,7 @@ function TaskCard({ t, members, onClick }) {
   return (
     <div onClick={onClick}
       style={{ background:'var(--surface)', borderRadius:10, border:`1px solid var(--gray-200)`, padding:'11px 13px', cursor:'pointer',
-        transition:'box-shadow 0.15s', display:'flex', flexDirection:'column', gap:7,
+        transition:'box-shadow 0.15s', display:'flex', flexDirection:'column', gap:7, minHeight:115,
         borderLeft: `3px solid ${selfDone ? '#10b981' : st.color}` }}
       onMouseEnter={e => { e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'; }}
       onMouseLeave={e => { e.currentTarget.style.boxShadow='none'; }}>
@@ -832,7 +832,7 @@ function MentionWidget() {
 
   if (count === 0 && directOnly) {
     return (
-      <div style={wCard({ padding:'10px 14px' })}>
+      <div style={{ ...T.card, padding:'10px 14px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={wTitle}>未確認メンション</span>
           <label style={{ display:'flex', alignItems:'center', gap:4, marginLeft:'auto', cursor:'pointer', fontSize:'0.7rem', color:T.textSub }}>
@@ -840,17 +840,17 @@ function MentionWidget() {
           </label>
         </div>
         <div style={{ fontSize:'0.75rem', color:T.textSub, marginTop:6, textAlign:'center' }}>
-          個別メンションなし（@channel等 {mentions.length}件）
+          個別メンションなし（@ch等 {mentions.length}件）
         </div>
       </div>
     );
   }
 
   return (
-    <div style={wCard({ padding:'10px 14px' })}>
-      {/* ヘッダー：タイトル + バッジ + 個別のみ + 更新 */}
+    <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:12, padding:'10px 14px', borderLeft:'3px solid #ef4444' }}>
+      {/* ヘッダー */}
       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-        <span style={{ fontSize:'0.82rem', fontWeight:700, color:T.text }}>未確認メンション</span>
+        <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#b91c1c' }}>未確認メンション</span>
         <span style={{ background:'#ef4444', color:'#fff', borderRadius:10, fontSize:'0.63rem', fontWeight:700, padding:'1px 7px', flexShrink:0 }}>{count}</span>
         <label style={{ display:'flex', alignItems:'center', gap:3, marginLeft:'auto', cursor:'pointer', fontSize:'0.7rem', color: directOnly ? 'var(--primary)' : T.textSub, fontWeight: directOnly ? 600 : 400, flexShrink:0 }}>
           <input type="checkbox" checked={directOnly} onChange={toggleDirectOnly} />個別のみ
@@ -1262,13 +1262,7 @@ export default function Dashboard() {
       {sub && <div style={{ fontSize:'0.7rem', color:T.textSub, marginTop:1 }}>{sub}</div>}
     </div>
   );
-  const selStyle = { padding:'6px 10px', border:'1px solid var(--gray-200)', borderRadius:7, fontSize:'0.8rem', background:'var(--surface)', color:T.text, outline:'none' };
   const myName = me?.displayName?.split(/[\s　/]/)[0] || '';
-
-  const tabBtnStyle = (active) => ({
-    padding:'6px 18px', border:'none', borderRadius:7, cursor:'pointer', fontSize:'0.82rem', fontWeight: active ? 700 : 500,
-    background: active ? 'var(--primary)' : 'transparent', color: active ? '#fff' : T.textSub, transition:'all 0.12s',
-  });
 
   // チーム期限切れアラートの本体（右サイドバーで共有）
   const overdueAlertBody = teamOverdue.length > 0 && (
@@ -1308,131 +1302,91 @@ export default function Dashboard() {
     </Foldable>
   );
 
-  const SectionLabel = ({ label }) => (
-    <div style={{ display:'flex', alignItems:'center', gap:8, padding:'2px 0' }}>
-      <span style={{ fontSize:'0.65rem', fontWeight:700, letterSpacing:'0.08em', color:T.textSub, textTransform:'uppercase', flexShrink:0 }}>{label}</span>
+  const SectionDivider = ({ label }) => (
+    <div style={{ display:'flex', alignItems:'center', gap:10, margin:'4px 0 12px' }}>
+      <span style={{ fontSize:'0.68rem', fontWeight:700, letterSpacing:'0.08em', color:T.textSub, textTransform:'uppercase', flexShrink:0 }}>{label}</span>
       <span style={{ flex:1, height:'1px', background:'var(--gray-200)', display:'block' }} />
     </div>
   );
 
-  // 右サイドバーコンテンツ（自分 / チーム に明確に分割）
-  const sidebarContent = (
-    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-      {/* ── 自分のこと ── */}
-      <SectionLabel label="自分のこと" />
+  // ── KPI + タスクグリッド（左エリア）
+  const taskArea = (
+    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+      {/* KPI 2枚：自然幅（大画面でも伸びすぎない） */}
+      <div style={{ display:'flex', gap:10 }}>
+        {[
+          { label:'進行中', value: mySummary?.in_progress||0, accent:'var(--primary)' },
+          { label:'期限切れ', value: myOverdue, accent: myOverdue > 0 ? '#ef4444' : T.textSub },
+        ].map(k => (
+          <div key={k.label} style={{ ...T.card, padding:'12px 18px', borderTop:`3px solid ${k.accent}`, minWidth:110 }}>
+            <div style={{ fontSize:'0.7rem', color:T.textSub, marginBottom:5 }}>{k.label}</div>
+            <div style={{ fontSize:'1.8rem', fontWeight:900, color:k.accent, lineHeight:1 }}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+      {/* マイタスク */}
+      {card(<>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+          <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>{myName ? `${myName} のタスク` : 'マイタスク'}</div>
+          <button onClick={() => { const w=localStorage.getItem('float_w')||380,h=localStorage.getItem('float_h')||640,x=localStorage.getItem('float_x'),y=localStorage.getItem('float_y'),pos=x&&y?`,left=${x},top=${y}`:''; window.open('/dashboard/floating','taskhub-float',`width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`); }}
+            style={{ padding:'4px 10px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.72rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+            ↗ ポップアップ
+          </button>
+        </div>
+        {activeTasks.length === 0
+          ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>アクティブなタスクはありません</div>
+          : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px,1fr))', gap:10 }}>
+              {activeTasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}
+            </div>
+        }
+      </>)}
+    </div>
+  );
+
+  // ── カレンダー + メンション（右エリア）
+  const selfSideArea = (
+    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
       <Foldable id="calendar" label="今日の予定" defaultOpen={true}>
         <CalendarWidget role={me?.role} />
       </Foldable>
       <MentionWidget />
-
-      {/* ── チームのこと ── */}
-      <div style={{ marginTop:6 }}>
-        <SectionLabel label="チームのこと" />
-      </div>
-      {overdueAlertBody}
-      <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
-        <TeamDetailWidget />
-      </Foldable>
     </div>
   );
 
-  // 左メインコンテンツ
-  const mainContent = (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      {/* タブヘッダー */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
-        {myName && <div style={{ fontSize:'0.82rem', color:T.textMid, fontWeight:600 }}>{myName} のタスク</div>}
-        <div style={{ display:'flex', gap:2, background:'var(--surface-2)', borderRadius:9, padding:3, border:'1px solid var(--gray-200)' }}>
-          <button style={tabBtnStyle(tab==='tasks')}   onClick={() => setTab('tasks')}>マイタスク</button>
-          <button style={tabBtnStyle(tab==='analytics')} onClick={() => setTab('analytics')}>分析</button>
-        </div>
+  // ── チームエリア
+  const teamArea = (
+    <div style={{ display:'flex', flexDirection: isMobile ? 'column' : 'row', gap:14, alignItems:'flex-start' }}>
+      <div style={{ flex:1 }}>{overdueAlertBody}</div>
+      <div style={{ flex:1 }}>
+        <Foldable id="team-detail" label="チーム稼働状況" defaultOpen={false}>
+          <TeamDetailWidget />
+        </Foldable>
       </div>
-
-      {/* 分析タブ */}
-      {tab === 'analytics' && <>
-        <AnalyticsTab members={members} usergroups={usergroups} />
-        {card(<>
-          {sh('タスク検索', '同部署のタスクを検索')}
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: filterApplied ? 14 : 0 }}>
-            <select value={filter.status} onChange={e => setF({status:e.target.value})} style={selStyle}>
-              <option value="">ステータス：すべて</option>
-              <option value="in_progress">進行中</option>
-              <option value="done">完了</option>
-            </select>
-            {deptTeams.length > 0 && <select value={filter.dept} onChange={e => setF({dept:e.target.value})} style={selStyle}><option value="">部署：すべて</option>{deptTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
-            {childTeams.length > 0 && <select value={filter.team} onChange={e => setF({team:e.target.value})} style={selStyle}><option value="">チーム：すべて</option>{childTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
-            <select value={filter.assignee} onChange={e => setF({assignee:e.target.value})} style={selStyle}>
-              <option value="">担当者：全員</option>
-              {(teamMemberIds ? members.filter(m => teamMemberIds.has(m.assignee_id)) : members).map(m => <option key={m.assignee_id} value={m.assignee_id}>{m.displayName}</option>)}
-            </select>
-            {projects.length > 0 && <select value={filter.project} onChange={e => setF({project:e.target.value})} style={selStyle}><option value="">プロジェクト：すべて</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
-            <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:'0.8rem', color:T.textMid, cursor:'pointer' }}><input type="checkbox" checked={filter.overdue} onChange={e => setF({overdue:e.target.checked})} />期限切れのみ</label>
-            <button onClick={applyFilter} style={{ padding:'6px 20px', background:'var(--primary)', color:'#fff', border:'none', borderRadius:7, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>検索</button>
-            {filterApplied && <button onClick={clearFilter} style={{ padding:'6px 12px', border:'1px solid var(--gray-200)', borderRadius:7, fontSize:'0.8rem', background:'var(--surface)', color:T.textSub, cursor:'pointer' }}>クリア</button>}
-          </div>
-          {filterApplied && (filteredTasks.tasks.length === 0
-            ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'24px 0' }}>該当するタスクがありません</div>
-            : <><div style={{ fontSize:'0.72rem', color:T.textSub, marginBottom:10 }}>{filteredTasks.total}件</div><div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px,1fr))', gap:10 }}>{filteredTasks.tasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}</div></>
-          )}
-        </>)}
-      </>}
-
-      {/* マイタスクタブ */}
-      {tab === 'tasks' && <>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10 }}>
-          {[
-            { label:'進行中', value: mySummary?.in_progress||0, accent:'var(--primary)' },
-            { label:'期限切れ', value: myOverdue, accent: myOverdue > 0 ? '#ef4444' : T.textSub },
-          ].map(k => (
-            <div key={k.label} style={{ ...T.card, padding:'14px 18px', borderTop:`3px solid ${k.accent}` }}>
-              <div style={{ fontSize:'0.72rem', color:T.textSub, fontWeight:500, marginBottom:6 }}>{k.label}</div>
-              <div style={{ fontSize:'2rem', fontWeight:900, color:k.accent, lineHeight:1 }}>{k.value}</div>
-            </div>
-          ))}
-        </div>
-        {card(<>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-            <div>
-              <div style={{ fontWeight:700, fontSize:'0.88rem', color:T.text }}>マイタスク</div>
-              <div style={{ fontSize:'0.7rem', color:T.textSub, marginTop:1 }}>進行中・保留 {activeTasks.length}件</div>
-            </div>
-            <button onClick={() => { const w=localStorage.getItem('float_w')||380,h=localStorage.getItem('float_h')||640,x=localStorage.getItem('float_x'),y=localStorage.getItem('float_y'),pos=x&&y?`,left=${x},top=${y}`:''; window.open('/dashboard/floating','taskhub-float',`width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`); }}
-              style={{ padding:'5px 12px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.75rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
-              ↗ ポップアップ
-            </button>
-          </div>
-          {activeTasks.length === 0
-            ? <div style={{ color:T.textSub, fontSize:'0.82rem', textAlign:'center', padding:'20px 0' }}>アクティブなタスクはありません</div>
-            : <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:10 }}>
-                {activeTasks.map(t => <TaskCard key={t.id} t={t} members={members} onClick={() => setSelectedTask(t)} />)}
-              </div>
-          }
-        </>)}
-      </>}
     </div>
   );
 
   return (
     <div style={{ padding: isMobile ? '12px' : '20px 24px', background:'var(--gray-50)', minHeight:'100%' }}>
-      {/* 勤怠：全幅・最上部 */}
-      <div style={{ marginBottom: isMobile ? 12 : 14 }}>
-        <AttendanceWidget />
-      </div>
+      {/* 勤怠 */}
+      <div style={{ marginBottom:16 }}><AttendanceWidget /></div>
 
-      {/* 2カラム（モバイルは縦積み） */}
+      {/* ── 自分のこと ── */}
+      <SectionDivider label="自分のこと" />
       {isMobile ? (
-        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          {mainContent}
-          {sidebarContent}
+        <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:24 }}>
+          {taskArea}
+          {selfSideArea}
         </div>
       ) : (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 360px', gap:20, alignItems:'start' }}>
-          {mainContent}
-          <div style={{ position:'sticky', top:16 }}>
-            {sidebarContent}
-          </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:20, alignItems:'start', marginBottom:28 }}>
+          {taskArea}
+          <div style={{ position:'sticky', top:16 }}>{selfSideArea}</div>
         </div>
       )}
+
+      {/* ── チームのこと ── */}
+      <SectionDivider label="チームのこと" />
+      {teamArea}
 
       {/* モーダル（タブ外） */}
       {selectedTask && <TaskPanel task={selectedTask} members={members} usergroups={usergroups} onClose={() => setSelectedTask(null)} onStatusChange={handleStatusChange} />}

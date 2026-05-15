@@ -2167,7 +2167,7 @@ function registerDashboardApi(deps) {
       const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 
       const r = await dbQuery(`
-        SELECT m.id, m.channel_id, m.message_ts, m.sender_user_id,
+        SELECT m.id, m.channel_id, m.message_ts, m.thread_ts_root, m.sender_user_id,
                m.text_preview, m.created_at, m.mention_type,
                d.display_name AS sender_name,
                d.profile_json->>'image_48' AS sender_avatar

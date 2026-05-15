@@ -860,7 +860,9 @@ function MentionWidget() {
       {/* アイテムリスト */}
       <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:260, overflowY:'auto' }}>
         {displayed.map(m => {
-          const slackUrl = `https://slack.com/archives/${m.channel_id}/p${m.message_ts.replace('.', '')}`;
+          // thread_ts_root があればスレッドビューで開く
+          const threadTs = m.thread_ts_root || m.message_ts;
+          const slackUrl = `https://slack.com/archives/${m.channel_id}/p${m.message_ts.replace('.', '')}?thread_ts=${threadTs}&cid=${m.channel_id}`;
           return (
             <div key={m.id} style={{ display:'flex', alignItems:'center', gap:5 }}>
               <a href={slackUrl} target="_blank" rel="noreferrer"

@@ -213,6 +213,13 @@ export default function CrmDashboard() {
   const [syncing, setSyncing]     = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncDone, setSyncDone]   = useState(false);
+  const [lastSync, setLastSync]   = useState(null);
+  const [kpiDrill, setKpiDrill]   = useState(null); // { type: 'payment'|'won'|'meeting', rows: [] }
+
+  // 最終同期時刻取得
+  useEffect(() => {
+    api.kintoneStatus().then(r => setLastSync(r.lastSync)).catch(() => {});
+  }, [syncDone]);
 
   const load = async (u, p, cm) => {
     setLoading(true);
@@ -361,32 +368,42 @@ export default function CrmDashboard() {
           {TARGET_REPS.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
 
-        {/* kintone同期ボタン（暫定） */}
+        {/* kintone同期ボタン + 最終同期時刻 */}
         <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:4, alignItems:'flex-end' }}>
-          <button onClick={handleKintoneSync} disabled={syncing}
-            style={{ padding:'5px 14px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.78rem', fontWeight:600, cursor: syncing ? 'default' : 'pointer',
-              background: syncDone ? '#f0fdf4' : syncing ? '#f8fafc' : '#fff',
-              color: syncDone ? '#059669' : syncing ? '#94a3b8' : '#374151',
-              display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
-            <span style={{ fontSize:'0.85rem' }}>{syncDone ? '✓' : '⟳'}</span>
-            {syncDone ? '同期完了' : syncing ? 'kintone同期中…' : 'kintoneデータ取得'}
-          </button>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {lastSync && !syncing && (
+              <span style={{ fontSize:'0.68rem', color:C.textSub }}>
+                最終同期: {new Date(lastSync).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}
+              </span>
+            )}
+            <button onClick={handleKintoneSync} disabled={syncing}
+              style={{ padding:'5px 14px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.78rem', fontWeight:600, cursor: syncing ? 'default' : 'pointer',
+                background: syncDone ? '#f0fdf4' : C.surface,
+                color: syncDone ? '#059669' : syncing ? C.textSub : C.textMid,
+                display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'0.85rem' }}>{syncDone ? '✓' : '⟳'}</span>
+              {syncDone ? '同期完了' : syncing ? 'kintone同期中…' : 'kintoneデータ取得'}
+            </button>
+          </div>
           {syncing && (
-            <div style={{ width:160, height:4, background:'#e2e8f0', borderRadius:2, overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${syncProgress}%`, background:'#1e40af', borderRadius:2, transition:'width 0.4s ease' }} />
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <div style={{ width:160, height:4, background:`${C.border}`, borderRadius:2, overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${syncProgress}%`, background:'var(--primary)', borderRadius:2, transition:'width 0.4s ease' }} />
+              </div>
+              <span style={{ fontSize:'0.62rem', color:C.textSub }}>{syncProgress}%</span>
             </div>
-          )}
-          {syncing && (
-            <span style={{ fontSize:'0.62rem', color:C.textSub }}>{syncProgress}%</span>
           )}
         </div>
       </div>
 
-      {/* ── KPIカード ── */}
+      {/* ── KPIカード（クリックで詳細） ── */}
       <div style={{ display:'grid', gridTemplateColumns: isTablet ? 'repeat(3,1fr)' : 'repeat(5,1fr)', gap:10 }}>
         {/* 入金額 */}
-        <div style={{ ...cardStyle, borderTop:'3px solid #059669' }}>
-          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>入金額</div>
+        <div onClick={() => setKpiDrill({ type:'payment', title:'入金額 内訳', rows: data.confirmedList || [] })}
+          style={{ ...cardStyle, borderTop:'3px solid #059669', cursor:'pointer', transition:'box-shadow 0.15s' }}
+          onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'}
+          onMouseLeave={e => e.currentTarget.style.boxShadow='none'}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>入金額 <span style={{ fontSize:'0.6rem', opacity:0.6 }}>↗</span></div>
           <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>{fmtM(curr.paymentAmount)}</div>
           <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
             <DiffTag diff={prev ? diffPct(curr.paymentAmount, prev.paymentAmount) : null} />
@@ -395,8 +412,11 @@ export default function CrmDashboard() {
         </div>
 
         {/* 受注件数 */}
-        <div style={{ ...cardStyle, borderTop:'3px solid var(--primary)' }}>
-          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>受注件数</div>
+        <div onClick={() => setKpiDrill({ type:'won', title:'受注一覧', rows: repTable?.flatMap(r => r.won_details || []) || [] })}
+          style={{ ...cardStyle, borderTop:'3px solid var(--primary)', cursor:'pointer', transition:'box-shadow 0.15s' }}
+          onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'}
+          onMouseLeave={e => e.currentTarget.style.boxShadow='none'}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>受注件数 <span style={{ fontSize:'0.6rem', opacity:0.6 }}>↗</span></div>
           <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
             {curr.wonCount}<span style={{ fontSize:'1rem', marginLeft:2 }}>件</span>
           </div>
@@ -407,8 +427,11 @@ export default function CrmDashboard() {
         </div>
 
         {/* 初回商談数 */}
-        <div style={{ ...cardStyle, borderTop:'3px solid #d97706' }}>
-          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>初回商談数</div>
+        <div onClick={() => setKpiDrill({ type:'meeting', title:'初回商談一覧', rows: repTable?.flatMap(r => r.meeting_details || []) || [] })}
+          style={{ ...cardStyle, borderTop:'3px solid #d97706', cursor:'pointer', transition:'box-shadow 0.15s' }}
+          onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'}
+          onMouseLeave={e => e.currentTarget.style.boxShadow='none'}>
+          <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>初回商談数 <span style={{ fontSize:'0.6rem', opacity:0.6 }}>↗</span></div>
           <div style={{ fontSize:'1.55rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
             {curr.meetingCount}<span style={{ fontSize:'1rem', marginLeft:2 }}>件</span>
           </div>
@@ -805,6 +828,60 @@ export default function CrmDashboard() {
 
       {drill && (
         <Drilldown rep={drill.rep} type={drill.type} start={rangeStart} end={rangeEnd} onClose={() => setDrill(null)} />
+      )}
+
+      {/* KPIカード詳細モーダル */}
+      {kpiDrill && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.45)', zIndex:800, display:'flex', alignItems:'flex-start', justifyContent:'flex-end', padding:'56px 24px 20px' }}
+          onClick={() => setKpiDrill(null)}>
+          <div style={{ background:C.surface, borderRadius:14, width:'min(520px,90vw)', maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'14px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+              <span style={{ fontWeight:700, fontSize:'0.95rem', color:C.text }}>{kpiDrill.title}</span>
+              <button onClick={() => setKpiDrill(null)} style={{ background:C.surface2, border:'none', borderRadius:8, width:28, height:28, cursor:'pointer', color:C.textSub, fontSize:16 }}>×</button>
+            </div>
+            <div style={{ overflowY:'auto', padding:'12px 16px', display:'flex', flexDirection:'column', gap:6 }}>
+              {/* 入金額詳細 */}
+              {kpiDrill.type === 'payment' && (data.confirmedList || []).length === 0 && (
+                <div style={{ textAlign:'center', color:C.textSub, padding:'24px 0', fontSize:'0.85rem' }}>データなし</div>
+              )}
+              {kpiDrill.type === 'payment' && (data.confirmedList || []).map((r, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', background:C.surface2, borderRadius:8 }}>
+                  <span style={{ fontSize:'0.72rem', color:C.textSub, flexShrink:0, minWidth:60 }}>{fmtDate(r.payment_date)}</span>
+                  <span style={{ flex:1, fontSize:'0.82rem', fontWeight:500, color:C.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</span>
+                  <span style={{ fontSize:'0.72rem', color:C.textSub, flexShrink:0 }}>{r.plan || '—'}</span>
+                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#059669', flexShrink:0 }}>{fmtMYen(r.amount)}</span>
+                </div>
+              ))}
+              {/* 受注・初回商談は担当者テーブルへ誘導 */}
+              {(kpiDrill.type === 'won' || kpiDrill.type === 'meeting') && (
+                <div style={{ textAlign:'center', padding:'20px 0' }}>
+                  <div style={{ color:C.textSub, fontSize:'0.82rem', marginBottom:12 }}>
+                    詳細は担当者別実績テーブルをご確認ください
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                    {reps.filter(r => !r.isGrouped).map(r => (
+                      <div key={r.rep} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:C.surface2, borderRadius:8 }}>
+                        <span style={{ flex:1, fontSize:'0.82rem', fontWeight:500, color:C.text }}>{r.rep}</span>
+                        <span style={{ fontSize:'0.82rem', color:C.text, fontWeight:700 }}>
+                          {kpiDrill.type === 'won' ? `${r.wonCount}件` : `${r.meetingCount}件`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            {kpiDrill.type === 'payment' && (data.confirmedList || []).length > 0 && (
+              <div style={{ padding:'10px 16px', borderTop:`1px solid ${C.border}`, display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8, flexShrink:0 }}>
+                <span style={{ fontSize:'0.72rem', color:C.textSub }}>合計</span>
+                <span style={{ fontSize:'0.95rem', fontWeight:800, color:'#059669' }}>
+                  {fmtMYen((data.confirmedList || []).reduce((s, r) => s + Number(r.amount || 0), 0))}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

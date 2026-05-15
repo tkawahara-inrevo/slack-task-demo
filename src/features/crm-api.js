@@ -1006,7 +1006,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           COUNT(*)::int AS count
         FROM kintone_payments
         WHERE payment_date >= (CURRENT_DATE - INTERVAL '${Number(months)} months')
-          AND payment_date <= CURRENT_DATE
+          AND payment_date <= (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month - 1 day')
           ${salesUser ? `AND staff=$1` : ''}
         GROUP BY 1 ORDER BY 1
       `, salesUser ? [salesUser] : []);

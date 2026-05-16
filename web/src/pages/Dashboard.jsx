@@ -1221,6 +1221,16 @@ export default function Dashboard() {
       })
   , [myTasks]);
 
+  // 期限当日＋期限切れのカウント（バッジ用）
+  const urgentTaskCount = useMemo(() => {
+    const tod = new Date(); tod.setHours(0, 0, 0, 0);
+    return activeTasks.filter(t => {
+      if (!t.due_date) return false;
+      const due = new Date(t.due_date); due.setHours(0, 0, 0, 0);
+      return due <= tod;
+    }).length;
+  }, [activeTasks]);
+
   const applyFilter = async () => {
     const params = { page: filter.page, limit: 50 };
     if (filter.status)   params.status   = filter.status;
@@ -1334,8 +1344,13 @@ export default function Dashboard() {
               {myName ? `${myName} のタスク` : 'マイタスク'}
             </span>
             <button onClick={() => { const w=localStorage.getItem('float_w')||380,h=localStorage.getItem('float_h')||640,x=localStorage.getItem('float_x'),y=localStorage.getItem('float_y'),pos=x&&y?`,left=${x},top=${y}`:''; window.open('/dashboard/floating','taskhub-float',`width=${w},height=${h},resizable=yes,scrollbars=yes${pos}`); }}
-              style={{ padding:'4px 10px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.72rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+              style={{ padding:'4px 10px', border:'1px solid var(--gray-200)', borderRadius:7, background:'var(--surface)', color:T.textSub, fontSize:'0.72rem', cursor:'pointer', display:'flex', alignItems:'center', gap:4, position:'relative' }}>
               ↗ ポップアップ
+              {urgentTaskCount > 0 && (
+                <span style={{ position:'absolute', top:-6, right:-6, background:'#dc2626', color:'#fff', borderRadius:'50%', minWidth:16, height:16, fontSize:'0.62rem', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 3px', lineHeight:1 }}>
+                  {urgentTaskCount}
+                </span>
+              )}
             </button>
           </div>
           {activeTasks.length === 0

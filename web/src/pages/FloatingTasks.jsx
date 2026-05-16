@@ -394,15 +394,13 @@ export default function FloatingTasks() {
     return () => clearInterval(id);
   }, [load]);
 
-  // タスクバー通知バッジ（期限切れ優先、次いでアクティブ件数）
+  // タスクバー通知バッジ（期限当日＋期限切れのみ）
   useEffect(() => {
-    const overdueCount = tasks.filter(isOverdue).length;
-    const activeCount  = tasks.filter(t => t.status === 'in_progress' || t.status === 'pending').length;
-    const badgeNum = overdueCount > 0 ? overdueCount : activeCount;
-    document.title = badgeNum > 0 ? `(${badgeNum}) TaskHub` : 'TaskHub';
+    const urgentCount = tasks.filter(t => isOverdue(t) || isDueToday(t)).length;
+    document.title = urgentCount > 0 ? `(${urgentCount}) TaskHub` : 'TaskHub';
     // Badging API（PWA・対応ブラウザのみ）
     if ('setAppBadge' in navigator) {
-      if (badgeNum > 0) navigator.setAppBadge(badgeNum).catch(() => {});
+      if (urgentCount > 0) navigator.setAppBadge(urgentCount).catch(() => {});
       else navigator.clearAppBadge().catch(() => {});
     }
   }, [tasks]);

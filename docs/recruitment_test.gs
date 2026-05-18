@@ -298,11 +298,22 @@ function onEdit(e) {
     if (sheet.getName() !== 'test') return;
     if (e.range.getA1Notation() !== 'B30') return;
     if (e.value !== 'TRUE') return;
+
     const b31 = sheet.getRange('B31');
-    if (b31.getValue() === true) {
+    if (b31.getValue() !== true) return; // B31未チェックなら何もしない
+
+    // B31チェック済み → C19を確認
+    const c19 = sheet.getRange('C19').getValue();
+    const num = Number(c19);
+    const validScore = c19 !== '' && c19 !== null &&
+                       !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000;
+
+    if (!validScore) {
+      // C19がまだ無効 → B31を外す
       b31.setValue(false);
       SpreadsheetApp.flush();
     }
+    // C19もOK → B31はそのまま（ポーラーが提出処理する）
   } catch (err) {
     console.error('onEdit error:', err);
   }

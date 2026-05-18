@@ -252,7 +252,7 @@ function setupCompleteCheckbox(ss) {
         .setBorder(true, true, true, false, false, false, '#16a34a', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
   const labelRange = sheet.getRange('C31:F31');
   labelRange.merge()
-            .setFormula('=IF(AND(B31=TRUE,NOT(AND(ISNUMBER(C19),C19>=0,C19<=1000,B30=TRUE))),IF(NOT(AND(ISNUMBER(C19),C19>=0,C19<=1000)),"⚠ 問13のタイピングスコア（C19）が未入力です。0〜1000の数字を入力してください","⚠ B30のスクリーンショット確認にチェックを入れてください"),"テスト完了したらチェックを入れてください → 自動採点・提出されます")')
+            .setFormula('=IF(AND(B31=TRUE,AND(ISNUMBER(C19),C19>=0,C19<=1000,B30=TRUE)),"⏳ 提出を受け付けました！採点が完了すると、このメッセージが更新されます。スプレッドシートを閉じても問題ありません。",IF(AND(B31=TRUE,NOT(AND(ISNUMBER(C19),C19>=0,C19<=1000,B30=TRUE))),IF(NOT(AND(ISNUMBER(C19),C19>=0,C19<=1000)),"⚠ 問13のタイピングスコア（C19）が未入力です。0〜1000の数字を入力してください","⚠ B30のスクリーンショット確認にチェックを入れてください"),"テスト完了したらチェックを入れてください → 自動採点・提出されます"))')
             .setFontSize(11).setFontWeight('bold').setFontColor('#15803d')
             .setVerticalAlignment('middle').setBackground('#f0fdf4')
             .setBorder(true, false, true, true, false, false, '#16a34a', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);

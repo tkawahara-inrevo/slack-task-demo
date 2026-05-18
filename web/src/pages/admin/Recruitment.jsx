@@ -135,8 +135,9 @@ export default function Recruitment() {
 
   const handleScheduleOpen = () => {
     setScheduleChecked(new Set());
-    const now = new Date(); now.setMinutes(now.getMinutes() + 30); now.setSeconds(0, 0);
-    setScheduleAt(now.toISOString().slice(0, 16));
+    const d = new Date(); d.setDate(d.getDate() + 3); d.setHours(9, 0, 0, 0);
+    const pad = n => String(n).padStart(2, '0');
+    setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T09:00`);
     loadSchedules();
     setShowSchedule(true);
   };

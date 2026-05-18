@@ -1288,24 +1288,42 @@ function registerCrmApi({ expressApp, authWithRole }) {
           const { rows: [customer] } = await dbQuery(
             `SELECT * FROM customers WHERE id=$1 AND team_id=$2`, [row.customer_id, teamId]
           );
-          const plan = (row.contract_type || '').includes('採用保証') ? 'guarantee' : 'monthly';
-          const colorOpts = ['Ocean','Emerald','Amber','Rose','Violet','Pink','Teal','Slate'];
-          const color = colorOpts[Math.floor(Math.random() * colorOpts.length)];
-          const { rows: [rpoClient] } = await dbQuery(`
-            INSERT INTO rpo_clients (id, team_id, name, color, plan, status, data, created_by)
-            VALUES (gen_random_uuid()::text, $1, $2, $3, $4, 'active', $5::jsonb, $6)
-            RETURNING id
-          `, [teamId, customer?.name || row.name, color, plan,
-              JSON.stringify({ dealId: row.id, customerId: row.customer_id,
-                projectInfo: { hiringTarget: row.hiring_target || 0 },
-                hrAssigneeName: row.na_user_id || null }),
-              req.dashboardUser.userId]);
-          rpoClientId = rpoClient.id;
-          await dbQuery(
-            `UPDATE deals SET data=jsonb_set(COALESCE(data,'{}'), '{rpo_client_id}', $3::jsonb) WHERE id=$1 AND team_id=$2`,
-            [row.id, teamId, JSON.stringify(rpoClientId)]
+          // 既に同dealでRPO案件がないか確認（crmDealId / dealId 両方チェック）
+          const { rows: existing_rpo } = await dbQuery(
+            `SELECT id FROM rpo_clients WHERE team_id=$1 AND (data->>'crmDealId'=$2 OR data->>'dealId'=$2)`,
+            [teamId, row.id]
           );
-          row.data = { ...row.data, rpo_client_id: rpoClientId };
+          if (existing_rpo.length === 0) {
+            const plan = (row.contract_type || row.payment_method || '').includes('月額') ? 'monthly' : 'guarantee';
+            const colorOpts = ['Ocean','Emerald','Amber','Rose','Violet','Pink','Teal','Slate'];
+            const color = colorOpts[Math.floor(Math.random() * colorOpts.length)];
+            const contractAmount = row.unit_price && row.guarantee_count
+              ? Number(row.unit_price) * Number(row.guarantee_count)
+              : row.monthly_cost && row.contract_months
+                ? Number(row.monthly_cost) * Number(row.contract_months) + (Number(row.initial_cost) || 0)
+                : Number(row.initial_fee) || 0;
+            const { rows: [rpoClient] } = await dbQuery(`
+              INSERT INTO rpo_clients (id, team_id, name, color, plan, status, phase, data, created_by)
+              VALUES (gen_random_uuid()::text, $1, $2, $3, $4, 'active', 'cr', $5::jsonb, $6)
+              RETURNING id
+            `, [teamId, customer?.name || row.name, color, plan,
+                JSON.stringify({
+                  crmDealId: row.id,
+                  projectInfo: {
+                    hiringTarget:  row.hiring_target || 0,
+                    contractAmount,
+                    inrevoContact: row.sales_person || '',
+                    startDate:     row.order_date ? String(row.order_date).slice(0, 10) : '',
+                  },
+                }),
+                req.dashboardUser.userId]);
+            rpoClientId = rpoClient.id;
+            await dbQuery(
+              `UPDATE deals SET data=jsonb_set(COALESCE(data,'{}'), '{rpo_client_id}', $3::jsonb) WHERE id=$1 AND team_id=$2`,
+              [row.id, teamId, JSON.stringify(rpoClientId)]
+            );
+            row.data = { ...row.data, rpo_client_id: rpoClientId };
+          }
         } catch (e) {
           console.error('[CRM] RPO auto-create error:', e);
         }

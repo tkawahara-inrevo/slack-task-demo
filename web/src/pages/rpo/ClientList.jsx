@@ -459,10 +459,11 @@ export default function ClientList() {
 
       {/* 案件一覧（Kanbanビュー） */}
       {(() => {
-        const nameFilter = c => !filterName || c.name.toLowerCase().includes(filterName.toLowerCase());
-        const hrFilter   = c => !filterHrId || c.data?.hrAssigneeId === filterHrId;
-        const active     = clients.filter(c => c.status !== 'archived' && hrFilter(c) && nameFilter(c));
-        const archived   = clients.filter(c => c.status === 'archived' && hrFilter(c) && nameFilter(c));
+        const nameFilter  = c => !filterName || c.name.toLowerCase().includes(filterName.toLowerCase());
+        const hrFilter    = c => !filterHrId || c.data?.hrAssigneeId === filterHrId;
+        const unassigned  = clients.filter(c => c.status !== 'archived' && !c.dash_team_id && hrFilter(c) && nameFilter(c));
+        const active      = clients.filter(c => c.status !== 'archived' && c.dash_team_id && hrFilter(c) && nameFilter(c));
+        const archived    = clients.filter(c => c.status === 'archived' && hrFilter(c) && nameFilter(c));
 
         const archiveClient = async (e, clientId) => {
           e.stopPropagation();
@@ -527,7 +528,13 @@ export default function ClientList() {
           );
         };
 
-        if (active.length === 0 && archived.length === 0) {
+        const assignTeam = async (e, clientId, dashTeamId) => {
+          e.stopPropagation();
+          await api.rpoUpdateClient(clientId, { dashTeamId }).catch(() => {});
+          setClients(prev => prev.map(c => c.id === clientId ? { ...c, dash_team_id: dashTeamId } : c));
+        };
+
+        if (unassigned.length === 0 && active.length === 0 && archived.length === 0) {
           return (
             <div className="rpo-empty">
               <p>案件がまだありません</p>
@@ -538,6 +545,35 @@ export default function ClientList() {
 
         return (
           <>
+            {/* 担当チーム未割当 */}
+            {unassigned.length > 0 && (
+              <div style={{ marginBottom: 20, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: '#92400e', marginBottom: 10 }}>
+                  ⚠ 担当チーム未割当 ({unassigned.length}件) — CRMで受注になった案件です
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {unassigned.map(client => (
+                    <div key={client.id} onClick={() => navigate(`/rpo/${client.id}`)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', borderRadius: 7, padding: '8px 12px', cursor: 'pointer', border: '1px solid #fde68a' }}>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: colorOf(client.color), flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, fontSize: '0.84rem', flex: 1 }}>{client.name}</span>
+                      <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>{planLabel(client.plan)}</span>
+                      {teams.length > 0 && (
+                        <select
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => e.target.value && assignTeam(e, client.id, e.target.value)}
+                          defaultValue=""
+                          style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 5, border: '1px solid #fde68a', background: '#fffbeb', cursor: 'pointer' }}
+                        >
+                          <option value="" disabled>チームを割り当て</option>
+                          {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Kanbanボード */}
             <div style={{ display: 'flex', gap: 12, overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 16 }}>
               {PHASES.map(phase => {

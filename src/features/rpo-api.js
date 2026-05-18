@@ -174,7 +174,7 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
                EXISTS(
                  SELECT 1 FROM rpo_clients rc
                  WHERE rc.team_id = d.team_id
-                   AND rc.data->>'crmDealId' = d.id
+                   AND (rc.data->>'crmDealId' = d.id OR rc.data->>'dealId' = d.id)
                ) AS already_linked
         FROM deals d
         JOIN customers c ON c.id = d.customer_id

@@ -15,6 +15,13 @@ const COLOR_OPTIONS = [
 
 const EMPTY_FORM = { name: '', color: 'Ocean', plan: 'guarantee', kintone: null, hrAssigneeId: '', driveFolder: null };
 
+const PHASES = [
+  { key: 'cr',    label: 'CR',    desc: '初回インタビュー', color: '#8b5cf6' },
+  { key: 'st_an', label: 'ST/AN', desc: '分析・媒体調査',   color: '#f59e0b' },
+  { key: 'dr',    label: 'DR',    desc: '最終判断・承認',   color: '#ef4444' },
+  { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',       color: '#3b82f6' },
+];
+
 // kintone支払方式 → プランコードに変換
 function mapPlan(shiharaiHoshiki) {
   if (!shiharaiHoshiki) return 'monthly';
@@ -440,7 +447,7 @@ export default function ClientList() {
         </div>
       )}
 
-      {/* 案件一覧 */}
+      {/* 案件一覧（Kanbanビュー） */}
       {(() => {
         const nameFilter = c => !filterName || c.name.toLowerCase().includes(filterName.toLowerCase());
         const hrFilter   = c => !filterHrId || c.data?.hrAssigneeId === filterHrId;
@@ -458,72 +465,101 @@ export default function ClientList() {
           await api.rpoUpdateClient(clientId, { status: 'active' }).catch(() => {});
           setClients(prev => prev.map(c => c.id === clientId ? { ...c, status: 'active' } : c));
         };
+        const changePhase = async (e, clientId, newPhase) => {
+          e.stopPropagation();
+          await api.rpoUpdateClient(clientId, { phase: newPhase }).catch(() => {});
+          setClients(prev => prev.map(c => c.id === clientId ? { ...c, phase: newPhase } : c));
+        };
 
-        const ClientCard = ({ client, isArchived }) => (
+        const KanbanCard = ({ client }) => (
           <div
-            key={client.id}
-            className={`rpo-card${isArchived ? ' archived' : ''}`}
             onClick={() => navigate(`/rpo/${client.id}`)}
-            style={{ borderTop: `4px solid ${colorOf(client.color)}`, opacity: isArchived ? 0.65 : 1 }}
+            style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', borderLeft: `4px solid ${colorOf(client.color)}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: 6 }}
           >
-            <div className="rpo-card-header">
-              <div className="rpo-card-avatar" style={{ background: colorOf(client.color) }}>
-                {client.name.charAt(0)}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div className="rpo-card-name">{client.name}</div>
-                <div className="rpo-card-plan">{planLabel(client.plan)}</div>
-              </div>
-              {isArchived ? (
+            <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--gray-800)', lineHeight: 1.3 }}>{client.name}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>{planLabel(client.plan)}</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginTop: 2 }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {client.data?.hrAssigneeName ? `👤 ${client.data.hrAssigneeName.split('/')[0].trim()}` : ''}
+                {client.dash_team_id && !effectiveTeamId ? ` · ${teams.find(t => t.id === client.dash_team_id)?.name || ''}` : ''}
+              </span>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                <select
+                  value={client.phase || 'cr'}
+                  onChange={e => changePhase(e, client.id, e.target.value)}
+                  style={{ fontSize: '0.68rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--gray-300)', background: 'var(--surface-2)', color: 'var(--gray-600)', cursor: 'pointer' }}
+                >
+                  {PHASES.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                </select>
                 <button
-                  className="btn-secondary small"
-                  style={{ fontSize: '0.72rem', padding: '2px 8px', flexShrink: 0 }}
-                  onClick={e => restoreClient(e, client.id)}
-                  title="進行中に戻す"
-                >復帰</button>
-              ) : (
-                <button
-                  className="rpo-card-end-btn"
                   onClick={e => archiveClient(e, client.id)}
                   title="案件を終了する"
+                  style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, border: '1px solid var(--gray-300)', background: 'none', color: 'var(--gray-400)', cursor: 'pointer' }}
                 >終了</button>
-              )}
-            </div>
-            <div className="rpo-card-meta">
-              {isArchived ? (
-                <span className="rpo-status-pill archived">終了済み</span>
-              ) : (
-                <span className="rpo-status-pill active">進行中</span>
-              )}
-              {client.data?.hrAssigneeName && (
-                <span className="rpo-card-assignee">👤 {client.data.hrAssigneeName}</span>
-              )}
-              {client.dash_team_id && !effectiveTeamId && (
-                <span className="rpo-card-team">
-                  {teams.find(t => t.id === client.dash_team_id)?.name || ''}
-                </span>
-              )}
-              <span className="rpo-card-date">{formatDate(client.updated_at)}</span>
+              </div>
             </div>
           </div>
         );
 
+        if (active.length === 0 && archived.length === 0) {
+          return (
+            <div className="rpo-empty">
+              <p>案件がまだありません</p>
+              <button className="btn-primary" onClick={() => setShowCreate(true)}>最初の案件を作成</button>
+            </div>
+          );
+        }
+
         return (
           <>
-            {active.length === 0 && archived.length === 0 ? (
-              <div className="rpo-empty">
-                <p>案件がまだありません</p>
-                <button className="btn-primary" onClick={() => setShowCreate(true)}>最初の案件を作成</button>
-              </div>
-            ) : (
-              <div className="rpo-grid">
-                {active.map(client => <ClientCard key={client.id} client={client} isArchived={false} />)}
-              </div>
-            )}
+            {/* Kanbanボード */}
+            <div style={{ display: 'flex', gap: 12, overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 16 }}>
+              {PHASES.map(phase => {
+                const cols = active.filter(c => (c.phase || 'cr') === phase.key);
+                return (
+                  <div key={phase.key} style={{ minWidth: 240, flex: '0 0 240px' }}>
+                    <div style={{ background: phase.color, color: '#fff', borderRadius: '8px 8px 0 0', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{phase.label}</span>
+                        <span style={{ fontSize: '0.72rem', opacity: 0.85, marginLeft: 6 }}>{phase.desc}</span>
+                      </div>
+                      <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 12, padding: '0 8px', fontSize: '0.78rem', fontWeight: 700 }}>{cols.length}</span>
+                    </div>
+                    <div style={{ background: 'var(--gray-100)', borderRadius: '0 0 8px 8px', padding: 8, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 100 }}>
+                      {cols.map(client => <KanbanCard key={client.id} client={client} />)}
+                      {cols.length === 0 && <div style={{ fontSize: '0.75rem', color: 'var(--gray-400)', textAlign: 'center', padding: '12px 0' }}>なし</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 終了済み（折りたたみ） */}
             {archived.length > 0 && (
               <ArchivedSection>
                 <div className="rpo-grid">
-                  {archived.map(client => <ClientCard key={client.id} client={client} isArchived={true} />)}
+                  {archived.map(client => (
+                    <div
+                      key={client.id}
+                      className="rpo-card archived"
+                      onClick={() => navigate(`/rpo/${client.id}`)}
+                      style={{ borderTop: `4px solid ${colorOf(client.color)}`, opacity: 0.65 }}
+                    >
+                      <div className="rpo-card-header">
+                        <div className="rpo-card-avatar" style={{ background: colorOf(client.color) }}>{client.name.charAt(0)}</div>
+                        <div style={{ flex: 1 }}>
+                          <div className="rpo-card-name">{client.name}</div>
+                          <div className="rpo-card-plan">{planLabel(client.plan)}</div>
+                        </div>
+                        <button className="btn-secondary small" style={{ fontSize: '0.72rem', padding: '2px 8px', flexShrink: 0 }} onClick={e => restoreClient(e, client.id)}>復帰</button>
+                      </div>
+                      <div className="rpo-card-meta">
+                        <span className="rpo-status-pill archived">終了済み</span>
+                        {client.data?.hrAssigneeName && <span className="rpo-card-assignee">👤 {client.data.hrAssigneeName}</span>}
+                        <span className="rpo-card-date">{formatDate(client.updated_at)}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </ArchivedSection>
             )}

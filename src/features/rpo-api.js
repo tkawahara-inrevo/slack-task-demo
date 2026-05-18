@@ -249,9 +249,9 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
       const access = await withRpoAccess(req, res);
       if (!access) return;
       const { teamId } = req.dashboardUser;
-      const { name, color, plan, status, dashTeamId, data } = req.body;
+      const { name, color, plan, status, phase, dashTeamId, data } = req.body;
 
-      const updated = await dbUpdateRpoClient(teamId, req.params.id, { name, color, plan, status, dashTeamId, data });
+      const updated = await dbUpdateRpoClient(teamId, req.params.id, { name, color, plan, status, phase, dashTeamId, data });
       if (!updated) return res.status(404).json({ error: 'not_found' });
       res.json({ client: updated });
     } catch (e) {

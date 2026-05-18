@@ -97,6 +97,7 @@ async function dbEnsureRpoSchema() {
     );
   `);
 
+  await dbQuery(`ALTER TABLE rpo_clients ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'cr';`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_team           ON rpo_clients(team_id);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_dash_team      ON rpo_clients(dash_team_id);`);
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_rpo_clients_status         ON rpo_clients(team_id, status);`);
@@ -224,7 +225,7 @@ async function dbListRpoClients(teamId, { fullAccess = true, myTeamIds = null, f
   }
 
   const { rows } = await dbQuery(
-    `SELECT id, team_id, dash_team_id, name, color, plan, status,
+    `SELECT id, team_id, dash_team_id, name, color, plan, status, phase,
             data, created_by, created_at, updated_at
      FROM rpo_clients
      WHERE team_id = $1${extra}
@@ -252,7 +253,7 @@ async function dbCreateRpoClient(teamId, { name, color = 'Ocean', plan = 'monthl
   return rows[0];
 }
 
-async function dbUpdateRpoClient(teamId, clientId, { name, color, plan, status, dashTeamId, data }) {
+async function dbUpdateRpoClient(teamId, clientId, { name, color, plan, status, phase, dashTeamId, data }) {
   const fields = [];
   const vals   = [];
   let i = 1;
@@ -261,6 +262,7 @@ async function dbUpdateRpoClient(teamId, clientId, { name, color, plan, status, 
   if (color       !== undefined) { fields.push(`color=$${i++}`);        vals.push(color); }
   if (plan        !== undefined) { fields.push(`plan=$${i++}`);         vals.push(plan); }
   if (status      !== undefined) { fields.push(`status=$${i++}`);       vals.push(status); }
+  if (phase       !== undefined) { fields.push(`phase=$${i++}`);        vals.push(phase); }
   if (dashTeamId  !== undefined) { fields.push(`dash_team_id=$${i++}`); vals.push(dashTeamId); }
   if (data        !== undefined) { fields.push(`data=$${i++}`);         vals.push(JSON.stringify(data)); }
 

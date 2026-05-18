@@ -213,6 +213,59 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
   });
 
   // ─────────────────────────────────────────
+  // GET /api/rpo/clients/:id/related  同一顧客の関連案件
+  // ─────────────────────────────────────────
+  expressApp.get('/api/rpo/clients/:id/related', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const client = await dbGetRpoClient(teamId, req.params.id);
+      if (!client) return res.status(404).json({ error: 'not_found' });
+
+      const dealId = client.data?.crmDealId || client.data?.dealId;
+      if (!dealId) return res.json({ deals: [], rpoClients: [] });
+
+      // CRMのcustomer_idを取得
+      const { rows: [deal] } = await dbQuery(
+        `SELECT customer_id FROM deals WHERE id=$1 AND team_id=$2`, [dealId, teamId]
+      );
+      if (!deal) return res.json({ deals: [], rpoClients: [] });
+
+      // 同一顧客の全CRM案件（自分以外）
+      const { rows: deals } = await dbQuery(`
+        SELECT d.id, d.name, d.status, d.yomi, d.order_date,
+               d.payment_method, d.unit_price, d.guarantee_count,
+               d.sales_person, d.data->>'rpo_client_id' AS rpo_client_id
+        FROM deals d
+        WHERE d.customer_id = $1 AND d.team_id = $2 AND d.id != $3
+        ORDER BY d.order_date DESC NULLS LAST
+        LIMIT 10
+      `, [deal.customer_id, teamId, dealId]);
+
+      // 同一顧客のRPO案件（自分以外）
+      const { rows: rpoClients } = await dbQuery(`
+        SELECT rc.id, rc.name, rc.status, rc.phase, rc.dash_team_id,
+               rc.data->>'crmDealId' AS crm_deal_id,
+               rc.data->>'dealId' AS deal_id,
+               dt.name AS dash_team_name
+        FROM rpo_clients rc
+        LEFT JOIN dash_teams dt ON dt.id = rc.dash_team_id AND dt.team_id = rc.team_id
+        WHERE rc.team_id = $1 AND rc.id != $2
+          AND (rc.data->>'crmDealId' IN (
+                SELECT id FROM deals WHERE customer_id=$3 AND team_id=$1
+              ) OR rc.data->>'dealId' IN (
+                SELECT id FROM deals WHERE customer_id=$3 AND team_id=$1
+              ))
+        ORDER BY rc.created_at DESC
+      `, [teamId, req.params.id, deal.customer_id]);
+
+      res.json({ deals, rpoClients });
+    } catch (e) {
+      console.error('[RPO] related error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ─────────────────────────────────────────
   // GET /api/rpo/clients/:id  案件詳細
   // ─────────────────────────────────────────
   expressApp.get('/api/rpo/clients/:id', authWithRole, async (req, res) => {

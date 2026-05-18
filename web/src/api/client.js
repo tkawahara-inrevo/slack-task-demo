@@ -387,6 +387,7 @@ export const api = {
     return rpoFetch(`/clients${qs ? '?' + qs : ''}`);
   },
   rpoClient:       (id)      => rpoFetch(`/clients/${id}`),
+  rpoRelated:      (id)      => rpoFetch(`/clients/${id}/related`),
   rpoCreateClient: (body)    => rpoPost('/clients', body),
   rpoUpdateClient: (id, body) => rpoFetch(`/clients/${id}`, {
     method: 'PUT',

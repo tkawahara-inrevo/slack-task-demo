@@ -228,6 +228,53 @@ function SimpleFunnelChart({ data }) {
 }
 
 // ─── ダッシュボード ───────────────────────────────────
+const PHASE_LABELS = { cr: 'CR', st_an: 'ST/AN', dr: 'DR', cs_op: 'CS/OP' };
+const PHASE_COLORS = { cr: '#8b5cf6', st_an: '#f59e0b', dr: '#ef4444', cs_op: '#3b82f6' };
+const DEAL_STATUS_LABEL = { active: '商談中', won: '受注', lost: '失注', dormant: '見送り' };
+const DEAL_STATUS_COLOR = { active: '#3b82f6', won: '#10b981', lost: '#ef4444', dormant: '#9ca3af' };
+
+function RelatedSection({ clientId }) {
+  const navigate = useNavigate();
+  const [related, setRelated] = useState(null);
+  useEffect(() => {
+    api.rpoRelated(clientId).then(r => setRelated(r)).catch(() => setRelated({ deals: [], rpoClients: [] }));
+  }, [clientId]);
+
+  if (!related || (related.deals.length === 0 && related.rpoClients.length === 0)) return null;
+
+  return (
+    <div style={{ border: '1px solid var(--gray-200)', borderRadius: 8, padding: '12px 14px', marginBottom: 16, background: 'var(--surface-2)' }}>
+      <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--gray-600)', marginBottom: 10 }}>同一顧客の関連案件</div>
+      {related.rpoClients.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)', marginBottom: 4 }}>RPO案件</div>
+          {related.rpoClients.map(rc => (
+            <div key={rc.id} onClick={() => navigate(`/rpo/${rc.id}`)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 6, cursor: 'pointer', background: 'var(--surface)', marginBottom: 3 }}>
+              <span style={{ fontSize: '0.82rem', flex: 1, fontWeight: 500 }}>{rc.name}</span>
+              {rc.phase && <span style={{ fontSize: '0.68rem', background: PHASE_COLORS[rc.phase] || '#6b7280', color: '#fff', borderRadius: 4, padding: '1px 6px' }}>{PHASE_LABELS[rc.phase] || rc.phase}</span>}
+              {rc.dash_team_name && <span style={{ fontSize: '0.68rem', color: 'var(--gray-400)' }}>{rc.dash_team_name}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {related.deals.length > 0 && (
+        <div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)', marginBottom: 4 }}>CRM案件</div>
+          {related.deals.map(d => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 6, background: 'var(--surface)', marginBottom: 3 }}>
+              <span style={{ fontSize: '0.82rem', flex: 1 }}>{d.name || d.yomi}</span>
+              <span style={{ fontSize: '0.68rem', color: DEAL_STATUS_COLOR[d.status] || '#6b7280', fontWeight: 600 }}>{DEAL_STATUS_LABEL[d.status] || d.status}</span>
+              {d.order_date && <span style={{ fontSize: '0.68rem', color: 'var(--gray-400)' }}>{String(d.order_date).slice(0, 10)}</span>}
+              {d.sales_person && <span style={{ fontSize: '0.68rem', color: 'var(--gray-400)' }}>{d.sales_person}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
   const d    = client.data;
   const info = d.projectInfo || {};
@@ -311,6 +358,9 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
     <div className="tab-section">
       {/* フェーズチェックリスト */}
       <PhaseChecklist client={client} onUpdate={onUpdate} />
+
+      {/* 同一顧客の関連案件 */}
+      {(client.data?.crmDealId || client.data?.dealId) && <RelatedSection clientId={client.id} />}
 
       <div className="section-header">
         <h2 className="section-title">プロジェクト概要</h2>

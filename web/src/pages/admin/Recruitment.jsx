@@ -146,18 +146,27 @@ export default function Recruitment() {
     if (!scheduleChecked.size || !scheduleAt) return;
     setScheduling(true);
     try {
-      await api.recruitmentScheduleCreate([...scheduleChecked], new Date(scheduleAt).toISOString());
+      const scheduledAtISO = new Date(scheduleAt).toISOString();
+      await api.recruitmentScheduleCreate([...scheduleChecked], scheduledAtISO);
+      setCandidates(prev => prev.map(c =>
+        scheduleChecked.has(c.id) ? { ...c, scheduled_at: scheduledAtISO } : c
+      ));
       await loadSchedules();
       setShowSchedule(false);
-      alert(`${scheduleChecked.size}名の予約送信を設定しました`);
     } catch (e) { alert('予約に失敗しました: ' + e.message); }
     finally { setScheduling(false); }
   };
 
   const handleScheduleCancel = async (id) => {
     if (!window.confirm('この予約をキャンセルしますか？')) return;
+    const target = schedules.find(s => s.id === id);
     await api.recruitmentScheduleCancel(id).catch(() => {});
     setSchedules(prev => prev.filter(s => s.id !== id));
+    if (target) {
+      setCandidates(prev => prev.map(c =>
+        c.id === target.candidate_id ? { ...c, scheduled_at: null, schedule_id: null } : c
+      ));
+    }
   };
 
   const isSending   = sendingIds.size > 0;

@@ -1232,12 +1232,19 @@ function registerDashboardApi(deps) {
       const baseUrl = process.env.APP_BASE_URL || `https://inrevo-task.com`;
       const webhookUrl = `${baseUrl}/api/dashboard/recruitment/webhook/complete`;
 
+      // 予約送信が入っている候補者は除外（重複送信防止）
+      const scheduledRes = await dbQuery(
+        `SELECT DISTINCT candidate_id FROM recruitment_scheduled_sends WHERE team_id=$1 AND status='pending'`,
+        [teamId]
+      );
+      const scheduledIds = new Set(scheduledRes.rows.map(r => r.candidate_id));
+
       const candidatesRes = await dbQuery(
         "SELECT * FROM recruitment_candidates WHERE team_id=$1 AND spreadsheet_url IS NULL AND status IN ('pending','error')",
         [teamId]
       );
-      const targets = candidatesRes.rows;
-      if (targets.length === 0) return res.json({ ok: true, sent: 0 });
+      const targets = candidatesRes.rows.filter(c => !scheduledIds.has(c.id));
+      if (targets.length === 0) return res.json({ ok: true, sent: 0, skippedScheduled: scheduledIds.size });
 
       const results = [];
       for (const c of targets) {
@@ -1382,7 +1389,7 @@ function registerDashboardApi(deps) {
   async function processScheduledSends() {
     try {
       const { rows: due } = await dbQuery(
-        `SELECT s.*, c.name, c.email, c.id AS c_id,
+        `SELECT s.*, c.name, c.email, c.id AS c_id, c.spreadsheet_url AS already_sent_url,
                 rs.gas_endpoint_url, rs.template_spreadsheet_id, rs.webhook_secret,
                 rs.from_email, rs.email_subject, rs.email_body
          FROM recruitment_scheduled_sends s
@@ -1397,6 +1404,11 @@ function registerDashboardApi(deps) {
 
       for (const row of due) {
         try {
+          // 手動送信済みの場合はスキップ
+          if (row.already_sent_url) {
+            await dbQuery(`UPDATE recruitment_scheduled_sends SET status='sent', error_message='手動送信済みのためスキップ' WHERE id=$1`, [row.id]);
+            continue;
+          }
           if (!row.gas_endpoint_url || !row.template_spreadsheet_id) {
             await dbQuery(`UPDATE recruitment_scheduled_sends SET status='error', error_message='設定不備' WHERE id=$1`, [row.id]);
             continue;

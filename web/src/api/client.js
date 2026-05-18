@@ -381,6 +381,7 @@ export const api = {
 
   // RPO案件管理
   rpoAccess:       ()        => rpoFetch('/access'),
+  rpoCrmWonDeals:  (q = '')  => rpoFetch(`/crm-won-deals?q=${encodeURIComponent(q)}`),
   rpoClients:      (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return rpoFetch(`/clients${qs ? '?' + qs : ''}`);

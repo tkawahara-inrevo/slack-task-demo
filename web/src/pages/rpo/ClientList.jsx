@@ -13,7 +13,7 @@ const COLOR_OPTIONS = [
   { name: 'Slate',   bg: '#64748b', label: 'スレート' },
 ];
 
-const EMPTY_FORM = { name: '', color: 'Ocean', plan: 'guarantee', kintone: null, hrAssigneeId: '', driveFolder: null };
+const EMPTY_FORM = { name: '', color: 'Ocean', plan: 'guarantee', crmDeal: null, hrAssigneeId: '', driveFolder: null };
 
 const PHASES = [
   { key: 'cr',    label: 'CR',    desc: '初回インタビュー', color: '#8b5cf6' },
@@ -22,12 +22,17 @@ const PHASES = [
   { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',       color: '#3b82f6' },
 ];
 
-// kintone支払方式 → プランコードに変換
-function mapPlan(shiharaiHoshiki) {
-  if (!shiharaiHoshiki) return 'monthly';
-  if (shiharaiHoshiki.includes('月額')) return 'monthly';
-  if (shiharaiHoshiki.includes('保証') || shiharaiHoshiki.includes('成功')) return 'guarantee';
-  return 'monthly';
+function mapCrmPlan(paymentMethod) {
+  if (!paymentMethod) return 'guarantee';
+  if (paymentMethod.includes('月額')) return 'monthly';
+  return 'guarantee';
+}
+
+function calcContractAmount(deal) {
+  if (!deal) return 0;
+  if (deal.unit_price && deal.guarantee_count) return Number(deal.unit_price) * Number(deal.guarantee_count);
+  if (deal.monthly_cost && deal.contract_months) return Number(deal.monthly_cost) * Number(deal.contract_months) + (Number(deal.initial_cost) || 0);
+  return 0;
 }
 
 export default function ClientList() {
@@ -131,15 +136,15 @@ export default function ClientList() {
   };
 
   const handleNameInput = (value) => {
-    setForm(f => ({ ...f, name: value, kintone: null, driveFolder: null }));
+    setForm(f => ({ ...f, name: value, crmDeal: null, driveFolder: null }));
     clearTimeout(debounceRef.current);
     fetchDriveCandidates(value);
     if (value.trim().length < 1) { setSuggestions([]); return; }
     debounceRef.current = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const r = await api.kintoneSearch(value.trim());
-        setSuggestions(r.results || []);
+        const r = await api.rpoCrmWonDeals(value.trim());
+        setSuggestions(r.deals || []);
       } catch {
         setSuggestions([]);
       } finally {
@@ -149,12 +154,11 @@ export default function ClientList() {
   };
 
   const selectSuggestion = (s) => {
-    const plan = mapPlan(s.data['支払方式']);
     setForm(f => ({
       ...f,
-      name:        s.company_name,
-      plan,
-      kintone:     { recordId: s.record_id, appId: s.app_id, data: s.data },
+      name:     s.company_name,
+      plan:     mapCrmPlan(s.payment_method),
+      crmDeal:  s,
       driveFolder: null,
     }));
     setSuggestions([]);
@@ -166,14 +170,15 @@ export default function ClientList() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      // kintoneから取得した情報をdataに含めて保存
       const hrUser = teamUsers.find(u => u.userId === form.hrAssigneeId);
       const initialData = {
-        ...(form.kintone ? {
-          kintone: form.kintone,
+        ...(form.crmDeal ? {
+          crmDealId: form.crmDeal.deal_id,
           projectInfo: {
-            inrevoContact: form.kintone.data['担当営業_0'] || '',
-            startDate:     form.kintone.data['受注日'] || '',
+            inrevoContact:  form.crmDeal.sales_person || '',
+            startDate:      form.crmDeal.order_date ? String(form.crmDeal.order_date).slice(0, 10) : '',
+            contractAmount: calcContractAmount(form.crmDeal),
+            hiringTarget:   form.crmDeal.hiring_target || 0,
           },
         } : {}),
         ...(hrUser ? { hrAssigneeId: hrUser.userId, hrAssigneeName: hrUser.displayName } : {}),
@@ -317,9 +322,9 @@ export default function ClientList() {
             <h2 className="modal-title">新規案件を作成</h2>
             <form onSubmit={handleCreate} className="modal-form">
 
-              {/* 企業名（kintoneオートコンプリート） */}
+              {/* 企業名（CRM受注案件検索） */}
               <div className="form-group" ref={suggestRef} style={{ position: 'relative' }}>
-                <label>企業名 *</label>
+                <label>企業名 * <span style={{ fontSize: '0.72rem', color: 'var(--gray-400)', fontWeight: 400 }}>CRMの受注案件から検索</span></label>
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
@@ -335,15 +340,12 @@ export default function ClientList() {
                   )}
                 </div>
 
-                {form.kintone && (
+                {form.crmDeal && (
                   <div className="kintone-selected-badge">
-                    kintone連携済
-                    {form.kintone.data['担当営業_0'] && (
-                      <span>　担当: {form.kintone.data['担当営業_0']}</span>
-                    )}
-                    {form.kintone.data['受注日'] && (
-                      <span>　受注日: {form.kintone.data['受注日']}</span>
-                    )}
+                    CRM連携済
+                    {form.crmDeal.sales_person && <span>　担当: {form.crmDeal.sales_person}</span>}
+                    {form.crmDeal.order_date && <span>　受注日: {String(form.crmDeal.order_date).slice(0, 10)}</span>}
+                    {form.crmDeal.already_linked && <span style={{ color: '#f59e0b' }}>　※既に案件あり</span>}
                   </div>
                 )}
 
@@ -351,19 +353,27 @@ export default function ClientList() {
                   <div className="kintone-suggestions">
                     {suggestions.map(s => (
                       <div
-                        key={`${s.app_id}-${s.record_id}`}
+                        key={s.deal_id}
                         className="kintone-suggestion-item"
                         onMouseDown={e => { e.preventDefault(); selectSuggestion(s); }}
                       >
-                        <span className="suggestion-company">{s.company_name}</span>
+                        <span className="suggestion-company">
+                          {s.company_name}
+                          {s.already_linked && <span style={{ fontSize: '0.7rem', color: '#f59e0b', marginLeft: 6 }}>案件あり</span>}
+                        </span>
                         <span className="suggestion-meta">
-                          {s.data['支払方式'] && <span>{s.data['支払方式']}</span>}
-                          {s.data['担当営業_0'] && <span>担当: {s.data['担当営業_0']}</span>}
-                          {s.data['受注日'] && <span>{s.data['受注日']}</span>}
+                          {s.payment_method && <span>{s.payment_method}</span>}
+                          {s.sales_person && <span>担当: {s.sales_person}</span>}
+                          {s.order_date && <span>{String(s.order_date).slice(0, 10)}</span>}
                         </span>
                       </div>
                     ))}
                   </div>
+                )}
+                {!searchLoading && suggestions.length === 0 && form.name.trim().length >= 1 && !form.crmDeal && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--gray-400)', margin: '4px 0 0' }}>
+                    CRMに受注案件が見つかりません。企業名を直接入力して作成できます。
+                  </p>
                 )}
               </div>
 

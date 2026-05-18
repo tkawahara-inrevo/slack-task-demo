@@ -152,6 +152,46 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
   });
 
   // ─────────────────────────────────────────
+  // GET /api/rpo/crm-won-deals  CRM受注案件検索
+  // ─────────────────────────────────────────
+  expressApp.get('/api/rpo/crm-won-deals', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const q = (req.query.q || '').trim();
+      const { rows } = await dbQuery(`
+        SELECT d.id AS deal_id,
+               c.id AS customer_id,
+               c.name AS company_name,
+               d.sales_person,
+               d.order_date,
+               d.payment_method,
+               d.unit_price,
+               d.guarantee_count,
+               d.hiring_target,
+               d.initial_cost,
+               d.monthly_cost,
+               d.contract_months,
+               EXISTS(
+                 SELECT 1 FROM rpo_clients rc
+                 WHERE rc.team_id = d.team_id
+                   AND rc.data->>'crmDealId' = d.id
+               ) AS already_linked
+        FROM deals d
+        JOIN customers c ON c.id = d.customer_id
+        WHERE d.team_id = $1
+          AND d.status = 'won'
+          AND ($2 = '' OR c.name ILIKE '%' || $2 || '%')
+        ORDER BY d.order_date DESC NULLS LAST
+        LIMIT 20
+      `, [teamId, q]);
+      res.json({ deals: rows });
+    } catch (e) {
+      console.error('[RPO] crm-won-deals error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ─────────────────────────────────────────
   // GET /api/rpo/clients  案件一覧
   // ─────────────────────────────────────────
   expressApp.get('/api/rpo/clients', authWithRole, async (req, res) => {

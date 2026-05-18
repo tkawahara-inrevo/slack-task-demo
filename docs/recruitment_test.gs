@@ -260,7 +260,10 @@ function onEdit(e) {
     SpreadsheetApp.flush();
 
     const labelRange = sheet.getRange('C31:F31');
-    const c19 = sheet.getRange('C19').getValue();
+    // B30とC19を1回のAPI呼び出しで取得（B19:C30の範囲）
+    const vals = sheet.getRange('B19:C30').getValues();
+    const c19 = vals[0][1]; // C19
+    const b30 = vals[11][0]; // B30
     const num = Number(c19);
     const validScore = c19 !== '' && c19 !== null &&
                        !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000;
@@ -271,7 +274,7 @@ function onEdit(e) {
       return;
     }
 
-    if (sheet.getRange('B30').getValue() !== true) {
+    if (b30 !== true) {
       labelRange.setValue('⚠ B30のスクリーンショット確認チェックを先に入れてください')
                 .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
       return;

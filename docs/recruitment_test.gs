@@ -47,7 +47,6 @@ function doPost(e) {
 
     setupCompleteCheckbox(ss);
     setupValidation(ss);
-    addEditTriggerForSheet(ss);
 
     // ★ editトリガーの代わりに「監視リスト」に追加
     addToWatchList(newFile.getId(), candidateId, webhookUrl);
@@ -104,9 +103,11 @@ function pollCompletions() {
       const sheet = ss.getSheetByName('test');
       if (!sheet) { remaining.push(item); continue; }
 
-      // B31 のチェックボックスが TRUE になっているか確認
+      // B31（提出）とB30（スクショ確認）の両方がTRUEか確認
       const isComplete = sheet.getRange('B31').getValue() === true;
       if (!isComplete) { remaining.push(item); continue; }
+      const screenshotOk = sheet.getRange('B30').getValue() === true;
+      if (!screenshotOk) { remaining.push(item); continue; }
 
       // すでに完了表示に書き換え済みかチェック（重複送信防止）
       const c31 = sheet.getRange('C31').getDisplayValue() || '';
@@ -196,12 +197,27 @@ function importFromSheet(spreadsheetId) {
 }
 
 // ================================================================
-// 完了チェックボックスをシートに設置
+// 完了チェックボックスをシートに設置（B30: スクショ確認 / B31: 提出）
 // ================================================================
 function setupCompleteCheckbox(ss) {
   const sheet = ss.getSheetByName('test');
   if (!sheet) return;
-  sheet.setRowHeight(30, 20); sheet.setRowHeight(31, 50); sheet.setRowHeight(32, 30);
+
+  // B30: スクリーンショット確認チェックボックス
+  sheet.setRowHeight(30, 44);
+  const ssCb = sheet.getRange('B30');
+  ssCb.insertCheckboxes(); ssCb.setValue(false);
+  ssCb.setBackground('#fffbeb')
+      .setBorder(true, true, true, false, false, false, '#d97706', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  const ssLabel = sheet.getRange('C30:F30');
+  ssLabel.merge()
+         .setValue('📸 問13のタイピングテストのスクリーンショットを貼り付けましたか？　→ 貼り付け済みならチェックを入れてください')
+         .setFontSize(11).setFontWeight('bold').setFontColor('#92400e')
+         .setVerticalAlignment('middle').setBackground('#fffbeb')
+         .setBorder(true, false, true, true, false, false, '#d97706', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+  // B31: 提出チェックボックス
+  sheet.setRowHeight(31, 50); sheet.setRowHeight(32, 30);
   const cbCell = sheet.getRange('B31');
   cbCell.insertCheckboxes(); cbCell.setValue(false);
   cbCell.setBackground('#f0fdf4')
@@ -212,7 +228,7 @@ function setupCompleteCheckbox(ss) {
             .setFontSize(12).setFontWeight('bold').setFontColor('#15803d')
             .setVerticalAlignment('middle').setBackground('#f0fdf4')
             .setBorder(true, false, true, true, false, false, '#16a34a', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  sheet.getRange('B32').setValue('※ すべての回答を終えてからチェックを入れてください。提出後は変更できません。')
+  sheet.getRange('B32').setValue('※ B30・B31の両方にチェックを入れると提出されます。提出後は変更できません。')
        .setFontColor('#6b7280').setFontSize(9).setFontStyle('italic');
 }
 
@@ -229,59 +245,47 @@ function setupValidation(ss) {
 }
 
 // ================================================================
-// チェックボックス用 installable onEdit トリガーを設置
+// シンプルonEditトリガー（テンプレートコピー時に自動引き継ぎ）
+// B31チェック時: C19スコアバリデーション + B30スクショ確認チェック
 // ================================================================
-function addEditTriggerForSheet(ss) {
-  try {
-    ScriptApp.newTrigger('onEditCheckCompletion')
-      .forSpreadsheet(ss)
-      .onEdit()
-      .create();
-  } catch (err) {
-    console.error('addEditTriggerForSheet error:', err);
-  }
-}
-
-// ================================================================
-// チェックボックス押下時バリデーション＋確認ポップアップ
-// ================================================================
-function onEditCheckCompletion(e) {
+function onEdit(e) {
   try {
     const sheet = e.range.getSheet();
     if (sheet.getName() !== 'test') return;
     if (e.range.getA1Notation() !== 'B31') return;
-    if (e.value !== 'TRUE') return; // チェックを外した場合は何もしない
+    if (e.value !== 'TRUE') return; // チェックを外した場合はスルー
 
-    const c19Value = sheet.getRange('C19').getValue();
-    const num = Number(c19Value);
-    const isValid = c19Value !== '' && c19Value !== null &&
-                    !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000 &&
-                    String(c19Value).trim() === String(Math.floor(num)); // 半角数字チェック
+    const labelRange = sheet.getRange('C31:F31');
 
-    if (!isValid) {
+    // C19スコアバリデーション
+    const c19 = sheet.getRange('C19').getValue();
+    const num = Number(c19);
+    const validScore = c19 !== '' && c19 !== null &&
+                       !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000;
+
+    if (!validScore) {
       e.range.setValue(false);
-      SpreadsheetApp.getUi().alert(
-        '⚠ タイピングスコアを入力してください',
-        '問13のタイピングテスト結果（C19）に 0〜1000 の半角数字を入力してから、もう一度チェックを入れてください。',
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
+      sheet.getRange('C19').setBackground('#fef2f2');
+      labelRange.setValue('⚠ 先に問13のタイピングスコア（C19）に 0〜1000 の半角数字を入力してください')
+                .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
       return;
     }
 
-    // スクリーンショット確認ポップアップ
-    const ui = SpreadsheetApp.getUi();
-    const result = ui.alert(
-      '📸 スクリーンショットの確認',
-      '問13のタイピングテストのスクリーンショットの貼り付けは済んでいますか？\n\n' +
-      '※ まだの場合は「キャンセル」を押して、貼り付けてから再度チェックを入れてください。',
-      ui.ButtonSet.OK_CANCEL
-    );
-
-    if (result !== ui.Button.OK) {
-      e.range.setValue(false); // キャンセル時はチェックを戻す
+    // B30スクリーンショット確認チェック
+    const screenshotChecked = sheet.getRange('B30').getValue() === true;
+    if (!screenshotChecked) {
+      e.range.setValue(false);
+      labelRange.setValue('⚠ 先にB30のスクリーンショット確認チェックを入れてください')
+                .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
+      return;
     }
+
+    // 両方OK → ラベルを元に戻す
+    sheet.getRange('C19').setBackground(null);
+    labelRange.setValue('テスト完了したらチェックを入れてください → 自動採点・提出されます')
+              .setFontColor('#15803d').setFontWeight('bold').setBackground('#f0fdf4');
   } catch (err) {
-    console.error('onEditCheckCompletion error:', err);
+    console.error('onEdit error:', err);
   }
 }
 

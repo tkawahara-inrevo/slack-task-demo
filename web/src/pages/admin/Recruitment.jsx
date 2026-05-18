@@ -26,6 +26,19 @@ export default function Recruitment() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [importing, setImporting]       = useState(false);
 
+  // 予約送信
+  const [showSchedule, setShowSchedule]       = useState(false);
+  const [scheduleChecked, setScheduleChecked] = useState(new Set());
+  const [scheduleAt, setScheduleAt]           = useState('');
+  const [scheduling, setScheduling]           = useState(false);
+  const [schedules, setSchedules]             = useState([]);
+  const [showScheduleList, setShowScheduleList] = useState(false);
+
+  const loadSchedules = async () => {
+    try { const r = await api.recruitmentScheduled(); setSchedules(r.schedules || []); }
+    catch { setSchedules([]); }
+  };
+
   const load = async () => {
     setLoading(true);
     try {
@@ -111,8 +124,35 @@ export default function Recruitment() {
     finally { setImporting(false); }
   };
 
+  const handleScheduleOpen = () => {
+    setScheduleChecked(new Set());
+    const now = new Date(); now.setMinutes(now.getMinutes() + 30); now.setSeconds(0, 0);
+    setScheduleAt(now.toISOString().slice(0, 16));
+    loadSchedules();
+    setShowSchedule(true);
+  };
+
+  const handleScheduleSubmit = async () => {
+    if (!scheduleChecked.size || !scheduleAt) return;
+    setScheduling(true);
+    try {
+      await api.recruitmentScheduleCreate([...scheduleChecked], new Date(scheduleAt).toISOString());
+      await loadSchedules();
+      setShowSchedule(false);
+      alert(`${scheduleChecked.size}名の予約送信を設定しました`);
+    } catch (e) { alert('予約に失敗しました: ' + e.message); }
+    finally { setScheduling(false); }
+  };
+
+  const handleScheduleCancel = async (id) => {
+    if (!window.confirm('この予約をキャンセルしますか？')) return;
+    await api.recruitmentScheduleCancel(id).catch(() => {});
+    setSchedules(prev => prev.filter(s => s.id !== id));
+  };
+
   const isSending   = sendingIds.size > 0;
   const pendingCount = candidates.filter(c => !c.spreadsheet_url && ['pending','error'].includes(c.status)).length;
+  const schedulableCandidates = candidates.filter(c => !c.spreadsheet_url && ['pending','error'].includes(c.status));
   const webhookUrl   = `${window.location.origin}/api/dashboard/recruitment/webhook/complete`;
   const totalScore   = settings.total_score || 10;
 
@@ -128,12 +168,100 @@ export default function Recruitment() {
             style={{ fontSize: 12, padding: '5px 12px', border: '1px solid #e5e7eb', borderRadius: 6, background: '#fff', cursor: 'pointer', color: '#6b7280' }}>
             ⚙️ 設定
           </button>
+          <button onClick={handleScheduleOpen} disabled={isSending || pendingCount === 0}
+            style={{ fontSize: 13, padding: '6px 14px', border: '1px solid #6366f1', borderRadius: 6, background: '#fff', color: '#6366f1', fontWeight: 600, cursor: pendingCount === 0 ? 'not-allowed' : 'pointer', opacity: pendingCount === 0 ? 0.5 : 1 }}>
+            🕐 予約送信
+          </button>
           <button onClick={handleSend} disabled={isSending || pendingCount === 0}
             className="btn btn-primary" style={{ fontSize: 13 }}>
             {isSending ? '送信中… (タブを離れても継続)' : `送信 ${pendingCount > 0 ? `(${pendingCount}名)` : ''}`}
           </button>
         </div>
       </div>
+
+      {/* 予約送信モーダル */}
+      {showSchedule && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end' }}
+          onClick={() => setShowSchedule(false)}>
+          <div style={{ background: '#fff', width: 400, height: '100%', boxShadow: '-4px 0 20px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>🕐 予約送信</span>
+              <button onClick={() => setShowSchedule(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#9ca3af' }}>×</button>
+            </div>
+
+            <div style={{ padding: '16px 20px', flex: 1 }}>
+              {/* 送信日時 */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 6 }}>送信日時</label>
+                <input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)}
+                  style={{ width: '100%', fontSize: 13, padding: '7px 10px', border: '1px solid #e5e7eb', borderRadius: 6, boxSizing: 'border-box' }} />
+              </div>
+
+              {/* 候補者チェックリスト */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>送信対象（未送信者）</label>
+                  <button onClick={() => {
+                    if (scheduleChecked.size === schedulableCandidates.length) setScheduleChecked(new Set());
+                    else setScheduleChecked(new Set(schedulableCandidates.map(c => c.id)));
+                  }} style={{ fontSize: 11, color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    {scheduleChecked.size === schedulableCandidates.length ? '全解除' : '全選択'}
+                  </button>
+                </div>
+                {schedulableCandidates.length === 0 ? (
+                  <div style={{ color: '#9ca3af', fontSize: 13, padding: '12px 0' }}>未送信の候補者がいません</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {schedulableCandidates.map(c => (
+                      <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer', background: scheduleChecked.has(c.id) ? '#eef2ff' : '#fff' }}>
+                        <input type="checkbox" checked={scheduleChecked.has(c.id)}
+                          onChange={() => setScheduleChecked(prev => {
+                            const s = new Set(prev);
+                            s.has(c.id) ? s.delete(c.id) : s.add(c.id);
+                            return s;
+                          })}
+                          style={{ accentColor: '#6366f1' }} />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                          <div style={{ fontSize: 11, color: '#9ca3af' }}>{c.email}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 予約一覧 */}
+              {schedules.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>予約中 ({schedules.length}件)</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {schedules.map(s => (
+                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#f9fafb', borderRadius: 6, fontSize: 12 }}>
+                        <span style={{ flex: 1 }}>{s.candidate_name}</span>
+                        <span style={{ color: '#6b7280' }}>{new Date(s.scheduled_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        <button onClick={() => handleScheduleCancel(s.id)}
+                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 11, padding: '1px 6px' }}>取消</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '14px 20px', borderTop: '1px solid #e5e7eb' }}>
+              <button onClick={handleScheduleSubmit}
+                disabled={scheduling || scheduleChecked.size === 0 || !scheduleAt}
+                style={{ width: '100%', padding: '10px', background: scheduleChecked.size > 0 && scheduleAt ? '#6366f1' : '#e5e7eb', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: scheduleChecked.size > 0 && scheduleAt ? 'pointer' : 'not-allowed' }}>
+                {scheduling ? '予約中...' : `${scheduleChecked.size}名を予約送信`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 設定パネル */}
       {showSettings && (

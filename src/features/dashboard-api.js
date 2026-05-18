@@ -1330,6 +1330,110 @@ function registerDashboardApi(deps) {
     } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
   });
 
+  // ─── 予約送信 ─────────────────────────────────────
+  // GET  /api/dashboard/admin/recruitment/scheduled  予約一覧
+  expressApp.get("/api/dashboard/admin/recruitment/scheduled", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows } = await dbQuery(
+        `SELECT s.*, c.name AS candidate_name, c.email AS candidate_email
+         FROM recruitment_scheduled_sends s
+         JOIN recruitment_candidates c ON c.id = s.candidate_id
+         WHERE s.team_id = $1 AND s.status = 'pending'
+         ORDER BY s.scheduled_at ASC`,
+        [teamId]
+      );
+      res.json({ schedules: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // POST /api/dashboard/admin/recruitment/scheduled  予約作成
+  expressApp.post("/api/dashboard/admin/recruitment/scheduled", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { candidateIds, scheduledAt } = req.body;
+      if (!candidateIds?.length || !scheduledAt) return res.status(400).json({ error: 'candidateIds and scheduledAt required' });
+      const created = [];
+      for (const candidateId of candidateIds) {
+        const { rows } = await dbQuery(
+          `INSERT INTO recruitment_scheduled_sends (team_id, candidate_id, scheduled_at)
+           VALUES ($1, $2, $3) RETURNING *`,
+          [teamId, candidateId, scheduledAt]
+        );
+        created.push(rows[0]);
+      }
+      res.json({ ok: true, created });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // DELETE /api/dashboard/admin/recruitment/scheduled/:id  予約キャンセル
+  expressApp.delete("/api/dashboard/admin/recruitment/scheduled/:id", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      await dbQuery(
+        `UPDATE recruitment_scheduled_sends SET status='cancelled' WHERE id=$1 AND team_id=$2 AND status='pending'`,
+        [req.params.id, teamId]
+      );
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ─── 予約送信ワーカー（1分ごとに実行） ─────────────────
+  async function processScheduledSends() {
+    try {
+      const { rows: due } = await dbQuery(
+        `SELECT s.*, c.name, c.email, c.id AS c_id,
+                rs.gas_endpoint_url, rs.template_spreadsheet_id, rs.webhook_secret,
+                rs.from_email, rs.email_subject, rs.email_body
+         FROM recruitment_scheduled_sends s
+         JOIN recruitment_candidates c ON c.id = s.candidate_id
+         LEFT JOIN recruitment_settings rs ON rs.team_id = s.team_id
+         WHERE s.status = 'pending' AND s.scheduled_at <= now()`
+      );
+      if (!due.length) return;
+
+      const baseUrl = process.env.APP_BASE_URL || 'https://inrevo-task.com';
+      const webhookUrl = `${baseUrl}/api/dashboard/recruitment/webhook/complete`;
+
+      for (const row of due) {
+        try {
+          if (!row.gas_endpoint_url || !row.template_spreadsheet_id) {
+            await dbQuery(`UPDATE recruitment_scheduled_sends SET status='error', error_message='設定不備' WHERE id=$1`, [row.id]);
+            continue;
+          }
+          const gasRes = await fetch(row.gas_endpoint_url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              candidateId: row.candidate_id,
+              name: row.name, email: row.email,
+              templateId: row.template_spreadsheet_id,
+              webhookUrl, secret: row.webhook_secret || '',
+              fromEmail: row.from_email || null,
+              emailSubject: row.email_subject || null,
+              emailBody: row.email_body || null,
+            }),
+          });
+          const gasData = await gasRes.json();
+          if (gasData.ok && gasData.spreadsheetUrl) {
+            await dbQuery(
+              `UPDATE recruitment_candidates SET spreadsheet_url=$1, spreadsheet_id=$2, status='sent', sent_at=now(), error_message=NULL WHERE id=$3`,
+              [gasData.spreadsheetUrl, gasData.spreadsheetId || null, row.candidate_id]
+            );
+            await dbQuery(`UPDATE recruitment_scheduled_sends SET status='sent' WHERE id=$1`, [row.id]);
+          } else {
+            const msg = gasData.error || 'GASエラー';
+            await dbQuery(`UPDATE recruitment_candidates SET status='error', error_message=$1 WHERE id=$2`, [msg, row.candidate_id]);
+            await dbQuery(`UPDATE recruitment_scheduled_sends SET status='error', error_message=$1 WHERE id=$2`, [msg, row.id]);
+          }
+        } catch (err) {
+          await dbQuery(`UPDATE recruitment_scheduled_sends SET status='error', error_message=$1 WHERE id=$2`, [err.message, row.id]).catch(() => {});
+        }
+      }
+    } catch (e) { console.error('[scheduled-sends] worker error:', e); }
+  }
+  setInterval(processScheduledSends, 60 * 1000);
+
   // GASからのwebhook（テスト完了・採点結果受信）
   expressApp.post("/api/dashboard/recruitment/webhook/complete", async (req, res) => {
     try {

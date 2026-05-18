@@ -47,6 +47,7 @@ function doPost(e) {
 
     setupCompleteCheckbox(ss);
     setupValidation(ss);
+    addEditTriggerForSheet(ss);
 
     // ★ editトリガーの代わりに「監視リスト」に追加
     addToWatchList(newFile.getId(), candidateId, webhookUrl);
@@ -222,9 +223,66 @@ function setupValidation(ss) {
   const test = ss.getSheetByName('test');
   if (!test) return;
   const typingRule = SpreadsheetApp.newDataValidation()
-    .requireNumberBetween(0, 999).setAllowInvalid(false)
-    .setHelpText('e-typingのスコア（数値）を入力してください。0〜999の整数のみ有効です。').build();
+    .requireNumberBetween(0, 1000).setAllowInvalid(false)
+    .setHelpText('e-typingのスコア（数値）を入力してください。0〜1000の整数のみ有効です。').build();
   test.getRange('C19').setDataValidation(typingRule);
+}
+
+// ================================================================
+// チェックボックス用 installable onEdit トリガーを設置
+// ================================================================
+function addEditTriggerForSheet(ss) {
+  try {
+    ScriptApp.newTrigger('onEditCheckCompletion')
+      .forSpreadsheet(ss)
+      .onEdit()
+      .create();
+  } catch (err) {
+    console.error('addEditTriggerForSheet error:', err);
+  }
+}
+
+// ================================================================
+// チェックボックス押下時バリデーション＋確認ポップアップ
+// ================================================================
+function onEditCheckCompletion(e) {
+  try {
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== 'test') return;
+    if (e.range.getA1Notation() !== 'B31') return;
+    if (e.value !== 'TRUE') return; // チェックを外した場合は何もしない
+
+    const c19Value = sheet.getRange('C19').getValue();
+    const num = Number(c19Value);
+    const isValid = c19Value !== '' && c19Value !== null &&
+                    !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000 &&
+                    String(c19Value).trim() === String(Math.floor(num)); // 半角数字チェック
+
+    if (!isValid) {
+      e.range.setValue(false);
+      SpreadsheetApp.getUi().alert(
+        '⚠ タイピングスコアを入力してください',
+        '問13のタイピングテスト結果（C19）に 0〜1000 の半角数字を入力してから、もう一度チェックを入れてください。',
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+      return;
+    }
+
+    // スクリーンショット確認ポップアップ
+    const ui = SpreadsheetApp.getUi();
+    const result = ui.alert(
+      '📸 スクリーンショットの確認',
+      '問13のタイピングテストのスクリーンショットの貼り付けは済んでいますか？\n\n' +
+      '※ まだの場合は「キャンセル」を押して、貼り付けてから再度チェックを入れてください。',
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (result !== ui.Button.OK) {
+      e.range.setValue(false); // キャンセル時はチェックを戻す
+    }
+  } catch (err) {
+    console.error('onEditCheckCompletion error:', err);
+  }
 }
 
 // ================================================================

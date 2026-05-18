@@ -529,6 +529,9 @@ export const api = {
   recruitmentCandidateDelete: (id) => apiFetch(`/admin/recruitment/candidates/${id}`, { method: 'DELETE' }),
   recruitmentSend: () => apiFetch('/admin/recruitment/send', { method: 'POST' }),
   recruitmentSendOne: (candidateId) => apiFetch('/admin/recruitment/send-one', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidateId }) }),
+  recruitmentScheduled: () => apiFetch('/admin/recruitment/scheduled'),
+  recruitmentScheduleCreate: (candidateIds, scheduledAt) => apiFetch('/admin/recruitment/scheduled', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidateIds, scheduledAt }) }),
+  recruitmentScheduleCancel: (id) => apiFetch(`/admin/recruitment/scheduled/${id}`, { method: 'DELETE' }),
 
   slackGroupVisibility: () => apiFetch('/admin/slack-group-visibility'),
   slackGroupVisibilityUpdate: (groupId, hiddenTabs) => apiFetch(`/admin/slack-group-visibility/${groupId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hiddenTabs }) }),

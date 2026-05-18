@@ -562,6 +562,19 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_body TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS total_score INTEGER`).catch(() => {});
 
+  // 採用テスト予約送信
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS recruitment_scheduled_sends (
+      id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      team_id      TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      scheduled_at TIMESTAMPTZ NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+
   // 誤ってSub ManagerにリネームされたSub Chiefを元に戻す
   await dbQuery(`UPDATE crm_role_targets SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});
   await dbQuery(`UPDATE crm_rep_roles SET role_name='Sub Chief' WHERE role_name='Sub Manager'`).catch(() => {});

@@ -150,7 +150,7 @@ export default function ClientDetail() {
 
       {/* タブコンテンツ：一度マウントしたらアンマウントせずCSS hide */}
       <div className="rpo-detail-content">
-        {mountedTabs.has('dashboard')  && <div style={{ display: activeTab === 'dashboard'  ? '' : 'none' }}><DashboardTab  client={client} onUpdate={updateData} accentColor={accentColor} teamUsers={teamUsers} /></div>}
+        {mountedTabs.has('dashboard')  && <div style={{ display: activeTab === 'dashboard'  ? '' : 'none' }}><DashboardTab  client={client} onUpdate={updateData} onPhaseChange={phase => setClient(c => ({...c, phase}))} accentColor={accentColor} teamUsers={teamUsers} /></div>}
         {mountedTabs.has('kpi')        && <div style={{ display: activeTab === 'kpi'        ? '' : 'none' }}><KpiTab        client={client} onUpdate={updateData} accentColor={accentColor} /></div>}
         {mountedTabs.has('content')    && <div style={{ display: activeTab === 'content'    ? '' : 'none' }}><ContentTab    client={client} onUpdate={updateData} accentColor={accentColor} /></div>}
         {mountedTabs.has('applicants') && <div style={{ display: activeTab === 'applicants' ? '' : 'none' }}><SheetsApplicantTab client={client} onUpdate={updateData} /></div>}
@@ -275,7 +275,7 @@ function RelatedSection({ clientId }) {
   );
 }
 
-function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
+function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers = [] }) {
   const d    = client.data;
   const info = d.projectInfo || {};
   const kpi  = d.kpiData     || {};
@@ -291,23 +291,6 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
       })
       .catch(() => {});
   }, [client.id]);
-
-  const [kintoneResults, setKintoneResults] = useState(null); // null=未検索, []+=結果
-  const [kintoneLoading, setKintoneLoading] = useState(false);
-  const fetchKintone = async () => {
-    setKintoneLoading(true);
-    try {
-      const r = await api.kintoneSearch(client.name);
-      setKintoneResults(r.results || []);
-    } catch { setKintoneResults([]); }
-    finally { setKintoneLoading(false); }
-  };
-  const applyKintone = (rec) => {
-    const amount  = Number(rec.data?.['見込売り上げ_税抜き']) || 0;
-    const target  = Number(rec.data?.['数値_0']) || 0;
-    onUpdate({ projectInfo: { ...info, contractAmount: amount, hiringTarget: target } });
-    setKintoneResults(null);
-  };
 
   // 予算計算
   const totalBudget    = Number(info.totalBudget)    || 0;
@@ -357,38 +340,14 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
   return (
     <div className="tab-section">
       {/* フェーズチェックリスト */}
-      <PhaseChecklist client={client} onUpdate={onUpdate} />
+      <PhaseChecklist client={client} onUpdate={onUpdate} onPhaseChange={onPhaseChange} />
 
       {/* 同一顧客の関連案件 */}
       {(client.data?.crmDealId || client.data?.dealId) && <RelatedSection clientId={client.id} />}
 
       <div className="section-header">
         <h2 className="section-title">プロジェクト概要</h2>
-        <button className="btn-secondary small" onClick={fetchKintone} disabled={kintoneLoading}
-          style={{ fontSize: '0.78rem' }}>
-          {kintoneLoading ? '検索中…' : '↻ kintoneと再同期'}
-        </button>
       </div>
-
-      {/* kintone検索結果 */}
-      {kintoneResults !== null && (
-        <div style={{ marginBottom: '12px', border: '1px solid var(--gray-200)', borderRadius: '8px', overflow: 'hidden' }}>
-          {kintoneResults.length === 0 ? (
-            <p style={{ padding: '10px 14px', fontSize: '0.85rem', color: 'var(--gray-500)' }}>一致するkintoneレコードがありません</p>
-          ) : kintoneResults.map(rec => (
-            <div key={rec.record_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid #f3f4f6' }}>
-              <div style={{ fontSize: '0.85rem' }}>
-                <strong>{rec.company_name}</strong>
-                <span style={{ marginLeft: '12px', color: 'var(--gray-500)' }}>
-                  受注: {rec.data?.['見込売り上げ_税抜き'] ? Number(rec.data['見込売り上げ_税抜き']).toLocaleString() + '円' : '—'}
-                  　採用: {rec.data?.['数値_0'] || '—'}名
-                </span>
-              </div>
-              <button className="btn-primary small" onClick={() => applyKintone(rec)}>反映</button>
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="info-grid">
         <div className="info-field">
@@ -631,7 +590,7 @@ const PHASE_CHECKLISTS = {
   ],
 };
 
-function PhaseChecklist({ client, onUpdate }) {
+function PhaseChecklist({ client, onUpdate, onPhaseChange }) {
   const currentPhase = client.phase || 'cr';
   const ph = RPO_PHASES.find(p => p.key === currentPhase) || RPO_PHASES[0];
   const items = PHASE_CHECKLISTS[currentPhase] || [];
@@ -645,8 +604,7 @@ function PhaseChecklist({ client, onUpdate }) {
   const changePhase = async (newPhase) => {
     try {
       await api.rpoUpdateClient(client.id, { phase: newPhase });
-      // ページリロードで最新状態を取得
-      window.location.reload();
+      onPhaseChange?.(newPhase);
     } catch { alert('フェーズの更新に失敗しました'); }
   };
 

@@ -253,35 +253,31 @@ function onEdit(e) {
     const sheet = e.range.getSheet();
     if (sheet.getName() !== 'test') return;
     if (e.range.getA1Notation() !== 'B31') return;
-    if (e.value !== 'TRUE') return; // チェックを外した場合はスルー
+    if (e.value !== 'TRUE') return;
+
+    // チェックを即座に外す（flush で画面に即反映）
+    e.range.setValue(false);
+    SpreadsheetApp.flush();
 
     const labelRange = sheet.getRange('C31:F31');
-
-    // C19スコアバリデーション
     const c19 = sheet.getRange('C19').getValue();
     const num = Number(c19);
     const validScore = c19 !== '' && c19 !== null &&
                        !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000;
 
     if (!validScore) {
-      e.range.setValue(false);
-      sheet.getRange('C19').setBackground('#fef2f2');
-      labelRange.setValue('⚠ 先に問13のタイピングスコア（C19）に 0〜1000 の半角数字を入力してください')
+      labelRange.setValue('⚠ タイピングスコア（C19）に 0〜1000 の半角数字を先に入力してください')
                 .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
       return;
     }
 
-    // B30スクリーンショット確認チェック
-    const screenshotChecked = sheet.getRange('B30').getValue() === true;
-    if (!screenshotChecked) {
-      e.range.setValue(false);
-      labelRange.setValue('⚠ 先にB30のスクリーンショット確認チェックを入れてください')
+    if (sheet.getRange('B30').getValue() !== true) {
+      labelRange.setValue('⚠ B30のスクリーンショット確認チェックを先に入れてください')
                 .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
       return;
     }
 
-    // 両方OK → ラベルを元に戻す
-    sheet.getRange('C19').setBackground(null);
+    // 両方OK
     labelRange.setValue('テスト完了したらチェックを入れてください → 自動採点・提出されます')
               .setFontColor('#15803d').setFontWeight('bold').setBackground('#f0fdf4');
   } catch (err) {

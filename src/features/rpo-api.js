@@ -1,4 +1,5 @@
 // RPO案件管理 API
+const { dbQuery } = require('../db/index');
 const { findClientFolder, searchClientFolders, findManagementSheet, parseFolderId } = require('./drive-api');
 const {
   dbEnsureRpoSchema,

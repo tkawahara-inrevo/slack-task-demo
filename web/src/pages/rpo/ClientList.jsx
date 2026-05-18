@@ -471,12 +471,27 @@ export default function ClientList() {
           setClients(prev => prev.map(c => c.id === clientId ? { ...c, phase: newPhase } : c));
         };
 
-        const KanbanCard = ({ client }) => (
+        const checklistProgress = (client) => {
+          const ph = client.phase || 'cr';
+          const items = { cr: 4, st_an: 4, dr: 4, cs_op: 4 }[ph] || 4;
+          const done = Object.values(client.data?.checklist?.[ph] || {}).filter(Boolean).length;
+          return { done, total: items };
+        };
+
+        const KanbanCard = ({ client }) => {
+          const { done, total } = checklistProgress(client);
+          return (
           <div
             onClick={() => navigate(`/rpo/${client.id}`)}
             style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', borderLeft: `4px solid ${colorOf(client.color)}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: 6 }}
           >
             <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--gray-800)', lineHeight: 1.3 }}>{client.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ flex: 1, height: 4, background: 'var(--gray-200)', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ width: `${total > 0 ? (done / total) * 100 : 0}%`, height: '100%', background: done === total ? '#10b981' : '#f59e0b', borderRadius: 2, transition: 'width 0.3s' }} />
+              </div>
+              <span style={{ fontSize: '0.68rem', color: done === total ? '#10b981' : 'var(--gray-500)', fontWeight: 600, flexShrink: 0 }}>{done}/{total}</span>
+            </div>
             <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>{planLabel(client.plan)}</div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginTop: 2 }}>
               <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -499,7 +514,8 @@ export default function ClientList() {
               </div>
             </div>
           </div>
-        );
+          );
+        };
 
         if (active.length === 0 && archived.length === 0) {
           return (

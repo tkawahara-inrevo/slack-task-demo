@@ -694,8 +694,9 @@ async function dbGetRpoSummary(teamId, { fullAccess = true, myTeamIds = null, fi
 
   const { rows } = await dbQuery(`
     SELECT
-      c.id, c.name, c.color, c.plan, c.status, c.dash_team_id,
+      c.id, c.name, c.color, c.plan, c.status, c.phase, c.dash_team_id, c.updated_at,
       dt.name AS dash_team_name,
+      c.data->>'hrAssigneeName' AS hr_assignee_name,
       (c.data->'projectInfo'->>'contractAmount')::numeric AS contract_amount,
       (c.data->'projectInfo'->>'totalBudget')::numeric    AS total_budget,
       (c.data->'projectInfo'->>'hiringTarget')::int        AS hiring_target,

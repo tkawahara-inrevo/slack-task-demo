@@ -309,6 +309,9 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
 
   return (
     <div className="tab-section">
+      {/* フェーズチェックリスト */}
+      <PhaseChecklist client={client} onUpdate={onUpdate} />
+
       <div className="section-header">
         <h2 className="section-title">プロジェクト概要</h2>
         <button className="btn-secondary small" onClick={fetchKintone} disabled={kintoneLoading}
@@ -539,6 +542,94 @@ function DashboardTab({ client, onUpdate, accentColor, teamUsers = [] }) {
           <SimpleBarChart data={mediaBarData} color={accentColor} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── フェーズ管理 ─────────────────────────────────────
+const RPO_PHASES = [
+  { key: 'cr',    label: 'CR',    desc: '初回インタビュー', color: '#8b5cf6' },
+  { key: 'st_an', label: 'ST/AN', desc: '分析・媒体調査',   color: '#f59e0b' },
+  { key: 'dr',    label: 'DR',    desc: '最終判断・承認',   color: '#ef4444' },
+  { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',       color: '#3b82f6' },
+];
+
+const PHASE_CHECKLISTS = {
+  cr: [
+    { key: 'interview_done',    label: '初回インタビュー実施済み' },
+    { key: 'hearing_recorded',  label: 'ヒアリング内容を記録済み' },
+    { key: 'karte_requested',   label: 'カルテ記入をクライアントに依頼済み' },
+    { key: 'strategy_aligned',  label: '採用戦略の方向性をクライアントと合意' },
+  ],
+  st_an: [
+    { key: 'swot_done',         label: 'SWOT / 4C分析完了' },
+    { key: 'media_surveyed',    label: '利用候補媒体の調査完了' },
+    { key: 'media_negotiated',  label: '媒体への問い合わせ・価格交渉完了' },
+    { key: 'budget_estimated',  label: '費用感・予算案を作成済み' },
+  ],
+  dr: [
+    { key: 'media_decided',     label: '利用媒体を最終決定' },
+    { key: 'approval_ceo',      label: '代表の承認取得済み' },
+    { key: 'approval_st_lead',  label: 'STリーダーの承認取得済み' },
+    { key: 'cs_briefed',        label: 'CS/OPへクライアント情報を引き継ぎ済み' },
+  ],
+  cs_op: [
+    { key: 'job_posting_done',  label: '求人票作成・媒体掲載完了' },
+    { key: 'applicant_tracking',label: '応募者管理を開始' },
+    { key: 'client_reported',   label: 'クライアントへ進捗報告実施' },
+    { key: 'offer_issued',      label: '内定通知を実施' },
+  ],
+};
+
+function PhaseChecklist({ client, onUpdate }) {
+  const currentPhase = client.phase || 'cr';
+  const ph = RPO_PHASES.find(p => p.key === currentPhase) || RPO_PHASES[0];
+  const items = PHASE_CHECKLISTS[currentPhase] || [];
+  const checklist = client.data?.checklist?.[currentPhase] || {};
+
+  const toggle = (key) => {
+    const updated = { ...checklist, [key]: !checklist[key] };
+    onUpdate({ checklist: { ...(client.data?.checklist || {}), [currentPhase]: updated } });
+  };
+
+  const changePhase = async (newPhase) => {
+    try {
+      await api.rpoUpdateClient(client.id, { phase: newPhase });
+      // ページリロードで最新状態を取得
+      window.location.reload();
+    } catch { alert('フェーズの更新に失敗しました'); }
+  };
+
+  const done  = items.filter(i => checklist[i.key]).length;
+  const total = items.length;
+
+  return (
+    <div style={{ background: 'var(--surface-2)', border: `1px solid ${ph.color}40`, borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--gray-700)' }}>現在のフェーズ</span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {RPO_PHASES.map(p => (
+            <button key={p.key} onClick={() => p.key !== currentPhase && changePhase(p.key)}
+              style={{ padding: '3px 10px', borderRadius: 6, border: `1px solid ${p.color}`, background: p.key === currentPhase ? p.color : 'transparent', color: p.key === currentPhase ? '#fff' : p.color, fontWeight: 700, fontSize: '0.75rem', cursor: p.key === currentPhase ? 'default' : 'pointer' }}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: done === total ? '#10b981' : 'var(--gray-500)', fontWeight: 600 }}>
+          {done}/{total} 完了
+        </span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 6 }}>
+        {items.map(item => (
+          <label key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '5px 8px', borderRadius: 6, background: checklist[item.key] ? '#10b98115' : 'var(--surface)', border: `1px solid ${checklist[item.key] ? '#10b98140' : 'var(--gray-200)'}` }}>
+            <input type="checkbox" checked={!!checklist[item.key]} onChange={() => toggle(item.key)}
+              style={{ width: 15, height: 15, accentColor: ph.color, flexShrink: 0 }} />
+            <span style={{ fontSize: '0.80rem', color: checklist[item.key] ? '#10b981' : 'var(--gray-700)', textDecoration: checklist[item.key] ? 'line-through' : 'none' }}>
+              {item.label}
+            </span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

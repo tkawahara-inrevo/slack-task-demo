@@ -228,6 +228,79 @@ function SimpleFunnelChart({ data }) {
 }
 
 // ─── ダッシュボード ───────────────────────────────────
+const YOMI_LABEL = { active:'商談中', won:'受注', lost:'失注', dormant:'見送り' };
+const YOMI_COLOR = { active:'#3b82f6', won:'#10b981', lost:'#ef4444', dormant:'#9ca3af' };
+
+function CrmInfoPanel({ clientId, onSyncToProject }) {
+  const [deal, setDeal] = useState(undefined); // undefined=loading, null=なし
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    api.rpoCrmInfo(clientId)
+      .then(r => setDeal(r.deal))
+      .catch(() => setDeal(null));
+  }, [clientId]);
+
+  if (deal === undefined) return null;
+  if (!deal) return null;
+
+  const contractAmount = deal.unit_price && deal.guarantee_count
+    ? Number(deal.unit_price) * Number(deal.guarantee_count)
+    : Number(deal.initial_fee) || 0;
+
+  const handleSync = async () => {
+    setSyncing(true);
+    await onSyncToProject({
+      inrevoContact:  deal.sales_person || '',
+      startDate:      deal.order_date ? String(deal.order_date).slice(0, 10) : '',
+      contractAmount,
+      hiringTarget:   deal.hiring_target || 0,
+    });
+    setSyncing(false);
+  };
+
+  const rows = [
+    { label: '受注日',   value: deal.order_date ? String(deal.order_date).slice(0, 10) : '—' },
+    { label: '担当営業', value: deal.sales_person || '—' },
+    { label: '契約種別', value: deal.contract_type || deal.payment_method || '—' },
+    { label: '受注金額', value: contractAmount > 0 ? contractAmount.toLocaleString('ja-JP') + '円' : '—' },
+    { label: '採用目標', value: deal.hiring_target ? `${deal.hiring_target}名` : '—' },
+    { label: '雇用形態', value: deal.employment_type || '—' },
+  ];
+
+  return (
+    <div style={{ border: '1px solid #bfdbfe', borderRadius: 8, padding: '12px 14px', marginBottom: 16, background: '#eff6ff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 700, fontSize: '0.82rem', color: '#1e40af' }}>CRM連携情報</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: YOMI_COLOR[deal.status] || '#6b7280', background: '#fff', borderRadius: 4, padding: '1px 6px', border: `1px solid ${YOMI_COLOR[deal.status] || '#e5e7eb'}` }}>
+            {YOMI_LABEL[deal.status] || deal.status}
+          </span>
+          {deal.yomi && <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>{deal.yomi}</span>}
+        </div>
+        <button onClick={handleSync} disabled={syncing}
+          style={{ fontSize: '0.72rem', padding: '3px 10px', borderRadius: 5, border: '1px solid #3b82f6', background: syncing ? '#e5e7eb' : '#fff', color: '#3b82f6', cursor: syncing ? 'default' : 'pointer', fontWeight: 600 }}>
+          {syncing ? '同期中...' : '↓ プロジェクト概要に同期'}
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '6px 16px' }}>
+        {rows.map(r => (
+          <div key={r.label} style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+            <span style={{ fontSize: '0.7rem', color: '#60a5fa', whiteSpace: 'nowrap', flexShrink: 0 }}>{r.label}</span>
+            <span style={{ fontSize: '0.82rem', color: '#1e3a8a', fontWeight: r.value !== '—' ? 500 : 400 }}>{r.value}</span>
+          </div>
+        ))}
+        {deal.memo && (
+          <div style={{ gridColumn: '1/-1', display: 'flex', gap: 6 }}>
+            <span style={{ fontSize: '0.7rem', color: '#60a5fa', whiteSpace: 'nowrap', flexShrink: 0 }}>メモ</span>
+            <span style={{ fontSize: '0.78rem', color: '#1e3a8a' }}>{deal.memo}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const PHASE_LABELS = { cr: 'CR', st_an: 'ST/AN', dr: 'DR', cs_op: 'CS/OP' };
 const PHASE_COLORS = { cr: '#8b5cf6', st_an: '#f59e0b', dr: '#ef4444', cs_op: '#3b82f6' };
 const DEAL_STATUS_LABEL = { active: '商談中', won: '受注', lost: '失注', dormant: '見送り' };
@@ -341,6 +414,11 @@ function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers 
     <div className="tab-section">
       {/* フェーズチェックリスト */}
       <PhaseChecklist client={client} onUpdate={onUpdate} onPhaseChange={onPhaseChange} />
+
+      {/* CRM連携情報 */}
+      {(client.data?.crmDealId || client.data?.dealId) && (
+        <CrmInfoPanel clientId={client.id} onSyncToProject={patch => onUpdate({ projectInfo: { ...info, ...patch } })} />
+      )}
 
       {/* 同一顧客の関連案件 */}
       {(client.data?.crmDealId || client.data?.dealId) && <RelatedSection clientId={client.id} />}

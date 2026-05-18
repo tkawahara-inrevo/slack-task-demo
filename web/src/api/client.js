@@ -388,6 +388,7 @@ export const api = {
   },
   rpoClient:       (id)      => rpoFetch(`/clients/${id}`),
   rpoRelated:      (id)      => rpoFetch(`/clients/${id}/related`),
+  rpoCrmInfo:      (id)      => rpoFetch(`/clients/${id}/crm-info`),
   rpoCreateClient: (body)    => rpoPost('/clients', body),
   rpoUpdateClient: (id, body) => rpoFetch(`/clients/${id}`, {
     method: 'PUT',

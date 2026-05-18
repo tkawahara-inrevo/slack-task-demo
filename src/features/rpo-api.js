@@ -214,6 +214,39 @@ function registerRpoApi({ expressApp, authWithRole, adminOnly }) {
   });
 
   // ─────────────────────────────────────────
+  // GET /api/rpo/clients/:id/crm-info  紐づくCRM案件情報
+  // ─────────────────────────────────────────
+  expressApp.get('/api/rpo/clients/:id/crm-info', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const client = await dbGetRpoClient(teamId, req.params.id);
+      if (!client) return res.status(404).json({ error: 'not_found' });
+
+      const dealId = client.data?.crmDealId || client.data?.dealId;
+      if (!dealId) return res.json({ deal: null });
+
+      const { rows: [deal] } = await dbQuery(`
+        SELECT d.id, d.name, d.status, d.yomi, d.order_date,
+               d.payment_method, d.contract_type,
+               d.unit_price, d.guarantee_count, d.initial_fee,
+               d.monthly_fee, d.contract_months,
+               d.hiring_target, d.employment_type,
+               d.sales_person, d.sales_user_id,
+               d.memo, d.data,
+               c.name AS customer_name, c.id AS customer_id
+        FROM deals d
+        JOIN customers c ON c.id = d.customer_id
+        WHERE d.id = $1 AND d.team_id = $2
+      `, [dealId, teamId]);
+
+      res.json({ deal: deal || null });
+    } catch (e) {
+      console.error('[RPO] crm-info error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  // ─────────────────────────────────────────
   // GET /api/rpo/clients/:id/related  同一顧客の関連案件
   // ─────────────────────────────────────────
   expressApp.get('/api/rpo/clients/:id/related', authWithRole, async (req, res) => {

@@ -1147,7 +1147,20 @@ function registerDashboardApi(deps) {
   expressApp.get("/api/dashboard/admin/recruitment/candidates", authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const r = await dbQuery("SELECT * FROM recruitment_candidates WHERE team_id=$1 ORDER BY created_at DESC", [teamId]);
+      const r = await dbQuery(
+        `SELECT c.*,
+                s.scheduled_at,
+                s.id AS schedule_id
+         FROM recruitment_candidates c
+         LEFT JOIN LATERAL (
+           SELECT scheduled_at, id FROM recruitment_scheduled_sends
+           WHERE candidate_id = c.id AND status = 'pending'
+           ORDER BY scheduled_at ASC LIMIT 1
+         ) s ON true
+         WHERE c.team_id = $1
+         ORDER BY c.created_at DESC`,
+        [teamId]
+      );
       res.json({ candidates: r.rows });
     } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
   });

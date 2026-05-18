@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 
-const STATUS_LABEL = { pending: '未送信', sent: '送信済', completed: '完了', error: 'エラー' };
-const STATUS_COLOR = { pending: '#9ca3af', sent: '#2563eb', completed: '#059669', error: '#dc2626' };
-const STATUS_BG   = { pending: '#f3f4f6', sent: '#eff6ff', completed: '#f0fdf4', error: '#fef2f2' };
+const STATUS_LABEL = { pending: '未送信', scheduled: '予約済み', sent: '送信済', completed: '完了', error: 'エラー' };
+const STATUS_COLOR = { pending: '#9ca3af', scheduled: '#7c3aed', sent: '#2563eb', completed: '#059669', error: '#dc2626' };
+const STATUS_BG   = { pending: '#f3f4f6', scheduled: '#f5f3ff', sent: '#eff6ff', completed: '#f0fdf4', error: '#fef2f2' };
 
-function StatusBadge({ status }) {
+function effectiveStatus(candidate) {
+  if (candidate.scheduled_at && candidate.status === 'pending') return 'scheduled';
+  return candidate.status;
+}
+
+function StatusBadge({ candidate }) {
+  const status = effectiveStatus(candidate);
+  const label = status === 'scheduled'
+    ? `🕐 ${new Date(candidate.scheduled_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}送信予定`
+    : STATUS_LABEL[status] || status;
   return (
     <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
       color: STATUS_COLOR[status] || '#9ca3af', background: STATUS_BG[status] || '#f3f4f6' }}>
-      {STATUS_LABEL[status] || status}
+      {label}
     </span>
   );
 }
@@ -391,7 +400,7 @@ export default function Recruitment() {
                   <td style={{ padding: '10px 14px' }}>
                     {sendingIds.has(c.id)
                       ? <span style={{ fontSize: 11, fontWeight: 700, color: '#d97706' }}>⏳ 送信中…</span>
-                      : <StatusBadge status={c.status} />}
+                      : <StatusBadge candidate={c} />}
                     {c.error_message && (
                       <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                         title={c.error_message}>{c.error_message}</div>

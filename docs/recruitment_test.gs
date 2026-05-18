@@ -280,25 +280,18 @@ function setupValidation(ss) {
 function setupConditionalFormatting(ss) {
   const sheet = ss.getSheetByName('test');
   if (!sheet) return;
-  const conditionOk  = 'AND(ISNUMBER(C19),C19>=0,C19<=1000,B30=TRUE)';
+  const conditionOk = 'AND(ISNUMBER(C19),C19>=0,C19<=1000,B30=TRUE)';
   const rules = sheet.getConditionalFormatRules();
-  // C19未入力・無効のとき赤ハイライト
+
+  // B31行: B31チェック済み かつ 条件NG → 赤（エラー）
   rules.push(
     SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=NOT(AND(ISNUMBER(C19),C19>=0,C19<=1000))')
-      .setBackground('#fef2f2')
-      .setRanges([sheet.getRange('C19')])
-      .build()
-  );
-  // B31行: 条件未達（赤）
-  rules.push(
-    SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(`=NOT(${conditionOk})`)
+      .whenFormulaSatisfied(`=AND(B31=TRUE,NOT(${conditionOk}))`)
       .setBackground('#fecaca').setFontColor('#991b1b')
       .setRanges([sheet.getRange('B31:F31')])
       .build()
   );
-  // B31行: 条件OK（緑）
+  // B31行: 条件OK → 緑（提出可能 or 処理中）
   rules.push(
     SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied(`=${conditionOk}`)

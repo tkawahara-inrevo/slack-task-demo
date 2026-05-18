@@ -47,6 +47,7 @@ function doPost(e) {
 
     setupCompleteCheckbox(ss);
     setupValidation(ss);
+    setupConditionalFormatting(ss);
 
     // ★ editトリガーの代わりに「監視リスト」に追加
     addToWatchList(newFile.getId(), candidateId, webhookUrl);
@@ -103,11 +104,38 @@ function pollCompletions() {
       const sheet = ss.getSheetByName('test');
       if (!sheet) { remaining.push(item); continue; }
 
-      // B31（提出）とB30（スクショ確認）の両方がTRUEか確認
-      const isComplete = sheet.getRange('B31').getValue() === true;
+      // B31・B30・C19をまとめて取得して検証
+      const vals = sheet.getRange('B19:C31').getValues();
+      const c19      = vals[0][1];   // C19: タイピングスコア
+      const b30      = vals[11][0];  // B30: スクショ確認
+      const isComplete = vals[12][0] === true; // B31: 提出チェック
+
       if (!isComplete) { remaining.push(item); continue; }
-      const screenshotOk = sheet.getRange('B30').getValue() === true;
-      if (!screenshotOk) { remaining.push(item); continue; }
+
+      // B30未確認 → B31を外してエラー表示（次回開いたとき気づける）
+      if (!b30) {
+        sheet.getRange('B31').setValue(false);
+        sheet.getRange('C31:F31')
+             .setValue('⚠ B30のスクリーンショット確認チェックを入れてから、もう一度B31にチェックしてください')
+             .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
+        SpreadsheetApp.flush();
+        remaining.push(item);
+        continue;
+      }
+
+      // C19未入力・無効 → B31を外してエラー表示
+      const c19Num = Number(c19);
+      const validScore = c19 !== '' && c19 !== null &&
+                         !isNaN(c19Num) && Number.isInteger(c19Num) && c19Num >= 0 && c19Num <= 1000;
+      if (!validScore) {
+        sheet.getRange('B31').setValue(false);
+        sheet.getRange('C31:F31')
+             .setValue('⚠ 問13のタイピングスコア（C19）が未入力または無効です。0〜1000の整数を入力後、もう一度B31にチェックしてください')
+             .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
+        SpreadsheetApp.flush();
+        remaining.push(item);
+        continue;
+      }
 
       // すでに完了表示に書き換え済みかチェック（重複送信防止）
       const c31 = sheet.getRange('C31').getDisplayValue() || '';
@@ -245,51 +273,40 @@ function setupValidation(ss) {
 }
 
 // ================================================================
-// シンプルonEditトリガー（テンプレートコピー時に自動引き継ぎ）
-// B31チェック時: C19スコアバリデーション + B30スクショ確認チェック
+// 条件付き書式（ブラウザ側で即時反映・GASトリガー不要）
+// C19未入力 or B30未チェック → B31行が赤くなる
+// 両方OK → B31行が緑になる
 // ================================================================
-function onEdit(e) {
-  try {
-    const sheet = e.range.getSheet();
-    if (sheet.getName() !== 'test') return;
-    if (e.range.getA1Notation() !== 'B31') return;
-    if (e.value !== 'TRUE') return;
-
-    // C19・B30を1回のAPI呼び出しで取得
-    const vals = sheet.getRange('B19:C30').getValues();
-    const c19  = vals[0][1];  // C19
-    const b30  = vals[11][0]; // B30
-    const num  = Number(c19);
-    const validScore = c19 !== '' && c19 !== null &&
-                       !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000;
-
-    if (!validScore) {
-      // NGのときだけ外す
-      e.range.setValue(false);
-      SpreadsheetApp.flush();
-      sheet.getRange('C31:F31')
-           .setValue('⚠ タイピングスコア（C19）に 0〜1000 の半角数字を先に入力してください')
-           .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
-      return;
-    }
-
-    if (b30 !== true) {
-      e.range.setValue(false);
-      SpreadsheetApp.flush();
-      sheet.getRange('C31:F31')
-           .setValue('⚠ B30のスクリーンショット確認チェックを先に入れてください')
-           .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
-      return;
-    }
-
-    // 両方OK → B31はチェックのままポーラーに任せる
-    // 「閉じても大丈夫」とだけ伝える（採点はポーラーが処理）
-    sheet.getRange('C31:F31')
-         .setValue('⏳ 提出を受け付けました。採点完了後に結果をご連絡します。このスプレッドシートを閉じても問題ありません。')
-         .setFontColor('#d97706').setFontWeight('bold').setBackground('#fffbeb');
-  } catch (err) {
-    console.error('onEdit error:', err);
-  }
+function setupConditionalFormatting(ss) {
+  const sheet = ss.getSheetByName('test');
+  if (!sheet) return;
+  const conditionOk  = 'AND(ISNUMBER(C19),C19>=0,C19<=1000,B30=TRUE)';
+  const rules = sheet.getConditionalFormatRules();
+  // C19未入力・無効のとき赤ハイライト
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=NOT(AND(ISNUMBER(C19),C19>=0,C19<=1000))')
+      .setBackground('#fef2f2')
+      .setRanges([sheet.getRange('C19')])
+      .build()
+  );
+  // B31行: 条件未達（赤）
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=NOT(${conditionOk})`)
+      .setBackground('#fecaca').setFontColor('#991b1b')
+      .setRanges([sheet.getRange('B31:F31')])
+      .build()
+  );
+  // B31行: 条件OK（緑）
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=${conditionOk}`)
+      .setBackground('#dcfce7').setFontColor('#15803d')
+      .setRanges([sheet.getRange('B31:F31')])
+      .build()
+  );
+  sheet.setConditionalFormatRules(rules);
 }
 
 // ================================================================

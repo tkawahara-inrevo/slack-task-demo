@@ -112,26 +112,12 @@ function pollCompletions() {
 
       if (!isComplete) { remaining.push(item); continue; }
 
-      // B30未確認 → B31を外してエラー表示（次回開いたとき気づける）
-      if (!b30) {
-        sheet.getRange('B31').setValue(false);
-        sheet.getRange('C31:F31')
-             .setValue('⚠ B30のスクリーンショット確認チェックを入れてから、もう一度B31にチェックしてください')
-             .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
-        SpreadsheetApp.flush();
-        remaining.push(item);
-        continue;
-      }
-
-      // C19未入力・無効 → B31を外してエラー表示
+      // B30未確認 or C19未入力 → B31を外すだけ（C31は数式に任せる）
       const c19Num = Number(c19);
       const validScore = c19 !== '' && c19 !== null &&
                          !isNaN(c19Num) && Number.isInteger(c19Num) && c19Num >= 0 && c19Num <= 1000;
-      if (!validScore) {
+      if (!b30 || !validScore) {
         sheet.getRange('B31').setValue(false);
-        sheet.getRange('C31:F31')
-             .setValue('⚠ 問13のタイピングスコア（C19）が未入力または無効です。0〜1000の整数を入力後、もう一度B31にチェックしてください')
-             .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
         SpreadsheetApp.flush();
         remaining.push(item);
         continue;

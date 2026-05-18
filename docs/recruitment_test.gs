@@ -255,34 +255,38 @@ function onEdit(e) {
     if (e.range.getA1Notation() !== 'B31') return;
     if (e.value !== 'TRUE') return;
 
-    // チェックを即座に外す（flush で画面に即反映）
-    e.range.setValue(false);
-    SpreadsheetApp.flush();
-
-    const labelRange = sheet.getRange('C31:F31');
-    // B30とC19を1回のAPI呼び出しで取得（B19:C30の範囲）
+    // C19・B30を1回のAPI呼び出しで取得
     const vals = sheet.getRange('B19:C30').getValues();
-    const c19 = vals[0][1]; // C19
-    const b30 = vals[11][0]; // B30
-    const num = Number(c19);
+    const c19  = vals[0][1];  // C19
+    const b30  = vals[11][0]; // B30
+    const num  = Number(c19);
     const validScore = c19 !== '' && c19 !== null &&
                        !isNaN(num) && Number.isInteger(num) && num >= 0 && num <= 1000;
 
     if (!validScore) {
-      labelRange.setValue('⚠ タイピングスコア（C19）に 0〜1000 の半角数字を先に入力してください')
-                .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
+      // NGのときだけ外す
+      e.range.setValue(false);
+      SpreadsheetApp.flush();
+      sheet.getRange('C31:F31')
+           .setValue('⚠ タイピングスコア（C19）に 0〜1000 の半角数字を先に入力してください')
+           .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
       return;
     }
 
     if (b30 !== true) {
-      labelRange.setValue('⚠ B30のスクリーンショット確認チェックを先に入れてください')
-                .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
+      e.range.setValue(false);
+      SpreadsheetApp.flush();
+      sheet.getRange('C31:F31')
+           .setValue('⚠ B30のスクリーンショット確認チェックを先に入れてください')
+           .setFontColor('#dc2626').setFontWeight('bold').setBackground('#fef2f2');
       return;
     }
 
-    // 両方OK
-    labelRange.setValue('テスト完了したらチェックを入れてください → 自動採点・提出されます')
-              .setFontColor('#15803d').setFontWeight('bold').setBackground('#f0fdf4');
+    // 両方OK → B31はチェックのままポーラーに任せる
+    // 「閉じても大丈夫」とだけ伝える（採点はポーラーが処理）
+    sheet.getRange('C31:F31')
+         .setValue('⏳ 提出を受け付けました。採点完了後に結果をご連絡します。このスプレッドシートを閉じても問題ありません。')
+         .setFontColor('#d97706').setFontWeight('bold').setBackground('#fffbeb');
   } catch (err) {
     console.error('onEdit error:', err);
   }

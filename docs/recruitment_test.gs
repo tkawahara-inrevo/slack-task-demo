@@ -190,8 +190,8 @@ function installPoller() {
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'pollCompletions') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('pollCompletions').timeBased().everyMinutes(5).create();
-  Browser.msgBox('✅ 定期チェック（5分ごと）を設定しました');
+  ScriptApp.newTrigger('pollCompletions').timeBased().everyMinutes(1).create();
+  Browser.msgBox('✅ 定期チェック（1分ごと）を設定しました');
 }
 
 function uninstallPoller() {

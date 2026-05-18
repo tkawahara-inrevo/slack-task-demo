@@ -303,6 +303,26 @@ function setupConditionalFormatting(ss) {
 }
 
 // ================================================================
+// B30チェック時にB31を強制リセット（テンプレートコピーに自動引き継ぎ）
+// B30→B31の順番を強制し、意図しない提出を防ぐ
+// ================================================================
+function onEdit(e) {
+  try {
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== 'test') return;
+    if (e.range.getA1Notation() !== 'B30') return;
+    if (e.value !== 'TRUE') return;
+    const b31 = sheet.getRange('B31');
+    if (b31.getValue() === true) {
+      b31.setValue(false);
+      SpreadsheetApp.flush();
+    }
+  } catch (err) {
+    console.error('onEdit error:', err);
+  }
+}
+
+// ================================================================
 // メール送信
 // ================================================================
 function sendTestEmail(name, email, spreadsheetUrl, opts) {

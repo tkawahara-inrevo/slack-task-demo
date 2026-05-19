@@ -169,9 +169,17 @@ export default function Recruitment() {
     }
   };
 
+  const [filterStatuses, setFilterStatuses] = useState(new Set(['pending','scheduled','sent','completed','error']));
+  const toggleStatus = (s) => setFilterStatuses(prev => {
+    const next = new Set(prev);
+    next.has(s) ? next.delete(s) : next.add(s);
+    return next;
+  });
+
   const isSending   = sendingIds.size > 0;
   const pendingCount = candidates.filter(c => !c.spreadsheet_url && ['pending','error'].includes(c.status)).length;
   const schedulableCandidates = candidates.filter(c => !c.spreadsheet_url && ['pending','error'].includes(c.status));
+  const filteredCandidates = candidates.filter(c => filterStatuses.has(effectiveStatus(c)));
   const webhookUrl   = `${window.location.origin}/api/dashboard/recruitment/webhook/complete`;
   const totalScore   = settings.total_score || 10;
 
@@ -379,6 +387,18 @@ export default function Recruitment() {
         <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 4 }}>{candidates.length}名登録中</span>
       </div>
 
+      {/* ステータスフィルター */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 600 }}>表示：</span>
+        {Object.entries(STATUS_LABEL).map(([s, label]) => (
+          <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, padding: '3px 10px', borderRadius: 99, border: `1px solid ${STATUS_COLOR[s]}`, background: filterStatuses.has(s) ? STATUS_BG[s] : '#f9fafb', color: filterStatuses.has(s) ? STATUS_COLOR[s] : '#9ca3af', fontWeight: 600, userSelect: 'none' }}>
+            <input type="checkbox" checked={filterStatuses.has(s)} onChange={() => toggleStatus(s)} style={{ accentColor: STATUS_COLOR[s], width: 12, height: 12 }} />
+            {label}
+          </label>
+        ))}
+        <span style={{ fontSize: 11, color: '#9ca3af' }}>{filteredCandidates.length}/{candidates.length}名表示</span>
+      </div>
+
       {/* 候補者テーブル */}
       {loading ? (
         <div style={{ color: '#9ca3af', padding: 24 }}>読み込み中…</div>
@@ -398,7 +418,7 @@ export default function Recruitment() {
               </tr>
             </thead>
             <tbody>
-              {candidates.map(c => (
+              {filteredCandidates.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                   <td style={{ padding: '10px 14px', fontWeight: 600, color: '#111827', minWidth: 100 }}>{c.name}</td>
                   <td style={{ padding: '10px 14px', color: '#6b7280' }}>{c.email}</td>

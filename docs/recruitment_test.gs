@@ -112,11 +112,20 @@ function pollCompletions() {
 
       if (!isComplete) { remaining.push(item); continue; }
 
-      // B30未確認 or C19未入力 → B31を外すだけ（C31は数式に任せる）
+      // B30チェック（チェックボックスが存在する新形式のみ。古いシートはスキップ）
+      const b30HasCheckbox = (b30 === true || b30 === false);
+      if (b30HasCheckbox && !b30) {
+        sheet.getRange('B31').setValue(false);
+        SpreadsheetApp.flush();
+        remaining.push(item);
+        continue;
+      }
+
+      // C19未入力・無効 → B31を外すだけ
       const c19Num = Number(c19);
       const validScore = c19 !== '' && c19 !== null &&
                          !isNaN(c19Num) && Number.isInteger(c19Num) && c19Num >= 0 && c19Num <= 1000;
-      if (!b30 || !validScore) {
+      if (!validScore) {
         sheet.getRange('B31').setValue(false);
         SpreadsheetApp.flush();
         remaining.push(item);

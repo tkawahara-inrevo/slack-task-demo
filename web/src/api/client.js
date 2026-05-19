@@ -589,6 +589,12 @@ export const api = {
   hrmosSync: () => apiFetch('/admin/hrmos-recruitment/sync', { method: 'POST' }),
   hrmosJobList: () => apiFetch('/admin/hrmos-recruitment/analytics').then(d => (d.byJob || []).map(j => j.name)),
 
+  // 法務案件管理
+  legalCases:       ()        => apiFetch('/legal/cases'),
+  legalCreate:      ()        => apiFetch('/legal/cases', { method: 'POST' }),
+  legalUpdate:      (id, body) => apiFetch(`/legal/cases/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  legalDelete:      (id)      => apiFetch(`/legal/cases/${id}`, { method: 'DELETE' }),
+
   // チャンネルマッピング
   channelMappingSync: () => apiFetch('/admin/channel-mapping/sync', { method: 'POST' }),
   channelMappingSyncStatus: (jobId) => apiFetch(`/admin/channel-mapping/sync/status/${jobId}`),

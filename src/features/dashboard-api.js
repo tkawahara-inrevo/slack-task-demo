@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const { randomUUID } = require("crypto");
 const { registerRpoApi } = require("./rpo-api");
+const { registerLegalApi } = require("./legal-api");
 const { registerKintoneApi } = require("./kintone-api");
 const { registerDriveApi } = require("./drive-api");
 const { registerCrmApi, registerDailyReportApi, registerChannelTargetsApi } = require("./crm-api");
@@ -4229,8 +4230,11 @@ function registerDashboardApi(deps) {
     }
   }
 
-  // RPO案件管理API（authWithRole/adminOnlyを共有）
+  // RPO案件管理API
   registerRpoApi({ expressApp, authWithRole, adminOnly });
+
+  // 法務案件管理API
+  registerLegalApi({ expressApp, authWithRole });
 
   // kintone連携API
   registerKintoneApi({ expressApp, authWithRole, adminOnly });

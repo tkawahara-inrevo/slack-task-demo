@@ -196,6 +196,7 @@ export default function Layout({ children }) {
     { to: '/workflows', label: 'WF' },
     { to: '/analytics', label: '分析' },
     { to: '/org-chart', label: 'チーム設定' },
+    { to: '/legal', label: '法務' },
   ];
 
   const adminLink = user && ['admin','corp','it','personnel'].includes(user?.role) ? (

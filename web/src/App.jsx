@@ -37,6 +37,7 @@ import CustomerList from './pages/crm/CustomerList'
 import SalesPerformance from './pages/crm/SalesPerformance'
 import LeadsDashboard from './pages/crm/LeadsDashboard'
 import SlackWorkflows from './pages/SlackWorkflows'
+import LegalHub from './pages/legal/LegalHub'
 import './App.css'
 
 function App() {
@@ -80,6 +81,7 @@ function App() {
         {/* 旧URLの後方互換 */}
         <Route path="/crm/pipeline" element={<Pipeline />} />
         <Route path="/crm/customers" element={<CustomerList />} />
+        <Route path="/legal" element={<LegalHub />} />
         <Route path="/rpo" element={<ClientList />} />
         <Route path="/rpo/summary" element={<RpoSummary />} />
         <Route path="/rpo/workload" element={<RpoWorkload />} />

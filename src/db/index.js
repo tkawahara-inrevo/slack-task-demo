@@ -683,6 +683,33 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // 法務案件管理
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS legal_cases (
+      id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      team_id          TEXT NOT NULL,
+      case_name        TEXT NOT NULL DEFAULT '新規案件',
+      na_date          DATE,
+      start_date       DATE,
+      priority         TEXT NOT NULL DEFAULT '中',
+      chief            TEXT,
+      ball             TEXT,
+      na_ledger        TEXT,
+      issue_summary    TEXT,
+      issue_details    TEXT,
+      contract_details TEXT,
+      direction        TEXT,
+      thread_url       TEXT,
+      result           TEXT NOT NULL DEFAULT '対応中',
+      history          JSONB NOT NULL DEFAULT '[]',
+      minutes          JSONB NOT NULL DEFAULT '[]',
+      created_by       TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_legal_cases_team ON legal_cases(team_id, updated_at DESC)`).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

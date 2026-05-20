@@ -516,6 +516,16 @@ export default function Recruitment() {
                                 📧 送付
                               </button>
                             )}
+                            {ps === 'sent' && (
+                              <button onClick={async () => {
+                                if (!window.confirm(`${c.name} さんの性格診断を手動で「回答済み」にしますか？`)) return;
+                                await api.personalityComplete(c.id).catch(e => alert(e.message));
+                                update(c.id, { personality_status: 'completed' });
+                              }} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', cursor: 'pointer' }}
+                                title="自動検知されない場合に手動で完了にする">
+                                ✓ 手動完了
+                              </button>
+                            )}
                             {ps === 'completed' && (
                               <button onClick={() => handleShowResult(c)}
                                 style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #86efac', background: '#f0fdf4', color: '#15803d', fontWeight: 600, cursor: 'pointer' }}>

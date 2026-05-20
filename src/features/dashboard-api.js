@@ -1524,6 +1524,19 @@ function registerDashboardApi(deps) {
 
   // ── 適性診断 ──────────────────────────────────────────────────────────────────
 
+  // 手動完了
+  expressApp.post("/api/dashboard/admin/personality/complete", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { candidateId } = req.body;
+      await dbQuery(
+        "UPDATE recruitment_candidates SET personality_status='completed', personality_completed_at=now() WHERE id=$1 AND team_id=$2",
+        [candidateId, teamId]
+      );
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
   // 送付
   expressApp.post("/api/dashboard/admin/personality/send", authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {
@@ -1611,13 +1624,22 @@ function registerDashboardApi(deps) {
       const { secret, email, name, action, responses, submittedAt } = req.body;
       if (action !== 'personalityCompleted') return res.status(400).json({ error: 'unknown_action' });
 
-      // メールアドレスで候補者を特定
-      const candRes = await dbQuery(
+      // メールアドレスで候補者を特定（名前でフォールバック）
+      let candRes = await dbQuery(
         "SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id WHERE LOWER(c.email)=LOWER($1) LIMIT 1",
         [email]
       );
+      if (!candRes.rows[0] && name) {
+        candRes = await dbQuery(
+          "SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id WHERE c.name ILIKE $1 LIMIT 1",
+          [`%${name}%`]
+        );
+      }
       const cand = candRes.rows[0];
-      if (!cand) return res.status(404).json({ error: 'candidate_not_found' });
+      if (!cand) {
+        console.log(`[適性診断webhook] 候補者が見つかりません: email=${email}, name=${name}`);
+        return res.status(404).json({ error: 'candidate_not_found' });
+      }
 
       const expectedSecret = cand.personality_webhook_secret || cand.webhook_secret || '';
       if (expectedSecret && expectedSecret !== secret) return res.status(403).json({ error: 'invalid_secret' });

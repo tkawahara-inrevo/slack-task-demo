@@ -88,4 +88,40 @@ async function syncKintoneApp(appId, cfg) {
   return results;
 }
 
-module.exports = { syncKintoneApp, APPS };
+// App170（入金管理）→ kintone_payments テーブルへ同期
+async function syncKintonePayments() {
+  const { dbQuery } = require('../db/index');
+  const { rows } = await dbQuery(
+    `SELECT record_id, company_name, data FROM kintone_cache WHERE app_id='170'`
+  );
+  let upserted = 0;
+  for (const rec of rows) {
+    const d = rec.data || {};
+    const company      = d.company || rec.company_name || null;
+    const amount       = d['数値']   != null && d['数値']   !== '' ? Number(d['数値'])   : null;
+    const incentive    = d['数値_0'] != null && d['数値_0'] !== '' ? Number(d['数値_0']) : null;
+    const paymentDate  = d.date      || null;
+    const plan         = d.plan      || null;
+    const staff        = d.Staff || d.staff || null;
+
+    if (!paymentDate) continue;
+
+    await dbQuery(`
+      INSERT INTO kintone_payments (id, team_id, record_id, company, amount, incentive_amount, payment_date, plan, staff, synced_at)
+      VALUES (gen_random_uuid()::text, 'T086C06L5V0', $1, $2, $3, $4, $5::date, $6, $7, now())
+      ON CONFLICT (record_id) DO UPDATE SET
+        company = EXCLUDED.company,
+        amount = EXCLUDED.amount,
+        incentive_amount = EXCLUDED.incentive_amount,
+        payment_date = EXCLUDED.payment_date,
+        plan = EXCLUDED.plan,
+        staff = EXCLUDED.staff,
+        synced_at = now()
+    `, [rec.record_id, company, amount, incentive, paymentDate, plan, staff]).catch(() => {});
+    upserted++;
+  }
+  console.log(`[kintone] kintone_payments upserted: ${upserted}`);
+  return upserted;
+}
+
+module.exports = { syncKintoneApp, syncKintonePayments, APPS };

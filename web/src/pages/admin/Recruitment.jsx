@@ -69,8 +69,12 @@ export default function Recruitment() {
 
   // 一次面接通過 → 性格診断ステージへ
   const handlePassFirstInterview = async (id) => {
-    await api.recruitmentStage(id, 'personality').catch(() => {});
-    update(id, { stage: 'personality' });
+    try {
+      await api.recruitmentStage(id, 'personality');
+      update(id, { stage: 'personality' });
+    } catch (e) {
+      alert('更新に失敗しました: ' + e.message);
+    }
   };
 
   // 実技テスト送付

@@ -1,6 +1,63 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 
+function PersonalityCell({ candidate: c, onUpdate, settings }) {
+  const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const ps = c.personality_status || 'pending';
+
+  const send = async () => {
+    if (!settings?.personality_gas_url) { alert('設定 → 適性診断GAS URLを設定してください'); return; }
+    if (!window.confirm(`${c.name} さんに適性診断を送付しますか？`)) return;
+    setLoading(true);
+    try {
+      await api.personalitySend(c.id);
+      onUpdate({ personality_status: 'sent', personality_sent_at: new Date().toISOString() });
+    } catch (e) { alert('送付失敗: ' + e.message); }
+    finally { setLoading(false); }
+  };
+
+  const downloadPdf = async () => {
+    if (!settings?.personality_gas_url) { alert('設定 → 適性診断GAS URLを設定してください'); return; }
+    setPdfLoading(true);
+    try {
+      const r = await api.personalityPdf(c.id);
+      if (r.pdfUrl) window.open(r.pdfUrl, '_blank');
+    } catch (e) { alert('PDF生成失敗: ' + e.message); }
+    finally { setPdfLoading(false); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 120 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 99, display: 'inline-block',
+        background: P_STATUS_BG[ps], color: P_STATUS_COLOR[ps] }}>
+        {P_STATUS_LABEL[ps] || ps}
+      </span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {ps === 'pending' && (
+          <button onClick={send} disabled={loading}
+            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #a5b4fc', background: '#eef2ff', color: '#4338ca', cursor: loading ? 'default' : 'pointer' }}>
+            {loading ? '送付中…' : '📧 送付'}
+          </button>
+        )}
+        {ps === 'completed' && (
+          <button onClick={downloadPdf} disabled={pdfLoading}
+            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #86efac', background: '#f0fdf4', color: '#15803d', cursor: pdfLoading ? 'default' : 'pointer' }}>
+            {pdfLoading ? '生成中…' : '📄 PDF'}
+          </button>
+        )}
+        {ps === 'sent' && (
+          <span style={{ fontSize: 10, color: '#9ca3af' }}>回答待ち</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const P_STATUS_LABEL = { pending: '未送付', sent: '送付済', completed: '回答済' };
+const P_STATUS_COLOR = { pending: '#9ca3af', sent: '#2563eb', completed: '#059669' };
+const P_STATUS_BG    = { pending: '#f3f4f6', sent: '#eff6ff', completed: '#f0fdf4' };
+
 const STATUS_LABEL = { pending: '未送信', scheduled: '予約済み', sent: '送信済', completed: '完了', error: 'エラー' };
 const STATUS_COLOR = { pending: '#9ca3af', scheduled: '#7c3aed', sent: '#2563eb', completed: '#059669', error: '#dc2626' };
 const STATUS_BG   = { pending: '#f3f4f6', scheduled: '#f5f3ff', sent: '#eff6ff', completed: '#f0fdf4', error: '#fef2f2' };
@@ -112,6 +169,11 @@ export default function Recruitment() {
         emailBody: settingsForm.email_body,
         totalScore: settingsForm.total_score ? Number(settingsForm.total_score) : null,
         importSheetUrl: settingsForm.import_sheet_url || null,
+        personalityGasUrl: settingsForm.personality_gas_url || null,
+        personalitySheetUrl: settingsForm.personality_sheet_url || null,
+        personalityEmailSubject: settingsForm.personality_email_subject || null,
+        personalityEmailBody: settingsForm.personality_email_body || null,
+        personalityWebhookSecret: settingsForm.personality_webhook_secret || null,
       });
       setSettings(settingsForm);
       setShowSettings(false);
@@ -357,7 +419,32 @@ export default function Recruitment() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+          {/* 適性診断設定 */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>適性診断（④性格診断）</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {[
+                ['personality_gas_url', '適性診断 GAS Web App URL', 'https://script.google.com/macros/s/...'],
+                ['personality_sheet_url', '結果スプレッドシートURL（参照用）', 'https://docs.google.com/spreadsheets/d/...'],
+                ['personality_webhook_secret', 'Webhookシークレット', '実技テストと同じでもOK'],
+              ].map(([key, label, placeholder]) => (
+                <div key={key}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 4 }}>{label}</label>
+                  <input value={settingsForm[key] || ''} onChange={e => setSettingsForm(f => ({ ...f, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    style={{ width: '100%', fontSize: 12, padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 4 }}>Webhook URL（GASに設定）</label>
+                <div style={{ fontSize: 11, padding: '6px 10px', background: '#f3f4f6', borderRadius: 6, color: '#374151', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                  {`${window.location.origin}/api/dashboard/recruitment/webhook/personality`}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
             <button onClick={() => setShowSettings(false)} className="btn btn-secondary" style={{ fontSize: 12 }}>キャンセル</button>
             <button onClick={handleSaveSettings} disabled={savingSettings} className="btn btn-primary" style={{ fontSize: 12 }}>
               {savingSettings ? '保存中…' : '保存'}
@@ -412,7 +499,7 @@ export default function Recruitment() {
           <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['氏名', 'メール', '回答', 'ステータス', 'スコア', 'タイピング', ''].map(h => (
+                {['氏名', 'メール', '回答', 'ステータス', 'スコア', 'タイピング', '性格診断', ''].map(h => (
                   <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -452,6 +539,9 @@ export default function Recruitment() {
                         {c.typing_level}
                       </span>
                     ) : <span style={{ color: '#d1d5db' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '10px 14px' }}>
+                    <PersonalityCell candidate={c} onUpdate={(patch) => setCandidates(prev => prev.map(x => x.id === c.id ? { ...x, ...patch } : x))} settings={settings} />
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                     <button onClick={() => handleDelete(c.id)}

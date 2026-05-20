@@ -1130,17 +1130,23 @@ function registerDashboardApi(deps) {
     try {
       const { teamId } = req.dashboardUser;
       const { templateSpreadsheetId, gasEndpointUrl, notifyChannelId, notifyMentionUserId, webhookSecret,
-              fromEmail, emailSubject, emailBody, totalScore, importSheetUrl } = req.body;
+              fromEmail, emailSubject, emailBody, totalScore, importSheetUrl,
+              personalityGasUrl, personalitySheetUrl, personalityEmailSubject, personalityEmailBody, personalityWebhookSecret } = req.body;
       await dbQuery(`
-        INSERT INTO recruitment_settings (team_id, template_spreadsheet_id, gas_endpoint_url, notify_channel_id, notify_mention_user_id, webhook_secret, from_email, email_subject, email_body, total_score, import_sheet_url, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+        INSERT INTO recruitment_settings (team_id, template_spreadsheet_id, gas_endpoint_url, notify_channel_id, notify_mention_user_id, webhook_secret, from_email, email_subject, email_body, total_score, import_sheet_url,
+          personality_gas_url, personality_sheet_url, personality_email_subject, personality_email_body, personality_webhook_secret, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
         ON CONFLICT (team_id) DO UPDATE SET
           template_spreadsheet_id=$2, gas_endpoint_url=$3, notify_channel_id=$4,
           notify_mention_user_id=$5, webhook_secret=$6,
           from_email=$7, email_subject=$8, email_body=$9, total_score=$10,
-          import_sheet_url=$11, updated_at=now()
+          import_sheet_url=$11,
+          personality_gas_url=$12, personality_sheet_url=$13,
+          personality_email_subject=$14, personality_email_body=$15,
+          personality_webhook_secret=$16, updated_at=now()
       `, [teamId, templateSpreadsheetId||null, gasEndpointUrl||null, notifyChannelId||null, notifyMentionUserId||null, webhookSecret||null,
-          fromEmail||null, emailSubject||null, emailBody||null, totalScore||null, importSheetUrl||null]);
+          fromEmail||null, emailSubject||null, emailBody||null, totalScore||null, importSheetUrl||null,
+          personalityGasUrl||null, personalitySheetUrl||null, personalityEmailSubject||null, personalityEmailBody||null, personalityWebhookSecret||null]);
       res.json({ ok: true });
     } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
   });
@@ -1499,6 +1505,110 @@ function registerDashboardApi(deps) {
 
       res.json({ ok: true });
     } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
+  });
+
+  // ── 適性診断 ──────────────────────────────────────────────────────────────────
+
+  // 送付
+  expressApp.post("/api/dashboard/admin/personality/send", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { candidateId } = req.body;
+      const [candRes, settingsRes] = await Promise.all([
+        dbQuery("SELECT * FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [candidateId, teamId]),
+        dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]),
+      ]);
+      const c = candRes.rows[0];
+      const s = settingsRes.rows[0];
+      if (!c) return res.status(404).json({ error: 'not_found' });
+      if (!s?.personality_gas_url) return res.status(400).json({ error: 'GASのURLを設定してください' });
+
+      const gasRes = await fetch(s.personality_gas_url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: s.personality_webhook_secret || s.webhook_secret || '',
+          action: 'sendPersonalityEmail',
+          name: c.name, email: c.email,
+          fromEmail: s.from_email || null,
+          emailSubject: s.personality_email_subject || null,
+          emailBody: s.personality_email_body || null,
+        }),
+      });
+      const gasData = await gasRes.json();
+      if (!gasData.ok) return res.status(500).json({ error: gasData.error || 'GASエラー' });
+
+      await dbQuery("UPDATE recruitment_candidates SET personality_status='sent', personality_sent_at=now() WHERE id=$1", [candidateId]);
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // PDF生成
+  expressApp.post("/api/dashboard/admin/personality/pdf", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { candidateId } = req.body;
+      const [candRes, settingsRes] = await Promise.all([
+        dbQuery("SELECT * FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [candidateId, teamId]),
+        dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]),
+      ]);
+      const c = candRes.rows[0];
+      const s = settingsRes.rows[0];
+      if (!c) return res.status(404).json({ error: 'not_found' });
+      if (!s?.personality_gas_url) return res.status(400).json({ error: 'GASのURLを設定してください' });
+
+      const gasRes = await fetch(s.personality_gas_url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: s.personality_webhook_secret || s.webhook_secret || '',
+          action: 'generatePdf',
+          candidateId: c.id, name: c.name,
+        }),
+      });
+      const gasData = await gasRes.json();
+      if (!gasData.ok) return res.status(500).json({ error: gasData.error || 'PDF生成エラー' });
+      res.json({ ok: true, pdfUrl: gasData.pdfUrl });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // フォーム回答webhook（GASのonFormSubmitから呼ばれる）
+  expressApp.post("/api/dashboard/recruitment/webhook/personality", async (req, res) => {
+    try {
+      const { secret, email, name, action, responses, submittedAt } = req.body;
+      if (action !== 'personalityCompleted') return res.status(400).json({ error: 'unknown_action' });
+
+      // メールアドレスで候補者を特定
+      const candRes = await dbQuery(
+        "SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id WHERE LOWER(c.email)=LOWER($1) LIMIT 1",
+        [email]
+      );
+      const cand = candRes.rows[0];
+      if (!cand) return res.status(404).json({ error: 'candidate_not_found' });
+
+      const expectedSecret = cand.personality_webhook_secret || cand.webhook_secret || '';
+      if (expectedSecret && expectedSecret !== secret) return res.status(403).json({ error: 'invalid_secret' });
+
+      await dbQuery(
+        "UPDATE recruitment_candidates SET personality_status='completed', personality_completed_at=now() WHERE id=$1",
+        [cand.id]
+      );
+
+      // Slack通知
+      if (cand.notify_channel_id) {
+        try {
+          const { WebClient } = require('@slack/web-api');
+          const wc = new WebClient(process.env.SLACK_BOT_TOKEN);
+          const mention = cand.notify_mention_user_id
+            ? cand.notify_mention_user_id.split(',').map(u => `<@${u.trim()}>`).join(' ')
+            : '';
+          await wc.chat.postMessage({
+            channel: cand.notify_channel_id,
+            text: `${mention}【適性診断完了】*${cand.name}* さんが適性診断に回答しました`,
+          });
+        } catch (slackErr) { console.error('[適性診断通知] Slack送信エラー:', slackErr.message); }
+      }
+
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
   // ── HRMOS採用 CSVインポート & アナリティクス ──────────────────────────────────

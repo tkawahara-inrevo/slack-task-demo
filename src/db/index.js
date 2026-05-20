@@ -562,6 +562,16 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_body TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS total_score INTEGER`).catch(() => {});
 
+  // 適性診断
+  await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_status TEXT NOT NULL DEFAULT 'pending'`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_sent_at TIMESTAMPTZ`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_completed_at TIMESTAMPTZ`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_body TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_webhook_secret TEXT`).catch(() => {});
+
   // 採用テスト予約送信
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS recruitment_scheduled_sends (

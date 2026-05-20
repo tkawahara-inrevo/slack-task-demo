@@ -399,7 +399,7 @@ export default function CrmDashboard() {
       {/* ── KPIカード（クリックで詳細） ── */}
       <div style={{ display:'grid', gridTemplateColumns: isTablet ? 'repeat(3,1fr)' : 'repeat(5,1fr)', gap:10 }}>
         {/* 入金額 */}
-        <div onClick={() => setKpiDrill({ type:'payment', title:'入金額 内訳', rows: data.confirmedList || [] })}
+        <div onClick={() => setKpiDrill({ type:'payment', title:'入金額 内訳', rows: summary?.payments || [] })}
           style={{ ...cardStyle, borderTop:'3px solid #059669', cursor:'pointer', transition:'box-shadow 0.15s' }}
           onMouseEnter={e => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'}
           onMouseLeave={e => e.currentTarget.style.boxShadow='none'}>
@@ -842,10 +842,10 @@ export default function CrmDashboard() {
             </div>
             <div style={{ overflowY:'auto', padding:'12px 16px', display:'flex', flexDirection:'column', gap:6 }}>
               {/* 入金額詳細 */}
-              {kpiDrill.type === 'payment' && (data.confirmedList || []).length === 0 && (
+              {kpiDrill.type === 'payment' && (summary?.payments || []).length === 0 && (
                 <div style={{ textAlign:'center', color:C.textSub, padding:'24px 0', fontSize:'0.85rem' }}>データなし</div>
               )}
-              {kpiDrill.type === 'payment' && (data.confirmedList || []).map((r, i) => (
+              {kpiDrill.type === 'payment' && (summary?.payments || []).map((r, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', background:C.surface2, borderRadius:8 }}>
                   <span style={{ fontSize:'0.72rem', color:C.textSub, flexShrink:0, minWidth:60 }}>{fmtDate(r.payment_date)}</span>
                   <span style={{ flex:1, fontSize:'0.82rem', fontWeight:500, color:C.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</span>
@@ -872,11 +872,11 @@ export default function CrmDashboard() {
                 </div>
               )}
             </div>
-            {kpiDrill.type === 'payment' && (data.confirmedList || []).length > 0 && (
+            {kpiDrill.type === 'payment' && (summary?.payments || []).length > 0 && (
               <div style={{ padding:'10px 16px', borderTop:`1px solid ${C.border}`, display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8, flexShrink:0 }}>
                 <span style={{ fontSize:'0.72rem', color:C.textSub }}>合計</span>
                 <span style={{ fontSize:'0.95rem', fontWeight:800, color:'#059669' }}>
-                  {fmtMYen((data.confirmedList || []).reduce((s, r) => s + Number(r.amount || 0), 0))}
+                  {fmtMYen((summary?.payments || []).reduce((s, r) => s + Number(r.amount || 0), 0))}
                 </span>
               </div>
             )}

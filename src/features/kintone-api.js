@@ -55,9 +55,10 @@ async function syncDealsFromKintoneCache() {
         data        = d.data || jsonb_build_object('kintone_record_id', kc.record_id),
         updated_at  = now()
       FROM kintone_cache kc
-      JOIN customers c ON c.name = kc.company_name AND c.team_id = d.team_id
+      JOIN customers c ON c.name = kc.company_name
       WHERE kc.app_id = '102'
         AND d.customer_id = c.id
+        AND d.team_id = c.team_id
     `);
     console.log('[kintone] deals mapping updated via company name');
   } catch (e) {

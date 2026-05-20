@@ -34,8 +34,9 @@ async function syncDealsFromKintoneCache() {
       UPDATE deals d
       SET
         yomi        = CASE WHEN kc.data->>'ヨミ' IS NOT NULL AND kc.data->>'ヨミ' != ''
-                           THEN kc.data->>'ヨミ' ELSE d.yomi END,
-        status      = CASE kc.data->>'ヨミ'
+                           THEN TRIM(SPLIT_PART(SPLIT_PART(kc.data->>'ヨミ', '（', 1), '(', 1))
+                           ELSE d.yomi END,
+        status      = CASE TRIM(SPLIT_PART(SPLIT_PART(kc.data->>'ヨミ', '（', 1), '(', 1))
                            WHEN '受注'   THEN 'won'
                            WHEN '失注'   THEN 'lost'
                            WHEN '見送り' THEN 'dormant'

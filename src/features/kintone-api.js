@@ -26,49 +26,40 @@ const KINTONE_DEAL_FIELD_MAP = {
 };
 
 // kintone_cache から deals テーブルへマッピングを反映
+// マッチング: kintone_cache.company_name → customers.name → deals.customer_id
 async function syncDealsFromKintoneCache() {
-  // kintoneが正とみなして常に上書きするフィールド
-  const ALWAYS_UPDATE = new Set(['order_date', 'yomi', 'inflow_date', 'first_meeting_date',
-                                  'conclusion_date', 'next_action_date', 'initial_fee',
-                                  'contract_type', 'lost_reason', 'inflow_source',
-                                  'guarantee_salary', 'contract_months']);
   try {
-    const { rows } = await dbQuery(
-      `SELECT record_id, company_name, data FROM kintone_cache WHERE app_id='102'`
-    );
-    for (const rec of rows) {
-      const d = rec.data || {};
-      const sets = [];
-      const vals = [rec.record_id];
-
-      for (const [kField, dbCol] of Object.entries(KINTONE_DEAL_FIELD_MAP)) {
-        const val = d[kField];
-        if (val == null || val === '') continue;
-        if (ALWAYS_UPDATE.has(dbCol)) {
-          sets.push(`${dbCol}=$${vals.length + 1}`);
-        } else {
-          sets.push(`${dbCol}=COALESCE(${dbCol}, $${vals.length + 1})`);
-        }
-        vals.push(val);
-      }
-
-      // ヨミから status を導出（kintoneを正とする）
-      const yomi = d['ヨミ'];
-      if (yomi) {
-        const newStatus = yomi === '受注' ? 'won' : yomi === '失注' ? 'lost' : yomi === '見送り' ? 'dormant' : 'active';
-        sets.push(`status=$${vals.length + 1}`);
-        vals.push(newStatus);
-      }
-
-      if (sets.length === 0) continue;
-
-      await dbQuery(
-        `UPDATE deals SET ${sets.join(', ')}, updated_at=now()
-         WHERE data->>'kintone_record_id'=$1`,
-        vals
-      ).catch(() => {});
-    }
-    console.log('[kintone] deals mapping updated');
+    // company_name経由でdealsと結合してまとめて更新
+    await dbQuery(`
+      UPDATE deals d
+      SET
+        yomi        = CASE WHEN kc.data->>'ヨミ' IS NOT NULL AND kc.data->>'ヨミ' != ''
+                           THEN kc.data->>'ヨミ' ELSE d.yomi END,
+        status      = CASE kc.data->>'ヨミ'
+                           WHEN '受注'   THEN 'won'
+                           WHEN '失注'   THEN 'lost'
+                           WHEN '見送り' THEN 'dormant'
+                           ELSE d.status END,
+        order_date  = CASE WHEN kc.data->>'受注日' IS NOT NULL AND kc.data->>'受注日' != ''
+                           THEN (kc.data->>'受注日')::date ELSE d.order_date END,
+        conclusion_date = CASE WHEN kc.data->>'結論日' IS NOT NULL AND kc.data->>'結論日' != ''
+                               THEN (kc.data->>'結論日')::date ELSE d.conclusion_date END,
+        first_meeting_date = CASE WHEN kc.data->>'初回商談日_コンサルチーム' IS NOT NULL AND kc.data->>'初回商談日_コンサルチーム' != ''
+                                  THEN (kc.data->>'初回商談日_コンサルチーム')::date ELSE d.first_meeting_date END,
+        initial_fee = CASE WHEN kc.data->>'見込売り上げ_税抜き' IS NOT NULL AND kc.data->>'見込売り上げ_税抜き' != ''
+                           THEN (kc.data->>'見込売り上げ_税抜き')::numeric ELSE d.initial_fee END,
+        contract_type = CASE WHEN kc.data->>'ヨミ_2' IS NOT NULL AND kc.data->>'ヨミ_2' != ''
+                             THEN kc.data->>'ヨミ_2' ELSE d.contract_type END,
+        lost_reason = CASE WHEN kc.data->>'失注理由' IS NOT NULL AND kc.data->>'失注理由' != ''
+                           THEN kc.data->>'失注理由' ELSE d.lost_reason END,
+        data        = d.data || jsonb_build_object('kintone_record_id', kc.record_id),
+        updated_at  = now()
+      FROM kintone_cache kc
+      JOIN customers c ON c.name = kc.company_name AND c.team_id = d.team_id
+      WHERE kc.app_id = '102'
+        AND d.customer_id = c.id
+    `);
+    console.log('[kintone] deals mapping updated via company name');
   } catch (e) {
     console.error('[kintone] deals mapping error:', e.message);
   }

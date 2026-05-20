@@ -374,7 +374,7 @@ export default function Recruitment() {
         <div style={{ color: '#9ca3af', padding: 24 }}>読み込み中…</div>
       ) : (
         <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 {['候補者', '実技テスト', 'スコア', '性格診断', ''].map(h => (
@@ -388,9 +388,11 @@ export default function Recruitment() {
                 const passedFirst = c.stage === 'personality';
                 return (
                   <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '10px 14px' }}>
-                      <div style={{ fontWeight: 600, color: '#111827' }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>{c.email}</div>
+                    <td style={{ padding: '8px 10px', width: 160 }}>
+                      {c.spreadsheet_url
+                        ? <a href={c.spreadsheet_url} target="_blank" rel="noreferrer" style={{ fontWeight: 600, color: '#2563eb', textDecoration: 'none' }} title="スプレッドシートを開く">{c.name}</a>
+                        : <span style={{ fontWeight: 600, color: '#111827' }}>{c.name}</span>}
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{c.email}</div>
                     </td>
 
                     {/* 実技テスト列 */}
@@ -406,9 +408,6 @@ export default function Recruitment() {
                               📧 送付
                             </button>
                           )}
-                          {c.spreadsheet_url && (
-                            <a href={c.spreadsheet_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>スプシ→</a>
-                          )}
                           {c.error_message && (
                             <span style={{ fontSize: 10, color: '#dc2626' }} title={c.error_message}>⚠エラー</span>
                           )}
@@ -423,7 +422,12 @@ export default function Recruitment() {
                           <span style={{ fontWeight: 700, fontSize: 14, color: c.score >= totalScore * 0.8 ? '#059669' : c.score >= totalScore * 0.6 ? '#d97706' : '#dc2626' }}>
                             {c.score}点
                           </span>
-                          {c.typing_level && <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{c.typing_level}</div>}
+                          {c.typing_level && (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                              {c.typing_level}
+                              {c.score_detail?.q13_raw != null && ` (${c.score_detail.q13_raw})`}
+                            </div>
+                          )}
                         </div>
                       ) : <span style={{ color: '#d1d5db' }}>—</span>}
                     </td>

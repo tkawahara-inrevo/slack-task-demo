@@ -1507,6 +1507,21 @@ function registerDashboardApi(deps) {
     } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
   });
 
+  // ── 候補者ステージ更新 ──────────────────────────────────────────────────────
+  expressApp.patch("/api/dashboard/admin/recruitment/candidates/:id/stage", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { stage } = req.body;
+      if (!stage) return res.status(400).json({ error: 'stage required' });
+      const { rows: [row] } = await dbQuery(
+        "UPDATE recruitment_candidates SET stage=$1, updated_at=now() WHERE id=$2 AND team_id=$3 RETURNING *",
+        [stage, req.params.id, teamId]
+      );
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      res.json({ candidate: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── 適性診断 ──────────────────────────────────────────────────────────────────
 
   // 送付

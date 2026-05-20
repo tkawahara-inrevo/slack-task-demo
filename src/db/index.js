@@ -562,7 +562,8 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS email_body TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS total_score INTEGER`).catch(() => {});
 
-  // 適性診断
+  // 適性診断・選考ステージ管理
+  await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'casual_talk'`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_status TEXT NOT NULL DEFAULT 'pending'`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_sent_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_completed_at TIMESTAMPTZ`).catch(() => {});

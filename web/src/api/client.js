@@ -532,6 +532,7 @@ export const api = {
   recruitmentCandidateDelete: (id) => apiFetch(`/admin/recruitment/candidates/${id}`, { method: 'DELETE' }),
   recruitmentSend: () => apiFetch('/admin/recruitment/send', { method: 'POST' }),
   recruitmentSendOne: (candidateId) => apiFetch('/admin/recruitment/send-one', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidateId }) }),
+  recruitmentStage: (id, stage) => apiFetch(`/admin/recruitment/candidates/${id}/stage`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stage }) }),
   personalitySend: (candidateId) => apiFetch('/admin/personality/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidateId }) }),
   personalityPdf:  (candidateId) => apiFetch('/admin/personality/pdf',  { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidateId }) }),
   recruitmentScheduled: () => apiFetch('/admin/recruitment/scheduled'),

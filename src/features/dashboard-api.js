@@ -1624,16 +1624,30 @@ function registerDashboardApi(deps) {
       const { secret, email, name, action, responses, submittedAt } = req.body;
       if (action !== 'personalityCompleted') return res.status(400).json({ error: 'unknown_action' });
 
-      // メールアドレスで候補者を特定（名前でフォールバック）
+      // 名前正規化（全角スペース→半角、前後空白除去、スペース除去）
+      const normName = (n) => (n || '').replace(/　/g, ' ').trim();
+      const compactName = (n) => normName(n).replace(/\s+/g, '');
+
+      // ① メールで検索
       let candRes = await dbQuery(
-        "SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id WHERE LOWER(c.email)=LOWER($1) LIMIT 1",
+        `SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id
+         FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id
+         WHERE LOWER(c.email)=LOWER($1) AND c.personality_status='sent' LIMIT 1`,
         [email]
       );
+      // ② 名前の完全一致（スペース正規化後）
       if (!candRes.rows[0] && name) {
-        candRes = await dbQuery(
-          "SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id WHERE c.name ILIKE $1 LIMIT 1",
-          [`%${name}%`]
+        const { rows } = await dbQuery(
+          `SELECT c.*, s.webhook_secret, s.personality_webhook_secret, s.notify_channel_id, s.notify_mention_user_id
+           FROM recruitment_candidates c LEFT JOIN recruitment_settings s ON c.team_id=s.team_id
+           WHERE c.personality_status='sent'`,
+          []
         );
+        const formName = compactName(name);
+        // スペース除去後の完全一致 → 部分一致の順で探す
+        let matched = rows.find(r => compactName(r.name) === formName);
+        if (!matched) matched = rows.find(r => compactName(r.name).includes(formName) || formName.includes(compactName(r.name)));
+        if (matched) candRes = { rows: [matched] };
       }
       const cand = candRes.rows[0];
       if (!cand) {

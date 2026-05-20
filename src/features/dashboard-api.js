@@ -1557,11 +1557,11 @@ function registerDashboardApi(deps) {
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
-  // PDF生成
+  // PDF生成（Drive URLをキャッシュ保存 → プレビューURL変換して返す）
   expressApp.post("/api/dashboard/admin/personality/pdf", authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { candidateId } = req.body;
+      const { candidateId, forceRegenerate } = req.body;
       const [candRes, settingsRes] = await Promise.all([
         dbQuery("SELECT * FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [candidateId, teamId]),
         dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]),
@@ -1569,6 +1569,13 @@ function registerDashboardApi(deps) {
       const c = candRes.rows[0];
       const s = settingsRes.rows[0];
       if (!c) return res.status(404).json({ error: 'not_found' });
+
+      // キャッシュ済みURLがあれば再利用
+      if (c.personality_pdf_url && !forceRegenerate) {
+        const previewUrl = driveUrlToPreview(c.personality_pdf_url);
+        return res.json({ ok: true, pdfUrl: c.personality_pdf_url, previewUrl });
+      }
+
       if (!s?.personality_gas_url) return res.status(400).json({ error: 'GASのURLを設定してください' });
 
       const gasRes = await fetch(s.personality_gas_url, {
@@ -1581,9 +1588,22 @@ function registerDashboardApi(deps) {
       });
       const gasData = await gasRes.json();
       if (!gasData.ok) return res.status(500).json({ error: gasData.error || 'PDF生成エラー' });
-      res.json({ ok: true, pdfUrl: gasData.pdfUrl });
+
+      // URLをDBにキャッシュ保存
+      const pdfUrl = gasData.pdfUrl;
+      await dbQuery("UPDATE recruitment_candidates SET personality_pdf_url=$1 WHERE id=$2", [pdfUrl, candidateId]).catch(() => {});
+
+      const previewUrl = driveUrlToPreview(pdfUrl);
+      res.json({ ok: true, pdfUrl, previewUrl });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
+
+  function driveUrlToPreview(url) {
+    if (!url) return null;
+    const m = url.match(/\/file\/d\/([^/]+)/);
+    if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+    return url;
+  }
 
   // フォーム回答webhook（GASのonFormSubmitから呼ばれる）
   expressApp.post("/api/dashboard/recruitment/webhook/personality", async (req, res) => {

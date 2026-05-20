@@ -98,13 +98,31 @@ export default function Recruitment() {
     } catch (e) { alert('送付失敗: ' + e.message); }
   };
 
-  const handlePersonalityPdf = async (id) => {
+  const [pdfModal, setPdfModal] = useState(null); // { name, previewUrl, pdfUrl }
+
+  const handleShowResult = async (c) => {
     if (!settings?.personality_gas_url) { alert('設定 → 適性診断GAS URLを設定してください'); return; }
-    const [loading2, setLoading2] = [false, () => {}]; // local loading はアクションセルで管理
+    // キャッシュがあれば即表示、なければ生成
+    if (c.personality_pdf_url) {
+      const m = c.personality_pdf_url.match(/\/file\/d\/([^/]+)/);
+      const previewUrl = m ? `https://drive.google.com/file/d/${m[1]}/preview` : c.personality_pdf_url;
+      setPdfModal({ name: c.name, previewUrl, pdfUrl: c.personality_pdf_url, loading: false });
+      return;
+    }
+    setPdfModal({ name: c.name, previewUrl: null, pdfUrl: null, loading: true });
     try {
-      const r = await api.personalityPdf(id);
-      if (r.pdfUrl) window.open(r.pdfUrl, '_blank');
-    } catch (e) { alert('PDF生成失敗: ' + e.message); }
+      const r = await api.personalityPdf(c.id);
+      setPdfModal({ name: c.name, previewUrl: r.previewUrl, pdfUrl: r.pdfUrl, loading: false });
+      update(c.id, { personality_pdf_url: r.pdfUrl });
+    } catch (e) {
+      setPdfModal(null);
+      alert('PDF生成失敗: ' + e.message);
+    }
+  };
+
+  const handlePersonalityPdf = async (id) => {
+    const c = candidates.find(x => x.id === id);
+    if (c) await handleShowResult(c);
   };
 
   const handleSaveSettings = async () => {
@@ -213,6 +231,40 @@ export default function Recruitment() {
           </button>
         </div>
       </div>
+
+      {/* 適性診断結果モーダル */}
+      {pdfModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={() => setPdfModal(null)}>
+          <div style={{ background: '#fff', borderRadius: 12, width: '90vw', maxWidth: 1000, height: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <span style={{ fontWeight: 700, fontSize: '1rem' }}>📊 {pdfModal.name} さんの適性診断結果</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {pdfModal.pdfUrl && (
+                  <a href={pdfModal.pdfUrl} target="_blank" rel="noreferrer"
+                    style={{ fontSize: 13, padding: '6px 14px', borderRadius: 7, border: '1px solid #86efac', background: '#f0fdf4', color: '#15803d', fontWeight: 600, textDecoration: 'none' }}>
+                    ⬇ PDFダウンロード
+                  </a>
+                )}
+                <button onClick={() => setPdfModal(null)} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', fontSize: 16, color: '#6b7280' }}>×</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', borderRadius: '0 0 12px 12px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {pdfModal.loading ? (
+                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: 8, textAlign: 'center' }}>⏳</div>
+                  PDFを生成しています… しばらくお待ちください
+                </div>
+              ) : pdfModal.previewUrl ? (
+                <iframe src={pdfModal.previewUrl} style={{ width: '100%', height: '100%', border: 'none', borderRadius: '0 0 12px 12px' }} title="適性診断結果" />
+              ) : (
+                <div style={{ color: '#6b7280' }}>表示できません</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 設定パネル */}
       {showSettings && (
@@ -462,9 +514,9 @@ export default function Recruitment() {
                               </button>
                             )}
                             {ps === 'completed' && (
-                              <button onClick={() => handlePersonalityPdf(c.id)}
+                              <button onClick={() => handleShowResult(c)}
                                 style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #86efac', background: '#f0fdf4', color: '#15803d', fontWeight: 600, cursor: 'pointer' }}>
-                                📄 PDF
+                                📊 結果を見る
                               </button>
                             )}
                             {settings?.personality_sheet_url && (

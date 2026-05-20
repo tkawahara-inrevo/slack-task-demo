@@ -850,7 +850,7 @@ export default function CrmDashboard() {
                   <span style={{ fontSize:'0.72rem', color:C.textSub, flexShrink:0, minWidth:60 }}>{fmtDate(r.payment_date)}</span>
                   <span style={{ flex:1, fontSize:'0.82rem', fontWeight:500, color:C.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</span>
                   <span style={{ fontSize:'0.72rem', color:C.textSub, flexShrink:0 }}>{r.plan || '—'}</span>
-                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#059669', flexShrink:0 }}>{fmtMYen(r.amount)}</span>
+                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:'#059669', flexShrink:0 }}>{fmtMYen(r.payment_amount ?? r.amount)}</span>
                 </div>
               ))}
               {/* 受注・初回商談は担当者テーブルへ誘導 */}
@@ -876,7 +876,7 @@ export default function CrmDashboard() {
               <div style={{ padding:'10px 16px', borderTop:`1px solid ${C.border}`, display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8, flexShrink:0 }}>
                 <span style={{ fontSize:'0.72rem', color:C.textSub }}>合計</span>
                 <span style={{ fontSize:'0.95rem', fontWeight:800, color:'#059669' }}>
-                  {fmtMYen((summary?.payments || []).reduce((s, r) => s + Number(r.amount || 0), 0))}
+                  {fmtMYen((summary?.payments || []).reduce((s, r) => s + Number(r.payment_amount ?? r.amount ?? 0), 0))}
                 </span>
               </div>
             )}

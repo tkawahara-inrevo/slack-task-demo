@@ -92,12 +92,23 @@ function installScanner() {
   });
   // 5分ごとに実行
   ScriptApp.newTrigger('scanNewResponses').timeBased().everyMinutes(5).create();
-  // 処理済みポインタをリセット（全回答を再スキャンしたい場合は削除）
-  const lastRow = SpreadsheetApp.getActiveSpreadsheet()
-    .getSheetByName(getProps().getProperty('RESPONSE_SHEET_NAME') || 'フォームの回答 1')
-    ?.getLastRow() || 1;
-  getProps().setProperty('LAST_PROCESSED_ROW', String(lastRow)); // 現在の行から開始（過去分は無視）
-  Browser.msgBox('✅ スキャナーを設置しました（5分ごとに新しい回答を検知します）');
+
+  // 回答シートの実際のデータ行数を数える（ヘッダー=1行目を除く）
+  const sheetName = getProps().getProperty('RESPONSE_SHEET_NAME') || 'フォームの回答 1';
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    Browser.msgBox(`❌ シート "${sheetName}" が見つかりません。\nRESPONSE_SHEET_NAME を確認してください。`);
+    return;
+  }
+  // A列（タイムスタンプ）に値がある最終行を取得（ヘッダー除く）
+  const tsCol = sheet.getRange('A:A').getValues().flat();
+  let lastDataRow = 1;
+  for (let i = tsCol.length - 1; i >= 1; i--) {
+    if (tsCol[i]) { lastDataRow = i + 1; break; } // 1-indexed
+  }
+  getProps().setProperty('LAST_PROCESSED_ROW', String(lastDataRow));
+  Browser.msgBox(`✅ スキャナーを設置しました\nシート: ${sheetName}\n現在の最終行: ${lastDataRow}行（これ以降の回答から検知します）`);
 }
 
 function uninstallScanner() {

@@ -377,7 +377,7 @@ export default function Recruitment() {
           <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['氏名', 'メール', '② 実技テスト', 'スコア', '④ 性格診断', ''].map(h => (
+                {['氏名', 'メール', '実技テスト', 'スコア', '性格診断', ''].map(h => (
                   <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -429,9 +429,15 @@ export default function Recruitment() {
                     {/* 性格診断列 */}
                     <td style={{ padding: '10px 14px' }}>
                       {!passedFirst ? (
-                        /* 一次面接通過前：解放ボタン */
+                        /* 一次面接通過前：実技完了時のみ解放ボタンが押せる */
                         <button onClick={() => handlePassFirstInterview(c.id)}
-                          style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#94a3b8', cursor: 'pointer' }}>
+                          disabled={c.status !== 'completed'}
+                          title={c.status !== 'completed' ? '実技テスト完了後に押せます' : '一次面接通過として性格診断を解放'}
+                          style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5,
+                            border: `1px solid ${c.status === 'completed' ? '#93c5fd' : '#e2e8f0'}`,
+                            background: c.status === 'completed' ? '#eff6ff' : '#f8fafc',
+                            color: c.status === 'completed' ? '#2563eb' : '#cbd5e1',
+                            cursor: c.status === 'completed' ? 'pointer' : 'not-allowed' }}>
                           一次面接通過 →
                         </button>
                       ) : (

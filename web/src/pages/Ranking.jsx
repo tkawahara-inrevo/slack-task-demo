@@ -37,6 +37,7 @@ export default function Ranking() {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
   const [elapsed, setElapsed]   = useState(null);
+  const [progress, setProgress] = useState(null); // { channels, done, current, threadsDone, threadsTotal, elapsedSec }
   const pollRef = useRef(null);
 
   const stopPoll = () => {
@@ -53,28 +54,37 @@ export default function Ranking() {
           localStorage.removeItem(JOB_KEY);
           setRanking(r.ranking || []);
           setElapsed(r.elapsed);
-                    setLoading(false);
+          setLoading(false);
+          setProgress(null);
         } else if (r.status === 'error') {
           stopPoll();
           localStorage.removeItem(JOB_KEY);
           setError(r.error || '集計に失敗しました');
-                    setLoading(false);
+          setLoading(false);
+          setProgress(null);
+        } else if (r.status === 'running') {
+          setProgress({ ...r.progress, elapsedSec: r.elapsed });
         }
       } catch (e) {
         stopPoll();
         localStorage.removeItem(JOB_KEY);
         setError(e.message || '集計に失敗しました');
-                setLoading(false);
+        setLoading(false);
+        setProgress(null);
       }
-    }, 3000);
+    }, 2000);
   };
 
-  // ページ読み込み時: 処理中のジョブがあれば再開
+  // ページ読み込み時: 処理中のジョブがあれば期間ごと復元
   useEffect(() => {
     const saved = localStorage.getItem(JOB_KEY);
     if (saved) {
       try {
-        const { jobId } = JSON.parse(saved);
+        const { jobId, from: f, to: t, category: cat, limit: lim } = JSON.parse(saved);
+        if (f) setFrom(f);
+        if (t) setTo(t);
+        if (cat) setCategory(cat);
+        if (lim) setLimit(lim);
         setLoading(true);
         startPolling(jobId);
       } catch { localStorage.removeItem(JOB_KEY); }
@@ -88,9 +98,10 @@ export default function Ranking() {
     setError('');
     setElapsed(null);
     setRanking([]);
-        try {
+    setProgress(null);
+    try {
       const { jobId } = await api.rankingStart({ from, to, category, limit });
-      localStorage.setItem(JOB_KEY, JSON.stringify({ jobId }));
+      localStorage.setItem(JOB_KEY, JSON.stringify({ jobId, from, to, category, limit }));
       startPolling(jobId);
     } catch (e) {
       setError(e.message || '集計の開始に失敗しました');
@@ -135,8 +146,52 @@ export default function Ranking() {
       </div>
 
       {loading && (
-        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: '0.85rem', color: '#6b7280' }}>
-          ⏳ Slackからデータを取得中...　別タブに移動しても処理は継続されます
+        <div style={{ marginBottom: 16, padding: '14px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: progress ? 10 : 0 }}>
+            <span style={{ fontSize: '1.1rem' }}>⏳</span>
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#0369a1' }}>
+                Slackからデータを取得中…
+                {progress?.elapsedSec && <span style={{ fontWeight: 400, color: '#64748b', marginLeft: 8 }}>{progress.elapsedSec}秒経過</span>}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>別タブに移動しても処理は継続されます</div>
+            </div>
+          </div>
+          {progress && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {/* チャンネル進捗 */}
+              {(progress.channels || []).map(ch => {
+                const done = (progress.done || []).includes(ch);
+                const isCurrent = progress.current === ch;
+                return (
+                  <div key={ch} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>{done ? '✅' : isCurrent ? '⚙️' : '⬜'}</span>
+                    <span style={{ fontSize: '0.82rem', color: done ? '#16a34a' : isCurrent ? '#0369a1' : '#94a3b8', fontWeight: isCurrent ? 700 : 400 }}>
+                      {ch}
+                      {isCurrent && progress.threadsTotal > 0 && (
+                        <span style={{ fontWeight: 400, color: '#64748b', marginLeft: 6 }}>
+                          スレッド取得中 {progress.threadsDone}/{progress.threadsTotal}件
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+              {/* スレッド進捗バー */}
+              {progress.current && progress.threadsTotal > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ background: '#e0f2fe', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                    <div style={{ background: '#0284c7', height: '100%', borderRadius: 4, transition: 'width 0.3s',
+                      width: `${Math.round((progress.threadsDone / progress.threadsTotal) * 100)}%` }} />
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 3 }}>
+                    {Math.round((progress.threadsDone / progress.threadsTotal) * 100)}%
+                    （スレッド1件あたり約1.2秒かかります）
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

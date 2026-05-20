@@ -230,7 +230,7 @@ export default function Recruitment() {
             finally { setSendingIds(new Set()); }
           }} disabled={sendingIds.size > 0 || pendingCount === 0}
             className="btn btn-primary" style={{ fontSize: 13 }}>
-            {sendingIds.size > 0 ? '送信中…' : `送信 ${pendingCount > 0 ? `(${pendingCount}名)` : ''}`}
+            {sendingIds.size > 0 ? '送信中…' : `実技テスト送信 ${pendingCount > 0 ? `(${pendingCount}名)` : ''}`}
           </button>
         </div>
       </div>

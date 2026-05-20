@@ -1514,7 +1514,7 @@ function registerDashboardApi(deps) {
       const { stage } = req.body;
       if (!stage) return res.status(400).json({ error: 'stage required' });
       const { rows: [row] } = await dbQuery(
-        "UPDATE recruitment_candidates SET stage=$1, updated_at=now() WHERE id=$2 AND team_id=$3 RETURNING *",
+        "UPDATE recruitment_candidates SET stage=$1 WHERE id=$2 AND team_id=$3 RETURNING *",
         [stage, req.params.id, teamId]
       );
       if (!row) return res.status(404).json({ error: 'not_found' });

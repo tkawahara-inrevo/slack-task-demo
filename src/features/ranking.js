@@ -91,7 +91,8 @@ async function fetchUserNames(client) {
 }
 
 // ── チャンネル別集計 ──────────────────────────────────────
-async function collectChannel(client, channelConfig, from, to, counter, onProgress) {
+async function collectChannel(botClient, replyClient, channelConfig, from, to, counter, onProgress) {
+  const client = botClient;
   if (!channelConfig.id) return;
 
   // 出退勤は親メッセージを少し遡って取得（月初めのスレッドを拾うため）
@@ -120,7 +121,7 @@ async function collectChannel(client, channelConfig, from, to, counter, onProgre
     const threadsToFetch = messages.filter(m => isHuman(m) && m.reply_count > 0);
     let done = 0;
     for (const msg of threadsToFetch) {
-      const replies = await fetchReplies(client, channelConfig.id, msg.ts);
+      const replies = await fetchReplies(replyClient, channelConfig.id, msg.ts);
       for (const r of replies.slice(1)) {
         if (isHuman(r) && inRange(r.ts, from, to)) inc(r.user);
       }
@@ -134,7 +135,7 @@ async function collectChannel(client, channelConfig, from, to, counter, onProgre
     const threadsToFetch = messages.filter(m => m.reply_count > 0 && !isExcluded(m));
     let done = 0;
     for (const msg of threadsToFetch) {
-      const replies = await fetchReplies(client, channelConfig.id, msg.ts);
+      const replies = await fetchReplies(replyClient, channelConfig.id, msg.ts);
       for (const r of replies.slice(1)) {
         if (isHuman(r) && inRange(r.ts, from, to)) inc(r.user);
       }
@@ -147,8 +148,8 @@ async function collectChannel(client, channelConfig, from, to, counter, onProgre
   console.log(`[ranking] ${channelConfig.name}: done`);
 }
 
-async function collectAndAggregate(client, from, to, category, limit, onProgress) {
-  const nameMap = await fetchUserNames(client);
+async function collectAndAggregate(botClient, replyClient, from, to, category, limit, onProgress) {
+  const nameMap = await fetchUserNames(botClient);
   onProgress?.({ step: 'users_loaded' });
 
   const counter = {};
@@ -156,7 +157,7 @@ async function collectAndAggregate(client, from, to, category, limit, onProgress
 
   // チャンネルは直列処理（APIレート制限の超過防止）
   for (const ch of channels) {
-    await collectChannel(client, ch, from, to, counter, onProgress);
+    await collectChannel(botClient, replyClient, ch, from, to, counter, onProgress);
   }
 
   const sortFn = {
@@ -184,9 +185,8 @@ async function collectAndAggregate(client, from, to, category, limit, onProgress
 const jobs = new Map();
 
 function registerRankingApi({ expressApp, authWithRole, slackClient }) {
-  // user tokenがあれば使用（conversations.repliesにuser tokenが必要な場合）
   const userToken = process.env.RANKING_SLACK_USER_TOKEN;
-  const client = userToken
+  const replyClient = userToken
     ? new (require('@slack/web-api').WebClient)(userToken)
     : slackClient;
 
@@ -211,7 +211,7 @@ function registerRankingApi({ expressApp, authWithRole, slackClient }) {
         const fromDate = new Date(`${from}T00:00:00+09:00`);
         const toDate   = new Date(`${to}T23:59:59+09:00`);
         const ranking  = await collectAndAggregate(
-          client, fromDate, toDate, category, Number(limit),
+          slackClient, replyClient, fromDate, toDate, category, Number(limit),
           ({ channel, phase, done, total }) => {
             const job = jobs.get(jobId);
             if (!job) return;

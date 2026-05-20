@@ -181,21 +181,51 @@ function sendPersonalityEmail(name, email, opts) {
 // PDF生成（「結果」シートをDriveに保存してURLを返す）
 // ================================================================
 function generatePdfForCandidate(candidateId, name) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('結果');
-  if (!sheet) throw new Error('「結果」シートが見つかりません');
+  const ss      = SpreadsheetApp.getActiveSpreadsheet();
+  const result  = ss.getSheetByName('結果');
+  if (!result) throw new Error('「結果」シートが見つかりません');
 
-  // スプレッドシートと同じフォルダに保存（権限問題を回避）
+  // 回答シートから対象者の行を探してコピー
+  const sheetName = getProps().getProperty('RESPONSE_SHEET_NAME') || 'フォームの回答 1';
+  const nameCol   = Number(getProps().getProperty('NAME_COLUMN') || 2);
+  const respSheet = ss.getSheetByName(sheetName);
+
+  if (respSheet && name) {
+    const dataRange = respSheet.getDataRange().getValues();
+    const normName  = (n) => (n || '').replace(/　/g, ' ').replace(/\s+/g, '').trim();
+    const targetName = normName(name);
+
+    // 最新の回答から逆順で検索（同名が複数いる場合は最新を使用）
+    let targetRow = -1;
+    for (let i = dataRange.length - 1; i >= 1; i--) {
+      const rowName = normName(String(dataRange[i][nameCol - 1] || ''));
+      if (rowName === targetName || rowName.includes(targetName) || targetName.includes(rowName)) {
+        targetRow = i;
+        break;
+      }
+    }
+
+    if (targetRow >= 0) {
+      // 対象者の回答行を「結果」シートの2行目にコピー
+      const srcRange = respSheet.getRange(targetRow + 1, 1, 1, dataRange[targetRow].length);
+      const dstRange = result.getRange(2, 1, 1, dataRange[targetRow].length);
+      srcRange.copyTo(dstRange, SpreadsheetApp.CopyPasteType.PASTE_VALUES, false);
+      SpreadsheetApp.flush(); // 数式の再計算を待つ
+      Utilities.sleep(1000);
+    }
+  }
+
+  // PDFエクスポート
   const ssFile  = DriveApp.getFileById(ss.getId());
   const parents = ssFile.getParents();
   const folder  = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
-  const url    = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?';
-  const opts   = { exportFormat:'pdf', format:'pdf', size:'A4', portrait:false,
-                   fitw:true, sheetnames:false, printtitle:false, pagenumbers:true,
-                   gridlines:false, fzr:false, gid:sheet.getSheetId() };
-  const query  = Object.keys(opts).map(k => k + '=' + opts[k]).join('&');
-  const token  = ScriptApp.getOAuthToken();
-  const resp   = UrlFetchApp.fetch(url + query, { headers: { Authorization: 'Bearer ' + token } });
+  const url     = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?';
+  const opts    = { exportFormat:'pdf', format:'pdf', size:'A4', portrait:false,
+                    fitw:true, sheetnames:false, printtitle:false, pagenumbers:true,
+                    gridlines:false, fzr:false, gid:result.getSheetId() };
+  const query   = Object.keys(opts).map(k => k + '=' + opts[k]).join('&');
+  const token   = ScriptApp.getOAuthToken();
+  const resp    = UrlFetchApp.fetch(url + query, { headers: { Authorization: 'Bearer ' + token } });
 
   const date = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
   const file = folder.createFile(resp.getBlob().setName((name || candidateId) + '_適性診断_' + date + '.pdf'));

@@ -12,7 +12,7 @@
 // 3. installScanner() を1回手動実行
 // ================================================================
 
-const FORM_URL = 'https://forms.gle/NmQNRrxn9QNwycCL6';
+const PERSONALITY_PERSONALITY_FORM_URL = 'https://forms.gle/NmQNRrxn9QNwycCL6';
 
 function getProps() {
   return PropertiesService.getScriptProperties();
@@ -161,8 +161,8 @@ function sendPersonalityEmail(name, email, opts) {
   opts = opts || {};
   const subject = opts.emailSubject || '【inrevo】適性診断のご案内';
   const body = opts.emailBody
-    ? opts.emailBody.replace(/\{name\}/g, name).replace(/\{url\}/g, FORM_URL)
-    : `${name} 様\n\nお世話になっております。\ninrevo 採用担当です。\n\n選考のご案内として、適性診断のご回答をお願いします。\n以下のURLよりご回答ください（所要時間：約10分）。\n\n${FORM_URL}\n\nご不明な点はお気軽にご連絡ください。\n\ninrevo 採用担当`;
+    ? opts.emailBody.replace(/\{name\}/g, name).replace(/\{url\}/g, PERSONALITY_FORM_URL)
+    : `${name} 様\n\nお世話になっております。\ninrevo 採用担当です。\n\n選考のご案内として、適性診断のご回答をお願いします。\n以下のURLよりご回答ください（所要時間：約10分）。\n\n${PERSONALITY_FORM_URL}\n\nご不明な点はお気軽にご連絡ください。\n\ninrevo 採用担当`;
 
   const fromEmail = opts.fromEmail || getProps().getProperty('EMAIL_FROM');
   if (fromEmail) {

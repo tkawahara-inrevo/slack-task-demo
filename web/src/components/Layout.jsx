@@ -188,6 +188,7 @@ export default function Layout({ children }) {
     { to: '/crm', label: 'CRM' },
     { to: '/crm/leads', label: 'リード管理' },
     ...(rpoAccess ? [{ to: '/rpo', label: '案件管理' }] : []),
+    { to: '/an', label: 'AN一覧' },
     { to: '/legal', label: '法務' },
   ];
 
@@ -217,7 +218,7 @@ export default function Layout({ children }) {
             {navLinks.map(({ to, label, end }) => (
               <NavLink key={to} to={to} end={end} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>{label}</NavLink>
             ))}
-            <DropdownNav label="ヒトトレ" matchPaths={['/crm', '/rpo', '/legal']} items={hitotoreItems} />
+            <DropdownNav label="ヒトトレ" matchPaths={['/crm', '/rpo', '/legal', '/an']} items={hitotoreItems} />
             {adminLink && <NavLink to={adminLink} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>Corp</NavLink>}
           </div>
 

@@ -16,9 +16,9 @@ const COLOR_OPTIONS = [
 const EMPTY_FORM = { name: '', color: 'Ocean', plan: 'guarantee', crmDeal: null, hrAssigneeId: '', driveFolder: null };
 
 const PHASES = [
-  { key: 'cr',    label: 'CR',    desc: '初回インタビュー', color: '#8b5cf6' },
-  { key: 'st_an', label: 'ST/AN', desc: '分析・媒体調査',   color: '#f59e0b' },
-  { key: 'dr',    label: 'DR',    desc: '最終判断・承認',   color: '#ef4444' },
+  { key: 'dr1',   label: 'DR①',  desc: '初期対応',        color: '#8b5cf6' },
+  { key: 'cr1',   label: 'CR①',  desc: '初回インタビュー', color: '#f59e0b' },
+  { key: 'dr2',   label: 'DR②',  desc: '二次分析・KO',     color: '#ef4444' },
   { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',       color: '#3b82f6' },
 ];
 

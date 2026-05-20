@@ -38,6 +38,7 @@ import SalesPerformance from './pages/crm/SalesPerformance'
 import LeadsDashboard from './pages/crm/LeadsDashboard'
 import SlackWorkflows from './pages/SlackWorkflows'
 import LegalHub from './pages/legal/LegalHub'
+import AnList from './pages/an/AnList'
 import './App.css'
 
 function App() {
@@ -82,6 +83,7 @@ function App() {
         <Route path="/crm/pipeline" element={<Pipeline />} />
         <Route path="/crm/customers" element={<CustomerList />} />
         <Route path="/legal" element={<LegalHub />} />
+        <Route path="/an" element={<AnList />} />
         <Route path="/rpo" element={<ClientList />} />
         <Route path="/rpo/summary" element={<RpoSummary />} />
         <Route path="/rpo/workload" element={<RpoWorkload />} />

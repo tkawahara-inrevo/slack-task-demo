@@ -635,36 +635,40 @@ function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers 
 
 // ─── フェーズ管理 ─────────────────────────────────────
 const RPO_PHASES = [
-  { key: 'cr',    label: 'CR',    desc: '初回インタビュー', color: '#8b5cf6' },
-  { key: 'st_an', label: 'ST/AN', desc: '分析・媒体調査',   color: '#f59e0b' },
-  { key: 'dr',    label: 'DR',    desc: '最終判断・承認',   color: '#ef4444' },
-  { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',       color: '#3b82f6' },
+  { key: 'dr1',   label: 'DR①',  desc: '初期対応',           color: '#8b5cf6' },
+  { key: 'cr1',   label: 'CR①',  desc: '初回インタビュー',    color: '#f59e0b' },
+  { key: 'dr2',   label: 'DR②',  desc: '二次分析・KO',        color: '#ef4444' },
+  { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',          color: '#3b82f6' },
 ];
 
+// 7ステップフロー（並行進行あり）
+// ① 担当アサイン → ② 一次分析・カルテ・メアド・初回MTG調整（DR）
+// ③ 初回MTG（DR） → ④ 初回インタビュー（CR）→ ⑤ 二次分析（DR）
+// ⑥ 求人票作成（CR）→ ⑦ KICKOFF MTG（DR）
 const PHASE_CHECKLISTS = {
-  cr: [
-    { key: 'interview_done',    label: '初回インタビュー実施済み' },
-    { key: 'hearing_recorded',  label: 'ヒアリング内容を記録済み' },
-    { key: 'karte_requested',   label: 'カルテ記入をクライアントに依頼済み' },
-    { key: 'strategy_aligned',  label: '採用戦略の方向性をクライアントと合意' },
+  dr1: [
+    { key: 'assigned',        label: '① 担当アサイン済み' },
+    { key: 'analysis1_done',  label: '② 一次分析完了' },
+    { key: 'karte_sent',      label: '② カルテ送付済み' },
+    { key: 'email_collected', label: '② メアド回収済み' },
+    { key: 'mtg1_scheduled',  label: '② 初回MTG日程調整済み' },
+    { key: 'mtg1_done',       label: '③ 初回MTG実施済み' },
   ],
-  st_an: [
-    { key: 'swot_done',         label: 'SWOT / 4C分析完了' },
-    { key: 'media_surveyed',    label: '利用候補媒体の調査完了' },
-    { key: 'media_negotiated',  label: '媒体への問い合わせ・価格交渉完了' },
-    { key: 'budget_estimated',  label: '費用感・予算案を作成済み' },
+  cr1: [
+    { key: 'interview_done',  label: '④ 初回インタビュー実施済み（テキスト）' },
+    { key: 'interview_saved', label: '④ インタビュー内容を記録済み' },
   ],
-  dr: [
-    { key: 'media_decided',     label: '利用媒体を最終決定' },
-    { key: 'approval_ceo',      label: '代表の承認取得済み' },
-    { key: 'approval_st_lead',  label: 'STリーダーの承認取得済み' },
-    { key: 'cs_briefed',        label: 'CS/OPへクライアント情報を引き継ぎ済み' },
+  dr2: [
+    { key: 'analysis2_done',  label: '⑤ 二次分析完了' },
+    { key: 'jobpost_done',    label: '⑥ 求人票作成完了（CR）' },
+    { key: 'ko_scheduled',    label: '⑦ KICKOFF MTG日程調整済み' },
+    { key: 'ko_done',         label: '⑦ KICKOFF MTG実施済み' },
   ],
   cs_op: [
-    { key: 'job_posting_done',  label: '求人票作成・媒体掲載完了' },
-    { key: 'applicant_tracking',label: '応募者管理を開始' },
-    { key: 'client_reported',   label: 'クライアントへ進捗報告実施' },
-    { key: 'offer_issued',      label: '内定通知を実施' },
+    { key: 'media_posted',       label: '求人媒体掲載開始' },
+    { key: 'applicant_tracking', label: '応募者管理を開始' },
+    { key: 'client_reported',    label: 'クライアントへ進捗報告実施' },
+    { key: 'offer_issued',       label: '内定通知を実施' },
   ],
 };
 

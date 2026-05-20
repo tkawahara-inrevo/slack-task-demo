@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { randomUUID } = require("crypto");
 const { registerRpoApi } = require("./rpo-api");
 const { registerLegalApi } = require("./legal-api");
+const { registerAnApi } = require("./an-api");
 const { registerKintoneApi } = require("./kintone-api");
 const { registerDriveApi } = require("./drive-api");
 const { registerCrmApi, registerDailyReportApi, registerChannelTargetsApi } = require("./crm-api");
@@ -4235,6 +4236,9 @@ function registerDashboardApi(deps) {
 
   // 法務案件管理API
   registerLegalApi({ expressApp, authWithRole });
+
+  // AN依頼管理API
+  registerAnApi({ expressApp, authWithRole, slackApp: deps.boltApp, teamId: process.env.SLACK_TEAM_ID || 'T086C06L5V0' });
 
   // kintone連携API
   registerKintoneApi({ expressApp, authWithRole, adminOnly });

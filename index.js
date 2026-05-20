@@ -2998,6 +2998,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     buildThreadCardBlocks: (...args) => buildThreadCardBlocks(...args),
     dbListPersonalFilters,
     dbGetPersonalFilterMemberIds,
+    boltApp: app,
   });
 
   // Root redirect

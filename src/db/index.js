@@ -683,6 +683,30 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
 
+  // AN依頼管理
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS an_requests (
+      id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      team_id       TEXT NOT NULL,
+      channel_id    TEXT,
+      message_ts    TEXT,
+      company_name  TEXT,
+      crm_deal_id   TEXT,
+      sales_person  TEXT,
+      request_type  TEXT,
+      priority      TEXT,
+      detail        TEXT,
+      raw_text      TEXT,
+      answer        TEXT,
+      answer_by     TEXT,
+      answer_at     TIMESTAMPTZ,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_an_requests_team ON an_requests(team_id, created_at DESC)`).catch(() => {});
+
   // 法務案件管理
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS legal_cases (

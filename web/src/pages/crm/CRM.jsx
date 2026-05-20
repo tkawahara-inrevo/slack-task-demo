@@ -479,7 +479,6 @@ const SYSTEM_FIELDS = [
     '後払い（媒体費用INREVO持ち)）','後払い（媒体費用クライアント持ち）',
     '変動プラン',
   ] },
-  { name:'payment_type',    label:'支払方式（独自管理）', defaults:['一括','分割','月払い'] },
   { name:'employment_type', label:'採用形態', defaults:['新卒','中途','アルバイト/インターン','業務委託'] },
   { name:'inflow_source', label:'流入経路', defaults:[
     'UNLIMT','カイマク','GLOXY','BrainNew','株式会社cluein','十方株式会社','株式会社Any Arts',

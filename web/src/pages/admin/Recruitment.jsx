@@ -519,9 +519,6 @@ export default function Recruitment() {
                                 📊 結果を見る
                               </button>
                             )}
-                            {settings?.personality_sheet_url && (
-                              <a href={settings.personality_sheet_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3b82f6' }}>結果→</a>
-                            )}
                           </div>
                         </div>
                       )}

@@ -87,33 +87,18 @@ async function fetchUserNames(botClient) {
   return map;
 }
 
-// reply_users を使って replies API 呼び出しを最小化
-// reply_users は最大5名 → それを超える場合だけ API を呼ぶ（実質ほぼなし）
+// 同一スレッドへの複数投稿も1件ずつカウント（常にAPIで取得）
 async function processReplies(client, channelId, messages, from, to, counter, key) {
   const replyMessages = messages.filter(m => m.reply_count && m.ts);
   for (const msg of replyMessages) {
-    const replyUsers = msg.reply_users || [];
-    const replyUsersCount = msg.reply_users_count || replyUsers.length;
-
-    if (replyUsers.length >= replyUsersCount) {
-      // reply_users で全員カバーできる → API不要
-      for (const uid of replyUsers) {
-        if (!counter[uid]) counter[uid] = { chat: 0, report_in: 0, report_out: 0 };
-        counter[uid][key || 'chat']++;
+    const replies = await fetchReplies(client, channelId, msg.ts);
+    for (const r of replies.slice(1)) { // 先頭は親メッセージなのでスキップ
+      if (isHuman(r) && inRange(r.ts, from, to)) {
+        if (!counter[r.user]) counter[r.user] = { chat: 0, report_in: 0, report_out: 0 };
+        counter[r.user][key || 'chat']++;
       }
-    } else {
-      // 5名超えのスレッド（ほぼ発生しない）→ API で取得
-      const replies = await fetchReplies(client, channelId, msg.ts);
-      const seen = new Set();
-      for (const r of replies.slice(1)) {
-        if (isHuman(r) && inRange(r.ts, from, to) && !seen.has(r.user)) {
-          seen.add(r.user);
-          if (!counter[r.user]) counter[r.user] = { chat: 0, report_in: 0, report_out: 0 };
-          counter[r.user][key || 'chat']++;
-        }
-      }
-      await sleep(500);
     }
+    await sleep(300);
   }
 }
 

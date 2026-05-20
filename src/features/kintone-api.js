@@ -27,6 +27,11 @@ const KINTONE_DEAL_FIELD_MAP = {
 
 // kintone_cache から deals テーブルへマッピングを反映
 async function syncDealsFromKintoneCache() {
+  // kintoneが正とみなして常に上書きするフィールド
+  const ALWAYS_UPDATE = new Set(['order_date', 'yomi', 'inflow_date', 'first_meeting_date',
+                                  'conclusion_date', 'next_action_date', 'initial_fee',
+                                  'contract_type', 'lost_reason', 'inflow_source',
+                                  'guarantee_salary', 'contract_months']);
   try {
     const { rows } = await dbQuery(
       `SELECT record_id, company_name, data FROM kintone_cache WHERE app_id='102'`
@@ -39,15 +44,26 @@ async function syncDealsFromKintoneCache() {
       for (const [kField, dbCol] of Object.entries(KINTONE_DEAL_FIELD_MAP)) {
         const val = d[kField];
         if (val == null || val === '') continue;
-        sets.push(`${dbCol}=COALESCE(${dbCol}, $${vals.length + 1})`);
+        if (ALWAYS_UPDATE.has(dbCol)) {
+          sets.push(`${dbCol}=$${vals.length + 1}`);
+        } else {
+          sets.push(`${dbCol}=COALESCE(${dbCol}, $${vals.length + 1})`);
+        }
         vals.push(val);
+      }
+
+      // ヨミから status を導出（kintoneを正とする）
+      const yomi = d['ヨミ'];
+      if (yomi) {
+        const newStatus = yomi === '受注' ? 'won' : yomi === '失注' ? 'lost' : yomi === '見送り' ? 'dormant' : 'active';
+        sets.push(`status=$${vals.length + 1}`);
+        vals.push(newStatus);
       }
 
       if (sets.length === 0) continue;
 
-      // kintone_record_id でマッチして deals を更新（NULLのカラムのみ上書き）
       await dbQuery(
-        `UPDATE deals SET ${sets.join(', ')}
+        `UPDATE deals SET ${sets.join(', ')}, updated_at=now()
          WHERE data->>'kintone_record_id'=$1`,
         vals
       ).catch(() => {});

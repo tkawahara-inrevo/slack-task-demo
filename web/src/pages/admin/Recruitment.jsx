@@ -69,7 +69,6 @@ export default function Recruitment() {
 
   // 一次面接通過 → 性格診断ステージへ
   const handlePassFirstInterview = async (id) => {
-    if (!window.confirm('一次面接通過として、性格診断を解放しますか？')) return;
     await api.recruitmentStage(id, 'personality').catch(() => {});
     update(id, { stage: 'personality' });
   };

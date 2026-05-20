@@ -34,7 +34,12 @@ function scanNewResponses() {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) { console.log(`[scanner] シート "${sheetName}" が見つかりません`); return; }
 
-  const lastRow = sheet.getLastRow();
+  // A列（タイムスタンプ）に値がある最終行を取得（空行・数式行を無視）
+  const tsValues = sheet.getRange('A:A').getValues().flat();
+  let lastRow = 1;
+  for (let i = tsValues.length - 1; i >= 1; i--) {
+    if (tsValues[i]) { lastRow = i + 1; break; } // 1-indexed
+  }
   if (lastRow < 2) return; // データなし
 
   // 前回処理済みの行番号を取得（初回は1行目=ヘッダーのみ）

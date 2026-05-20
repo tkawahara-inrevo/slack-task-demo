@@ -377,7 +377,7 @@ export default function Recruitment() {
           <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['氏名', 'メール', '実技テスト', 'スコア', '性格診断', ''].map(h => (
+                {['候補者', '実技テスト', 'スコア', '性格診断', ''].map(h => (
                   <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b7280', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -388,8 +388,10 @@ export default function Recruitment() {
                 const passedFirst = c.stage === 'personality';
                 return (
                   <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '10px 14px', fontWeight: 600, color: '#111827' }}>{c.name}</td>
-                    <td style={{ padding: '10px 14px', color: '#6b7280', fontSize: 12 }}>{c.email}</td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <div style={{ fontWeight: 600, color: '#111827' }}>{c.name}</div>
+                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>{c.email}</div>
+                    </td>
 
                     {/* 実技テスト列 */}
                     <td style={{ padding: '10px 14px' }}>

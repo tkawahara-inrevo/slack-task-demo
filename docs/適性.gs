@@ -210,8 +210,11 @@ function generatePdfForCandidate(candidateId, name) {
       const srcRange = respSheet.getRange(targetRow + 1, 1, 1, dataRange[targetRow].length);
       const dstRange = result.getRange(2, 1, 1, dataRange[targetRow].length);
       srcRange.copyTo(dstRange, SpreadsheetApp.CopyPasteType.PASTE_VALUES, false);
-      SpreadsheetApp.flush(); // 数式の再計算を待つ
-      Utilities.sleep(1000);
+      // =B2 / =A2 の参照先を明示的にセット（数式が参照する前に確実に値を入れる）
+      result.getRange('A2').setValue(dataRange[targetRow][0]);              // タイムスタンプ
+      result.getRange('B2').setValue(dataRange[targetRow][nameCol - 1]);    // 氏名
+      SpreadsheetApp.flush();
+      Utilities.sleep(1500);
     }
   }
 

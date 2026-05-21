@@ -1599,7 +1599,10 @@ function registerDashboardApi(deps) {
           candidateId: c.id, name: c.name,
         }),
       });
-      const gasData = await gasRes.json();
+      const rawText = await gasRes.text();
+      let gasData;
+      try { gasData = JSON.parse(rawText); }
+      catch { return res.status(500).json({ error: `GASがHTMLを返しました。ウェブアプリとして再デプロイしてURLを更新してください。(status: ${gasRes.status})` }); }
       if (!gasData.ok) return res.status(500).json({ error: gasData.error || 'PDF生成エラー' });
 
       // URLをDBにキャッシュ保存
@@ -1663,7 +1666,7 @@ function registerDashboardApi(deps) {
         [cand.id]
       );
 
-      // Slack通知
+      // Slack通知（PDF生成してボタン付きで送信）
       if (cand.notify_channel_id) {
         try {
           const { WebClient } = require('@slack/web-api');
@@ -1671,9 +1674,49 @@ function registerDashboardApi(deps) {
           const mention = cand.notify_mention_user_id
             ? cand.notify_mention_user_id.split(',').map(u => `<@${u.trim()}>`).join(' ')
             : '';
+
+          // PDFを生成してURLを取得
+          let pdfUrl = null;
+          try {
+            const settingsRes = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [cand.team_id]);
+            const s = settingsRes.rows[0];
+            if (s?.personality_gas_url) {
+              const gasRes = await fetch(s.personality_gas_url, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  secret: s.personality_webhook_secret || s.webhook_secret || '',
+                  action: 'generatePdf', candidateId: cand.id, name: cand.name,
+                }),
+              });
+              const rawText = await gasRes.text();
+              const gasData = JSON.parse(rawText);
+              if (gasData.ok && gasData.pdfUrl) {
+                pdfUrl = gasData.pdfUrl;
+                await dbQuery("UPDATE recruitment_candidates SET personality_pdf_url=$1 WHERE id=$2", [pdfUrl, cand.id]).catch(() => {});
+              }
+            }
+          } catch (pdfErr) { console.error('[適性診断通知] PDF生成エラー:', pdfErr.message); }
+
+          const blocks = [
+            {
+              type: 'section',
+              text: { type: 'mrkdwn', text: `${mention}【適性診断完了】*${cand.name}* さんが適性診断に回答しました` },
+            },
+            ...(pdfUrl ? [{
+              type: 'actions',
+              elements: [{
+                type: 'button',
+                text: { type: 'plain_text', text: '📄 結果PDFを開く' },
+                url: pdfUrl,
+                style: 'primary',
+              }],
+            }] : []),
+          ];
+
           await wc.chat.postMessage({
             channel: cand.notify_channel_id,
-            text: `${mention}【適性診断完了】*${cand.name}* さんが適性診断に回答しました`,
+            text: `${mention}【適性診断完了】${cand.name} さんが適性診断に回答しました`,
+            blocks,
           });
         } catch (slackErr) { console.error('[適性診断通知] Slack送信エラー:', slackErr.message); }
       }

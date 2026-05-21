@@ -265,6 +265,53 @@ function jsonRes(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
+// ================================================================
+// デバッグ：スクリプトエディタから直接実行して実行ログで確認
+// ================================================================
+function testDebug() {
+  const ss        = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = getProps().getProperty('RESPONSE_SHEET_NAME') || 'フォームの回答 1';
+  const nameCol   = Number(getProps().getProperty('NAME_COLUMN') || 2);
+  const respSheet = ss.getSheetByName(sheetName);
+
+  if (!respSheet) {
+    const names = ss.getSheets().map(s => s.getName()).join(', ');
+    Browser.msgBox(`❌ シート「${sheetName}」が見つかりません\n存在するシート: ${names}`);
+    return;
+  }
+
+  const testName  = '河原 宝'; // ← テストしたい名前に変更
+  const normName  = (n) => (n || '').replace(/　/g, ' ').replace(/\s+/g, '').trim();
+  const dataRange = respSheet.getDataRange().getValues();
+
+  let found = null;
+  for (let i = dataRange.length - 1; i >= 1; i--) {
+    const rowName = normName(String(dataRange[i][nameCol - 1] || ''));
+    if (rowName === normName(testName) || rowName.includes(normName(testName)) || normName(testName).includes(rowName)) {
+      found = { row: i + 1, name: dataRange[i][nameCol - 1], timestamp: dataRange[i][0] };
+      break;
+    }
+  }
+
+  const resultSheet = ss.getSheetByName('結果');
+  const c5 = resultSheet ? resultSheet.getRange('C5').getValue() : '「結果」シートなし';
+  const f5 = resultSheet ? resultSheet.getRange('F5').getValue() : '「結果」シートなし';
+
+  const msg = [
+    `【シート名】${sheetName}`,
+    `【総行数】${dataRange.length}行`,
+    `【検索名】${testName}`,
+    found
+      ? `【検出】行${found.row} 名前:${found.name} 日時:${found.timestamp}`
+      : `【検出】見つかりません`,
+    `【C5現在値】${c5}`,
+    `【F5現在値】${f5}`,
+  ].join('\n');
+
+  Browser.msgBox(msg);
+  Logger.log(msg);
+}
+
 // 手動PDF保存（シート上のPDFボタン用）
 function saveRangeAsPDF() {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();

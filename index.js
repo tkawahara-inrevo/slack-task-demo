@@ -1990,15 +1990,39 @@ app.function(
         teamId = await getTeamIdViaAuthTest(client);
       }
 
-      // WFから assignee_group_id が渡された場合はそのグループを使用（経理・人事など部署別対応）
+      // メッセージのユーザーグループメンションからアサイン先を自動判別
+      // relay-botと同じロジック：@corp-keiri → 経理G、@corp-soumu → 総務G
+      const GROUP_ROUTING = {
+        "S08HTC8S2EQ": { id: "S08HTC8S2EQ", handle: "corp-keiri"  }, // 経理
+        "S08RD9JL137": { id: "S08RD9JL137", handle: "corp-soumu"  }, // 総務
+      };
+      let detectedGroup = null;
+      if (channelId && msgTs) {
+        try {
+          const histRes = await client.conversations.history({
+            channel: channelId, latest: msgTs, inclusive: true, limit: 1,
+          });
+          const msg = histRes.messages?.[0];
+          if (msg) {
+            const text = msg.text || "";
+            const mentionedIds = [...text.matchAll(/<!subteam\^(S[0-9A-Z]+)>/g)].map(m => m[1]);
+            for (const gid of mentionedIds) {
+              if (GROUP_ROUTING[gid]) { detectedGroup = GROUP_ROUTING[gid]; break; }
+            }
+          }
+        } catch (_) {}
+      }
+
       const inputGroupId = String(inputs?.assignee_group_id || inputs?.assigneeGroupId || '').trim() || null;
       const corpGroupId =
         inputGroupId ||
+        detectedGroup?.id ||
         process.env.CORP_SOUMU_USERGROUP_ID ||
         process.env.CORP_SYSTEM_USERGROUP_ID ||
         "";
       const corpHandle = (
         inputs?.assignee_group_handle || inputs?.assigneeGroupHandle ||
+        detectedGroup?.handle ||
         process.env.CORP_SOUMU_HANDLE ||
         process.env.CORP_SYSTEM_HANDLE ||
         "corp-soumu"

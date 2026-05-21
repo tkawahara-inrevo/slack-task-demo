@@ -365,6 +365,28 @@ function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers 
       .catch(() => {});
   }, [client.id]);
 
+  // CRM情報を自動同期（crmDealIdがある場合、初回ロード時にprojectInfoへ反映）
+  useEffect(() => {
+    const dealId = client.data?.crmDealId || client.data?.dealId;
+    if (!dealId) return;
+    api.rpoCrmInfo(client.id).then(r => {
+      const deal = r.deal;
+      if (!deal) return;
+      const contractAmount = deal.unit_price && deal.guarantee_count
+        ? Number(deal.unit_price) * Number(deal.guarantee_count)
+        : Number(deal.initial_fee) || 0;
+      const patch = {};
+      const pi = client.data?.projectInfo || {};
+      if (!pi.inrevoContact && deal.sales_person)  patch.inrevoContact  = deal.sales_person;
+      if (!pi.startDate    && deal.order_date)      patch.startDate      = String(deal.order_date).slice(0,10);
+      if (!pi.contractAmount && contractAmount > 0) patch.contractAmount = contractAmount;
+      if (!pi.hiringTarget && deal.hiring_target)   patch.hiringTarget   = deal.hiring_target;
+      if (Object.keys(patch).length > 0) {
+        onUpdate({ projectInfo: { ...pi, ...patch } });
+      }
+    }).catch(() => {});
+  }, [client.id]);
+
   // 予算計算
   const totalBudget    = Number(info.totalBudget)    || 0;
   const contractAmount = Number(info.contractAmount) || 0;
@@ -412,8 +434,8 @@ function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers 
 
   return (
     <div className="tab-section">
-      {/* フェーズチェックリスト */}
-      <PhaseChecklist client={client} onUpdate={onUpdate} onPhaseChange={onPhaseChange} />
+      {/* やること一覧（フラット） */}
+      <FlatTaskList client={client} onUpdate={onUpdate} teamUsers={teamUsers} />
 
       {/* CRM連携情報 */}
       {(client.data?.crmDealId || client.data?.dealId) && (
@@ -633,92 +655,83 @@ function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers 
   );
 }
 
-// ─── フェーズ管理 ─────────────────────────────────────
-const RPO_PHASES = [
-  { key: 'dr1',   label: 'DR①',  desc: '初期対応',           color: '#8b5cf6' },
-  { key: 'cr1',   label: 'CR①',  desc: '初回インタビュー',    color: '#f59e0b' },
-  { key: 'dr2',   label: 'DR②',  desc: '二次分析・KO',        color: '#ef4444' },
-  { key: 'cs_op', label: 'CS/OP', desc: '採用活動中',          color: '#3b82f6' },
+// ─── やること一覧（フラット・フェーズなし） ─────────────
+const RPO_TASKS = [
+  { key: 'assigned',          label: '担当アサイン済み' },
+  { key: 'analysis1_done',    label: '一次分析完了' },
+  { key: 'karte_sent',        label: 'カルテ送付済み' },
+  { key: 'email_collected',   label: 'メアド回収済み' },
+  { key: 'mtg1_scheduled',    label: '初回MTG日程調整済み' },
+  { key: 'mtg1_done',         label: '初回MTG実施済み' },
+  { key: 'interview_done',    label: '初回インタビュー実施済み' },
+  { key: 'interview_saved',   label: 'インタビュー内容を記録済み' },
+  { key: 'analysis2_done',    label: '二次分析完了' },
+  { key: 'jobpost_done',      label: '求人票作成完了' },
+  { key: 'ko_scheduled',      label: 'KICKOFF MTG日程調整済み' },
+  { key: 'ko_done',           label: 'KICKOFF MTG実施済み' },
+  { key: 'media_posted',      label: '求人媒体掲載開始' },
+  { key: 'client_reported',   label: 'クライアントへ進捗報告実施' },
+  { key: 'offer_issued',      label: '内定通知を実施' },
 ];
 
-// 7ステップフロー（並行進行あり）
-// ① 担当アサイン → ② 一次分析・カルテ・メアド・初回MTG調整（DR）
-// ③ 初回MTG（DR） → ④ 初回インタビュー（CR）→ ⑤ 二次分析（DR）
-// ⑥ 求人票作成（CR）→ ⑦ KICKOFF MTG（DR）
-const PHASE_CHECKLISTS = {
-  dr1: [
-    { key: 'assigned',        label: '① 担当アサイン済み' },
-    { key: 'analysis1_done',  label: '② 一次分析完了' },
-    { key: 'karte_sent',      label: '② カルテ送付済み' },
-    { key: 'email_collected', label: '② メアド回収済み' },
-    { key: 'mtg1_scheduled',  label: '② 初回MTG日程調整済み' },
-    { key: 'mtg1_done',       label: '③ 初回MTG実施済み' },
-  ],
-  cr1: [
-    { key: 'interview_done',  label: '④ 初回インタビュー実施済み（テキスト）' },
-    { key: 'interview_saved', label: '④ インタビュー内容を記録済み' },
-  ],
-  dr2: [
-    { key: 'analysis2_done',  label: '⑤ 二次分析完了' },
-    { key: 'jobpost_done',    label: '⑥ 求人票作成完了（CR）' },
-    { key: 'ko_scheduled',    label: '⑦ KICKOFF MTG日程調整済み' },
-    { key: 'ko_done',         label: '⑦ KICKOFF MTG実施済み' },
-  ],
-  cs_op: [
-    { key: 'media_posted',       label: '求人媒体掲載開始' },
-    { key: 'applicant_tracking', label: '応募者管理を開始' },
-    { key: 'client_reported',    label: 'クライアントへ進捗報告実施' },
-    { key: 'offer_issued',       label: '内定通知を実施' },
-  ],
-};
-
-function PhaseChecklist({ client, onUpdate, onPhaseChange }) {
-  const currentPhase = client.phase || 'cr';
-  const ph = RPO_PHASES.find(p => p.key === currentPhase) || RPO_PHASES[0];
-  const items = PHASE_CHECKLISTS[currentPhase] || [];
-  const checklist = client.data?.checklist?.[currentPhase] || {};
+function FlatTaskList({ client, onUpdate, teamUsers = [] }) {
+  const tasks = client.data?.flat_tasks || {};
+  const done  = RPO_TASKS.filter(t => tasks[t.key]?.done).length;
+  const total = RPO_TASKS.length;
 
   const toggle = (key) => {
-    const updated = { ...checklist, [key]: !checklist[key] };
-    onUpdate({ checklist: { ...(client.data?.checklist || {}), [currentPhase]: updated } });
+    const cur = tasks[key] || {};
+    const isDone = !cur.done;
+    onUpdate({ flat_tasks: { ...tasks, [key]: { ...cur, done: isDone } } });
   };
 
-  const changePhase = async (newPhase) => {
-    try {
-      await api.rpoUpdateClient(client.id, { phase: newPhase });
-      onPhaseChange?.(newPhase);
-    } catch { alert('フェーズの更新に失敗しました'); }
+  const setAssignee = (key, userId) => {
+    const cur = tasks[key] || {};
+    onUpdate({ flat_tasks: { ...tasks, [key]: { ...cur, assignee_id: userId || null } } });
   };
 
-  const done  = items.filter(i => checklist[i.key]).length;
-  const total = items.length;
+  const setDue = (key, date) => {
+    const cur = tasks[key] || {};
+    onUpdate({ flat_tasks: { ...tasks, [key]: { ...cur, due_date: date || null } } });
+  };
+
+  const isOverdue = (t) => {
+    if (!t?.due_date || t?.done) return false;
+    return new Date(t.due_date) < new Date(new Date().toDateString());
+  };
 
   return (
-    <div style={{ background: 'var(--surface-2)', border: `1px solid ${ph.color}40`, borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--gray-700)' }}>現在のフェーズ</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {RPO_PHASES.map(p => (
-            <button key={p.key} onClick={() => p.key !== currentPhase && changePhase(p.key)}
-              style={{ padding: '3px 10px', borderRadius: 6, border: `1px solid ${p.color}`, background: p.key === currentPhase ? p.color : 'transparent', color: p.key === currentPhase ? '#fff' : p.color, fontWeight: 700, fontSize: '0.75rem', cursor: p.key === currentPhase ? 'default' : 'pointer' }}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: done === total ? '#10b981' : 'var(--gray-500)', fontWeight: 600 }}>
-          {done}/{total} 完了
-        </span>
+    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--gray-200)', borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--gray-700)' }}>やること一覧</span>
+        <span style={{ fontSize: '0.78rem', color: done === total ? '#10b981' : 'var(--gray-500)', fontWeight: 600 }}>{done}/{total} 完了</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 6 }}>
-        {items.map(item => (
-          <label key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '5px 8px', borderRadius: 6, background: checklist[item.key] ? '#10b98115' : 'var(--surface)', border: `1px solid ${checklist[item.key] ? '#10b98140' : 'var(--gray-200)'}` }}>
-            <input type="checkbox" checked={!!checklist[item.key]} onChange={() => toggle(item.key)}
-              style={{ width: 15, height: 15, accentColor: ph.color, flexShrink: 0 }} />
-            <span style={{ fontSize: '0.80rem', color: checklist[item.key] ? '#10b981' : 'var(--gray-700)', textDecoration: checklist[item.key] ? 'line-through' : 'none' }}>
-              {item.label}
-            </span>
-          </label>
-        ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {RPO_TASKS.map(item => {
+          const t = tasks[item.key] || {};
+          const overdue = isOverdue(t);
+          const assigneeName = teamUsers.find(u => u.userId === t.assignee_id)?.displayName?.split('/')[0]?.trim() || '';
+          return (
+            <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, background: t.done ? '#10b98108' : 'var(--surface)', border: `1px solid ${t.done ? '#10b98130' : overdue ? '#fca5a5' : 'var(--gray-200)'}` }}>
+              <input type="checkbox" checked={!!t.done} onChange={() => toggle(item.key)}
+                style={{ width: 15, height: 15, accentColor: '#10b981', flexShrink: 0, cursor: 'pointer' }} />
+              <span style={{ flex: 1, fontSize: '0.82rem', color: t.done ? '#10b981' : 'var(--gray-800)', textDecoration: t.done ? 'line-through' : 'none', fontWeight: t.done ? 400 : 500 }}>
+                {item.label}
+              </span>
+              {/* NA（担当者） */}
+              <select value={t.assignee_id || ''} onChange={e => setAssignee(item.key, e.target.value)}
+                title="担当者"
+                style={{ fontSize: '0.72rem', padding: '1px 4px', borderRadius: 5, border: '1px solid var(--gray-300)', background: 'var(--surface-2)', color: t.assignee_id ? 'var(--gray-700)' : 'var(--gray-400)', maxWidth: 90, cursor: 'pointer' }}>
+                <option value="">NA未設定</option>
+                {teamUsers.map(u => <option key={u.userId} value={u.userId}>{u.displayName?.split('/')[0]?.trim()}</option>)}
+              </select>
+              {/* 期日 */}
+              <input type="date" value={t.due_date ? t.due_date.slice(0,10) : ''} onChange={e => setDue(item.key, e.target.value)}
+                title="期日"
+                style={{ fontSize: '0.72rem', padding: '1px 4px', borderRadius: 5, border: `1px solid ${overdue ? '#fca5a5' : 'var(--gray-300)'}`, background: overdue ? '#fef2f2' : 'var(--surface-2)', color: overdue ? '#dc2626' : 'var(--gray-600)', width: 110, cursor: 'pointer' }} />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

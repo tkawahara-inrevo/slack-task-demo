@@ -574,23 +574,35 @@ export default function ClientList() {
                 </div>
               </div>
             )}
-            {/* Kanbanボード */}
-            <div style={{ display: 'flex', gap: 12, overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 16 }}>
-              {PHASES.map(phase => {
-                const cols = active.filter(c => (c.phase || 'cr') === phase.key);
+            {/* 案件リスト */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {active.map(client => {
+                const tasksDone = Object.values(client.data?.flat_tasks || {}).filter(t => t?.done).length;
+                const tasksTotal = 15;
                 return (
-                  <div key={phase.key} style={{ minWidth: 240, flex: '0 0 240px' }}>
-                    <div style={{ background: phase.color, color: '#fff', borderRadius: '8px 8px 0 0', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{phase.label}</span>
-                        <span style={{ fontSize: '0.72rem', opacity: 0.85, marginLeft: 6 }}>{phase.desc}</span>
+                  <div key={client.id} onClick={() => navigate(`/rpo/${client.id}`)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface)', borderRadius: 9, padding: '10px 14px', cursor: 'pointer', border: '1px solid var(--gray-200)', borderLeft: `4px solid ${colorOf(client.color)}` }}
+                    onMouseEnter={e => e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'}
+                    onMouseLeave={e => e.currentTarget.style.boxShadow='none'}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--gray-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 2 }}>{planLabel(client.plan)}{client.data?.hrAssigneeName ? ` · HR: ${client.data.hrAssigneeName.split('/')[0].trim()}` : ''}</div>
+                    </div>
+                    {/* 進捗バー */}
+                    <div style={{ flexShrink: 0, width: 120 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>進捗</span>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: tasksDone === tasksTotal ? '#10b981' : 'var(--gray-600)' }}>{tasksDone}/{tasksTotal}</span>
                       </div>
-                      <span style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 12, padding: '0 8px', fontSize: '0.78rem', fontWeight: 700 }}>{cols.length}</span>
+                      <div style={{ height: 5, background: 'var(--gray-200)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ width: `${(tasksDone/tasksTotal)*100}%`, height: '100%', background: tasksDone === tasksTotal ? '#10b981' : '#3b82f6', borderRadius: 3, transition: 'width 0.3s' }} />
+                      </div>
                     </div>
-                    <div style={{ background: 'var(--gray-100)', borderRadius: '0 0 8px 8px', padding: 8, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 100 }}>
-                      {cols.map(client => <KanbanCard key={client.id} client={client} />)}
-                      {cols.length === 0 && <div style={{ fontSize: '0.75rem', color: 'var(--gray-400)', textAlign: 'center', padding: '12px 0' }}>なし</div>}
-                    </div>
+                    {client.dash_team_id && !effectiveTeamId && (
+                      <span style={{ fontSize: '0.72rem', color: 'var(--gray-400)', flexShrink: 0 }}>{teams.find(t => t.id === client.dash_team_id)?.name || ''}</span>
+                    )}
+                    <button onClick={e => archiveClient(e, client.id)} title="案件を終了する"
+                      style={{ fontSize: '0.68rem', padding: '1px 8px', borderRadius: 4, border: '1px solid var(--gray-300)', background: 'none', color: 'var(--gray-400)', cursor: 'pointer', flexShrink: 0 }}>終了</button>
                   </div>
                 );
               })}

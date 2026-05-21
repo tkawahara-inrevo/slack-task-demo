@@ -1990,11 +1990,15 @@ app.function(
         teamId = await getTeamIdViaAuthTest(client);
       }
 
+      // WFから assignee_group_id が渡された場合はそのグループを使用（経理・人事など部署別対応）
+      const inputGroupId = String(inputs?.assignee_group_id || inputs?.assigneeGroupId || '').trim() || null;
       const corpGroupId =
+        inputGroupId ||
         process.env.CORP_SOUMU_USERGROUP_ID ||
         process.env.CORP_SYSTEM_USERGROUP_ID ||
         "";
       const corpHandle = (
+        inputs?.assignee_group_handle || inputs?.assigneeGroupHandle ||
         process.env.CORP_SOUMU_HANDLE ||
         process.env.CORP_SYSTEM_HANDLE ||
         "corp-soumu"

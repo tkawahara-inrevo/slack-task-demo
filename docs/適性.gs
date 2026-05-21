@@ -152,6 +152,30 @@ function doPost(e) {
       return jsonRes({ ok: true, pdfUrl: url });
     }
 
+    // デバッグ用：シートの状態を返す
+    if (data.action === 'debug') {
+      const { name } = data;
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sheetName = getProps().getProperty('RESPONSE_SHEET_NAME') || 'フォームの回答 1';
+      const nameCol = Number(getProps().getProperty('NAME_COLUMN') || 2);
+      const respSheet = ss.getSheetByName(sheetName);
+      if (!respSheet) return jsonRes({ error: `シート「${sheetName}」が見つかりません`, sheets: ss.getSheets().map(s => s.getName()) });
+      const normName = (n) => (n || '').replace(/　/g, ' ').replace(/\s+/g, '').trim();
+      const dataRange = respSheet.getDataRange().getValues();
+      let found = null;
+      for (let i = dataRange.length - 1; i >= 1; i--) {
+        const rowName = normName(String(dataRange[i][nameCol - 1] || ''));
+        if (rowName === normName(name) || rowName.includes(normName(name)) || normName(name).includes(rowName)) {
+          found = { row: i + 1, name: dataRange[i][nameCol - 1], timestamp: dataRange[i][0] };
+          break;
+        }
+      }
+      const resultSheet = ss.getSheetByName('結果');
+      const c5 = resultSheet ? resultSheet.getRange('C5').getValue() : 'シートなし';
+      const f5 = resultSheet ? resultSheet.getRange('F5').getValue() : 'シートなし';
+      return jsonRes({ sheetName, totalRows: dataRange.length, found, c5_current: c5, f5_current: f5 });
+    }
+
     return jsonRes({ error: 'unknown_action' });
   } catch (err) {
     console.error(err);

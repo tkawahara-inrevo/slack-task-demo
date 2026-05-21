@@ -165,7 +165,7 @@ function doPost(e) {
       let found = null;
       for (let i = dataRange.length - 1; i >= 1; i--) {
         const rowName = normName(String(dataRange[i][nameCol - 1] || ''));
-        if (rowName === normName(name) || rowName.includes(normName(name)) || normName(name).includes(rowName)) {
+        if (rowName && (rowName === normName(name) || rowName.includes(normName(name)) || normName(name).includes(rowName))) {
           found = { row: i + 1, name: dataRange[i][nameCol - 1], timestamp: dataRange[i][0] };
           break;
         }
@@ -223,7 +223,7 @@ function generatePdfForCandidate(candidateId, name) {
     let targetRow = -1;
     for (let i = dataRange.length - 1; i >= 1; i--) {
       const rowName = normName(String(dataRange[i][nameCol - 1] || ''));
-      if (rowName === targetName || rowName.includes(targetName) || targetName.includes(rowName)) {
+      if (rowName && (rowName === targetName || rowName.includes(targetName) || targetName.includes(rowName))) {
         targetRow = i;
         break;
       }
@@ -287,7 +287,7 @@ function testDebug() {
   let found = null;
   for (let i = dataRange.length - 1; i >= 1; i--) {
     const rowName = normName(String(dataRange[i][nameCol - 1] || ''));
-    if (rowName === normName(testName) || rowName.includes(normName(testName)) || normName(testName).includes(rowName)) {
+    if (rowName && (rowName === normName(testName) || rowName.includes(normName(testName)) || normName(testName).includes(rowName))) {
       found = { row: i + 1, name: dataRange[i][nameCol - 1], timestamp: dataRange[i][0] };
       break;
     }

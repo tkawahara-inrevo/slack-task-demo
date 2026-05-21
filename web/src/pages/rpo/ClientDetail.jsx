@@ -655,9 +655,10 @@ function DashboardTab({ client, onUpdate, onPhaseChange, accentColor, teamUsers 
   );
 }
 
+const RPO_ROLES = ['DR', 'CR', 'CS'];
+
 // ─── やること一覧（フラット・フェーズなし） ─────────────
 const RPO_TASKS = [
-  { key: 'assigned',          label: '担当アサイン済み' },
   { key: 'analysis1_done',    label: '一次分析完了' },
   { key: 'karte_sent',        label: 'カルテ送付済み' },
   { key: 'email_collected',   label: 'メアド回収済み' },
@@ -685,9 +686,9 @@ function FlatTaskList({ client, onUpdate, teamUsers = [] }) {
     onUpdate({ flat_tasks: { ...tasks, [key]: { ...cur, done: isDone } } });
   };
 
-  const setAssignee = (key, userId) => {
+  const setRole = (key, role) => {
     const cur = tasks[key] || {};
-    onUpdate({ flat_tasks: { ...tasks, [key]: { ...cur, assignee_id: userId || null } } });
+    onUpdate({ flat_tasks: { ...tasks, [key]: { ...cur, role: role || null } } });
   };
 
   const setDue = (key, date) => {
@@ -710,7 +711,7 @@ function FlatTaskList({ client, onUpdate, teamUsers = [] }) {
         {RPO_TASKS.map(item => {
           const t = tasks[item.key] || {};
           const overdue = isOverdue(t);
-          const assigneeName = teamUsers.find(u => u.userId === t.assignee_id)?.displayName?.split('/')[0]?.trim() || '';
+          const roleColors = { DR: '#8b5cf6', CR: '#f59e0b', CS: '#3b82f6' };
           return (
             <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, background: t.done ? '#10b98108' : 'var(--surface)', border: `1px solid ${t.done ? '#10b98130' : overdue ? '#fca5a5' : 'var(--gray-200)'}` }}>
               <input type="checkbox" checked={!!t.done} onChange={() => toggle(item.key)}
@@ -718,12 +719,12 @@ function FlatTaskList({ client, onUpdate, teamUsers = [] }) {
               <span style={{ flex: 1, fontSize: '0.82rem', color: t.done ? '#10b981' : 'var(--gray-800)', textDecoration: t.done ? 'line-through' : 'none', fontWeight: t.done ? 400 : 500 }}>
                 {item.label}
               </span>
-              {/* NA（担当者） */}
-              <select value={t.assignee_id || ''} onChange={e => setAssignee(item.key, e.target.value)}
-                title="担当者"
-                style={{ fontSize: '0.72rem', padding: '1px 4px', borderRadius: 5, border: '1px solid var(--gray-300)', background: 'var(--surface-2)', color: t.assignee_id ? 'var(--gray-700)' : 'var(--gray-400)', maxWidth: 90, cursor: 'pointer' }}>
-                <option value="">NA未設定</option>
-                {teamUsers.map(u => <option key={u.userId} value={u.userId}>{u.displayName?.split('/')[0]?.trim()}</option>)}
+              {/* NA（ロール） */}
+              <select value={t.role || ''} onChange={e => setRole(item.key, e.target.value)}
+                title="担当ロール"
+                style={{ fontSize: '0.72rem', padding: '1px 6px', borderRadius: 5, border: `1px solid ${t.role ? (roleColors[t.role] + '80') : 'var(--gray-300)'}`, background: t.role ? (roleColors[t.role] + '15') : 'var(--surface-2)', color: t.role ? roleColors[t.role] : 'var(--gray-400)', fontWeight: t.role ? 700 : 400, cursor: 'pointer', width: 72 }}>
+                <option value="">-</option>
+                {RPO_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
               {/* 期日 */}
               <input type="date" value={t.due_date ? t.due_date.slice(0,10) : ''} onChange={e => setDue(item.key, e.target.value)}

@@ -218,10 +218,8 @@ function generatePdfForCandidate(candidateId, name) {
     }
   }
 
-  // PDFエクスポート
-  const ssFile  = DriveApp.getFileById(ss.getId());
-  const parents = ssFile.getParents();
-  const folder  = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  // PDFエクスポート（マイドライブのルートに保存）
+  const folder = DriveApp.getRootFolder();
   const url     = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?';
   const opts    = { exportFormat:'pdf', format:'pdf', size:'A4', portrait:false,
                     fitw:true, sheetnames:false, printtitle:false, pagenumbers:true,
@@ -247,9 +245,7 @@ function jsonRes(obj) {
 function saveRangeAsPDF() {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('結果');
-  const ssFile  = DriveApp.getFileById(ss.getId());
-  const parents = ssFile.getParents();
-  const folder  = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const folder = DriveApp.getRootFolder();
   const url    = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?';
   const exportOptions = { exportFormat:'pdf', format:'pdf', size:'A4', portrait:false,
                           fitw:true, sheetnames:false, printtitle:false, pagenumbers:true,

@@ -206,13 +206,13 @@ function generatePdfForCandidate(candidateId, name) {
     }
 
     if (targetRow >= 0) {
-      // 対象者の回答行を「結果」シートの2行目にコピー
+      // 対象者の回答行を「結果」シートの2行目にコピー（スコア計算用）
       const srcRange = respSheet.getRange(targetRow + 1, 1, 1, dataRange[targetRow].length);
       const dstRange = result.getRange(2, 1, 1, dataRange[targetRow].length);
       srcRange.copyTo(dstRange, SpreadsheetApp.CopyPasteType.PASTE_VALUES, false);
-      // =B2 / =A2 の参照先を明示的にセット（数式が参照する前に確実に値を入れる）
-      result.getRange('A2').setValue(dataRange[targetRow][0]);              // タイムスタンプ
-      result.getRange('B2').setValue(dataRange[targetRow][nameCol - 1]);    // 氏名
+      // 数式に頼らず受験者名・受験日を表示セルに直接書き込む
+      result.getRange('C5').setValue(dataRange[targetRow][nameCol - 1]);  // 受験者名（C,D5結合）
+      result.getRange('F5').setValue(dataRange[targetRow][0]);             // 受験日時（F,G,H5結合）
       SpreadsheetApp.flush();
       Utilities.sleep(1500);
     }

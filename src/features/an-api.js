@@ -181,6 +181,88 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
       res.json({ ok: true });
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
+
+  // ─── AN依頼に紐づくRPO実績 ──────────────────────────
+  expressApp.get('/api/dashboard/an/requests/:id/rpo-results', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [anReq] } = await dbQuery(
+        `SELECT * FROM an_requests WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]
+      );
+      if (!anReq || !anReq.crm_deal_id) return res.json({ results: null });
+
+      // CRM deal → RPO client を辿る
+      const { rows: [deal] } = await dbQuery(
+        `SELECT data->>'rpo_client_id' AS rpo_client_id FROM deals WHERE id=$1 AND team_id=$2`,
+        [anReq.crm_deal_id, teamId]
+      );
+      const rpoClientId = deal?.rpo_client_id;
+      if (!rpoClientId) return res.json({ results: null });
+
+      const { rows: [rpo] } = await dbQuery(
+        `SELECT name, data FROM rpo_clients WHERE id=$1 AND team_id=$2`, [rpoClientId, teamId]
+      );
+      if (!rpo) return res.json({ results: null });
+
+      const media = (rpo.data?.mediaStatus || []).filter(m => m.name && (m.mediaCost > 0 || m.hiredCount > 0));
+      const { rows: appRows } = await dbQuery(
+        `SELECT status, COUNT(*)::int AS cnt FROM rpo_applicants WHERE rpo_client_id=$1 AND team_id=$2 GROUP BY status`,
+        [rpoClientId, teamId]
+      );
+      const appByStatus = Object.fromEntries(appRows.map(r => [r.status, r.cnt]));
+      const totalApplicants = appRows.reduce((s, r) => s + r.cnt, 0);
+      const accepted = appByStatus['内定承諾'] || 0;
+      const totalCost = media.reduce((s, m) => s + (Number(m.mediaCost) || 0), 0);
+
+      res.json({ results: {
+        client_name: rpo.name,
+        rpo_client_id: rpoClientId,
+        media,
+        total_applicants: totalApplicants,
+        app_by_status: appByStatus,
+        accepted_count: accepted,
+        total_cost: totalCost,
+        hiring_target: rpo.data?.projectInfo?.hiringTarget || 0,
+      }});
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ─── 媒体実績DB（全案件横断集計） ─────────────────────
+  expressApp.get('/api/dashboard/an/media-stats', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows } = await dbQuery(`
+        SELECT
+          m->>'name'                             AS media_name,
+          COUNT(*)::int                          AS campaigns,
+          SUM((m->>'mediaCost')::numeric)        AS total_cost,
+          SUM((m->>'hiredCount')::int)           AS total_hired,
+          AVG((m->>'mediaCost')::numeric)        AS avg_cost,
+          SUM(CASE WHEN (m->>'hiredCount')::int > 0 THEN 1 ELSE 0 END)::int AS success_campaigns
+        FROM rpo_clients rc,
+             jsonb_array_elements(
+               CASE WHEN rc.data ? 'mediaStatus' THEN rc.data->'mediaStatus' ELSE '[]'::jsonb END
+             ) AS m
+        WHERE rc.team_id=$1
+          AND rc.status != 'archived'
+          AND (m->>'name') IS NOT NULL
+          AND (m->>'name') != ''
+          AND ((m->>'mediaCost')::numeric > 0 OR (m->>'hiredCount')::int > 0)
+        GROUP BY media_name
+        ORDER BY total_hired DESC NULLS LAST, total_cost DESC NULLS LAST
+      `, [teamId]);
+
+      res.json({ stats: rows.map(r => ({
+        media_name: r.media_name,
+        campaigns: r.campaigns,
+        total_cost: Number(r.total_cost) || 0,
+        total_hired: Number(r.total_hired) || 0,
+        avg_cost: Math.round(Number(r.avg_cost) || 0),
+        cost_per_hire: r.total_hired > 0 ? Math.round(Number(r.total_cost) / r.total_hired) : null,
+        success_campaigns: r.success_campaigns,
+      })) });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
 }
 
 module.exports = { registerAnApi };

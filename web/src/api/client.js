@@ -597,6 +597,8 @@ export const api = {
   anRequests:    (status) => apiFetch(`/an/requests${status ? `?status=${status}` : ''}`),
   anUpdate:      (id, body) => apiFetch(`/an/requests/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   anPostToSlack: (id) => apiFetch(`/an/requests/${id}/post-to-slack`, { method: 'POST' }),
+  anRpoResults:  (id) => apiFetch(`/an/requests/${id}/rpo-results`),
+  anMediaStats:  ()  => apiFetch(`/an/media-stats`),
 
   // 法務案件管理
   legalCases:       ()        => apiFetch('/legal/cases'),

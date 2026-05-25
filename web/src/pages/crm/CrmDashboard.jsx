@@ -75,15 +75,11 @@ function buildRepTable(repTable, targetReps, filterRep) {
     const f = repTable.find(r => r.rep === filterRep);
     return [f ? { ...f } : { rep: filterRep, wonCount: 0, meetingCount: 0, paymentAmount: 0 }];
   }
-  // targetReps の順に並べる（サーバーが返した KPI 担当者リスト）
-  const rows = targetReps.map(name => {
+  // targetReps の順に並べる（添田/リファラルも targetReps の末尾に含まれている前提）
+  return targetReps.map(name => {
     const f = repTable.find(r => r.rep === name);
     return f ? { ...f } : { rep: name, wonCount: 0, meetingCount: 0, paymentAmount: 0 };
   });
-  // 添田/リファラル
-  const addaRef = repTable.find(r => r.groupType === 'adda_ref');
-  if (addaRef) rows.push({ ...addaRef });
-  return rows;
 }
 
 function Drilldown({ rep, type, start, end, onClose }) {

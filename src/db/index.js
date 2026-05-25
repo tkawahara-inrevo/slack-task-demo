@@ -602,6 +602,10 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS exclude_from_kpi BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
   await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS monthly_to_adda_ref BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
 
+  // kintone_payments に流入経路カラム（App102 から会社名で join した値）
+  // 「丸山さん × グラハム = アライアンス扱い」など、流入経路を考慮した振り分け用
+  await dbQuery(`ALTER TABLE kintone_payments ADD COLUMN IF NOT EXISTS inflow_source TEXT`).catch(() => {});
+
   // フィールド選択肢設定
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS crm_field_options (

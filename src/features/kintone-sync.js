@@ -94,6 +94,17 @@ async function syncKintonePayments() {
   const { rows } = await dbQuery(
     `SELECT record_id, company_name, data FROM kintone_cache WHERE app_id='170'`
   );
+
+  // App102 (案件) から会社名 → 流入経路 マップを構築
+  // 同じ会社名で複数案件がある場合は直近の流入経路を採用（最後の上書きが残る）
+  const dealRowsRes = await dbQuery(
+    `SELECT company_name, data->>'流入経路' AS inflow FROM kintone_cache WHERE app_id='102'`
+  );
+  const inflowMap = {};
+  for (const r of dealRowsRes.rows) {
+    if (r.company_name && r.inflow) inflowMap[r.company_name] = r.inflow;
+  }
+
   let upserted = 0;
   for (const rec of rows) {
     const d = rec.data || {};
@@ -103,12 +114,13 @@ async function syncKintonePayments() {
     const paymentDate  = d.date      || null;
     const plan         = d.plan      || null;
     const staff        = d.Staff || d.staff || null;
+    const inflowSource = company ? (inflowMap[company] || null) : null;
 
     if (!paymentDate) continue;
 
     await dbQuery(`
-      INSERT INTO kintone_payments (id, team_id, record_id, company, amount, incentive_amount, payment_date, plan, staff, synced_at)
-      VALUES (gen_random_uuid()::text, 'T086C06L5V0', $1, $2, $3, $4, $5::date, $6, $7, now())
+      INSERT INTO kintone_payments (id, team_id, record_id, company, amount, incentive_amount, payment_date, plan, staff, inflow_source, synced_at)
+      VALUES (gen_random_uuid()::text, 'T086C06L5V0', $1, $2, $3, $4, $5::date, $6, $7, $8, now())
       ON CONFLICT (record_id) DO UPDATE SET
         company = EXCLUDED.company,
         amount = EXCLUDED.amount,
@@ -116,8 +128,9 @@ async function syncKintonePayments() {
         payment_date = EXCLUDED.payment_date,
         plan = EXCLUDED.plan,
         staff = EXCLUDED.staff,
+        inflow_source = EXCLUDED.inflow_source,
         synced_at = now()
-    `, [rec.record_id, company, amount, incentive, paymentDate, plan, staff]).catch(() => {});
+    `, [rec.record_id, company, amount, incentive, paymentDate, plan, staff, inflowSource]).catch(() => {});
     upserted++;
   }
 

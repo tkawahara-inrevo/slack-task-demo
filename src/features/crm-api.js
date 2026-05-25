@@ -704,7 +704,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
       // 'bc'       … 担当者本人のBC実績として計上
       // 'adda_ref' … 添田/リファラル行へ集約
       // 'excluded' … KPIから完全除外（アライアンス扱い）
-      const classifyPayment = (staff, plan) => {
+      const classifyPayment = (staff, plan, inflow) => {
+        // 過渡期の特別ルール: 丸山さん × グラハム流入 = アライアンス扱い
+        if ((staff || '').includes('丸山') && inflow === 'グラハム') return 'excluded';
+
         const role = findRoleFor(staff);
         if (role?.exclude_from_kpi)    return 'excluded';
         if (role?.is_retired)          return 'adda_ref';
@@ -727,7 +730,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           dbQuery(`SELECT COUNT(*)::int AS cnt FROM deals d
             WHERE d.team_id=$1${pf}
             AND d.first_meeting_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          dbQuery(`SELECT staff, plan,
+          dbQuery(`SELECT staff, plan, inflow_source,
                           COALESCE(amount,0)::bigint AS amount,
                           COALESCE(incentive_amount,0)::bigint AS incentive_amount
                    FROM kintone_payments
@@ -740,7 +743,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         let paymentAmount = 0, incentiveAmount = 0;
         for (const p of payRowsRes.rows) {
           if (salesUser && !isAddaRef && !(p.staff || '').includes(salesUser)) continue;
-          const dest = classifyPayment(p.staff, p.plan);
+          const dest = classifyPayment(p.staff, p.plan, p.inflow_source);
           if (dest === 'excluded') continue;
           if (isAddaRef && dest !== 'adda_ref') continue;
           paymentAmount   += Number(p.amount);
@@ -789,7 +792,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       // 担当者別入金額 & インセン（kintone_payments）— 全行取得して JS で振り分け
       const repPayRowsRes = await dbQuery(`
-        SELECT staff, plan,
+        SELECT staff, plan, inflow_source,
                COALESCE(amount,0)::bigint           AS amount,
                COALESCE(incentive_amount,0)::bigint AS incentive_amount
         FROM kintone_payments
@@ -806,7 +809,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const repPayMap = {};   // { repName: { payment, incentive } }
       const addaRefAgg = { paymentAmount: 0, incentiveAmount: 0 };
       for (const p of repPayRowsRes.rows) {
-        const dest = classifyPayment(p.staff, p.plan);
+        const dest = classifyPayment(p.staff, p.plan, p.inflow_source);
         if (dest === 'excluded') continue;
         if (dest === 'adda_ref') {
           addaRefAgg.paymentAmount   += Number(p.amount);
@@ -903,7 +906,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       // プラン別入金内訳（フィルタ適用、JSで振り分け）
       const planRowsRes = await dbQuery(`
-        SELECT plan, company, staff, COALESCE(amount,0)::bigint AS amount
+        SELECT plan, company, staff, inflow_source, COALESCE(amount,0)::bigint AS amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date AND amount > 0
       `, [rangeStart, rangeEnd]);
@@ -912,8 +915,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const planExpected = isAddaRef ? 'adda_ref' : (salesUser ? 'bc' : null);
       for (const p of planRowsRes.rows) {
         if (salesUser && !isAddaRef && !(p.staff || '').includes(salesUser)) continue;
-        if (planExpected && classifyPayment(p.staff, p.plan) !== planExpected) continue;
-        if (!planExpected && classifyPayment(p.staff, p.plan) === 'excluded') continue;
+        const dest = classifyPayment(p.staff, p.plan, p.inflow_source);
+        if (planExpected && dest !== planExpected) continue;
+        if (!planExpected && dest === 'excluded') continue;
         const key = p.plan || '未設定';
         if (!planAgg[key]) planAgg[key] = { companies: new Set(), amount: 0 };
         if (p.company) planAgg[key].companies.add(p.company);
@@ -1024,7 +1028,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       // type: 'payments' | 'won'
 
       if (type === 'payments') {
-        // 期間内の入金を全取得 → 新ルール（is_retired / exclude_from_kpi / monthly_to_adda_ref）で振り分け
+        // 期間内の入金を全取得 → 新ルール（is_retired / exclude_from_kpi / monthly_to_adda_ref / 流入経路）で振り分け
         const repRolesRes = await dbQuery(`
           SELECT rep_name,
                  COALESCE(is_retired, false)          AS is_retired,
@@ -1041,7 +1045,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
           }
           return null;
         };
-        const classifyPayment = (staff, plan) => {
+        const classifyPayment = (staff, plan, inflow) => {
+          if ((staff || '').includes('丸山') && inflow === 'グラハム') return 'excluded';
           const role = findRoleFor(staff);
           if (role?.exclude_from_kpi)    return 'excluded';
           if (role?.is_retired)          return 'adda_ref';
@@ -1051,7 +1056,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         };
 
         const allRowsRes = await dbQuery(`
-          SELECT kp.payment_date, kp.company, kp.plan, kp.incentive_amount, kp.amount, kp.staff,
+          SELECT kp.payment_date, kp.company, kp.plan, kp.incentive_amount, kp.amount, kp.staff, kp.inflow_source,
             CASE WHEN kp.plan LIKE '%月額%' THEN (
               SELECT COUNT(*)::int FROM kintone_payments kp2
               WHERE kp2.company = kp.company
@@ -1064,7 +1069,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         `, [start, end]);
 
         const rows = allRowsRes.rows.filter(r => {
-          const dest = classifyPayment(r.staff, r.plan);
+          const dest = classifyPayment(r.staff, r.plan, r.inflow_source);
           if (rep === '添田/リファラル') return dest === 'adda_ref';
           if (rep === 'アライアンス')    return dest === 'excluded';
           if (dest !== 'bc') return false;
@@ -1489,7 +1494,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
         }
         return null;
       };
-      const classifyPaymentMS = (staff, plan) => {
+      const classifyPaymentMS = (staff, plan, inflow) => {
+        if ((staff || '').includes('丸山') && inflow === 'グラハム') return 'excluded';
         const role = findRoleForMS(staff);
         if (role?.exclude_from_kpi)    return 'excluded';
         if (role?.is_retired)          return 'adda_ref';
@@ -1500,7 +1506,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       // 今月入金（期間内の全行取得 → JS で振り分け、BC計上分のみ confirmed として扱う）
       const allPaymentsRes = await dbQuery(`
-        SELECT payment_date, company, staff, plan,
+        SELECT payment_date, company, staff, plan, inflow_source,
                amount AS payment_amount,
                incentive_amount
         FROM kintone_payments
@@ -1516,7 +1522,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const paymentsRes = {
         rows: allPaymentsRes.rows.filter(p => {
           if (salesUser && !isAddaRefMS && !(p.staff || '').includes(salesUser)) return false;
-          const dest = classifyPaymentMS(p.staff, p.plan);
+          const dest = classifyPaymentMS(p.staff, p.plan, p.inflow_source);
           if (dest === 'excluded') return false;
           if (isAddaRefMS && dest !== 'adda_ref') return false;
           return true;

@@ -668,13 +668,39 @@ function registerCrmApi({ expressApp, authWithRole }) {
       }
       const [prevStart, prevEnd] = [ps.prev_start, ps.prev_end];
 
-      // 設定済み担当者（crm_rep_roles）をDBから取得
-      const configuredRepsRes = await dbQuery(`SELECT rep_name FROM crm_rep_roles WHERE team_id=$1`, [teamId]);
-      const CONFIGURED_REPS = configuredRepsRes.rows.map(r => r.rep_name);
-      // 設定外担当者（アライアンス含む）はKPI・テーブルから完全除外、添田/リファラルに集約
-      const configuredRepsFilter = CONFIGURED_REPS.length > 0
-        ? CONFIGURED_REPS.map((_, i) => `kp.staff ILIKE $${i + 3}`).join(' OR ')
-        : 'FALSE';
+      // 設定済み担当者（crm_rep_roles）をフラグ込みでDBから取得
+      const repRolesRes = await dbQuery(`
+        SELECT rep_name, role_name, monthly_target_override,
+               COALESCE(is_retired, false)          AS is_retired,
+               COALESCE(exclude_from_kpi, false)    AS exclude_from_kpi,
+               COALESCE(monthly_to_adda_ref, false) AS monthly_to_adda_ref
+        FROM crm_rep_roles WHERE team_id=$1
+      `, [teamId]);
+      const REP_ROLES = repRolesRes.rows;
+      const CONFIGURED_REPS = REP_ROLES.map(r => r.rep_name);
+
+      // staff 名 → ロール設定の解決（部分一致）
+      const findRoleFor = (staff) => {
+        if (!staff) return null;
+        for (const r of REP_ROLES) {
+          if (!r.rep_name) continue;
+          if (staff.includes(r.rep_name) || r.rep_name.includes(staff)) return r;
+        }
+        return null;
+      };
+
+      // 入金1件の振り分け先: 'bc' | 'adda_ref' | 'excluded'
+      // 'bc'       … 担当者本人のBC実績として計上
+      // 'adda_ref' … 添田/リファラル行へ集約
+      // 'excluded' … KPIから完全除外（アライアンス扱い）
+      const classifyPayment = (staff, plan) => {
+        const role = findRoleFor(staff);
+        if (role?.exclude_from_kpi)    return 'excluded';
+        if (role?.is_retired)          return 'adda_ref';
+        if (role?.monthly_to_adda_ref) return (plan || '').includes('月額') ? 'adda_ref' : 'bc';
+        if (role)                      return 'bc';
+        return 'adda_ref';
+      };
 
       // ── 期間内の主要指標を集計するヘルパー ──
       const getMetrics = async (start, end) => {
@@ -682,34 +708,39 @@ function registerCrmApi({ expressApp, authWithRole }) {
         const si = salesUser ? 3 : 2;
         const baseP = salesUser ? [teamId, salesUser, start, end] : [teamId, start, end];
 
-        const [wonRes, meetingRes, payRes, alliancePayRes] = await Promise.all([
-          // 受注件数・金額
+        const [wonRes, meetingRes, payRowsRes] = await Promise.all([
+          // 受注件数・金額（deals 側は sales_person で素直に集計）
           dbQuery(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(d.initial_fee),0)::bigint AS amount
             FROM deals d WHERE d.team_id=$1${pf}
             AND d.status='won' AND d.order_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 初回商談数
+          // 初回商談数（deals 側は sales_person で素直に集計）
           dbQuery(`SELECT COUNT(*)::int AS cnt FROM deals d
             WHERE d.team_id=$1${pf}
             AND d.first_meeting_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 入金額・インセン：設定済み担当者のみ集計（アライアンス等は完全除外）
-          dbQuery(`SELECT
-              COALESCE(SUM(kp.amount),0)::bigint AS total_amount,
-              COALESCE(SUM(kp.incentive_amount),0)::bigint AS incentive_amount
-            FROM kintone_payments kp
-            WHERE kp.payment_date BETWEEN $1::date AND $2::date
-            ${salesUser ? `AND kp.staff ILIKE $3` : (CONFIGURED_REPS.length > 0 ? `AND (${configuredRepsFilter})` : '')}`,
-            salesUser ? [start, end, `%${salesUser}%`] : [...[start, end], ...CONFIGURED_REPS.map(r => `%${r}%`)]),
-          Promise.resolve({ rows: [{ incentive_amount: 0 }] }), // allianceIncentive廃止
+          // 入金: 期間内の全行を取得し、JS 側で classifyPayment により振り分け
+          dbQuery(`SELECT staff, plan,
+                          COALESCE(amount,0)::bigint AS amount,
+                          COALESCE(incentive_amount,0)::bigint AS incentive_amount
+                   FROM kintone_payments
+                   WHERE payment_date BETWEEN $1::date AND $2::date`,
+            [start, end]),
         ]);
 
-        const wonCount = wonRes.rows[0]?.cnt || 0;
+        let paymentAmount = 0, incentiveAmount = 0;
+        for (const p of payRowsRes.rows) {
+          if (salesUser && !(p.staff || '').includes(salesUser)) continue;
+          if (classifyPayment(p.staff, p.plan) !== 'bc') continue;
+          paymentAmount   += Number(p.amount);
+          incentiveAmount += Number(p.incentive_amount);
+        }
+
         return {
-          wonCount,
-          wonAmount:           Number(wonRes.rows[0]?.amount || 0),
-          meetingCount:        meetingRes.rows[0]?.cnt || 0,
-          paymentAmount:       Number(payRes.rows[0]?.total_amount || 0),
-          incentiveAmount:     Number(payRes.rows[0]?.incentive_amount || 0), // アライアンス除外済
-          allianceIncentive:   Number(alliancePayRes.rows[0]?.incentive_amount || 0),
+          wonCount:        wonRes.rows[0]?.cnt || 0,
+          wonAmount:       Number(wonRes.rows[0]?.amount || 0),
+          meetingCount:    meetingRes.rows[0]?.cnt || 0,
+          paymentAmount,
+          incentiveAmount,
+          allianceIncentive: 0, // 廃止（exclude_from_kpi に統合）
         };
       };
 
@@ -743,45 +774,77 @@ function registerCrmApi({ expressApp, authWithRole }) {
         GROUP BY 1 ORDER BY 1
       `, [teamId, rangeStart, rangeEnd]);
 
-      // 担当者別入金額 & インセン（kintone_payments）
-      const repPayRows = await dbQuery(`
-        SELECT staff,
-               COALESCE(SUM(amount),0)::bigint AS payment_amount,
-               COALESCE(SUM(incentive_amount),0)::bigint AS incentive_amount
+      // 担当者別入金額 & インセン（kintone_payments）— 全行取得して JS で振り分け
+      const repPayRowsRes = await dbQuery(`
+        SELECT staff, plan,
+               COALESCE(amount,0)::bigint           AS amount,
+               COALESCE(incentive_amount,0)::bigint AS incentive_amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1::date AND $2::date
-        GROUP BY staff
       `, [rangeStart, rangeEnd]);
-      const repPayMap = {};
-      for (const r of repPayRows.rows) {
-        repPayMap[r.staff] = { payment: Number(r.payment_amount), incentive: Number(r.incentive_amount) };
+
+      // staff（kintoneの担当者名）→ 設定上の rep_name 解決
+      const resolveRepName = (staff) => {
+        const role = findRoleFor(staff);
+        return role?.rep_name || staff;
+      };
+
+      // BC計上対象のみ rep_name 別に集計、addaRef集約分は別バケツに
+      const repPayMap = {};   // { repName: { payment, incentive } }
+      const addaRefAgg = { paymentAmount: 0, incentiveAmount: 0 };
+      for (const p of repPayRowsRes.rows) {
+        const dest = classifyPayment(p.staff, p.plan);
+        if (dest === 'excluded') continue;
+        if (dest === 'adda_ref') {
+          addaRefAgg.paymentAmount   += Number(p.amount);
+          addaRefAgg.incentiveAmount += Number(p.incentive_amount);
+          continue;
+        }
+        // dest === 'bc'
+        const repName = resolveRepName(p.staff);
+        if (!repPayMap[repName]) repPayMap[repName] = { payment: 0, incentive: 0 };
+        repPayMap[repName].payment   += Number(p.amount);
+        repPayMap[repName].incentive += Number(p.incentive_amount);
       }
 
-      // 設定済み担当者のみ表示、それ以外は添田/リファラルに集約（アライアンス含む完全除外）
       const isConfigured = (rep) => rep && CONFIGURED_REPS.some(n => rep.includes(n) || n.includes(rep));
 
-      const rawRepTable = repRows.rows.map(r => ({
-        rep:              r.rep,
-        wonCount:         r.won_count,
-        meetingCount:     r.meeting_count,
-        paymentAmount:    repPayMap[r.rep]?.payment   || 0,
-        incentiveAmount:  repPayMap[r.rep]?.incentive || 0,
+      // 設定済み担当者を repRows（deals 側） + repPayMap（kintone 側）から合成
+      const repNameSet = new Set();
+      for (const r of repRows.rows) if (isConfigured(r.rep)) repNameSet.add(resolveRepName(r.rep));
+      for (const n of Object.keys(repPayMap)) repNameSet.add(n);
+
+      // deals 側集計を rep_name 解決ベースで束ねる
+      const dealsAggByRep = {};
+      for (const r of repRows.rows) {
+        const repName = resolveRepName(r.rep);
+        if (!isConfigured(repName)) continue;
+        if (!dealsAggByRep[repName]) dealsAggByRep[repName] = { wonCount: 0, meetingCount: 0 };
+        dealsAggByRep[repName].wonCount     += Number(r.won_count);
+        dealsAggByRep[repName].meetingCount += Number(r.meeting_count);
+      }
+
+      const normalRows = [...repNameSet].map(repName => ({
+        rep:             repName,
+        wonCount:        dealsAggByRep[repName]?.wonCount     || 0,
+        meetingCount:    dealsAggByRep[repName]?.meetingCount || 0,
+        paymentAmount:   repPayMap[repName]?.payment          || 0,
+        incentiveAmount: repPayMap[repName]?.incentive        || 0,
       }));
 
-      const normalRows  = rawRepTable.filter(r => isConfigured(r.rep));
-      const addaRefSrc  = rawRepTable.filter(r => !isConfigured(r.rep));
-
-      const sumRows = (rows, label, groupType) => rows.length === 0 ? null : ({
-        rep:             label,
-        wonCount:        rows.reduce((s, r) => s + r.wonCount, 0),
-        meetingCount:    rows.reduce((s, r) => s + r.meetingCount, 0),
-        paymentAmount:   0, // 添田/リファラルの入金額はKPI対象外
-        incentiveAmount: 0,
-        isGrouped: true,
-        groupType,
-      });
-
-      const addaRefRow = sumRows(addaRefSrc, '添田/リファラル', 'adda_ref');
+      // 添田/リファラル行: 入金集約値 + 未設定担当者の受注/初回商談を加算
+      const addaRefDealRows = repRows.rows.filter(r => !isConfigured(r.rep));
+      const addaRefRow = (addaRefAgg.paymentAmount === 0 && addaRefAgg.incentiveAmount === 0 && addaRefDealRows.length === 0)
+        ? null
+        : {
+            rep:             '添田/リファラル',
+            wonCount:        addaRefDealRows.reduce((s, r) => s + Number(r.won_count), 0),
+            meetingCount:    addaRefDealRows.reduce((s, r) => s + Number(r.meeting_count), 0),
+            paymentAmount:   addaRefAgg.paymentAmount,
+            incentiveAmount: addaRefAgg.incentiveAmount,
+            isGrouped:       true,
+            groupType:       'adda_ref',
+          };
 
       const repTable = [
         ...normalRows,
@@ -878,9 +941,11 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       const repTargetMap = {};
       const repRoleInferred = {}; // フロントに渡す自動推定役職
-      // KPI管理対象の担当者（BC担当）。フロント側の TARGET_REPS と同期させること。
-      // 追加・変更時は crm-api.js と CrmDashboard.jsx の両方を更新する必要がある。
-      const TARGET_REPS_SERVER = ['山本 夏乃','板金 慎太郎','萩原 隼人','藤原 一矢','野村 尭弘'];
+      // KPI管理対象の担当者（BC担当）= crm_rep_roles 設定済 − 除外/退職
+      // フロントもこのリストでダッシュボードを描画するため、ハードコードは廃止
+      const TARGET_REPS_SERVER = REP_ROLES
+        .filter(r => !r.exclude_from_kpi && !r.is_retired)
+        .map(r => r.rep_name);
       let teamTarget = 0;
       for (const rep of TARGET_REPS_SERVER) {
         const repRole  = repRepRoleMap[rep];
@@ -911,6 +976,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         repTargetMap,
         repRoleInferred,
         teamTarget,
+        targetReps: TARGET_REPS_SERVER, // KPI担当者リスト（フロント動的化用）
         planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,
         overdueAlerts: overdueRes.rows,
@@ -930,40 +996,54 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { rep, type, start, end } = req.query;
       // type: 'payments' | 'won'
 
-      // グループ名 → 実スタッフ名のマッチ条件
-      const ALLIANCE_REPS_DD = ['長嶺', '丸山', '外山'];
-      const staffCondition = (repName, paramOffset) => {
-        if (repName === 'アライアンス') {
-          return {
-            where: ALLIANCE_REPS_DD.map((n, i) => `kp.staff ILIKE $${paramOffset + i}`).join(' OR '),
-            params: ALLIANCE_REPS_DD.map(n => `%${n}%`),
-          };
-        }
-        if (repName === '添田/リファラル') {
-          return {
-            where: `(kp.staff ILIKE $${paramOffset} OR kp.staff ILIKE $${paramOffset + 1})`,
-            params: ['%添田%', '%リファラル%'],
-          };
-        }
-        return { where: `kp.staff=$${paramOffset}`, params: [repName] };
-      };
-
       if (type === 'payments') {
-        const sc = staffCondition(rep, 3);
-        const { rows } = await dbQuery(`
-          SELECT kp.payment_date, kp.company, kp.plan, kp.incentive_amount, kp.amount,
-            kp.staff,
+        // 期間内の入金を全取得 → 新ルール（is_retired / exclude_from_kpi / monthly_to_adda_ref）で振り分け
+        const repRolesRes = await dbQuery(`
+          SELECT rep_name,
+                 COALESCE(is_retired, false)          AS is_retired,
+                 COALESCE(exclude_from_kpi, false)    AS exclude_from_kpi,
+                 COALESCE(monthly_to_adda_ref, false) AS monthly_to_adda_ref
+          FROM crm_rep_roles WHERE team_id=$1
+        `, [teamId]);
+        const REP_ROLES = repRolesRes.rows;
+        const findRoleFor = (staff) => {
+          if (!staff) return null;
+          for (const r of REP_ROLES) {
+            if (!r.rep_name) continue;
+            if (staff.includes(r.rep_name) || r.rep_name.includes(staff)) return r;
+          }
+          return null;
+        };
+        const classifyPayment = (staff, plan) => {
+          const role = findRoleFor(staff);
+          if (role?.exclude_from_kpi)    return 'excluded';
+          if (role?.is_retired)          return 'adda_ref';
+          if (role?.monthly_to_adda_ref) return (plan || '').includes('月額') ? 'adda_ref' : 'bc';
+          if (role)                      return 'bc';
+          return 'adda_ref';
+        };
+
+        const allRowsRes = await dbQuery(`
+          SELECT kp.payment_date, kp.company, kp.plan, kp.incentive_amount, kp.amount, kp.staff,
             CASE WHEN kp.plan LIKE '%月額%' THEN (
               SELECT COUNT(*)::int FROM kintone_payments kp2
               WHERE kp2.company = kp.company
                 AND kp2.payment_date <= kp.payment_date
             ) ELSE NULL END AS month_num
           FROM kintone_payments kp
-          WHERE (${sc.where})
-            AND kp.payment_date BETWEEN $1::date AND $2::date
+          WHERE kp.payment_date BETWEEN $1::date AND $2::date
             AND kp.incentive_amount > 0
           ORDER BY kp.payment_date DESC
-        `, [start, end, ...sc.params]);
+        `, [start, end]);
+
+        const rows = allRowsRes.rows.filter(r => {
+          const dest = classifyPayment(r.staff, r.plan);
+          if (rep === '添田/リファラル') return dest === 'adda_ref';
+          if (rep === 'アライアンス')    return dest === 'excluded';
+          if (dest !== 'bc') return false;
+          // 個別担当者: staff に名前を含む（部分一致）
+          return (r.staff || '').includes(rep);
+        });
         res.json({ rows });
       } else if (type === 'won') {
         const { rows } = await dbQuery(`
@@ -1130,13 +1210,27 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { repRoles } = req.body;
       for (const r of repRoles) {
         await dbQuery(`
-          INSERT INTO crm_rep_roles (team_id, rep_name, role_name, monthly_target_override, prev_role_name, prev_monthly_target_override)
-          VALUES ($1, $2, $3, $4, $5, $6)
+          INSERT INTO crm_rep_roles (team_id, rep_name, role_name, monthly_target_override,
+                                     prev_role_name, prev_monthly_target_override,
+                                     is_retired, exclude_from_kpi, monthly_to_adda_ref)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (team_id, rep_name) DO UPDATE
-          SET role_name=$3, monthly_target_override=$4, prev_role_name=$5, prev_monthly_target_override=$6
+          SET role_name=$3, monthly_target_override=$4, prev_role_name=$5, prev_monthly_target_override=$6,
+              is_retired=$7, exclude_from_kpi=$8, monthly_to_adda_ref=$9
         `, [teamId, r.rep_name, r.role_name || '', r.monthly_target_override || null,
-            r.prev_role_name || '', r.prev_monthly_target_override || null]);
+            r.prev_role_name || '', r.prev_monthly_target_override || null,
+            !!r.is_retired, !!r.exclude_from_kpi, !!r.monthly_to_adda_ref]);
       }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 行削除（担当者をリストから外す）
+  expressApp.delete('/api/crm/rep-roles/:repName', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { repName } = req.params;
+      await dbQuery('DELETE FROM crm_rep_roles WHERE team_id=$1 AND rep_name=$2', [teamId, repName]);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });
@@ -1351,17 +1445,50 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const monthStart = `${year}-${String(mon).padStart(2,'0')}-01`;
       const monthEnd = new Date(year, mon, 0).toISOString().split('T')[0];
 
-      // 今月入金確定（担当者フィルタ対応）
-      const paymentsRes = await dbQuery(`
+      // 担当者ロール（フラグ）を取得して入金を振り分ける
+      const repRolesRes = await dbQuery(`
+        SELECT rep_name,
+               COALESCE(is_retired, false)          AS is_retired,
+               COALESCE(exclude_from_kpi, false)    AS exclude_from_kpi,
+               COALESCE(monthly_to_adda_ref, false) AS monthly_to_adda_ref
+        FROM crm_rep_roles WHERE team_id=$1
+      `, [teamId]);
+      const REP_ROLES_MS = repRolesRes.rows;
+      const findRoleForMS = (staff) => {
+        if (!staff) return null;
+        for (const r of REP_ROLES_MS) {
+          if (!r.rep_name) continue;
+          if (staff.includes(r.rep_name) || r.rep_name.includes(staff)) return r;
+        }
+        return null;
+      };
+      const classifyPaymentMS = (staff, plan) => {
+        const role = findRoleForMS(staff);
+        if (role?.exclude_from_kpi)    return 'excluded';
+        if (role?.is_retired)          return 'adda_ref';
+        if (role?.monthly_to_adda_ref) return (plan || '').includes('月額') ? 'adda_ref' : 'bc';
+        if (role)                      return 'bc';
+        return 'adda_ref';
+      };
+
+      // 今月入金（期間内の全行取得 → JS で振り分け、BC計上分のみ confirmed として扱う）
+      const allPaymentsRes = await dbQuery(`
         SELECT payment_date, company, staff, plan,
                amount AS payment_amount,
                incentive_amount
         FROM kintone_payments
         WHERE payment_date BETWEEN $1 AND $2
           AND amount > 0
-          ${salesUser ? 'AND staff=$3' : ''}
         ORDER BY payment_date
-      `, salesUser ? [monthStart, monthEnd, salesUser] : [monthStart, monthEnd]);
+      `, [monthStart, monthEnd]);
+
+      // BC計上対象のみ抽出（担当者フィルタも適用）
+      const paymentsRes = {
+        rows: allPaymentsRes.rows.filter(p => {
+          if (salesUser && !(p.staff || '').includes(salesUser)) return false;
+          return classifyPaymentMS(p.staff, p.plan) === 'bc';
+        }),
+      };
 
       const salesFilter = salesUser ? `AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '';
       const salesParams = salesUser ? [teamId, salesUser] : [teamId];

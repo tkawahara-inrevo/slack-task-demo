@@ -594,6 +594,14 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS prev_role_name TEXT NOT NULL DEFAULT ''`).catch(() => {});
   await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS prev_monthly_target_override BIGINT`).catch(() => {});
 
+  // KPI振り分けフラグ
+  // is_retired           : 退職者。実績はすべて添田/リファラルへ集約
+  // exclude_from_kpi     : 完全除外（KPIにも添田にも入れない／アライアンス扱い）
+  // monthly_to_adda_ref  : 月額プランの入金のみ添田/リファラルへ集約（月額以外はBC計上）
+  await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS is_retired BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS exclude_from_kpi BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_rep_roles ADD COLUMN IF NOT EXISTS monthly_to_adda_ref BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+
   // フィールド選択肢設定
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS crm_field_options (

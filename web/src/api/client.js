@@ -303,6 +303,7 @@ export const api = {
   crmPerformanceAccess: () => crmFetch('/performance-access'),
   crmRepRoles: () => crmFetch('/rep-roles'),
   crmRepRolesSave: (repRoles) => crmFetch('/rep-roles', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ repRoles }) }),
+  crmRepRoleDelete: (repName) => crmFetch(`/rep-roles/${encodeURIComponent(repName)}`, { method:'DELETE' }),
 
   // CRM: Payments
   crmPayments: (dealId) => crmFetch(`/deals/${dealId}/payments`),

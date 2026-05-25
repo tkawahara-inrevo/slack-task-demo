@@ -5,7 +5,7 @@ import SalesPerformance from './SalesPerformance';
 import CrmDashboard from './CrmDashboard';
 import { api } from '../../api/client';
 
-const TARGET_REPS  = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
+// TARGET_REPS はもうハードコードしない。crm_rep_roles から動的取得。
 const ROLE_NAMES   = ['役職無し', 'Lead', 'Sub Manager', 'Sub Chief', 'Chief', 'Sub Expert', 'Expert'];
 const ROLE_OPTIONS = ['', ...ROLE_NAMES];
 
@@ -595,7 +595,7 @@ function CrmSettings() {
   const [section, setSection] = useState('kpi');
   const [roleTargetRows, setRoleTargetRows] = useState([]);
   const [roleTargets, setRoleTargets]       = useState({});
-  const [repRoles, setRepRoles]             = useState({});
+  const [repList, setRepList]               = useState([]); // [{rep_name, role_name, monthly_target_override, prev_role_name, prev_monthly_target_override, is_retired, exclude_from_kpi, monthly_to_adda_ref}]
   const [period, setPeriod]                 = useState({ prevStart:'', prevEnd:'', currStart:'', currEnd:'' });
   const [saving, setSaving]                 = useState(false);
   const [notice, setNotice]                 = useState('');
@@ -611,23 +611,49 @@ function CrmSettings() {
       const rtMap = {};
       for (const r of merged) rtMap[r.role_name] = r.monthly_target;
       setRoleTargets(rtMap);
-      const rrMap = {};
-      for (const r of (rr.repRoles || [])) rrMap[r.rep_name] = r;
-      setRepRoles(rrMap);
+      setRepList((rr.repRoles || []).map(r => ({
+        rep_name: r.rep_name,
+        role_name: r.role_name || '',
+        monthly_target_override: r.monthly_target_override,
+        prev_role_name: r.prev_role_name || '',
+        prev_monthly_target_override: r.prev_monthly_target_override,
+        is_retired: !!r.is_retired,
+        exclude_from_kpi: !!r.exclude_from_kpi,
+        monthly_to_adda_ref: !!r.monthly_to_adda_ref,
+      })));
       const s = ps.settings || {};
       setPeriod({ prevStart:s.prev_start?.split('T')[0]||'', prevEnd:s.prev_end?.split('T')[0]||'', currStart:s.curr_start?.split('T')[0]||'', currEnd:s.curr_end?.split('T')[0]||'' });
     });
   }, []);
 
   const getEffective = (rep) => {
-    const r = repRoles[rep];
-    if (r?.monthly_target_override) return Number(r.monthly_target_override);
-    return roleTargets[r?.role_name || '役職無し'] || 0;
+    if (!rep) return 0;
+    if (rep.monthly_target_override) return Number(rep.monthly_target_override);
+    return roleTargets[rep.role_name || '役職無し'] || 0;
   };
 
-  const setRepRole     = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), role_name: role } }));
-  const setPrevRepRole = (rep, role) => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), prev_role_name: role } }));
-  const setOverride    = (rep, wan)  => setRepRoles(prev => ({ ...prev, [rep]: { ...(prev[rep]||{rep_name:rep}), monthly_target_override: wan===''?null:Number(wan)*10000 } }));
+  const updateRep = (rep_name, patch) =>
+    setRepList(prev => prev.map(r => r.rep_name === rep_name ? { ...r, ...patch } : r));
+
+  const handleAddRep = () => {
+    const name = (window.prompt('担当者のフルネーム（kintone_payments.staff と一致するように）') || '').trim();
+    if (!name) return;
+    if (repList.some(r => r.rep_name === name)) { alert('すでに登録済みです'); return; }
+    setRepList(prev => [...prev, {
+      rep_name: name, role_name: '', monthly_target_override: null,
+      prev_role_name: '', prev_monthly_target_override: null,
+      is_retired: false, exclude_from_kpi: false, monthly_to_adda_ref: false,
+    }]);
+  };
+
+  const handleDeleteRep = async (rep_name) => {
+    if (!window.confirm(`${rep_name} をリストから削除しますか？`)) return;
+    try {
+      await api.crmRepRoleDelete(rep_name);
+      setRepList(prev => prev.filter(r => r.rep_name !== rep_name));
+    } catch { alert('削除に失敗しました'); }
+  };
+
   const setRoleTarget = (roleName, wan) => {
     setRoleTargetRows(prev => prev.map(r => r.role_name===roleName ? {...r, monthly_target: Number(wan)*10000} : r));
     setRoleTargets(prev => ({...prev, [roleName]: Number(wan)*10000}));
@@ -636,12 +662,15 @@ function CrmSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const repArr  = TARGET_REPS.map(rep => ({
-        rep_name:rep,
-        role_name:repRoles[rep]?.role_name||'',
-        monthly_target_override:repRoles[rep]?.monthly_target_override||null,
-        prev_role_name:repRoles[rep]?.prev_role_name||'',
-        prev_monthly_target_override:repRoles[rep]?.prev_monthly_target_override||null,
+      const repArr  = repList.map(r => ({
+        rep_name: r.rep_name,
+        role_name: r.role_name || '',
+        monthly_target_override: r.monthly_target_override || null,
+        prev_role_name: r.prev_role_name || '',
+        prev_monthly_target_override: r.prev_monthly_target_override || null,
+        is_retired: !!r.is_retired,
+        exclude_from_kpi: !!r.exclude_from_kpi,
+        monthly_to_adda_ref: !!r.monthly_to_adda_ref,
       }));
       const roleArr = roleTargetRows.map((r,i) => ({ role_name:r.role_name, monthly_target:r.monthly_target, sort_order:i }));
       await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({ prevStart:period.prevStart, prevEnd:period.prevEnd, currStart:period.currStart, currEnd:period.currEnd })]);
@@ -650,7 +679,10 @@ function CrmSettings() {
     setSaving(false);
   };
 
-  const teamTotal = TARGET_REPS.reduce((s, rep) => s + getEffective(rep), 0);
+  // KPI 対象担当者（除外・退職は teamTotal から除く）
+  const teamTotal = repList
+    .filter(r => !r.exclude_from_kpi && !r.is_retired)
+    .reduce((s, rep) => s + getEffective(rep), 0);
 
   const SECTIONS = [
     { key:'kpi',     label:'役職・KPI目標', icon:'🎯' },
@@ -723,47 +755,85 @@ function CrmSettings() {
             </div>
             {/* 担当者別 */}
             <div>
-              <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#374151', marginBottom:10 }}>担当者別 役職割り当て</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#374151' }}>担当者別 役職割り当て・KPI区分</div>
+                <button onClick={handleAddRep}
+                  style={{ padding:'4px 10px', border:'1px solid #c7d2fe', background:'#eef2ff', color:'#4f46e5', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor:'pointer' }}>
+                  + 担当者追加
+                </button>
+              </div>
+              <div style={{ fontSize:'0.68rem', color:'#94a3b8', marginBottom:8, lineHeight:1.5 }}>
+                <b>退職</b>: 入金は全て添田/リファラル / <b>除外</b>: KPI から完全除外（アライアンス扱い） / <b>月額→添</b>: 月額プランの入金のみ添田/リファラル
+              </div>
               <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
-                {TARGET_REPS.map((rep,i) => {
-                  const [fam, given] = rep.split(/[\s　]/);
-                  const roleName = repRoles[rep]?.role_name || '';
-                  const overrideRaw = repRoles[rep]?.monthly_target_override;
-                  const overrideWan = overrideRaw ? Math.round(Number(overrideRaw)/10000) : '';
-                  const effective = getEffective(rep);
+                {repList.length === 0 && (
+                  <div style={{ padding:'18px 14px', textAlign:'center', fontSize:'0.78rem', color:'#94a3b8' }}>
+                    担当者が未登録です。「+ 担当者追加」から追加してください
+                  </div>
+                )}
+                {repList.map((r, i) => {
+                  // eslint-disable-next-line no-irregular-whitespace
+                  const [fam, given] = (r.rep_name || '').split(/[\s　]/);
+                  const overrideWan = r.monthly_target_override ? Math.round(Number(r.monthly_target_override)/10000) : '';
+                  const effective = getEffective(r);
+                  const dimmed = r.exclude_from_kpi || r.is_retired;
                   return (
-                    <div key={rep} style={{ padding:'9px 14px', borderBottom:i<TARGET_REPS.length-1?'1px solid #f8fafc':'none' }}>
+                    <div key={r.rep_name} style={{ padding:'9px 14px', borderBottom:i<repList.length-1?'1px solid #f8fafc':'none', opacity: dimmed ? 0.6 : 1 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                         <span style={{ width:22, height:22, borderRadius:5, background:'#eef2ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.62rem', fontWeight:800, color:'#4f46e5', flexShrink:0 }}>{fam?.[0]}</span>
                         <span style={{ fontWeight:700, color:'#4f46e5', fontSize:'0.72rem' }}>{fam}</span>
-                        <span style={{ color:'#374151', fontSize:'0.82rem' }}>{given}</span>
-                        {effective > 0 && <span style={{ marginLeft:'auto', fontSize:'0.72rem', fontWeight:700, color:'#1e40af' }}>{Math.round(effective/10000)}万</span>}
+                        <span style={{ color:'#374151', fontSize:'0.82rem' }}>{given || ''}</span>
+                        {!dimmed && effective > 0 && <span style={{ marginLeft:'auto', fontSize:'0.72rem', fontWeight:700, color:'#1e40af' }}>{Math.round(effective/10000)}万</span>}
+                        <button onClick={() => handleDeleteRep(r.rep_name)}
+                          title="削除"
+                          style={{ marginLeft: !dimmed && effective>0 ? 6 : 'auto', width:20, height:20, border:'none', background:'transparent', color:'#cbd5e1', cursor:'pointer', fontSize:'0.85rem', lineHeight:1 }}>
+                          ×
+                        </button>
                       </div>
-                      <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                      <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap', marginBottom:6 }}>
                         <div style={{ display:'flex', alignItems:'center', gap:4, flex:'1 1 120px' }}>
                           <span style={{ fontSize:'0.62rem', color:'#94a3b8', flexShrink:0 }}>今期</span>
-                          <select value={roleName} onChange={e => setRepRole(rep, e.target.value)}
+                          <select value={r.role_name} onChange={e => updateRep(r.rep_name, { role_name: e.target.value })}
                             style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none' }}>
-                            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 未選択 —'}</option>)}
+                            {ROLE_OPTIONS.map(o => <option key={o} value={o}>{o||'— 未選択 —'}</option>)}
                           </select>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:4, flex:'1 1 120px' }}>
                           <span style={{ fontSize:'0.62rem', color:'#94a3b8', flexShrink:0 }}>前期</span>
-                          <select value={repRoles[rep]?.prev_role_name||''} onChange={e => setPrevRepRole(rep, e.target.value)}
-                            style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none', color: repRoles[rep]?.prev_role_name ? '#0f172a' : '#94a3b8' }}>
-                            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r||'— 今期と同じ —'}</option>)}
+                          <select value={r.prev_role_name||''} onChange={e => updateRep(r.rep_name, { prev_role_name: e.target.value })}
+                            style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none', color: r.prev_role_name ? '#0f172a' : '#94a3b8' }}>
+                            {ROLE_OPTIONS.map(o => <option key={o} value={o}>{o||'— 今期と同じ —'}</option>)}
                           </select>
                         </div>
                         <input type="number" min="0" step="10" value={overrideWan}
-                          onChange={e => setOverride(rep, e.target.value)} placeholder="手動"
+                          onChange={e => updateRep(r.rep_name, { monthly_target_override: e.target.value===''?null:Number(e.target.value)*10000 })}
+                          placeholder="手動"
                           style={{ width:52, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', textAlign:'right', outline:'none' }} />
                         <span style={{ fontSize:'0.65rem', color:'#94a3b8' }}>万</span>
+                      </div>
+                      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                        {[
+                          { key:'is_retired',          label:'退職',     color:'#dc2626', bg:'#fef2f2' },
+                          { key:'exclude_from_kpi',    label:'除外',     color:'#92400e', bg:'#fef9c3' },
+                          { key:'monthly_to_adda_ref', label:'月額→添',  color:'#0e7490', bg:'#ecfeff' },
+                        ].map(flag => {
+                          const on = !!r[flag.key];
+                          return (
+                            <label key={flag.key} style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, cursor:'pointer',
+                              background: on ? flag.bg : '#f8fafc', border: `1px solid ${on ? flag.color+'66' : '#e2e8f0'}` }}>
+                              <input type="checkbox" checked={on}
+                                onChange={e => updateRep(r.rep_name, { [flag.key]: e.target.checked })}
+                                style={{ margin:0, accentColor: flag.color, width:12, height:12 }} />
+                              <span style={{ fontSize:'0.65rem', fontWeight:600, color: on ? flag.color : '#64748b' }}>{flag.label}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
                   );
                 })}
                 <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 14px', background:'#f8fafc', borderTop:'1px solid #f1f5f9' }}>
-                  <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:600 }}>合計</span>
+                  <span style={{ fontSize:'0.75rem', color:'#64748b', fontWeight:600 }}>KPI対象 合計</span>
                   <span style={{ fontSize:'0.85rem', fontWeight:800, color:teamTotal>0?'#1e40af':'#cbd5e1' }}>{teamTotal>0?`${Math.round(teamTotal/10000)}万`:'未設定'}</span>
                 </div>
               </div>

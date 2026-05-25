@@ -3,8 +3,8 @@ import { useBreakpoint } from '../../hooks/useWindowWidth';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine, LabelList } from 'recharts';
 import { api } from '../../api/client';
 
-const TARGET_REPS = ['山本 夏乃', '板金 慎太郎', '萩原 隼人', '藤原 一矢', '野村 尭弘'];
-const REP_COLORS  = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6'];
+// TARGET_REPS はサーバー（/api/crm/dashboard の targetReps）から動的取得
+const REP_COLORS  = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#14b8a6','#f97316'];
 
 const ACT_CFG = {
   '初回商談': { color:'#059669', bg:'#dcfce7' },
@@ -69,34 +69,20 @@ function DiffTag({ diff }) {
   );
 }
 
-function buildRepTable(repTable, filterRep) {
+function buildRepTable(repTable, targetReps, filterRep) {
   if (!repTable?.length) return [];
-  if (filterRep && TARGET_REPS.includes(filterRep)) {
+  if (filterRep && targetReps.includes(filterRep)) {
     const f = repTable.find(r => r.rep === filterRep);
     return [f ? { ...f } : { rep: filterRep, wonCount: 0, meetingCount: 0, paymentAmount: 0 }];
   }
-  // TARGET_REPS（メイン担当者）
-  const rows = TARGET_REPS.map(name => {
+  // targetReps の順に並べる（サーバーが返した KPI 担当者リスト）
+  const rows = targetReps.map(name => {
     const f = repTable.find(r => r.rep === name);
     return f ? { ...f } : { rep: name, wonCount: 0, meetingCount: 0, paymentAmount: 0 };
   });
-  // 添田/リファラル（KPI対象）
+  // 添田/リファラル
   const addaRef = repTable.find(r => r.groupType === 'adda_ref');
   if (addaRef) rows.push({ ...addaRef });
-  // アライアンス（KPI対象外・最後に表示）
-  const alliance = repTable.find(r => r.groupType === 'alliance');
-  if (alliance) rows.push({ ...alliance });
-  // その他（上記以外）
-  const others = repTable.filter(r =>
-    !TARGET_REPS.includes(r.rep) && r.groupType !== 'alliance' && r.groupType !== 'adda_ref'
-  );
-  if (others.length > 0) rows.push({
-    rep: 'その他', isOther: true,
-    wonCount:        others.reduce((s, r) => s + r.wonCount, 0),
-    meetingCount:    others.reduce((s, r) => s + r.meetingCount, 0),
-    paymentAmount:   others.reduce((s, r) => s + r.paymentAmount, 0),
-    incentiveAmount: others.reduce((s, r) => s + (r.incentiveAmount || 0), 0),
-  });
   return rows;
 }
 
@@ -279,9 +265,10 @@ export default function CrmDashboard() {
   const {
     curr, prev, repTable, yomiBreakdown = [], overdueAlerts = [], stagnantAlerts = [],
     rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, repRoleInferred = {}, teamTarget = 0, planBreakdown = [],
+    targetReps = [],
   } = data;
 
-  const reps = buildRepTable(repTable, salesUser);
+  const reps = buildRepTable(repTable, targetReps, salesUser);
   const termLabel = period === 'term' ? '期' : '月';
   const alertCount = overdueAlerts.length + stagnantAlerts.length;
 
@@ -365,7 +352,7 @@ export default function CrmDashboard() {
         <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period, customMonth); }}
           style={{ padding:'5px 12px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.82rem', background:C.surface, cursor:'pointer', color:C.text }}>
           <option value="">全員</option>
-          {TARGET_REPS.map(u => <option key={u} value={u}>{u}</option>)}
+          {targetReps.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
 
         {/* kintone同期ボタン + 最終同期時刻 */}
@@ -494,7 +481,7 @@ export default function CrmDashboard() {
                 <span style={{ width:8, height:8, borderRadius:'50%', background:'#6366f1', display:'inline-block' }} />
                 <span style={{ fontWeight:700, fontSize:'0.85rem', color:C.text }}>担当者別実績</span>
               </div>
-              <span style={{ fontSize:'0.68rem', color:C.textSub }}>6名　クリックでドリルダウン</span>
+              <span style={{ fontSize:'0.68rem', color:C.textSub }}>{reps.length}名　クリックでドリルダウン</span>
             </div>
             <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>

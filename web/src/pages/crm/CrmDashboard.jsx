@@ -45,8 +45,9 @@ const fmtM = n => {
   if (!n) return '0万';
   const m = Number(n);
   if (m >= 1e8) return `${(m / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}億`;
-  if (m >= 1e4) return `${Math.round(m / 1e4).toLocaleString()}万`;
-  return m.toLocaleString();
+  if (m >= 1e5) return `${Math.round(m / 1e4).toLocaleString()}万`;   // 10万以上 = 整数万
+  if (m >= 1e4) return `${(m / 1e4).toFixed(1)}万`;                   // 1万〜10万 = 小数点1桁
+  return m.toLocaleString();                                          // 1万未満 = 円のまま
 };
 const fmtMYen  = n => `¥${fmtM(n)}`;
 const fmtDate  = d => d ? String(d).substring(0, 10).replace(/-/g, '/') : '';

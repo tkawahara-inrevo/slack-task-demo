@@ -71,7 +71,7 @@ function TargetModal({ targets, onSave, onClose }) {
     </>
   );
 }
-const fmtM = n => { if (!n) return '—'; const m = Math.round(Number(n)); return m >= 10000 ? `${Math.round(m/10000).toLocaleString()}万` : m.toLocaleString(); };
+const fmtM = n => { if (!n) return '—'; const m = Number(n); if (m >= 1e5) return `${Math.round(m/1e4).toLocaleString()}万`; if (m >= 1e4) return `${(m/1e4).toFixed(1)}万`; return Math.round(m).toLocaleString(); };
 const TICK = { fontSize: 11, fill: '#6b7280' };
 
 const YOMI_COLOR = {

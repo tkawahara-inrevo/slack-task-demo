@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 
 const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
-const fmtM = (n) => n ? `¥${(Math.round(Number(n)/10000)).toLocaleString()}万` : '—';
+const fmtM = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const pct = (n) => n != null ? `${Math.round(Number(n)*100)/100}%` : '—';
 
 const ROLE_ORDER = ['役職無し','Lead','Sub Manager','Sub Chief','Chief','Sub Expert','Expert'];

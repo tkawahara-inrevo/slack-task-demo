@@ -42,12 +42,8 @@ const C = {
 };
 
 const fmtM = n => {
-  if (!n) return '0万';
-  const m = Number(n);
-  if (m >= 1e8) return `${(m / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}億`;
-  if (m >= 1e5) return `${Math.round(m / 1e4).toLocaleString()}万`;   // 10万以上 = 整数万
-  if (m >= 1e4) return `${(m / 1e4).toFixed(1)}万`;                   // 1万〜10万 = 小数点1桁
-  return m.toLocaleString();                                          // 1万未満 = 円のまま
+  if (!n) return '0';
+  return Math.round(Number(n)).toLocaleString();
 };
 const fmtMYen  = n => `¥${fmtM(n)}`;
 const fmtDate  = d => d ? String(d).substring(0, 10).replace(/-/g, '/') : '';
@@ -734,17 +730,17 @@ export default function CrmDashboard() {
 
           {/* 入金推移 */}
           <div style={{ ...cardStyle, padding:'14px 16px' }}>
-            {sectionHead('入金推移（実入金額）', period === 'term' ? '今期 月別' : '過去6ヶ月　単位: 万円')}
+            {sectionHead('入金推移（実入金額）', period === 'term' ? '今期 月別' : '過去6ヶ月')}
             <ResponsiveContainer width="100%" height={period === 'term' ? 160 : 130}>
               <BarChart data={trendData} margin={{ top:8, right:0, left:0, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={v => `${Math.round(v / 1e4)}万`} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={42} />
+                <YAxis tickFormatter={v => Math.round(v).toLocaleString()} tick={{ fontSize:9, fill:'#94a3b8' }} axisLine={false} tickLine={false} width={64} />
                 <Tooltip formatter={v => [`${fmtM(v)}`, '実入金額']}
                   contentStyle={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, fontSize:11, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
                   <LabelList dataKey="amount" position="top"
-                    formatter={v => v > 0 ? `${Math.round(v / 1e4)}万` : ''}
+                    formatter={v => v > 0 ? Math.round(v).toLocaleString() : ''}
                     style={{ fontSize:8, fill:'#94a3b8' }} />
                   {trendData.map((_, i) => <Cell key={i} fill={i === trendData.length - 1 ? '#1e40af' : '#bfdbfe'} />)}
                 </Bar>

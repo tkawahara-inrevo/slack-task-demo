@@ -735,13 +735,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
             [start, end]),
         ]);
 
-        // 期待する振り分け先（'bc' または 'adda_ref'）
-        const expected = isAddaRef ? 'adda_ref' : 'bc';
+        // KPI集計対象: 'bc' と 'adda_ref' 両方含む（'excluded' = アライアンスのみ除外）
+        // 「添田/リファラル」フィルタ選択時は adda_ref のみに絞る
         let paymentAmount = 0, incentiveAmount = 0;
         for (const p of payRowsRes.rows) {
-          // 個別担当者フィルタ時のみ staff 名一致を要求
           if (salesUser && !isAddaRef && !(p.staff || '').includes(salesUser)) continue;
-          if (classifyPayment(p.staff, p.plan) !== expected) continue;
+          const dest = classifyPayment(p.staff, p.plan);
+          if (dest === 'excluded') continue;
+          if (isAddaRef && dest !== 'adda_ref') continue;
           paymentAmount   += Number(p.amount);
           incentiveAmount += Number(p.incentive_amount);
         }
@@ -1510,11 +1511,15 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       const ADDA_REF_MS = '添田/リファラル';
       const isAddaRefMS = salesUser === ADDA_REF_MS;
-      const expectedMS = isAddaRefMS ? 'adda_ref' : 'bc';
+      // KPI対象 = 'bc' + 'adda_ref'（'excluded' = アライアンスのみ除外）
+      // addaRef フィルタ選択時は adda_ref のみに絞る
       const paymentsRes = {
         rows: allPaymentsRes.rows.filter(p => {
           if (salesUser && !isAddaRefMS && !(p.staff || '').includes(salesUser)) return false;
-          return classifyPaymentMS(p.staff, p.plan) === expectedMS;
+          const dest = classifyPaymentMS(p.staff, p.plan);
+          if (dest === 'excluded') return false;
+          if (isAddaRefMS && dest !== 'adda_ref') return false;
+          return true;
         }),
       };
 

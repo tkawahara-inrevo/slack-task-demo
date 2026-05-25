@@ -836,13 +836,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
         dealsAggByRep[repName].meetingCount += Number(r.meeting_count);
       }
 
-      const normalRows = [...repNameSet].map(repName => ({
-        rep:             repName,
-        wonCount:        dealsAggByRep[repName]?.wonCount     || 0,
-        meetingCount:    dealsAggByRep[repName]?.meetingCount || 0,
-        paymentAmount:   repPayMap[repName]?.payment          || 0,
-        incentiveAmount: repPayMap[repName]?.incentive        || 0,
-      }));
+      // 「添田/リファラル」は予約名なので normalRows には出さない（addaRefRow と重複防止）
+      const normalRows = [...repNameSet]
+        .filter(repName => repName !== ADDA_REF)
+        .map(repName => ({
+          rep:             repName,
+          wonCount:        dealsAggByRep[repName]?.wonCount     || 0,
+          meetingCount:    dealsAggByRep[repName]?.meetingCount || 0,
+          paymentAmount:   repPayMap[repName]?.payment          || 0,
+          incentiveAmount: repPayMap[repName]?.incentive        || 0,
+        }));
 
       // 添田/リファラル行: 入金集約値 + 未設定担当者の受注/初回商談を加算
       const addaRefDealRows = repRows.rows.filter(r => !isConfigured(r.rep));
@@ -964,10 +967,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       const repTargetMap = {};
       const repRoleInferred = {}; // フロントに渡す自動推定役職
-      // KPI管理対象の担当者（BC担当）= crm_rep_roles 設定済 − 除外/退職
+      // KPI管理対象の担当者（BC担当）= crm_rep_roles 設定済 − 除外/退職 − 添田/リファラル予約名
       // フロントもこのリストでダッシュボードを描画するため、ハードコードは廃止
       const TARGET_REPS_SERVER = REP_ROLES
-        .filter(r => !r.exclude_from_kpi && !r.is_retired)
+        .filter(r => !r.exclude_from_kpi && !r.is_retired && r.rep_name !== ADDA_REF)
         .map(r => r.rep_name);
       let teamTarget = 0;
       for (const rep of TARGET_REPS_SERVER) {

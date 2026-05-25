@@ -78,6 +78,15 @@ async function runSync() {
       console.log(`[kintone] syncing app ${appId}...`);
       const records = await syncKintoneApp(Number(appId), cfg);
       await dbUpsertKintoneRecords(String(appId), records);
+      // kintone側で削除されたレコードをDBからも削除（記事0件のときは安全側で削除しない）
+      if (records.length > 0) {
+        const ids = records.map(r => r.recordId).filter(Boolean);
+        const del = await dbQuery(
+          'DELETE FROM kintone_cache WHERE app_id=$1 AND record_id <> ALL($2::text[])',
+          [String(appId), ids]
+        );
+        if (del.rowCount > 0) console.log(`[kintone] app ${appId}: removed ${del.rowCount} stale records`);
+      }
       console.log(`[kintone] synced ${records.length} records from app ${appId}`);
     }
     // deals テーブルへのフィールドマッピング

@@ -120,6 +120,17 @@ async function syncKintonePayments() {
     `, [rec.record_id, company, amount, incentive, paymentDate, plan, staff]).catch(() => {});
     upserted++;
   }
+
+  // kintone_cache (app_id=170) に存在しない record_id を kintone_payments から削除
+  // = kintone 上で削除されたレコードを DB からも除去する
+  if (rows.length > 0) {
+    const del = await dbQuery(`
+      DELETE FROM kintone_payments
+      WHERE record_id NOT IN (SELECT record_id FROM kintone_cache WHERE app_id='170')
+    `);
+    if (del.rowCount > 0) console.log(`[kintone] kintone_payments: removed ${del.rowCount} stale records`);
+  }
+
   console.log(`[kintone] kintone_payments upserted: ${upserted}`);
   return upserted;
 }

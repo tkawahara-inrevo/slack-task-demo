@@ -638,9 +638,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { teamId } = req.dashboardUser;
       const { salesUser, period = 'month', customMonth } = req.query; // period: 'month' | 'term' | 'custom'
 
-      // 担当者フィルター
-      const personFilter = salesUser ? ` AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '';
-      const personParams = salesUser ? [teamId, salesUser] : [teamId];
+      const ADDA_REF = '添田/リファラル';
+      const isAddaRef = salesUser === ADDA_REF;
 
       // 期間設定取得
       const periodRes = await dbQuery('SELECT * FROM crm_period_settings WHERE team_id=$1', [teamId]);
@@ -679,6 +678,18 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const REP_ROLES = repRolesRes.rows;
       const CONFIGURED_REPS = REP_ROLES.map(r => r.rep_name);
 
+      // deals 側の担当者フィルタ（yomi等のクエリ用、$2 以降を消費）
+      // - 通常担当者: COALESCE(...)=$2
+      // - 添田/リファラル: 設定済担当者 全員に該当しない人（NOT ILIKE 〜 AND ...）
+      const personFilter = isAddaRef
+        ? (CONFIGURED_REPS.length > 0
+          ? ` AND (${CONFIGURED_REPS.map((_, i) => `COALESCE(d.sales_person, d.sales_user_id) NOT ILIKE $${i + 2}`).join(' AND ')})`
+          : '')
+        : (salesUser ? ` AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '');
+      const personParams = isAddaRef
+        ? (CONFIGURED_REPS.length > 0 ? [teamId, ...CONFIGURED_REPS.map(r => `%${r}%`)] : [teamId])
+        : (salesUser ? [teamId, salesUser] : [teamId]);
+
       // staff 名 → ロール設定の解決（部分一致）
       const findRoleFor = (staff) => {
         if (!staff) return null;
@@ -704,20 +715,18 @@ function registerCrmApi({ expressApp, authWithRole }) {
 
       // ── 期間内の主要指標を集計するヘルパー ──
       const getMetrics = async (start, end) => {
-        const pf = salesUser ? ` AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '';
-        const si = salesUser ? 3 : 2;
-        const baseP = salesUser ? [teamId, salesUser, start, end] : [teamId, start, end];
+        // deals 側のフィルタ（personFilter と同じ分岐、ただし baseP に start/end が末尾追加）
+        const pf      = personFilter;
+        const baseP   = [...personParams, start, end];
+        const si      = baseP.length - 1; // start の $番号
 
         const [wonRes, meetingRes, payRowsRes] = await Promise.all([
-          // 受注件数・金額（deals 側は sales_person で素直に集計）
           dbQuery(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(d.initial_fee),0)::bigint AS amount
             FROM deals d WHERE d.team_id=$1${pf}
             AND d.status='won' AND d.order_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 初回商談数（deals 側は sales_person で素直に集計）
           dbQuery(`SELECT COUNT(*)::int AS cnt FROM deals d
             WHERE d.team_id=$1${pf}
             AND d.first_meeting_date BETWEEN $${si}::date AND $${si+1}::date`, baseP),
-          // 入金: 期間内の全行を取得し、JS 側で classifyPayment により振り分け
           dbQuery(`SELECT staff, plan,
                           COALESCE(amount,0)::bigint AS amount,
                           COALESCE(incentive_amount,0)::bigint AS incentive_amount
@@ -726,10 +735,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
             [start, end]),
         ]);
 
+        // 期待する振り分け先（'bc' または 'adda_ref'）
+        const expected = isAddaRef ? 'adda_ref' : 'bc';
         let paymentAmount = 0, incentiveAmount = 0;
         for (const p of payRowsRes.rows) {
-          if (salesUser && !(p.staff || '').includes(salesUser)) continue;
-          if (classifyPayment(p.staff, p.plan) !== 'bc') continue;
+          // 個別担当者フィルタ時のみ staff 名一致を要求
+          if (salesUser && !isAddaRef && !(p.staff || '').includes(salesUser)) continue;
+          if (classifyPayment(p.staff, p.plan) !== expected) continue;
           paymentAmount   += Number(p.amount);
           incentiveAmount += Number(p.incentive_amount);
         }
@@ -740,7 +752,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           meetingCount:    meetingRes.rows[0]?.cnt || 0,
           paymentAmount,
           incentiveAmount,
-          allianceIncentive: 0, // 廃止（exclude_from_kpi に統合）
+          allianceIncentive: 0,
         };
       };
 
@@ -846,10 +858,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
             groupType:       'adda_ref',
           };
 
-      const repTable = [
-        ...normalRows,
-        ...(addaRefRow ? [addaRefRow] : []),
-      ];
+      const repTable = isAddaRef
+        ? (addaRefRow ? [addaRefRow] : [])
+        : [...normalRows, ...(addaRefRow ? [addaRefRow] : [])];
 
       // ── アラート（全担当者対象、フィルター不要）──
       const today = new Date().toISOString().split('T')[0];
@@ -886,17 +897,29 @@ function registerCrmApi({ expressApp, authWithRole }) {
           WHEN 'アポ化済商談前' THEN 7 WHEN 'アポ化前' THEN 8 ELSE 9 END
       `, personParams);
 
-      // プラン別入金内訳（アライアンス・リファラル含む全員）
-      const planBreakdownRes = await dbQuery(`
-        SELECT COALESCE(plan, '未設定') AS plan,
-               COUNT(DISTINCT company)::int AS cnt,
-               COALESCE(SUM(amount),0)::bigint AS amount
+      // プラン別入金内訳（フィルタ適用、JSで振り分け）
+      const planRowsRes = await dbQuery(`
+        SELECT plan, company, staff, COALESCE(amount,0)::bigint AS amount
         FROM kintone_payments
-        WHERE payment_date BETWEEN $1::date AND $2::date
-          AND amount > 0
-          ${salesUser ? 'AND staff=$3' : ''}
-        GROUP BY 1 ORDER BY amount DESC
-      `, salesUser ? [rangeStart, rangeEnd, salesUser] : [rangeStart, rangeEnd]);
+        WHERE payment_date BETWEEN $1::date AND $2::date AND amount > 0
+      `, [rangeStart, rangeEnd]);
+
+      const planAgg = {}; // plan -> { cnt: Set<company>, amount }
+      const planExpected = isAddaRef ? 'adda_ref' : (salesUser ? 'bc' : null);
+      for (const p of planRowsRes.rows) {
+        if (salesUser && !isAddaRef && !(p.staff || '').includes(salesUser)) continue;
+        if (planExpected && classifyPayment(p.staff, p.plan) !== planExpected) continue;
+        if (!planExpected && classifyPayment(p.staff, p.plan) === 'excluded') continue;
+        const key = p.plan || '未設定';
+        if (!planAgg[key]) planAgg[key] = { companies: new Set(), amount: 0 };
+        if (p.company) planAgg[key].companies.add(p.company);
+        planAgg[key].amount += Number(p.amount);
+      }
+      const planBreakdownRes = {
+        rows: Object.entries(planAgg)
+          .map(([plan, v]) => ({ plan, cnt: v.companies.size, amount: v.amount }))
+          .sort((a, b) => b.amount - a.amount),
+      };
 
       // 担当者リスト & 役職別目標 & 担当者役職マッピング
       const [salesUsersRes, roleTargetRes, repRoleRes] = await Promise.all([
@@ -976,7 +999,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         repTargetMap,
         repRoleInferred,
         teamTarget,
-        targetReps: TARGET_REPS_SERVER, // KPI担当者リスト（フロント動的化用）
+        targetReps: [...TARGET_REPS_SERVER, ADDA_REF], // KPI担当者リスト + 添田/リファラル
         planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,
         overdueAlerts: overdueRes.rows,
@@ -1482,16 +1505,34 @@ function registerCrmApi({ expressApp, authWithRole }) {
         ORDER BY payment_date
       `, [monthStart, monthEnd]);
 
-      // BC計上対象のみ抽出（担当者フィルタも適用）
+      const ADDA_REF_MS = '添田/リファラル';
+      const isAddaRefMS = salesUser === ADDA_REF_MS;
+      const expectedMS = isAddaRefMS ? 'adda_ref' : 'bc';
       const paymentsRes = {
         rows: allPaymentsRes.rows.filter(p => {
-          if (salesUser && !(p.staff || '').includes(salesUser)) return false;
-          return classifyPaymentMS(p.staff, p.plan) === 'bc';
+          if (salesUser && !isAddaRefMS && !(p.staff || '').includes(salesUser)) return false;
+          return classifyPaymentMS(p.staff, p.plan) === expectedMS;
         }),
       };
 
-      const salesFilter = salesUser ? `AND COALESCE(d.sales_person, d.sales_user_id)=$2` : '';
-      const salesParams = salesUser ? [teamId, salesUser] : [teamId];
+      // 担当者フィルタ（addaRef 時は設定済担当者以外）
+      let salesFilter, salesParams;
+      if (isAddaRefMS) {
+        const configured = REP_ROLES_MS.map(r => r.rep_name).filter(Boolean);
+        if (configured.length > 0) {
+          salesFilter = `AND (${configured.map((_, i) => `COALESCE(d.sales_person, d.sales_user_id) NOT ILIKE $${i + 2}`).join(' AND ')})`;
+          salesParams = [teamId, ...configured.map(r => `%${r}%`)];
+        } else {
+          salesFilter = '';
+          salesParams = [teamId];
+        }
+      } else if (salesUser) {
+        salesFilter = `AND COALESCE(d.sales_person, d.sales_user_id)=$2`;
+        salesParams = [teamId, salesUser];
+      } else {
+        salesFilter = '';
+        salesParams = [teamId];
+      }
 
       // 締結ほぼ確実 (yomi A or S)（担当者フィルタ対応）
       const highRes = await dbQuery(`

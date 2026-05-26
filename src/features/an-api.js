@@ -227,10 +227,37 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
-  // ─── 媒体実績DB（全案件横断集計） ─────────────────────
+  // ─── 媒体実績DB（全案件横断集計 + フィルタ + ファセット） ─────────
   expressApp.get('/api/dashboard/an/media-stats', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
+      const { industry, hire_type, prefecture, size_bucket, period_from, period_to } = req.query;
+
+      // size_bucket: small(<=5) / mid(6-10) / large(11+)
+      const filters = [`rc.team_id=$1`, `rc.status != 'archived'`, `(m->>'name') IS NOT NULL`, `(m->>'name') != ''`,
+        `((m->>'mediaCost')::numeric > 0 OR (m->>'hiredCount')::int > 0)`];
+      const params = [teamId];
+      const add = (sql, val) => { params.push(val); filters.push(sql.replace('?', `$${params.length}`)); };
+      if (industry)     add(`c.industry = ?`, industry);
+      if (prefecture)   add(`c.prefecture = ?`, prefecture);
+      if (hire_type)    add(`d.hire_type @> ?::jsonb`, JSON.stringify([hire_type]));
+      if (size_bucket === 'small') filters.push(`COALESCE((rc.data->'projectInfo'->>'hiringTarget')::int, 0) BETWEEN 1 AND 5`);
+      if (size_bucket === 'mid')   filters.push(`COALESCE((rc.data->'projectInfo'->>'hiringTarget')::int, 0) BETWEEN 6 AND 10`);
+      if (size_bucket === 'large') filters.push(`COALESCE((rc.data->'projectInfo'->>'hiringTarget')::int, 0) >= 11`);
+      if (period_from) add(`(m->>'periodStart')::date >= ?`, period_from);
+      if (period_to)   add(`(m->>'periodEnd')::date <= ?`, period_to);
+
+      const baseFrom = `
+        FROM rpo_clients rc
+        LEFT JOIN deals d     ON d.id = rc.data->>'crmDealId'
+        LEFT JOIN customers c ON c.id = d.customer_id,
+        jsonb_array_elements(
+          CASE WHEN rc.data ? 'mediaStatus' THEN rc.data->'mediaStatus' ELSE '[]'::jsonb END
+        ) AS m
+        WHERE ${filters.join(' AND ')}
+      `;
+
+      // 媒体別の集計
       const { rows } = await dbQuery(`
         SELECT
           m->>'name'                             AS media_name,
@@ -239,28 +266,74 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
           SUM((m->>'hiredCount')::int)           AS total_hired,
           AVG((m->>'mediaCost')::numeric)        AS avg_cost,
           SUM(CASE WHEN (m->>'hiredCount')::int > 0 THEN 1 ELSE 0 END)::int AS success_campaigns
-        FROM rpo_clients rc,
-             jsonb_array_elements(
-               CASE WHEN rc.data ? 'mediaStatus' THEN rc.data->'mediaStatus' ELSE '[]'::jsonb END
-             ) AS m
-        WHERE rc.team_id=$1
-          AND rc.status != 'archived'
-          AND (m->>'name') IS NOT NULL
-          AND (m->>'name') != ''
-          AND ((m->>'mediaCost')::numeric > 0 OR (m->>'hiredCount')::int > 0)
+        ${baseFrom}
         GROUP BY media_name
         ORDER BY total_hired DESC NULLS LAST, total_cost DESC NULLS LAST
-      `, [teamId]);
+      `, params);
 
-      res.json({ stats: rows.map(r => ({
-        media_name: r.media_name,
-        campaigns: r.campaigns,
-        total_cost: Number(r.total_cost) || 0,
-        total_hired: Number(r.total_hired) || 0,
-        avg_cost: Math.round(Number(r.avg_cost) || 0),
-        cost_per_hire: r.total_hired > 0 ? Math.round(Number(r.total_cost) / r.total_hired) : null,
-        success_campaigns: r.success_campaigns,
-      })) });
+      // 媒体 × 業界 のブレイクダウン
+      const { rows: byInd } = await dbQuery(`
+        SELECT m->>'name' AS media_name,
+               COALESCE(c.industry,'未設定') AS industry,
+               SUM((m->>'hiredCount')::int)    AS hired,
+               SUM((m->>'mediaCost')::numeric) AS cost,
+               COUNT(*)::int                   AS campaigns
+        ${baseFrom}
+        GROUP BY media_name, industry
+        ORDER BY media_name, hired DESC NULLS LAST
+      `, params);
+
+      // 媒体 × 雇用形態 のブレイクダウン
+      const { rows: byHire } = await dbQuery(`
+        SELECT m->>'name' AS media_name,
+               COALESCE(NULLIF(jsonb_array_elements_text(
+                 CASE WHEN d.hire_type IS NOT NULL AND jsonb_typeof(d.hire_type)='array' AND jsonb_array_length(d.hire_type)>0
+                      THEN d.hire_type ELSE '["未設定"]'::jsonb END
+               ), ''), '未設定') AS hire_type,
+               SUM((m->>'hiredCount')::int)    AS hired,
+               SUM((m->>'mediaCost')::numeric) AS cost
+        ${baseFrom}
+        GROUP BY media_name, hire_type
+        ORDER BY media_name, hired DESC NULLS LAST
+      `, params);
+
+      // ファセット（フィルタ選択肢、フィルタ適用前の全体から）
+      const { rows: facetRows } = await dbQuery(`
+        SELECT DISTINCT
+          c.industry, c.prefecture
+        FROM rpo_clients rc
+        LEFT JOIN deals d     ON d.id = rc.data->>'crmDealId'
+        LEFT JOIN customers c ON c.id = d.customer_id
+        WHERE rc.team_id=$1 AND rc.status != 'archived'
+      `, [teamId]);
+      const industries  = [...new Set(facetRows.map(r => r.industry).filter(Boolean))].sort();
+      const prefectures = [...new Set(facetRows.map(r => r.prefecture).filter(Boolean))].sort();
+
+      const groupBy = (arr, key) => arr.reduce((m, r) => {
+        (m[r.media_name] = m[r.media_name] || []).push(r); return m;
+      }, {});
+      const indByMedia  = groupBy(byInd);
+      const hireByMedia = groupBy(byHire);
+
+      res.json({
+        stats: rows.map(r => ({
+          media_name: r.media_name,
+          campaigns: r.campaigns,
+          total_cost: Number(r.total_cost) || 0,
+          total_hired: Number(r.total_hired) || 0,
+          avg_cost: Math.round(Number(r.avg_cost) || 0),
+          cost_per_hire: r.total_hired > 0 ? Math.round(Number(r.total_cost) / r.total_hired) : null,
+          success_campaigns: r.success_campaigns,
+          by_industry: (indByMedia[r.media_name] || []).map(x => ({
+            industry: x.industry, hired: Number(x.hired)||0, cost: Number(x.cost)||0, campaigns: x.campaigns,
+          })),
+          by_hire_type: (hireByMedia[r.media_name] || []).map(x => ({
+            hire_type: x.hire_type, hired: Number(x.hired)||0, cost: Number(x.cost)||0,
+          })),
+        })),
+        facets: { industries, prefectures, hire_types: ['新卒','中途'],
+          size_buckets: [['small','〜5名'],['mid','6〜10名'],['large','11名〜']] },
+      });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 }

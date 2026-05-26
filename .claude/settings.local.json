@@ -69,7 +69,10 @@
       "mcp__claude_ai_Google_Drive__download_file_content",
       "PowerShell($data = Get-Content 'C:\\\\Users\\\\takar\\\\.claude\\\\projects\\\\e--dev-slack-task-demo\\\\3d701271-a635-4c63-975e-4e603cf5e4ec\\\\tool-results\\\\mcp-claude_ai_Google_Drive-download_file_content-1778203019821.txt' -Raw | ConvertFrom-Json; $csv = $data.content; $lines = $csv -split \"`n\"; Write-Output \"=== ヘッダー行 ===\"; Write-Output $lines[0]; Write-Output \"\"; Write-Output \"=== データ1行目 ===\"; Write-Output $lines[1])",
       "PowerShell($data = Get-Content 'C:\\\\Users\\\\takar\\\\.claude\\\\projects\\\\e--dev-slack-task-demo\\\\3d701271-a635-4c63-975e-4e603cf5e4ec\\\\tool-results\\\\mcp-claude_ai_Google_Drive-download_file_content-1778203019821.txt' -Raw | ConvertFrom-Json; $csv = [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($data.content\\)\\); $lines = $csv -split \"`n\"; Write-Output \"=== ヘッダー（全列）===\"; $lines[0]; Write-Output \"\"; Write-Output \"=== データ1行目 ===\"; $lines[1])",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -v \"node_modules\\\\|//\")",
+      "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem -o StrictHostKeyChecking=no e:/dev/slack-task-demo/seed_test_10.sql ubuntu@3.222.101.208:/tmp/seed_test_10.sql)",
+      "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem e:/dev/slack-task-demo/seed_rpo_3.sql ubuntu@3.222.101.208:/tmp/seed_rpo_3.sql)"
     ]
   }
 }

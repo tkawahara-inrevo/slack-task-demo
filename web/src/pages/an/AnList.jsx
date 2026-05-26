@@ -18,7 +18,10 @@ export default function AnList() {
   const [view, setView]         = useState('list'); // 'list' | 'media'
   const [rpoResults, setRpoResults] = useState(null);
   const [mediaStats, setMediaStats] = useState([]);
+  const [mediaFacets, setMediaFacets] = useState({ industries: [], prefectures: [], hire_types: [], size_buckets: [] });
+  const [mediaFilters, setMediaFilters] = useState({ industry: '', hire_type: '', prefecture: '', size_bucket: '' });
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [expandedMedia, setExpandedMedia] = useState({});
 
   const load = async () => {
     setLoading(true);
@@ -38,10 +41,17 @@ export default function AnList() {
     api.anRpoResults(req.id).then(r => setRpoResults(r.results)).catch(() => {});
   };
 
-  const loadMediaStats = () => {
+  const loadMediaStats = (filters = mediaFilters) => {
     setMediaLoading(true);
-    api.anMediaStats().then(r => setMediaStats(r.stats || [])).catch(() => {}).finally(() => setMediaLoading(false));
+    api.anMediaStats(filters).then(r => {
+      setMediaStats(r.stats || []);
+      if (r.facets) setMediaFacets(r.facets);
+    }).catch(() => {}).finally(() => setMediaLoading(false));
   };
+
+  useEffect(() => {
+    if (view === 'media') loadMediaStats(mediaFilters);
+  }, [mediaFilters, view]);
 
   const saveAnswer = async () => {
     if (!selected) return;
@@ -82,7 +92,7 @@ export default function AnList() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray-200)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 2 }}>
             {[['list','AN依頼一覧'],['media','媒体実績DB']].map(([v,l]) => (
-              <button key={v} onClick={() => { setView(v); if(v==='media') loadMediaStats(); }}
+              <button key={v} onClick={() => setView(v)}
                 style={{ padding: '3px 10px', fontSize: '0.78rem', fontWeight: 700, borderRadius: 5, border: 'none', cursor: 'pointer', background: view===v ? '#2563eb' : 'transparent', color: view===v ? '#fff' : 'var(--gray-500)' }}>
                 {l}
               </button>
@@ -103,11 +113,44 @@ export default function AnList() {
           {/* 媒体実績DBビュー */}
           {view === 'media' && (
             <div style={{ padding: 12 }}>
+              {/* フィルタバー */}
+              <div style={{ marginBottom: 10, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 6 }}>
+                {[
+                  ['industry',    '業界',     mediaFacets.industries.map(v => [v,v])],
+                  ['hire_type',   '雇用形態', mediaFacets.hire_types.map(v => [v,v])],
+                  ['prefecture',  'エリア',   mediaFacets.prefectures.map(v => [v,v])],
+                  ['size_bucket', '採用規模', mediaFacets.size_buckets],
+                ].map(([key, label, opts]) => (
+                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <label style={{ fontSize: '0.66rem', color: 'var(--gray-500)', fontWeight: 600 }}>{label}</label>
+                    <select value={mediaFilters[key]} onChange={e => setMediaFilters(f => ({ ...f, [key]: e.target.value }))}
+                      style={{ padding: '4px 6px', fontSize: '0.76rem', border: '1px solid var(--gray-300)', borderRadius: 5, background: 'var(--surface)' }}>
+                      <option value="">すべて</option>
+                      {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                ))}
+                {Object.values(mediaFilters).some(Boolean) && (
+                  <button onClick={() => setMediaFilters({ industry:'', hire_type:'', prefecture:'', size_bucket:'' })}
+                    style={{ gridColumn: '1 / -1', padding: '4px', fontSize: '0.72rem', background: 'transparent', border: '1px dashed var(--gray-300)', borderRadius: 5, color: 'var(--gray-500)', cursor: 'pointer' }}>
+                    フィルタをクリア
+                  </button>
+                )}
+              </div>
+
               {mediaLoading && <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>読み込み中...</div>}
-              {!mediaLoading && mediaStats.length === 0 && <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>データなし</div>}
-              {mediaStats.map(s => (
+              {!mediaLoading && mediaStats.length === 0 && <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>該当なし</div>}
+              {mediaStats.map(s => {
+                const expanded = expandedMedia[s.media_name];
+                return (
                 <div key={s.media_name} style={{ marginBottom: 8, background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 6 }}>{s.media_name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.88rem', flex: 1 }}>{s.media_name}</span>
+                    <button onClick={() => setExpandedMedia(m => ({ ...m, [s.media_name]: !m[s.media_name] }))}
+                      style={{ fontSize: '0.7rem', color: '#2563eb', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                      {expanded ? '▼ 内訳を閉じる' : '▶ 内訳を見る'}
+                    </button>
+                  </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
                     {[
                       ['掲載回数', `${s.campaigns}回`],
@@ -123,8 +166,35 @@ export default function AnList() {
                       </div>
                     ))}
                   </div>
+
+                  {expanded && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--gray-200)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>業界別</div>
+                        {(s.by_industry || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
+                        {(s.by_industry || []).map((b, i) => (
+                          <div key={i} style={{ display: 'flex', fontSize: '0.74rem', padding: '2px 0', borderBottom: '1px solid var(--gray-100)' }}>
+                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.industry}</span>
+                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.hired}人</span>
+                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.cost)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>雇用形態別</div>
+                        {(s.by_hire_type || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
+                        {(s.by_hire_type || []).map((b, i) => (
+                          <div key={i} style={{ display: 'flex', fontSize: '0.74rem', padding: '2px 0', borderBottom: '1px solid var(--gray-100)' }}>
+                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.hire_type}</span>
+                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.hired}人</span>
+                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.cost)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              );})}
             </div>
           )}
           {/* AN依頼一覧ビュー */}

@@ -437,7 +437,7 @@ export default function Recruitment() {
         <select value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
           style={{ fontSize: 13, padding: '7px 12px', border: '1px solid #e5e7eb', borderRadius: 8, outline: 'none', background: '#fff' }}>
           <option value="">部署 未選択</option>
-          {['MK','BC','CR','DR','ST','AN','CS','OP','HR','Corp','IT'].map(d => <option key={d} value={d}>{d}</option>)}
+          <option value="MK">MK</option>
         </select>
         <button onClick={handleAdd} disabled={!form.name.trim() || !form.email.trim()}
           style={{ fontSize: 13, padding: '7px 12px', border: 'none', borderRadius: 8, background: '#2563eb', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>
@@ -496,7 +496,7 @@ export default function Recruitment() {
                       <select value={c.department || ''} onChange={e => handleChangeDepartment(c.id, e.target.value)}
                         style={{ fontSize: 10, padding: '1px 4px', marginTop: 2, border: '1px solid #e5e7eb', borderRadius: 4, background: '#fff', color: '#6b7280' }}>
                         <option value="">部署 未設定</option>
-                        {['MK','BC','CR','DR','ST','AN','CS','OP','HR','Corp','IT'].map(d => <option key={d} value={d}>{d}</option>)}
+                        <option value="MK">MK</option>
                       </select>
                     </td>
 

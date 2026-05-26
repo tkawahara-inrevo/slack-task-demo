@@ -1176,15 +1176,123 @@ function registerDashboardApi(deps) {
   expressApp.post("/api/dashboard/admin/recruitment/candidates", authWithRole, adminOrPersonnelOnly, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { name, email } = req.body;
+      const { name, email, department } = req.body;
       if (!name?.trim() || !email?.trim()) return res.status(400).json({ error: "name and email required" });
       const id = randomUUID();
       const r = await dbQuery(
-        "INSERT INTO recruitment_candidates (id, team_id, name, email) VALUES ($1,$2,$3,$4) RETURNING *",
-        [id, teamId, name.trim(), email.trim()]
+        "INSERT INTO recruitment_candidates (id, team_id, name, email, department) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+        [id, teamId, name.trim(), email.trim(), department || null]
       );
       res.json({ candidate: r.rows[0] });
     } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
+  });
+
+  // 部署更新
+  expressApp.patch("/api/dashboard/admin/recruitment/candidates/:id/department", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { department } = req.body;
+      const r = await dbQuery(
+        "UPDATE recruitment_candidates SET department=$1 WHERE id=$2 AND team_id=$3 RETURNING *",
+        [department || null, req.params.id, teamId]
+      );
+      if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
+      res.json({ candidate: r.rows[0] });
+    } catch (e) { console.error(e); res.status(500).json({ error: "internal" }); }
+  });
+
+  // 再採点: GASに即時採点を依頼
+  expressApp.post("/api/dashboard/admin/recruitment/candidates/:id/regrade", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const candRes = await dbQuery("SELECT * FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [req.params.id, teamId]);
+      const c = candRes.rows[0];
+      if (!c) return res.status(404).json({ error: 'not_found' });
+      if (!c.spreadsheet_id) return res.status(400).json({ error: 'スプレッドシートが未送信です' });
+
+      const sRes = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]);
+      const s = sRes.rows[0];
+      if (!s?.gas_endpoint_url) return res.status(400).json({ error: '実技GAS URL未設定' });
+
+      const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.get('host')}`;
+      const webhookUrl = `${baseUrl}/api/dashboard/recruitment/webhook/complete`;
+
+      const gasRes = await fetch(s.gas_endpoint_url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'gradeNow',
+          secret: s.webhook_secret || '',
+          candidateId: c.id,
+          spreadsheetId: c.spreadsheet_id,
+          webhookUrl,
+        }),
+      });
+      const data = await gasRes.json().catch(() => ({}));
+      if (!data.ok) return res.status(500).json({ error: data.error || 'GASエラー' });
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // MK部署等: 実技+適性を同時送付
+  expressApp.post("/api/dashboard/admin/recruitment/candidates/:id/send-both", authWithRole, adminOrPersonnelOnly, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const candRes = await dbQuery("SELECT * FROM recruitment_candidates WHERE id=$1 AND team_id=$2", [req.params.id, teamId]);
+      const c = candRes.rows[0];
+      if (!c) return res.status(404).json({ error: 'not_found' });
+
+      const sRes = await dbQuery("SELECT * FROM recruitment_settings WHERE team_id=$1", [teamId]);
+      const s = sRes.rows[0];
+      if (!s?.gas_endpoint_url) return res.status(400).json({ error: '実技GAS URL未設定' });
+      if (!s?.personality_gas_url) return res.status(400).json({ error: '適性GAS URL未設定' });
+
+      const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.get('host')}`;
+
+      // 1) 実技テスト送付（未送付の場合のみ）
+      if (!c.spreadsheet_url) {
+        const webhookUrl = `${baseUrl}/api/dashboard/recruitment/webhook/complete`;
+        const gasRes = await fetch(s.gas_endpoint_url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            candidateId: c.id, name: c.name, email: c.email,
+            templateId: s.template_spreadsheet_id,
+            webhookUrl, secret: s.webhook_secret || '',
+            fromEmail: s.from_email || null,
+            emailSubject: s.email_subject || null,
+            emailBody: s.email_body || null,
+          }),
+        });
+        const data = await gasRes.json().catch(() => ({}));
+        if (!data.ok) return res.status(500).json({ error: '実技送付失敗: ' + (data.error || 'unknown') });
+        await dbQuery(
+          "UPDATE recruitment_candidates SET spreadsheet_url=$1, spreadsheet_id=$2, status='sent', sent_at=now(), error_message=NULL WHERE id=$3",
+          [data.spreadsheetUrl, data.spreadsheetId, c.id]
+        );
+      }
+
+      // 2) 適性検査送付
+      const pRes = await fetch(s.personality_gas_url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: s.personality_webhook_secret || s.webhook_secret || '',
+          action: 'sendPersonalityEmail',
+          name: c.name, email: c.email,
+          fromEmail: s.from_email || null,
+          emailSubject: s.personality_email_subject || null,
+          emailBody: s.personality_email_body || null,
+        }),
+      });
+      const pData = await pRes.json().catch(() => ({}));
+      if (!pData.ok) return res.status(500).json({ error: '適性送付失敗: ' + (pData.error || 'unknown') });
+
+      // 3) ステージを personality に進める + 適性送付済みに
+      await dbQuery(
+        "UPDATE recruitment_candidates SET stage='personality', personality_status='sent', personality_sent_at=now() WHERE id=$1",
+        [c.id]
+      );
+
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 
   expressApp.delete("/api/dashboard/admin/recruitment/candidates/:id", authWithRole, adminOrPersonnelOnly, async (req, res) => {

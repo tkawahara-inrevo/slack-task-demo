@@ -32,6 +32,7 @@ function doPost(e) {
     if (secret !== getSecret()) return jsonRes({ error: 'unauthorized' });
 
     if (data.action === 'importFromSheet') return importFromSheet(data.spreadsheetId);
+    if (data.action === 'gradeNow')        return gradeNow(data.spreadsheetId, data.candidateId, data.webhookUrl);
 
     // テンプレートをコピー
     const newFile = DriveApp.getFileById(templateId).makeCopy(`${name}様_実技テスト`);
@@ -175,6 +176,51 @@ function pollCompletions() {
   }
 
   setWatchList(remaining);
+}
+
+// ================================================================
+// 即時採点（TaskHubから「再採点」ボタン経由で呼ばれる）
+// ポーリング待ちにせず、その場でcalculateScoreしてwebhookに送信。
+// 監視リストにも入れて以降の再採点漏れにも備える。
+// ================================================================
+function gradeNow(spreadsheetId, candidateId, webhookUrl) {
+  try {
+    if (!spreadsheetId || !candidateId || !webhookUrl) {
+      return jsonRes({ error: 'spreadsheetId/candidateId/webhookUrl required' });
+    }
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const sheet = ss.getSheetByName('test');
+    if (!sheet) return jsonRes({ error: 'sheet "test" not found' });
+
+    // 監視リストにも入れておく（次回以降の保険）
+    const list = getWatchList();
+    if (!list.some(i => i.sheetId === spreadsheetId)) {
+      list.push({ sheetId: spreadsheetId, candidateId, webhookUrl, addedAt: Date.now() });
+      setWatchList(list);
+    }
+
+    const result = calculateScore(ss);
+    UrlFetchApp.fetch(webhookUrl, {
+      method: 'POST',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        candidateId, secret: getSecret(),
+        score: result.total, scoreDetail: result.detail,
+        typingLevel: result.detail.q13_level,
+      }),
+      muteHttpExceptions: true,
+    });
+
+    // C31の表示を完了に
+    sheet.getRange('C31:F31').merge()
+         .setValue('✅ 提出が完了しました！採点結果は採用担当者よりご連絡します。ありがとうございました。')
+         .setFontColor('#15803d').setFontWeight('bold').setBackground('#dcfce7');
+
+    return jsonRes({ ok: true, score: result.total });
+  } catch (err) {
+    console.error('gradeNow error:', err);
+    return jsonRes({ error: err.toString() });
+  }
 }
 
 // ================================================================

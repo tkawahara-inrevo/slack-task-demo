@@ -26,7 +26,7 @@ export default function Recruitment() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({});
   const [savingSettings, setSavingSettings] = useState(false);
-  const [form, setForm]             = useState({ name: '', email: '' });
+  const [form, setForm]             = useState({ name: '', email: '', department: '' });
   const [importing, setImporting]   = useState(false);
   const [filterStatuses, setFilterStatuses] = useState(new Set(['pending','scheduled','sent','completed','error']));
 
@@ -55,10 +55,43 @@ export default function Recruitment() {
   const handleAdd = async () => {
     if (!form.name.trim() || !form.email.trim()) return;
     try {
-      const r = await api.recruitmentCandidateAdd({ name: form.name.trim(), email: form.email.trim() });
+      const r = await api.recruitmentCandidateAdd({ name: form.name.trim(), email: form.email.trim(), department: form.department || null });
       setCandidates(prev => [r.candidate, ...prev]);
-      setForm({ name: '', email: '' });
+      setForm({ name: '', email: '', department: '' });
     } catch (e) { alert(e.message); }
+  };
+
+  const handleChangeDepartment = async (id, department) => {
+    try {
+      await api.recruitmentDepartment(id, department || null);
+      update(id, { department: department || null });
+    } catch (e) { alert('部署更新失敗: ' + e.message); }
+  };
+
+  const handleRegrade = async (id) => {
+    const c = candidates.find(x => x.id === id);
+    if (!window.confirm(`${c?.name} さんを再採点しますか？\n（GAS側で即座に採点してwebhookに送信します）`)) return;
+    try {
+      await api.recruitmentRegrade(id);
+      // 少し待ってからリロード（webhook受信待ち）
+      setTimeout(async () => {
+        const fresh = await api.recruitmentCandidates();
+        setCandidates(fresh.candidates || []);
+      }, 2000);
+      alert('再採点を依頼しました。数秒で結果が反映されます。');
+    } catch (e) { alert('再採点失敗: ' + e.message); }
+  };
+
+  const handleSendBoth = async (id) => {
+    const c = candidates.find(x => x.id === id);
+    if (!window.confirm(`${c?.name} さんに【実技テスト＋適性検査】を同時送付しますか？`)) return;
+    setSendingIds(s => new Set([...s, id]));
+    try {
+      await api.recruitmentSendBoth(id);
+      const fresh = await api.recruitmentCandidates();
+      setCandidates(fresh.candidates || []);
+    } catch (e) { alert('送付失敗: ' + e.message); }
+    finally { setSendingIds(s => { const n = new Set(s); n.delete(id); return n; }); }
   };
 
   const handleDelete = async (id) => {
@@ -401,6 +434,11 @@ export default function Recruitment() {
         <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="メールアドレス"
           onKeyDown={e => e.key === 'Enter' && handleAdd()}
           style={{ fontSize: 13, padding: '7px 12px', border: '1px solid #e5e7eb', borderRadius: 8, outline: 'none', width: 240 }} />
+        <select value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
+          style={{ fontSize: 13, padding: '7px 12px', border: '1px solid #e5e7eb', borderRadius: 8, outline: 'none', background: '#fff' }}>
+          <option value="">部署 未選択</option>
+          {['MK','BC','CR','DR','ST','AN','CS','OP','HR','Corp','IT'].map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
         <button onClick={handleAdd} disabled={!form.name.trim() || !form.email.trim()}
           style={{ fontSize: 13, padding: '7px 12px', border: 'none', borderRadius: 8, background: '#2563eb', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>
           ＋ 追加
@@ -443,11 +481,23 @@ export default function Recruitment() {
                 const passedFirst = c.stage === 'personality';
                 return (
                   <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px 10px', width: 160 }}>
-                      {c.spreadsheet_url
-                        ? <a href={c.spreadsheet_url} target="_blank" rel="noreferrer" style={{ fontWeight: 600, color: '#2563eb', textDecoration: 'none' }} title="スプレッドシートを開く">{c.name}</a>
-                        : <span style={{ fontWeight: 600, color: '#111827' }}>{c.name}</span>}
+                    <td style={{ padding: '8px 10px', width: 180 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {c.spreadsheet_url
+                          ? <a href={c.spreadsheet_url} target="_blank" rel="noreferrer" style={{ fontWeight: 600, color: '#2563eb', textDecoration: 'none' }} title="スプレッドシートを開く">{c.name}</a>
+                          : <span style={{ fontWeight: 600, color: '#111827' }}>{c.name}</span>}
+                        {c.department && (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 99,
+                            background: c.department === 'MK' ? '#fef3c7' : '#f3f4f6',
+                            color: c.department === 'MK' ? '#b45309' : '#6b7280' }}>{c.department}</span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{c.email}</div>
+                      <select value={c.department || ''} onChange={e => handleChangeDepartment(c.id, e.target.value)}
+                        style={{ fontSize: 10, padding: '1px 4px', marginTop: 2, border: '1px solid #e5e7eb', borderRadius: 4, background: '#fff', color: '#6b7280' }}>
+                        <option value="">部署 未設定</option>
+                        {['MK','BC','CR','DR','ST','AN','CS','OP','HR','Corp','IT'].map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
                     </td>
 
                     {/* 実技テスト列 */}
@@ -456,11 +506,27 @@ export default function Recruitment() {
                         {sendingIds.has(c.id)
                           ? <span style={{ fontSize: 11, fontWeight: 700, color: '#d97706' }}>⏳ 送信中…</span>
                           : <TestStatusBadge c={c} />}
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                           {['pending','error'].includes(c.status) && !c.scheduled_at && (
-                            <button onClick={() => handleSendTest(c.id)} disabled={sendingIds.has(c.id)}
-                              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #fde68a', background: '#fffbeb', color: '#d97706', fontWeight: 600, cursor: 'pointer' }}>
-                              📧 送付
+                            <>
+                              <button onClick={() => handleSendTest(c.id)} disabled={sendingIds.has(c.id)}
+                                style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #fde68a', background: '#fffbeb', color: '#d97706', fontWeight: 600, cursor: 'pointer' }}>
+                                📧 実技のみ
+                              </button>
+                              {c.department === 'MK' && (
+                                <button onClick={() => handleSendBoth(c.id)} disabled={sendingIds.has(c.id)}
+                                  title="MK部署: 実技テストと適性検査を同時送付"
+                                  style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #f59e0b', background: '#f59e0b', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+                                  ⚡ 実技＋適性 一括
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {c.status === 'sent' && !c.completed_at && (
+                            <button onClick={() => handleRegrade(c.id)}
+                              title="GAS側で即時採点してwebhookに送信"
+                              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #93c5fd', background: '#eff6ff', color: '#2563eb', fontWeight: 600, cursor: 'pointer' }}>
+                              🔄 再採点
                             </button>
                           )}
                           {c.error_message && (

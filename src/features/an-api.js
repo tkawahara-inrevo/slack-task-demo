@@ -114,7 +114,7 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     try {
       const { teamId } = req.dashboardUser;
       const { status } = req.query;
-      const extra = status ? ` AND status=$2` : '';
+      const extra = status ? ` AND a.status=$2` : '';
       const { rows } = await dbQuery(
         `SELECT a.*, d.name AS deal_name, c.name AS customer_name
          FROM an_requests a

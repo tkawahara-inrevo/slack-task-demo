@@ -72,7 +72,8 @@
       "Bash(grep -v \"^$\")",
       "Bash(grep -v \"node_modules\\\\|//\")",
       "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem -o StrictHostKeyChecking=no e:/dev/slack-task-demo/seed_test_10.sql ubuntu@3.222.101.208:/tmp/seed_test_10.sql)",
-      "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem e:/dev/slack-task-demo/seed_rpo_3.sql ubuntu@3.222.101.208:/tmp/seed_rpo_3.sql)"
+      "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem e:/dev/slack-task-demo/seed_rpo_3.sql ubuntu@3.222.101.208:/tmp/seed_rpo_3.sql)",
+      "Bash(node e:/dev/slack-task-demo/_fix.js)"
     ]
   }
 }

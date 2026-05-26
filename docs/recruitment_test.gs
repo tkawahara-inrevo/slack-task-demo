@@ -454,10 +454,12 @@ function getTypingLevel(s) {
   ].find(([min]) => s >= min) || [0,'E-'])[1];
 }
 // 全角英数記号 → 半角に正規化（Ａ→A, ０→0, ＋→+, 　→半角スペース）
+// ※ 範囲を全角リテラルで書くとエディタ／コピペ／保存エンコーディングで化けることがあるので
+//    必ず \uFFxx の明示的unicode escapeで指定する。書き換えないこと。
 function fwToHalf(s) {
   return String(s)
-    .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
-    .replace(/　/g, ' ');
+    .replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/\u3000/g, ' ');
 }
 function matchText(val, expected) {
   return fwToHalf(val).trim().replace(/\s+/g,'') === fwToHalf(expected).replace(/\s+/g,'');
@@ -486,6 +488,18 @@ function testSendEmailFull() {
 function showWatchList() {
   const list = getWatchList();
   Browser.msgBox(`監視中: ${list.length}件\n${list.map(i => i.candidateId).join('\n')}`);
+}
+
+// 採点の動作確認用: 指定スプレッドシートのスコアをログ出力（webhookには送らない）
+function debugScore(spreadsheetId) {
+  // 例: debugScore('1-GoOzUl-fNm4svrFsNvOF8UWCIJRRowMXUXgW2S9CxQ')
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  const result = calculateScore(ss);
+  console.log('total:', result.total);
+  console.log('detail:', JSON.stringify(result.detail));
+  console.log('fwToHalf("ｃｔｒｌ+ｃ"):', fwToHalf('ｃｔｒｌ+ｃ'));
+  console.log('fwToHalf("１４８"):', fwToHalf('１４８'));
+  Browser.msgBox(`Total: ${result.total}/10\n${JSON.stringify(result.detail, null, 2)}`);
 }
 
 function authorizeAllScopes() {

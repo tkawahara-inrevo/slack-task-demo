@@ -401,7 +401,7 @@ function calculateScore(ss) {
   const detail = {};
 
   detail.q1 = matchText(test.getRange('C3').getValue(), '株式会社INREVO') ? 1 : 0;
-  detail.q2 = (test.getRange('C4').getDisplayValue().trim() === '0922821670') ? 1 : 0;
+  detail.q2 = (fwToHalf(test.getRange('C4').getDisplayValue()).trim() === '0922821670') ? 1 : 0;
   detail.q3 = (Number(test.getRange('C6').getValue()) === 141) ? 1 : 0;
 
   if (sheet6) {
@@ -453,8 +453,18 @@ function getTypingLevel(s) {
     [90,'D+'],[73,'D'],[56,'D-'],[39,'E+'],[22,'E'],[0,'E-'],
   ].find(([min]) => s >= min) || [0,'E-'])[1];
 }
-function matchText(val, expected) { return String(val).trim().replace(/\s+/g,'') === expected.replace(/\s+/g,''); }
-function normalizeShortcut(val) { return String(val).trim().toLowerCase().replace(/[\s　]/g,'').replace(/＋/g,'+'); }
+// 全角英数記号 → 半角に正規化（Ａ→A, ０→0, ＋→+, 　→半角スペース）
+function fwToHalf(s) {
+  return String(s)
+    .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, ' ');
+}
+function matchText(val, expected) {
+  return fwToHalf(val).trim().replace(/\s+/g,'') === fwToHalf(expected).replace(/\s+/g,'');
+}
+function normalizeShortcut(val) {
+  return fwToHalf(val).trim().toLowerCase().replace(/\s+/g,'');
+}
 function jsonRes(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
 
 // ================================================================

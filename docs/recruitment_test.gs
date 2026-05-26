@@ -494,12 +494,25 @@ function showWatchList() {
 function debugScore(spreadsheetId) {
   // 例: debugScore('1-GoOzUl-fNm4svrFsNvOF8UWCIJRRowMXUXgW2S9CxQ')
   const ss = SpreadsheetApp.openById(spreadsheetId);
+  const test = ss.getSheetByName('test');
+  // 実際のセル値を出力してロジック側の参照位置とずれてないか確認
+  const cells = ['C3','C4','C6','C14','C15','C16','C17','C19'];
+  cells.forEach(addr => {
+    const v = test.getRange(addr).getValue();
+    const d = test.getRange(addr).getDisplayValue();
+    console.log(`${addr}: value=${JSON.stringify(v)} display=${JSON.stringify(d)}`);
+  });
+  // testシート全体の中身も浅くダンプ（B列〜C列の上位30行）
+  console.log('--- B2:C20 dump ---');
+  test.getRange('B2:C20').getValues().forEach((row, i) => {
+    console.log(`row${i+2}: B=${JSON.stringify(row[0])} C=${JSON.stringify(row[1])}`);
+  });
+
   const result = calculateScore(ss);
   console.log('total:', result.total);
   console.log('detail:', JSON.stringify(result.detail));
   console.log('fwToHalf("ｃｔｒｌ+ｃ"):', fwToHalf('ｃｔｒｌ+ｃ'));
   console.log('fwToHalf("１４８"):', fwToHalf('１４８'));
-  Browser.msgBox(`Total: ${result.total}/10\n${JSON.stringify(result.detail, null, 2)}`);
 }
 
 function authorizeAllScopes() {

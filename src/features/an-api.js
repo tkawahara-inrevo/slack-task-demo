@@ -247,15 +247,16 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
       if (period_from) add(`(m->>'periodStart')::date >= ?`, period_from);
       if (period_to)   add(`(m->>'periodEnd')::date <= ?`, period_to);
 
-      const baseFrom = `
+      const baseTables = `
         FROM rpo_clients rc
         LEFT JOIN deals d     ON d.id = rc.data->>'crmDealId'
-        LEFT JOIN customers c ON c.id = d.customer_id,
-        jsonb_array_elements(
+        LEFT JOIN customers c ON c.id = d.customer_id
+        CROSS JOIN LATERAL jsonb_array_elements(
           CASE WHEN rc.data ? 'mediaStatus' THEN rc.data->'mediaStatus' ELSE '[]'::jsonb END
         ) AS m
-        WHERE ${filters.join(' AND ')}
       `;
+      const baseWhere = `WHERE ${filters.join(' AND ')}`;
+      const baseFrom = `${baseTables} ${baseWhere}`;
 
       // 媒体別の集計
       const { rows } = await dbQuery(`
@@ -286,13 +287,15 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
       // 媒体 × 雇用形態 のブレイクダウン
       const { rows: byHire } = await dbQuery(`
         SELECT m->>'name' AS media_name,
-               COALESCE(NULLIF(jsonb_array_elements_text(
-                 CASE WHEN d.hire_type IS NOT NULL AND jsonb_typeof(d.hire_type)='array' AND jsonb_array_length(d.hire_type)>0
-                      THEN d.hire_type ELSE '["未設定"]'::jsonb END
-               ), ''), '未設定') AS hire_type,
+               COALESCE(NULLIF(ht.value, ''), '未設定') AS hire_type,
                SUM((m->>'hiredCount')::int)    AS hired,
                SUM((m->>'mediaCost')::numeric) AS cost
-        ${baseFrom}
+        ${baseTables}
+        LEFT JOIN LATERAL jsonb_array_elements_text(
+          CASE WHEN d.hire_type IS NOT NULL AND jsonb_typeof(d.hire_type)='array' AND jsonb_array_length(d.hire_type)>0
+               THEN d.hire_type ELSE '["未設定"]'::jsonb END
+        ) AS ht(value) ON true
+        ${baseWhere}
         GROUP BY media_name, hire_type
         ORDER BY media_name, hired DESC NULLS LAST
       `, params);

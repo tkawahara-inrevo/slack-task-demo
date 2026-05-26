@@ -422,7 +422,7 @@ function calculateScore(ss) {
 
   total = detail.q1+detail.q2+detail.q3+detail.q4+detail.q5+detail.q6+detail.q7+detail.q8+detail.q9+detail.q10;
 
-  const typingRaw = Number(test.getRange('C19').getValue()) || 0;
+  const typingRaw = Number(fwToHalf(test.getRange('C19').getDisplayValue())) || 0;
   detail.q13_raw = typingRaw;
   detail.q13_level = getTypingLevel(typingRaw);
   detail.typing_level = detail.q13_level;

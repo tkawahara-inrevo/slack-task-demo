@@ -105,11 +105,11 @@ function pollCompletions() {
       const sheet = ss.getSheetByName('test');
       if (!sheet) { remaining.push(item); continue; }
 
-      // B31・B30・C19をまとめて取得して検証
-      const vals = sheet.getRange('B19:C31').getValues();
-      const c19      = vals[0][1];   // C19: タイピングスコア
-      const b30      = vals[11][0];  // B30: スクショ確認
-      const isComplete = vals[12][0] === true; // B31: 提出チェック
+      // B18・B30・C18をまとめて取得して検証（タイピングスコア=C18, B30/B31=チェックボックス）
+      const vals = sheet.getRange('B18:C31').getValues();
+      const c19      = vals[0][1];   // C18: タイピングスコア（変数名は互換のためc19のまま）
+      const b30      = vals[12][0];  // B30: スクショ確認
+      const isComplete = vals[13][0] === true; // B31: 提出チェック
 
       if (!isComplete) { remaining.push(item); continue; }
 
@@ -402,7 +402,7 @@ function calculateScore(ss) {
 
   detail.q1 = matchText(test.getRange('C3').getValue(), '株式会社INREVO') ? 1 : 0;
   detail.q2 = (fwToHalf(test.getRange('C4').getDisplayValue()).trim() === '0922821670') ? 1 : 0;
-  detail.q3 = (Number(test.getRange('C6').getValue()) === 141) ? 1 : 0;
+  detail.q3 = (Number(test.getRange('C5').getValue()) === 141) ? 1 : 0;
 
   if (sheet6) {
     detail.q4 = (Number(sheet6.getRange('G1').getValue()) === 757) ? 1 : 0;
@@ -411,10 +411,10 @@ function calculateScore(ss) {
   } else { detail.q4 = detail.q5 = detail.q6 = 0; }
 
   [
-    { key:'q7',  cell:'C14', ok:['ctrl+c','control+c'] },
-    { key:'q8',  cell:'C15', ok:['ctrl+v','control+v'] },
-    { key:'q9',  cell:'C16', ok:['ctrl+shift+v','ctrl+alt+v','control+shift+v','control+alt+v'] },
-    { key:'q10', cell:'C17', ok:['ctrl+z','control+z'] },
+    { key:'q7',  cell:'C13', ok:['ctrl+c','control+c'] },
+    { key:'q8',  cell:'C14', ok:['ctrl+v','control+v'] },
+    { key:'q9',  cell:'C15', ok:['ctrl+shift+v','ctrl+alt+v','control+shift+v','control+alt+v'] },
+    { key:'q10', cell:'C16', ok:['ctrl+z','control+z'] },
   ].forEach(({ key, cell, ok }) => {
     const val = normalizeShortcut(test.getRange(cell).getValue());
     detail[key] = ok.some(a => val === a || val.includes(a)) ? 1 : 0;
@@ -422,7 +422,7 @@ function calculateScore(ss) {
 
   total = detail.q1+detail.q2+detail.q3+detail.q4+detail.q5+detail.q6+detail.q7+detail.q8+detail.q9+detail.q10;
 
-  const typingRaw = Number(fwToHalf(test.getRange('C19').getDisplayValue())) || 0;
+  const typingRaw = Number(fwToHalf(test.getRange('C18').getDisplayValue())) || 0;
   detail.q13_raw = typingRaw;
   detail.q13_level = getTypingLevel(typingRaw);
   detail.typing_level = detail.q13_level;

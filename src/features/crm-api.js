@@ -1007,6 +1007,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         repTargetMap,
         repRoleInferred,
         teamTarget,
+        termTargetOverride: ps.term_target != null ? Number(ps.term_target) : null,
         targetReps: [...TARGET_REPS_SERVER, ADDA_REF], // KPI担当者リスト + 添田/リファラル
         planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,
@@ -1682,10 +1683,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.put('/api/crm/period-settings', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { prevStart, prevEnd, currStart, currEnd } = req.body;
-      await dbQuery(`INSERT INTO crm_period_settings (team_id, prev_start, prev_end, curr_start, curr_end) VALUES ($1,$2,$3,$4,$5)
-        ON CONFLICT (team_id) DO UPDATE SET prev_start=$2, prev_end=$3, curr_start=$4, curr_end=$5, updated_at=now()`,
-        [teamId, prevStart, prevEnd, currStart, currEnd]);
+      const { prevStart, prevEnd, currStart, currEnd, termTarget } = req.body;
+      const tgt = (termTarget === '' || termTarget == null) ? null : Number(termTarget);
+      await dbQuery(`INSERT INTO crm_period_settings (team_id, prev_start, prev_end, curr_start, curr_end, term_target)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (team_id) DO UPDATE SET prev_start=$2, prev_end=$3, curr_start=$4, curr_end=$5, term_target=$6, updated_at=now()`,
+        [teamId, prevStart, prevEnd, currStart, currEnd, tgt]);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
   });

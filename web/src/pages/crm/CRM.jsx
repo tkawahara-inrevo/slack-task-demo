@@ -596,7 +596,7 @@ function CrmSettings() {
   const [roleTargetRows, setRoleTargetRows] = useState([]);
   const [roleTargets, setRoleTargets]       = useState({});
   const [repList, setRepList]               = useState([]); // [{rep_name, role_name, monthly_target_override, prev_role_name, prev_monthly_target_override, is_retired, exclude_from_kpi, monthly_to_adda_ref}]
-  const [period, setPeriod]                 = useState({ prevStart:'', prevEnd:'', currStart:'', currEnd:'' });
+  const [period, setPeriod]                 = useState({ prevStart:'', prevEnd:'', currStart:'', currEnd:'', termTarget:'' });
   const [saving, setSaving]                 = useState(false);
   const [notice, setNotice]                 = useState('');
 
@@ -622,7 +622,7 @@ function CrmSettings() {
         monthly_to_adda_ref: !!r.monthly_to_adda_ref,
       })));
       const s = ps.settings || {};
-      setPeriod({ prevStart:s.prev_start?.split('T')[0]||'', prevEnd:s.prev_end?.split('T')[0]||'', currStart:s.curr_start?.split('T')[0]||'', currEnd:s.curr_end?.split('T')[0]||'' });
+      setPeriod({ prevStart:s.prev_start?.split('T')[0]||'', prevEnd:s.prev_end?.split('T')[0]||'', currStart:s.curr_start?.split('T')[0]||'', currEnd:s.curr_end?.split('T')[0]||'', termTarget: s.term_target ? Math.round(Number(s.term_target)/10000) : '' });
     });
   }, []);
 
@@ -673,7 +673,7 @@ function CrmSettings() {
         monthly_to_adda_ref: !!r.monthly_to_adda_ref,
       }));
       const roleArr = roleTargetRows.map((r,i) => ({ role_name:r.role_name, monthly_target:r.monthly_target, sort_order:i }));
-      await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({ prevStart:period.prevStart, prevEnd:period.prevEnd, currStart:period.currStart, currEnd:period.currEnd })]);
+      await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({ prevStart:period.prevStart, prevEnd:period.prevEnd, currStart:period.currStart, currEnd:period.currEnd, termTarget: period.termTarget === '' ? null : Number(period.termTarget) * 10000 })]);
       setNotice('保存しました'); setTimeout(() => setNotice(''), 2500);
     } catch { setNotice('保存に失敗しました'); setTimeout(() => setNotice(''), 3000); }
     setSaving(false);
@@ -725,6 +725,14 @@ function CrmSettings() {
                 ))}
               </div>
             ))}
+          </div>
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginTop:8, marginBottom:4 }}>今期チーム目標（上書き）</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:12 }}>未入力なら役職別KPI × 月数の合算が使われます</div>
+          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 18px', maxWidth:480, marginBottom:20, display:'flex', alignItems:'center', gap:10 }}>
+            <input type="number" min="0" step="100"
+              value={period.termTarget} onChange={e => setPeriod(p => ({...p, termTarget:e.target.value}))} placeholder="未設定（合算値を使用）"
+              style={{ flex:1, padding:'6px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.85rem', outline:'none', textAlign:'right' }} />
+            <span style={{ fontSize:'0.8rem', color:'#64748b', fontWeight:600 }}>万円</span>
           </div>
           <button onClick={handleSave} disabled={saving}
             style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}>

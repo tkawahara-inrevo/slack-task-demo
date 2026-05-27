@@ -568,6 +568,7 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_sent_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_completed_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS department TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_period_settings ADD COLUMN IF NOT EXISTS term_target BIGINT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

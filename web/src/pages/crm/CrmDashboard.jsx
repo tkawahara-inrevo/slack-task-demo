@@ -258,7 +258,7 @@ export default function CrmDashboard() {
   const {
     curr, prev, repTable, yomiBreakdown = [], overdueAlerts = [], stagnantAlerts = [],
     rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, repRoleInferred = {}, teamTarget = 0, planBreakdown = [],
-    targetReps = [],
+    targetReps = [], termTargetOverride = null,
   } = data;
 
   const reps = buildRepTable(repTable, targetReps, salesUser);
@@ -287,7 +287,10 @@ export default function CrmDashboard() {
   const effectiveMonthlyTarget = salesUser && repTargetMap[salesUser] > 0
     ? repTargetMap[salesUser]
     : teamTarget;
-  const termKpiTarget = period === 'term' ? effectiveMonthlyTarget * termMonths : 0;
+  // 今期チーム目標は上書き設定があればそれを優先（担当者フィルタ時は除く）
+  const termKpiTarget = period === 'term'
+    ? ((!salesUser && termTargetOverride > 0) ? termTargetOverride : effectiveMonthlyTarget * termMonths)
+    : 0;
 
   // KPI分母: 今期は月次目標×月数、指定月は月次目標（担当者フィルタ時は個人目標）
   const kpiDenom   = period === 'term'

@@ -5,20 +5,14 @@ const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const fmtM = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const pct = (n) => n != null ? `${Math.round(Number(n)*100)/100}%` : '—';
 
-const ROLE_ORDER = ['役職無し','Lead','Sub Manager','Sub Chief','Chief','Sub Expert','Expert'];
-
-function getUpperRoles(currentRole) {
-  const idx = ROLE_ORDER.indexOf(currentRole);
-  return {
-    plus1: idx >= 0 && idx < ROLE_ORDER.length - 1 ? ROLE_ORDER[idx + 1] : null,
-    plus2: idx >= 0 && idx < ROLE_ORDER.length - 2 ? ROLE_ORDER[idx + 2] : null,
-  };
-}
-
+// 役職の上下関係は crm_role_targets の sort_order に従う（DB側で並び替え可能）
 function calcLines(currentRole, roles, totalCurrMonths) {
-  const getRoleTarget = (name) => roles.find(r => r.role_name === name)?.monthly_target || 0;
+  const sorted = [...(roles || [])].sort((a,b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const getRoleTarget = (name) => sorted.find(r => r.role_name === name)?.monthly_target || 0;
   const currentTarget = getRoleTarget(currentRole);
-  const { plus1, plus2 } = getUpperRoles(currentRole);
+  const idx = sorted.findIndex(r => r.role_name === currentRole);
+  const plus1 = (idx >= 0 && idx < sorted.length - 1) ? sorted[idx + 1].role_name : null;
+  const plus2 = (idx >= 0 && idx < sorted.length - 2) ? sorted[idx + 2].role_name : null;
   return {
     promotion2: plus2 ? Math.round(getRoleTarget(plus2) * 1.2 * totalCurrMonths) : null,
     promotion1: plus1 ? Math.round(getRoleTarget(plus1) * 1.2 * totalCurrMonths) : null,

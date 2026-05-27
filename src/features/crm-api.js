@@ -1720,17 +1720,20 @@ function registerCrmApi({ expressApp, authWithRole }) {
         monthlyMap[m] += Number(r.incentive_amount || 0);
       });
 
-      // 今期経過月数
+      // 月数: 前期・今期それぞれ実際の期間で計算
       const currStart = new Date(period.curr_start);
       const currEnd = new Date(period.curr_end);
+      const prevStart = new Date(period.prev_start);
+      const prevEnd = new Date(period.prev_end);
       const today = new Date();
       const evalDate = today < currEnd ? today : currEnd;
       const elapsedMonths = Math.ceil((evalDate - currStart) / (30.44 * 24 * 3600 * 1000));
       const totalCurrMonths = Math.round((currEnd - currStart) / (30.44 * 24 * 3600 * 1000));
+      const totalPrevMonths = Math.round((prevEnd - prevStart) / (30.44 * 24 * 3600 * 1000));
 
       res.json({
         staff, prevTotal, currTotal, currRows: currRows.slice(0,50), monthlyMap,
-        elapsedMonths, totalCurrMonths,
+        elapsedMonths, totalCurrMonths, totalPrevMonths,
         period, roles, repRole, prevMonthlyTarget,
       });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }

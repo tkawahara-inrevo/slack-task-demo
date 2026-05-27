@@ -8,7 +8,6 @@ import { api } from '../../api/client';
 // TARGET_REPS はもうハードコードしない。crm_rep_roles から動的取得。
 // 初期役職（DBが空のときのみ使用。以降はDBの crm_role_targets が真実）
 const ROLE_NAMES_DEFAULT = ['役職無し', 'Lead', 'Sub Manager', 'Sub Chief', 'Chief', 'Sub Expert', 'Expert'];
-const ROLE_OPTIONS = ['', ...ROLE_NAMES];
 
 const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const YOMI_COLOR = { 'S 90％':'#7c3aed','A 70％':'#1d4ed8','B 50％':'#0891b2','C 30％':'#059669' };
@@ -830,14 +829,14 @@ function CrmSettings() {
                           <span style={{ fontSize:'0.62rem', color:'#94a3b8', flexShrink:0 }}>今期</span>
                           <select value={r.role_name} onChange={e => updateRep(r.rep_name, { role_name: e.target.value })}
                             style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none' }}>
-                            {ROLE_OPTIONS.map(o => <option key={o} value={o}>{o||'— 未選択 —'}</option>)}
+                            {['', ...roleTargetRows.map(r => r.role_name)].map(o => <option key={o} value={o}>{o||'— 未選択 —'}</option>)}
                           </select>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:4, flex:'1 1 120px' }}>
                           <span style={{ fontSize:'0.62rem', color:'#94a3b8', flexShrink:0 }}>前期</span>
                           <select value={r.prev_role_name||''} onChange={e => updateRep(r.rep_name, { prev_role_name: e.target.value })}
                             style={{ flex:1, padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.75rem', background:'#fff', outline:'none', color: r.prev_role_name ? '#0f172a' : '#94a3b8' }}>
-                            {ROLE_OPTIONS.map(o => <option key={o} value={o}>{o||'— 今期と同じ —'}</option>)}
+                            {['', ...roleTargetRows.map(r => r.role_name)].map(o => <option key={o} value={o}>{o||'— 今期と同じ —'}</option>)}
                           </select>
                         </div>
                         <input type="number" min="0" step="10" value={overrideWan}

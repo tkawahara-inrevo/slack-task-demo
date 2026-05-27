@@ -13,7 +13,7 @@ const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
 const YOMI_COLOR = { 'S 90％':'#7c3aed','A 70％':'#1d4ed8','B 50％':'#0891b2','C 30％':'#059669' };
 
 // 表示から除外するスタッフ
-const YOMI_EXCLUDED = ['外山 雄大', '添田 剛'];
+// 旧: 添田/外山を画面側で除外していたが、操作者が自分の案件を見られない問題があったため撤去
 
 const YOMI_CFG_PANEL = {
   'S 90％': { color:'#4f46e5', bg:'#ede9fe', border:'#c4b5fd' },
@@ -117,20 +117,12 @@ function YomiPanel({ full = false }) {
   const [filterStaff, setFilterStaff] = useState('');
 
   useEffect(() => {
-    Promise.all([api.crmYomiKanri(), api.crmMyInfo()])
-      .then(([r, me]) => {
+    api.crmYomiKanri()
+      .then(r => {
         setYomiKanri(r);
         const init = {};
         Object.values(r.byStaff).flat().forEach(d => { init[d.id] = d.sales_memo || ''; });
         setMemoCache(init);
-        // 自分の名前がスタッフ一覧に含まれていればデフォルトフィルタにセット
-        if (me.displayName) {
-          const myName = me.displayName;
-          const matched = Object.keys(r.byStaff).find(name =>
-            name.includes(myName) || myName.includes(name.split('/')[0].trim())
-          );
-          if (matched) setFilterStaff(matched);
-        }
       }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -138,7 +130,7 @@ function YomiPanel({ full = false }) {
   if (!yomiKanri) return null;
 
   const allEntries = Object.entries(yomiKanri.byStaff)
-    .filter(([name, d]) => d.length > 0 && !YOMI_EXCLUDED.some(ex => name.includes(ex.split(' ')[0])))
+    .filter(([, d]) => d.length > 0)
     .sort((a,b) => b[1].length - a[1].length);
 
   const staffOptions = allEntries.map(([name]) => name);

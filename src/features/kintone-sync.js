@@ -33,9 +33,11 @@ function kintoneGet(appId, token, fields, offset) {
       method:  'GET',
       headers: { 'X-Cybozu-API-Token': token },
     }, res => {
-      let buf = '';
-      res.on('data', c  => { buf += c; });
+      // chunk境界でのマルチバイト文字割れ防止: Bufferで集約してから utf8 デコード
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
       res.on('end',  () => {
+        const buf = Buffer.concat(chunks).toString('utf8');
         try { resolve(JSON.parse(buf)); }
         catch (e) { reject(new Error(`kintone parse error: ${buf.slice(0, 200)}`)); }
       });

@@ -62,6 +62,8 @@ async function findCrmDealId(teamId, kintoneUrl, companyName) {
   return null;
 }
 
+function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeamId }) {
+
   // ── AN依頼の検出条件 ─────────────────────────────────
   // ワークフロー定型: 【会社名】と【kintone】が両方含まれる。回答返信(【AN調査結果】)は除外
   function isAnRequestMessage(text) {

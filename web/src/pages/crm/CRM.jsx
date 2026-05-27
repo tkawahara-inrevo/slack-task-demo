@@ -659,6 +659,16 @@ function CrmSettings() {
     setRoleTargets(prev => ({ ...prev, [name]: 0 }));
   };
 
+  const moveRole = (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= roleTargetRows.length) return;
+    setRoleTargetRows(prev => {
+      const next = [...prev];
+      [next[idx], next[j]] = [next[j], next[idx]];
+      return next.map((r, i) => ({ ...r, sort_order: i }));
+    });
+  };
+
   const handleDeleteRole = (roleName) => {
     const usingReps = repList.filter(r => r.role_name === roleName || r.prev_role_name === roleName);
     let confirmMsg = `役職「${roleName}」を削除しますか？`;
@@ -773,7 +783,15 @@ function CrmSettings() {
               </div>
               <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
                 {roleTargetRows.map((row,i) => (
-                  <div key={row.role_name} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 14px', borderBottom:i<roleTargetRows.length-1?'1px solid #f8fafc':'none' }}>
+                  <div key={row.role_name} style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 14px', borderBottom:i<roleTargetRows.length-1?'1px solid #f8fafc':'none' }}>
+                    <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                      <button onClick={() => moveRole(i, -1)} disabled={i===0}
+                        title="上へ"
+                        style={{ border:'none', background:'transparent', color: i===0?'#e2e8f0':'#94a3b8', fontSize:'0.66rem', cursor: i===0?'default':'pointer', padding:0, lineHeight:1 }}>▲</button>
+                      <button onClick={() => moveRole(i, 1)} disabled={i===roleTargetRows.length-1}
+                        title="下へ"
+                        style={{ border:'none', background:'transparent', color: i===roleTargetRows.length-1?'#e2e8f0':'#94a3b8', fontSize:'0.66rem', cursor: i===roleTargetRows.length-1?'default':'pointer', padding:0, lineHeight:1 }}>▼</button>
+                    </div>
                     <span style={{ flex:1, fontSize:'0.83rem', fontWeight:600, color:'#374151' }}>{row.role_name}</span>
                     <input type="number" min="0" step="10"
                       value={row.monthly_target>0?Math.round(row.monthly_target/10000):''}

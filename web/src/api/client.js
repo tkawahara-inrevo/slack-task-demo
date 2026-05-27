@@ -602,6 +602,7 @@ export const api = {
   anUpdate:      (id, body) => apiFetch(`/an/requests/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   anPostToSlack: (id) => apiFetch(`/an/requests/${id}/post-to-slack`, { method: 'POST' }),
   anRpoResults:  (id) => apiFetch(`/an/requests/${id}/rpo-results`),
+  anBackfill:    (days = 30) => apiFetch(`/an/backfill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }),
   anMediaStats:  (filters = {}) => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
     return apiFetch(`/an/media-stats${qs ? `?${qs}` : ''}`);

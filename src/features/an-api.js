@@ -62,52 +62,94 @@ async function findCrmDealId(teamId, kintoneUrl, companyName) {
   return null;
 }
 
-function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeamId }) {
+  // ── AN依頼の検出条件 ─────────────────────────────────
+  // ワークフロー定型: 【会社名】と【kintone】が両方含まれる。回答返信(【AN調査結果】)は除外
+  function isAnRequestMessage(text) {
+    if (!text) return false;
+    if (text.includes('【AN調査結果】')) return false;
+    return text.includes('【会社名】') && text.includes('【kintone】');
+  }
+
+  // 1件取り込み（リスナー & backfill 共通）
+  async function ingestAnRequest({ teamId, channelId, messageTs, text }) {
+    const parsed = parseAnRequest(text);
+    const crmDealId = await findCrmDealId(teamId, parsed.kintone_url, parsed.company_name);
+    const detail = [
+      parsed.hearing ? `【ヒアリング項目】\n${parsed.hearing}` : '',
+      parsed.budget  ? `【媒体予算】\n${parsed.budget}` : '',
+    ].filter(Boolean).join('\n\n');
+
+    const r = await dbQuery(`
+      INSERT INTO an_requests
+        (team_id, channel_id, message_ts, company_name, crm_deal_id,
+         sales_person, request_type, priority, detail, raw_text, status, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',COALESCE($11, now()))
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `, [
+      teamId, channelId, messageTs,
+      parsed.company_name || null,
+      crmDealId || null,
+      parsed.sales_person || null,
+      parsed.request_type || null,
+      parsed.priority || null,
+      detail || parsed.detail || null,
+      text,
+      messageTs ? new Date(Number(messageTs.split('.')[0]) * 1000) : null,
+    ]);
+    return { inserted: r.rowCount > 0, parsed };
+  }
 
   // ── Slackリスナー：AN依頼チャンネルを監視 ──────────────
   if (slackApp && AN_CHANNEL_ID) {
-    slackApp.message(async ({ message, client }) => {
+    slackApp.message(async ({ message }) => {
       if (message.channel !== AN_CHANNEL_ID) return;
-      if (message.subtype) return; // bot/edited等はスキップ
-      if (!message.text) return;
-      if (!message.text.includes('AN依頼')) return;
-
+      // edited/deleted等はスキップ。bot_message（Workflowからの依頼）は許可
+      if (message.subtype && message.subtype !== 'bot_message') return;
+      if (!isAnRequestMessage(message.text)) return;
       try {
-        const parsed = parseAnRequest(message.text);
-        const teamId = defaultTeamId;
-        const crmDealId = await findCrmDealId(teamId, parsed.kintone_url, parsed.company_name);
-
-        const detail = [
-          parsed.hearing ? `【ヒアリング項目】\n${parsed.hearing}` : '',
-          parsed.budget  ? `【媒体予算】\n${parsed.budget}` : '',
-        ].filter(Boolean).join('\n\n');
-
-        await dbQuery(`
-          INSERT INTO an_requests
-            (team_id, channel_id, message_ts, company_name, crm_deal_id,
-             sales_person, request_type, priority, detail, raw_text, status)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')
-          ON CONFLICT DO NOTHING
-        `, [
-          teamId,
-          message.channel,
-          message.ts,
-          parsed.company_name || null,
-          crmDealId || null,
-          parsed.sales_person || null,
-          parsed.request_type || null,
-          parsed.priority || null,
-          detail || parsed.detail || null,
-          message.text,
-        ]);
-
-        console.log(`[AN] 新規依頼登録: ${parsed.company_name}`);
+        const { inserted, parsed } = await ingestAnRequest({
+          teamId: defaultTeamId, channelId: message.channel, messageTs: message.ts, text: message.text,
+        });
+        if (inserted) console.log(`[AN] 新規依頼登録: ${parsed.company_name}`);
       } catch (e) {
         console.error('[AN] 登録エラー:', e.message);
       }
     });
     console.log(`[AN] チャンネル ${AN_CHANNEL_ID} を監視中`);
   }
+
+  // ── 過去メッセージ取り込み（backfill） ─────────────────
+  expressApp.post('/api/dashboard/an/backfill', authWithRole, async (req, res) => {
+    try {
+      if (!slackApp) return res.status(500).json({ error: 'Slack未設定' });
+      const { teamId } = req.dashboardUser;
+      const days = Math.max(1, Math.min(365, Number(req.body?.days) || 30));
+      const oldest = Math.floor(Date.now()/1000) - days * 86400;
+
+      let cursor = undefined, scanned = 0, inserted = 0;
+      do {
+        const r = await slackApp.client.conversations.history({
+          channel: AN_CHANNEL_ID, oldest: String(oldest), limit: 200, cursor,
+        });
+        if (!r.ok) return res.status(500).json({ error: r.error || 'slack_history_error' });
+        for (const m of r.messages || []) {
+          scanned++;
+          if (m.subtype && m.subtype !== 'bot_message') continue;
+          if (!isAnRequestMessage(m.text)) continue;
+          try {
+            const { inserted: ok } = await ingestAnRequest({
+              teamId, channelId: AN_CHANNEL_ID, messageTs: m.ts, text: m.text,
+            });
+            if (ok) inserted++;
+          } catch (e) { console.error('[AN backfill]', e.message); }
+        }
+        cursor = r.response_metadata?.next_cursor;
+      } while (cursor);
+
+      res.json({ ok: true, scanned, inserted, days });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
 
   // ── CRUD API ──────────────────────────────────────────
   expressApp.get('/api/dashboard/an/requests', authWithRole, async (req, res) => {

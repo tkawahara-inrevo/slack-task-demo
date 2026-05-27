@@ -98,6 +98,20 @@ export default function AnList() {
               </button>
             ))}
           </div>
+          <button onClick={async () => {
+              const daysStr = window.prompt('過去何日分を取り込みますか？（1〜365）', '90');
+              if (!daysStr) return;
+              const days = Math.max(1, Math.min(365, Number(daysStr) || 30));
+              try {
+                const r = await api.anBackfill(days);
+                alert(`取り込み完了\nスキャン: ${r.scanned}件\n新規登録: ${r.inserted}件`);
+                load();
+              } catch (e) { alert('取り込み失敗: ' + e.message); }
+            }}
+            title="Slackチャンネルの過去メッセージから依頼を取り込む"
+            style={{ padding: '3px 10px', fontSize: '0.74rem', fontWeight: 600, borderRadius: 5, border: '1px solid var(--gray-300)', background: 'var(--surface)', color: 'var(--gray-600)', cursor: 'pointer' }}>
+            📥 Slackから取り込み
+          </button>
           <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
             {[['', '全件'], ['pending', '未回答'], ['answered', '回答済み']].map(([v, l]) => (
               <button key={v} onClick={() => setFilterStatus(v)}

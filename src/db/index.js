@@ -569,6 +569,29 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_completed_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS department TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE crm_period_settings ADD COLUMN IF NOT EXISTS term_target BIGINT`).catch(() => {});
+
+  // kintone App103 (活動履歴) キャッシュ
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS kintone_activities (
+      record_id          TEXT PRIMARY KEY,
+      team_id            TEXT NOT NULL DEFAULT 'T086C06L5V0',
+      deal_record_id     TEXT,
+      activity_date      DATE,
+      activity_type      TEXT,
+      assignee           TEXT,
+      content            TEXT,
+      next_action_date   DATE,
+      next_action_content TEXT,
+      next_action_detail TEXT,
+      next_assignee      TEXT,
+      yomi_at_time       TEXT,
+      is_done            BOOLEAN DEFAULT FALSE,
+      created_at         TIMESTAMPTZ,
+      updated_at         TIMESTAMPTZ,
+      synced_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_kintone_activities_deal ON kintone_activities(deal_record_id)`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

@@ -2459,7 +2459,23 @@ function registerDashboardApi(deps) {
       const activitiesWithNames = await Promise.all(
         activities.map(async (a) => ({ ...a, displayName: await getUserDisplayName(teamId, a.user_id) }))
       );
-      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, payments, tasks, deliverables, positions, mediaplans, calcDefs });
+      // kintone活動履歴（App103）を deal.data->>'kintone_record_id' で取得
+      const { dbQuery } = require('./index');
+      const dealKintoneId = deal.data?.kintone_record_id;
+      let kintoneActivities = [];
+      if (dealKintoneId) {
+        const kr = await dbQuery(
+          `SELECT record_id, activity_date, activity_type, assignee, content,
+                  next_action_date, next_action_content, next_action_detail, next_assignee,
+                  yomi_at_time, is_done, created_at, updated_at
+           FROM kintone_activities
+           WHERE deal_record_id=$1
+           ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC`,
+          [String(dealKintoneId)]
+        );
+        kintoneActivities = kr.rows;
+      }
+      res.json({ deal, members: membersWithNames, activities: activitiesWithNames, kintoneActivities, payments, tasks, deliverables, positions, mediaplans, calcDefs, kintoneDealRecordId: dealKintoneId || null });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

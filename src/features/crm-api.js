@@ -336,11 +336,31 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.get('/api/crm/deals/:id/activities', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { rows } = await dbQuery(
+      // 既存 deal_activities
+      const localRes = await dbQuery(
         `SELECT * FROM deal_activities WHERE team_id=$1 AND deal_id=$2 ORDER BY created_at DESC`,
         [teamId, req.params.id]
       );
-      res.json({ activities: rows });
+      // kintone活動履歴: deals.data->>'kintone_record_id' で紐付け
+      const dealRes = await dbQuery(
+        `SELECT data->>'kintone_record_id' AS rec_id FROM deals WHERE id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      const dealKintoneId = dealRes.rows[0]?.rec_id;
+      let kintoneRows = [];
+      if (dealKintoneId) {
+        const kr = await dbQuery(
+          `SELECT record_id, deal_record_id, activity_date, activity_type, assignee, content,
+                  next_action_date, next_action_content, next_action_detail, next_assignee,
+                  yomi_at_time, is_done, created_at, updated_at
+           FROM kintone_activities
+           WHERE deal_record_id=$1
+           ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC`,
+          [String(dealKintoneId)]
+        );
+        kintoneRows = kr.rows.map(r => ({ ...r, source: 'kintone' }));
+      }
+      res.json({ activities: localRes.rows, kintoneActivities: kintoneRows });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 

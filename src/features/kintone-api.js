@@ -1,6 +1,6 @@
 // kintone連携 API（検索・同期）
 const { dbEnsureKintoneSchema, dbUpsertKintoneRecords, dbSearchKintoneCompanies, dbGetKintoneLastSync, dbGetKintoneRecord } = require('../db/kintone');
-const { syncKintoneApp, syncKintonePayments, APPS } = require('./kintone-sync');
+const { syncKintoneApp, syncKintonePayments, syncKintoneActivities, APPS } = require('./kintone-sync');
 const { dbQuery } = require('../db/index');
 
 // kintone App102 フィールド → deals カラム のマッピング定義
@@ -167,6 +167,8 @@ async function runSync() {
     await syncDealsFromKintoneCache();
     // kintone_payments（App170）同期
     await syncKintonePayments();
+    // kintone_activities（App103: 活動履歴）同期
+    await syncKintoneActivities().catch(e => console.error('[kintone] activities sync error:', e.message));
     // リード管理ダッシュボード用マテリアライズドビューをリフレッシュ
     await dbQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_lead_customers').catch(() => {});
     await dbQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_lead_flags').catch(() => {});

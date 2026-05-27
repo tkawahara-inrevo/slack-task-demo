@@ -948,32 +948,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const repRepRoleMap = {};
       for (const r of repRoleRes.rows) repRepRoleMap[r.rep_name] = r;
 
-      // Slackのtitleから役職を推定するフォールバック。crm_rep_roles に手動設定がある場合はそちら優先。
-      // 役職名は crm_role_targets の role_name と一致させること。manager→Chief は意図的な運用。
-      const inferRoleFromTitle = (title) => {
-        if (!title) return '役職無し';
-        const t = title.toLowerCase();
-        if (t.includes('sub expert'))  return 'Sub Expert';
-        if (t.includes('expert'))      return 'Expert';
-        if (t.includes('sub manager')) return 'Sub Manager';
-        if (t.includes('sub chief'))   return 'Sub Chief';
-        if (t.includes('chief'))       return 'Chief';
-        if (t.includes('manager'))     return 'Chief';
-        if (t.includes('lead'))        return 'Lead';
-        return '役職無し';
-      };
-
-      // Slack ディレクトリから担当者タイトルを取得
-      const slackDirRes = await dbQuery(
-        `SELECT display_name, real_name, profile_json->>'title' AS title
-         FROM dashboard_user_directory WHERE team_id=$1 AND is_active=true`,
-        [teamId]
-      );
-
       const repTargetMap = {};
-      const repRoleInferred = {}; // フロントに渡す自動推定役職
+      const repRoleInferred = {}; // フロントに渡す役職（手動設定のみ。Slack自動推定は廃止）
       // KPI管理対象の担当者（BC担当）= crm_rep_roles 設定済 − 除外/退職 − 添田/リファラル予約名
-      // フロントもこのリストでダッシュボードを描画するため、ハードコードは廃止
       const TARGET_REPS_SERVER = REP_ROLES
         .filter(r => !r.exclude_from_kpi && !r.is_retired && r.rep_name !== ADDA_REF)
         .map(r => r.rep_name);
@@ -981,16 +958,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       for (const rep of TARGET_REPS_SERVER) {
         const repRole  = repRepRoleMap[rep];
         const override = repRole?.monthly_target_override;
-
-        // 役職: 手動設定 > Slackプロフィール自動推定
-        let roleName = repRole?.role_name || '';
-        if (!roleName) {
-          const lastName = rep.split(/[\s　]/)[0];
-          const profile  = slackDirRes.rows.find(d =>
-            d.display_name?.includes(lastName) || d.real_name?.includes(lastName)
-          );
-          roleName = inferRoleFromTitle(profile?.title);
-        }
+        const roleName = repRole?.role_name || '役職無し';
         repRoleInferred[rep] = roleName;
 
         const effective = override != null ? Number(override) : (roleTargetMap[roleName] || 0);
@@ -1662,13 +1630,24 @@ function registerCrmApi({ expressApp, authWithRole }) {
     try {
       const { teamId } = req.dashboardUser;
       const { targets } = req.body; // [{ role_name, monthly_target, sort_order }]
+      const validNames = targets.map(t => t.role_name).filter(Boolean);
+      // リストに無くなった役職は削除
+      if (validNames.length > 0) {
+        await dbQuery(
+          `DELETE FROM crm_role_targets WHERE team_id=$1 AND role_name NOT IN (${validNames.map((_, i) => `$${i+2}`).join(',')})`,
+          [teamId, ...validNames]
+        );
+      } else {
+        await dbQuery(`DELETE FROM crm_role_targets WHERE team_id=$1`, [teamId]);
+      }
       for (const t of targets) {
+        if (!t.role_name) continue;
         await dbQuery(`INSERT INTO crm_role_targets (team_id, role_name, monthly_target, sort_order) VALUES ($1,$2,$3,$4)
           ON CONFLICT (team_id, role_name) DO UPDATE SET monthly_target=$3, sort_order=$4`,
           [teamId, t.role_name, t.monthly_target, t.sort_order ?? 0]);
       }
       res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: 'internal' }); }
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
   // 期間設定 GET/PUT
@@ -1777,38 +1756,27 @@ function registerCrmApi({ expressApp, authWithRole }) {
       );
       const allStaff = staffRes.rows.map(r => r.staff);
 
-      // Slack ディレクトリから名前とタイトルを取得
+      // Slack ディレクトリからアバター取得（役職はcrm_rep_rolesの手動設定のみを参照）
       const dirRes = await dbQuery(
-        `SELECT display_name, real_name, profile_json->>'title' AS title, profile_json->>'image_72' AS avatar_url
+        `SELECT display_name, real_name, profile_json->>'image_72' AS avatar_url
          FROM dashboard_user_directory WHERE team_id=$1 AND is_active=true`,
         [teamId]
       );
+      const repRoleRes = await dbQuery(
+        `SELECT rep_name, role_name FROM crm_rep_roles WHERE team_id=$1`, [teamId]
+      );
+      const repRoleMap = Object.fromEntries(repRoleRes.rows.map(r => [r.rep_name, r.role_name || '役職無し']));
 
-      // title から役職を推定
-      const inferRole = (title) => {
-        if (!title) return null;
-        const t = title.toLowerCase();
-        if (t.includes('sub expert'))  return 'Sub Expert';
-        if (t.includes('expert'))      return 'Expert';
-        if (t.includes('sub manager')) return 'Sub Manager';
-        if (t.includes('sub chief'))   return 'Sub Chief';
-        if (t.includes('chief'))       return 'Chief';
-        if (t.includes('manager'))     return 'Chief';
-        if (t.includes('lead'))        return 'Lead';
-        return '役職無し';
-      };
-
-      // スタッフ名でマッチング（kintone名 vs Slack表示名）
       const result = allStaff.map(staffName => {
-        const lastName = staffName.split(/[\s　]/)[0]; // 姓のみで検索
+        const lastName = staffName.split(/[\s　]/)[0];
         const profile = dirRes.rows.find(d =>
           d.display_name?.includes(lastName) || d.real_name?.includes(lastName)
         );
         return {
           name: staffName,
-          displayName: staffName.split(/[\s　]/)[0], // 姓のみ表示
-          role: inferRole(profile?.title),
-          title: profile?.title || null,
+          displayName: staffName.split(/[\s　]/)[0],
+          role: repRoleMap[staffName] || '役職無し',
+          title: null,
           avatar_url: profile?.avatar_url || null,
         };
       });

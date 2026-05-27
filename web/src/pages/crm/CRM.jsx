@@ -6,7 +6,8 @@ import CrmDashboard from './CrmDashboard';
 import { api } from '../../api/client';
 
 // TARGET_REPS はもうハードコードしない。crm_rep_roles から動的取得。
-const ROLE_NAMES   = ['役職無し', 'Lead', 'Sub Manager', 'Sub Chief', 'Chief', 'Sub Expert', 'Expert'];
+// 初期役職（DBが空のときのみ使用。以降はDBの crm_role_targets が真実）
+const ROLE_NAMES_DEFAULT = ['役職無し', 'Lead', 'Sub Manager', 'Sub Chief', 'Chief', 'Sub Expert', 'Expert'];
 const ROLE_OPTIONS = ['', ...ROLE_NAMES];
 
 const fmt = (n) => n ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
@@ -595,10 +596,10 @@ function CrmSettings() {
   useEffect(() => {
     Promise.all([api.crmRoleTargets(), api.crmRepRoles(), api.crmPeriodSettings()]).then(([rt, rr, ps]) => {
       const rows = rt.targets || [];
-      const merged = ROLE_NAMES.map((name, i) => {
-        const ex = rows.find(r => r.role_name === name);
-        return { role_name: name, monthly_target: Number(ex?.monthly_target || 0), sort_order: i };
-      });
+      // DBに保存済みのものをそのまま使用。未保存（初回）のみ ROLE_NAMES_DEFAULT で初期化
+      const merged = rows.length > 0
+        ? rows.map((r, i) => ({ role_name: r.role_name, monthly_target: Number(r.monthly_target || 0), sort_order: r.sort_order ?? i }))
+        : ROLE_NAMES_DEFAULT.map((name, i) => ({ role_name: name, monthly_target: 0, sort_order: i }));
       setRoleTargetRows(merged);
       const rtMap = {};
       for (const r of merged) rtMap[r.role_name] = r.monthly_target;
@@ -649,6 +650,31 @@ function CrmSettings() {
   const setRoleTarget = (roleName, wan) => {
     setRoleTargetRows(prev => prev.map(r => r.role_name===roleName ? {...r, monthly_target: Number(wan)*10000} : r));
     setRoleTargets(prev => ({...prev, [roleName]: Number(wan)*10000}));
+  };
+
+  const handleAddRole = () => {
+    const name = (window.prompt('役職名を入力してください（例: Senior Manager）') || '').trim();
+    if (!name) return;
+    if (roleTargetRows.some(r => r.role_name === name)) { alert('すでに同名の役職があります'); return; }
+    setRoleTargetRows(prev => [...prev, { role_name: name, monthly_target: 0, sort_order: prev.length }]);
+    setRoleTargets(prev => ({ ...prev, [name]: 0 }));
+  };
+
+  const handleDeleteRole = (roleName) => {
+    const usingReps = repList.filter(r => r.role_name === roleName || r.prev_role_name === roleName);
+    let confirmMsg = `役職「${roleName}」を削除しますか？`;
+    if (usingReps.length > 0) {
+      confirmMsg += `\n\n以下の${usingReps.length}名がこの役職を使用中です。削除すると役職が未設定になります:\n` + usingReps.map(r => `・${r.rep_name}`).join('\n');
+    }
+    if (!window.confirm(confirmMsg)) return;
+    setRoleTargetRows(prev => prev.filter(r => r.role_name !== roleName));
+    setRoleTargets(prev => { const n = {...prev}; delete n[roleName]; return n; });
+    // この役職を使用していた担当者をクリア
+    setRepList(prev => prev.map(r => ({
+      ...r,
+      role_name: r.role_name === roleName ? '' : r.role_name,
+      prev_role_name: r.prev_role_name === roleName ? '' : r.prev_role_name,
+    })));
   };
 
   const handleSave = async () => {
@@ -739,7 +765,13 @@ function CrmSettings() {
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, maxWidth:800 }}>
             {/* 役職別目標 */}
             <div>
-              <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#374151', marginBottom:10 }}>役職別 月次目標</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#374151' }}>役職別 月次目標</div>
+                <button onClick={handleAddRole}
+                  style={{ padding:'4px 10px', border:'1px solid #c7d2fe', background:'#eef2ff', color:'#4f46e5', borderRadius:6, fontSize:'0.72rem', fontWeight:700, cursor:'pointer' }}>
+                  + 役職追加
+                </button>
+              </div>
               <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'hidden' }}>
                 {roleTargetRows.map((row,i) => (
                   <div key={row.role_name} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 14px', borderBottom:i<roleTargetRows.length-1?'1px solid #f8fafc':'none' }}>
@@ -749,6 +781,9 @@ function CrmSettings() {
                       onChange={e => setRoleTarget(row.role_name, e.target.value)} placeholder="0"
                       style={{ width:80, padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius:6, fontSize:'0.85rem', textAlign:'right', outline:'none' }} />
                     <span style={{ fontSize:'0.72rem', color:'#64748b' }}>万/月</span>
+                    <button onClick={() => handleDeleteRole(row.role_name)}
+                      title="この役職を削除"
+                      style={{ border:'none', background:'transparent', color:'#cbd5e1', fontSize:'1rem', cursor:'pointer', padding:'0 4px' }}>×</button>
                   </div>
                 ))}
               </div>

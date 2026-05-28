@@ -76,7 +76,8 @@
       "Bash(node e:/dev/slack-task-demo/_fix.js)",
       "Bash(git revert *)",
       "Bash(node --check e:/dev/slack-task-demo/src/features/an-api.js)",
-      "Bash(curl -s -H 'X-Cybozu-API-Token: cekSgk3whWbQU6KFOGhr7wnnFOiSp2hzRHQP0Zhz' 'https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=103&query=order%20by%20$id%20desc%20limit%202')"
+      "Bash(curl -s -H 'X-Cybozu-API-Token: cekSgk3whWbQU6KFOGhr7wnnFOiSp2hzRHQP0Zhz' 'https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=103&query=order%20by%20$id%20desc%20limit%202')",
+      "Bash(node --check src/features/kintone-api.js)"
     ]
   }
 }

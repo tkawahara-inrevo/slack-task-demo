@@ -31,111 +31,67 @@ const KINTONE_DEAL_FIELD_MAP = {
 //   2. deals:     data->>'kintone_record_id' でマッチ。なければ新規作成。あれば全フィールド更新
 //   3. ヨミから status を導出（受注/失注/見送り）
 async function syncDealsFromKintoneCache() {
+  const teamId = 'T086C06L5V0';
   try {
-    const { rows: cacheRows } = await dbQuery(
-      `SELECT record_id, company_name, data FROM kintone_cache WHERE app_id='102' AND company_name IS NOT NULL`
-    );
+    // ヨミの（）以降を剥がす式 / status導出式（SQL内で共通利用）
+    const YOMI = `TRIM(regexp_replace(COALESCE(kc.data->>'ヨミ',''), '[（(].*$', ''))`;
+    const STATUS = `CASE ${YOMI}
+        WHEN '受注' THEN 'won' WHEN '失注' THEN 'lost' WHEN '見送り' THEN 'dormant' ELSE 'active' END`;
 
-    const teamId = 'T086C06L5V0';
-    let created = 0, updated = 0, customersCreated = 0;
+    // 1) customers 補完（company_name が customers に無ければ作成）
+    const custIns = await dbQuery(`
+      INSERT INTO customers (team_id, name)
+      SELECT DISTINCT $1, kc.company_name
+      FROM kintone_cache kc
+      WHERE kc.app_id='102' AND kc.company_name IS NOT NULL AND kc.company_name <> ''
+        AND NOT EXISTS (SELECT 1 FROM customers c WHERE c.team_id=$1 AND c.name=kc.company_name)
+    `, [teamId]);
 
-    for (const kc of cacheRows) {
-      const d = kc.data || {};
-      // ヨミから（）以降の説明を剥がす
-      const rawYomi = d['ヨミ'] || '';
-      const yomi = rawYomi.replace(/[（(].*$/, '').trim();
-      if (!yomi && !kc.record_id) continue;
+    // 2) 新規 deal 作成（kintone_record_id がまだ deals に無いもの）
+    const dealIns = await dbQuery(`
+      INSERT INTO deals (team_id, customer_id, name, yomi, status,
+                         order_date, conclusion_date, first_meeting_date, inflow_date, inflow_source,
+                         initial_fee, contract_type, lost_reason, sales_person, data)
+      SELECT $1, c.id,
+        COALESCE(NULLIF(kc.data->>'案件名',''), kc.company_name || '_' || kc.record_id),
+        NULLIF(${YOMI},''),
+        ${STATUS},
+        NULLIF(kc.data->>'受注日','')::date,
+        NULLIF(kc.data->>'結論日','')::date,
+        NULLIF(kc.data->>'初回商談日_コンサルチーム','')::date,
+        NULLIF(COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム'),'')::date,
+        NULLIF(kc.data->>'流入経路',''),
+        NULLIF(kc.data->>'見込売り上げ_税抜き','')::numeric,
+        NULLIF(kc.data->>'ヨミ_2',''),
+        NULLIF(kc.data->>'失注理由',''),
+        NULLIF(kc.data->>'担当営業_0',''),
+        jsonb_build_object('kintone_record_id', kc.record_id)
+      FROM kintone_cache kc
+      JOIN customers c ON c.team_id=$1 AND c.name=kc.company_name
+      WHERE kc.app_id='102' AND kc.company_name IS NOT NULL AND kc.company_name <> ''
+        AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.team_id=$1 AND d.data->>'kintone_record_id'=kc.record_id)
+    `, [teamId]);
 
-      // status 導出
-      const status = yomi === '受注'   ? 'won'
-                   : yomi === '失注'   ? 'lost'
-                   : yomi === '見送り' ? 'dormant'
-                   : 'active';
+    // 3) 既存 deal を一括更新（kintone_record_id で結合。空値は既存値を保持）
+    const dealUpd = await dbQuery(`
+      UPDATE deals d SET
+        yomi   = COALESCE(NULLIF(${YOMI},''), d.yomi),
+        status = ${STATUS},
+        order_date         = COALESCE(NULLIF(kc.data->>'受注日','')::date, d.order_date),
+        conclusion_date    = COALESCE(NULLIF(kc.data->>'結論日','')::date, d.conclusion_date),
+        first_meeting_date = COALESCE(NULLIF(kc.data->>'初回商談日_コンサルチーム','')::date, d.first_meeting_date),
+        inflow_date        = COALESCE(NULLIF(COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム'),'')::date, d.inflow_date),
+        inflow_source      = COALESCE(NULLIF(kc.data->>'流入経路',''), d.inflow_source),
+        initial_fee        = COALESCE(NULLIF(kc.data->>'見込売り上げ_税抜き','')::numeric, d.initial_fee),
+        contract_type      = COALESCE(NULLIF(kc.data->>'ヨミ_2',''), d.contract_type),
+        lost_reason        = COALESCE(NULLIF(kc.data->>'失注理由',''), d.lost_reason),
+        sales_person       = COALESCE(NULLIF(kc.data->>'担当営業_0',''), d.sales_person),
+        updated_at = now()
+      FROM kintone_cache kc
+      WHERE kc.app_id='102' AND d.team_id=$1 AND d.data->>'kintone_record_id'=kc.record_id
+    `, [teamId]);
 
-      // customer 確保
-      let custRes = await dbQuery(
-        `SELECT id FROM customers WHERE team_id=$1 AND name=$2 LIMIT 1`,
-        [teamId, kc.company_name]
-      );
-      let customerId;
-      if (custRes.rows[0]) {
-        customerId = custRes.rows[0].id;
-      } else {
-        const ins = await dbQuery(
-          `INSERT INTO customers (team_id, name) VALUES ($1,$2) RETURNING id`,
-          [teamId, kc.company_name]
-        );
-        customerId = ins.rows[0].id;
-        customersCreated++;
-      }
-
-      // deal: kintone_record_id でマッチ
-      const dealRes = await dbQuery(
-        `SELECT id FROM deals WHERE team_id=$1 AND data->>'kintone_record_id'=$2 LIMIT 1`,
-        [teamId, String(kc.record_id)]
-      );
-
-      const fields = {
-        yomi:               yomi || null,
-        status,
-        order_date:          d['受注日']                 || null,
-        conclusion_date:     d['結論日']                 || null,
-        first_meeting_date:  d['初回商談日_コンサルチーム'] || null,
-        inflow_date:         d['流入日'] || d['商談獲得日_マーケチーム'] || null,
-        inflow_source:       d['流入経路']               || null,
-        initial_fee:         d['見込売り上げ_税抜き']     || null,
-        contract_type:       d['ヨミ_2']                 || null,
-        lost_reason:         d['失注理由']               || null,
-        sales_person:        d['担当営業_0']             || null,
-        name:                d['案件名'] || `${kc.company_name}_kintone_${kc.record_id}`,
-      };
-
-      if (dealRes.rows[0]) {
-        // 既存deal: 値があるフィールドだけ上書き（空文字はnullに正規化）
-        const sets = [], vals = [];
-        let i = 1;
-        const push = (col, val, cast='') => {
-          if (val === '' || val == null) return;
-          sets.push(`${col}=$${i++}${cast}`);
-          vals.push(val);
-        };
-        push('yomi', fields.yomi);
-        sets.push(`status='${status}'`);
-        push('order_date',         fields.order_date,         '::date');
-        push('conclusion_date',    fields.conclusion_date,    '::date');
-        push('first_meeting_date', fields.first_meeting_date, '::date');
-        push('inflow_date',        fields.inflow_date,        '::date');
-        push('inflow_source',      fields.inflow_source);
-        push('initial_fee',        fields.initial_fee,        '::numeric');
-        push('contract_type',      fields.contract_type);
-        push('lost_reason',        fields.lost_reason);
-        push('sales_person',       fields.sales_person);
-        sets.push(`updated_at=now()`);
-        vals.push(dealRes.rows[0].id);
-        await dbQuery(`UPDATE deals SET ${sets.join(', ')} WHERE id=$${i}`, vals);
-        updated++;
-      } else {
-        // 新規deal
-        await dbQuery(`
-          INSERT INTO deals (team_id, customer_id, name, yomi, status,
-                             order_date, conclusion_date, first_meeting_date, inflow_date, inflow_source,
-                             initial_fee, contract_type, lost_reason, sales_person, data)
-          VALUES ($1,$2,$3,$4,$5,
-                  NULLIF($6,'')::date, NULLIF($7,'')::date, NULLIF($8,'')::date, NULLIF($9,'')::date, $10,
-                  NULLIF($11,'')::numeric, $12, $13, $14,
-                  jsonb_build_object('kintone_record_id', $15::text))
-        `, [
-          teamId, customerId, fields.name, fields.yomi, status,
-          fields.order_date || '', fields.conclusion_date || '', fields.first_meeting_date || '', fields.inflow_date || '',
-          fields.inflow_source,
-          fields.initial_fee || '', fields.contract_type, fields.lost_reason, fields.sales_person,
-          String(kc.record_id),
-        ]);
-        created++;
-      }
-    }
-
-    console.log(`[kintone] deals upsert: created=${created} updated=${updated} customers=${customersCreated}`);
+    console.log(`[kintone] deals upsert(bulk): customers+${custIns.rowCount} deals_new+${dealIns.rowCount} deals_upd=${dealUpd.rowCount}`);
   } catch (e) {
     console.error('[kintone] deals upsert error:', e.message);
   }

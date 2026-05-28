@@ -683,6 +683,9 @@ async function dbEnsureSettingsSchema() {
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_an_study_media_study ON an_study_media(study_record_id)`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_an_study_media_name ON an_study_media(media_name)`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_studies ADD COLUMN IF NOT EXISTS slack_message_ts TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_studies ADD COLUMN IF NOT EXISTS slack_channel_id TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_studies ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'kintone'`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

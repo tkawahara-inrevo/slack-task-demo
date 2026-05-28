@@ -46,37 +46,12 @@ export default function AnList() {
   useEffect(() => { const t = setTimeout(() => load(), 300); return () => clearTimeout(t); }, [searchQ]); // eslint-disable-line
 
   const openDetail = async (row) => {
-    if (row.source === 'kintone') {
-      // kintone調査の場合は study + media を取得
-      setStudyDetail(null);
-      setSelected({ ...row, _kind: 'study' });
-      try {
-        const r = await api.anStudyDetail(row.source_id);
-        setStudyDetail({ study: r.study, media: r.media });
-      } catch { setStudyDetail({ study: null, media: [] }); }
-      setRpoResults(null);
-      setPastStudies(null);
-      return;
-    }
-    // slack（an_requests）の場合は従来通り
-    const req = await api.anRequests().then(r => (r.requests||[]).find(x => x.id === row.source_id)).catch(() => null);
-    if (!req) return;
-    setSelected({ ...req, _kind: 'request' });
-    setAnswer(req.answer || '');
-    setEst({
-      est_media_cost: req.est_media_cost ?? '',
-      est_unit_price: req.est_unit_price ?? '',
-      est_budget: req.est_budget ?? '',
-      est_hire_count: req.est_hire_count ?? '',
-      recommended_media: req.recommended_media ?? '',
-    });
-    setRpoResults(null);
-    api.anRpoResults(req.id).then(r => setRpoResults(r.results)).catch(() => {});
-    setPastStudies(null);
     setStudyDetail(null);
-    if (req.company_name) {
-      api.anStudies(req.company_name).then(r => setPastStudies(r.studies || [])).catch(() => setPastStudies([]));
-    } else { setPastStudies([]); }
+    setSelected({ ...row, _kind: 'study' });
+    try {
+      const r = await api.anStudyDetail(row.source_id);
+      setStudyDetail({ study: r.study, media: r.media });
+    } catch { setStudyDetail({ study: null, media: [] }); }
   };
 
   const loadMediaStats = (filters = mediaFilters) => {
@@ -304,45 +279,41 @@ export default function AnList() {
               </div>
               {loading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中...</div>
               : unified.length === 0 ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>該当なし</div>
-              : unified.map(row => {
-                  const key = `${row.source}:${row.source_id}`;
-                  const isSelectedRow = selected && (
-                    (row.source==='slack' && selected._kind==='request' && selected.id===row.source_id) ||
-                    (row.source==='kintone' && selected._kind==='study' && selected.source_id===row.source_id)
-                  );
-                  const isDone = row.source==='slack'
-                    ? (row.status==='answered' || row.status==='closed')
-                    : ['完了','対応済','クローズ'].includes(row.status);
-                  const statusColor = isDone ? '#059669' : '#dc2626';
-                  const statusBg    = isDone ? '#f0fdf4' : '#fef2f2';
-                  const statusLabel = row.source==='slack'
-                    ? (STATUS_LABEL[row.status] || row.status)
-                    : (row.status || '対応中');
-                  return (
-                    <div key={key} onClick={() => openDetail(row)}
-                      style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', cursor: 'pointer',
-                        background: isSelectedRow ? '#eff6ff' : 'var(--surface)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                        <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 5px', borderRadius: 3,
-                          background: row.source==='slack' ? '#eef2ff' : '#fef3c7', color: row.source==='slack' ? '#4f46e5' : '#92400e' }}>
-                          {row.source==='slack' ? 'Slack' : 'kintone'}
-                        </span>
-                        <span style={{ fontWeight: 700, fontSize: '0.82rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--gray-900)' }}>
-                          {row.company_name || '(会社名なし)'}
-                        </span>
-                        <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: statusBg, color: statusColor }}>
-                          {statusLabel}
-                        </span>
+              : (() => {
+                  // 同会社のカウント
+                  const companyCount = {};
+                  unified.forEach(r => { if (r.company_name) companyCount[r.company_name] = (companyCount[r.company_name]||0)+1; });
+                  return unified.map(row => {
+                    const key = `study:${row.source_id}`;
+                    const isSelectedRow = selected && selected.source_id===row.source_id;
+                    const isDone = ['完了','対応済','クローズ'].includes(row.status);
+                    const statusColor = isDone ? '#059669' : '#d97706';
+                    const statusBg    = isDone ? '#f0fdf4' : '#fffbeb';
+                    const sameCount = row.company_name ? companyCount[row.company_name] : 0;
+                    return (
+                      <div key={key} onClick={() => openDetail(row)}
+                        style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', cursor: 'pointer',
+                          background: isSelectedRow ? '#eff6ff' : 'var(--surface)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.82rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--gray-900)' }}>
+                            {row.company_name || '(会社名なし)'}
+                            {sameCount > 1 && <span style={{ marginLeft: 5, fontSize: '0.66rem', color: 'var(--gray-500)', fontWeight: 600 }}>({sameCount}件)</span>}
+                          </span>
+                          <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: statusBg, color: statusColor }}>
+                            {isDone ? '回答済' : (row.status || '未回答')}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--gray-500)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                          {row.requester && <span>👤 {row.requester}</span>}
+                          {row.request_type && <span style={{ color: 'var(--gray-600)' }}>{row.request_type}</span>}
+                          {row.priority && <span style={{ color: '#dc2626', fontWeight: 700 }}>優先:{row.priority}</span>}
+                          {row.media_count > 0 && <span style={{ color: '#0284c7' }}>📊 媒体{row.media_count}</span>}
+                          <span style={{ marginLeft: 'auto', color: 'var(--gray-400)' }}>{row.requested_at ? fmtDate(row.requested_at) : '—'}</span>
+                        </div>
                       </div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--gray-500)', display: 'flex', gap: 6, alignItems: 'center' }}>
-                        {row.requester && <span>👤 {row.requester}</span>}
-                        {row.priority && <span style={{ color: '#dc2626', fontWeight: 700 }}>優先:{row.priority}</span>}
-                        {row.media_count > 0 && <span style={{ color: '#0284c7' }}>📊 媒体{row.media_count}</span>}
-                        <span style={{ marginLeft: 'auto', color: 'var(--gray-400)' }}>{row.requested_at ? fmtDate(row.requested_at) : '—'}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
             </>
           )}
         </div>
@@ -440,211 +411,6 @@ export default function AnList() {
         </div>
       )}
 
-      {/* 右: Slack依頼の詳細（従来） */}
-      {selected && selected._kind === 'request' && (
-        <div style={S.detail}>
-          <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-500)', fontSize: '1.1rem', padding: 4 }}>←</button>
-            <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: '#eef2ff', color: '#4f46e5' }}>Slack</span>
-            <span style={{ fontWeight: 700, fontSize: '0.95rem', flex: 1 }}>{selected.company_name || '（会社名なし）'}</span>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-              background: STATUS_BG[selected.status], color: STATUS_COLOR[selected.status] }}>
-              {STATUS_LABEL[selected.status]}
-            </span>
-          </div>
-
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* 依頼者情報（メタ） */}
-            <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 8 }}>依頼者情報</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.82rem' }}>
-                {[
-                  ['会社名', selected.company_name || '—'],
-                  ['担当営業', selected.sales_person || '—'],
-                  selected.mentor_name ? ['メンター', selected.mentor_name] : null,
-                  selected.hire_type ? ['新卒/中途', selected.hire_type] : null,
-                  selected.request_type ? ['依頼粒度', selected.request_type] : null,
-                  selected.priority ? ['優先度', selected.priority] : null,
-                  selected.kintone_url ? ['kintone', <a key="kk" href={selected.kintone_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }}>{selected.kintone_url}</a>] : null,
-                  ['受付日時', fmtDate(selected.created_at)],
-                  selected.deal_name || selected.customer_name ? ['CRM案件', selected.deal_name || selected.customer_name] : null,
-                ].filter(Boolean).map(([label, val]) => (
-                  <div key={label} style={{ display: 'flex', gap: 10 }}>
-                    <div style={{ color: 'var(--gray-500)', fontSize: '0.72rem', width: 90, flexShrink: 0 }}>{label}</div>
-                    <div style={{ color: 'var(--gray-900)', fontWeight: 500, wordBreak: 'break-all', flex: 1 }}>{val}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* ヒアリング21項目 */}
-            {selected.hearing && (
-              <div>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>ヒアリング項目（21項目）</div>
-                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.6 }}>
-                  {selected.hearing}
-                </pre>
-              </div>
-            )}
-
-            {/* 媒体予算 */}
-            {selected.budget && (
-              <div>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>媒体予算</div>
-                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
-                  {selected.budget}
-                </pre>
-              </div>
-            )}
-
-            {/* 依頼詳細（自由文） */}
-            {selected.detail_parsed && (
-              <div>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>依頼内容（自由文）</div>
-                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
-                  {selected.detail_parsed}
-                </pre>
-              </div>
-            )}
-
-            {/* 元のSlackメッセージ（折りたたみ） */}
-            {selected.raw_text && (
-              <details>
-                <summary style={{ fontSize: '0.75rem', color: 'var(--gray-400)', cursor: 'pointer' }}>Slack元メッセージを見る</summary>
-                <pre style={{ fontSize: '0.75rem', color: 'var(--gray-600)', background: 'var(--gray-50)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '6px 0 0', maxHeight: 300, overflowY: 'auto' }}>
-                  {selected.raw_text}
-                </pre>
-              </details>
-            )}
-
-            {/* RPO実績 */}
-            {rpoResults && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: '0.78rem', color: '#15803d', marginBottom: 8 }}>📊 この案件のRPO実績（{rpoResults.client_name}）</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 6, marginBottom: 8 }}>
-                  {[
-                    ['採用目標', `${rpoResults.hiring_target}人`],
-                    ['内定承諾', `${rpoResults.accepted_count}人`],
-                    ['総応募数', `${rpoResults.total_applicants}人`],
-                    ['媒体費合計', fmtYen(rpoResults.total_cost)],
-                  ].map(([l,v]) => (
-                    <div key={l} style={{ background: 'var(--surface)', borderRadius: 5, padding: '4px 8px' }}>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>{l}</div>
-                      <div style={{ fontSize: '0.84rem', fontWeight: 600 }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-                {rpoResults.media.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 700, marginBottom: 4 }}>利用媒体</div>
-                    {rpoResults.media.map((m, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 8, fontSize: '0.78rem', padding: '3px 0', borderBottom: '1px solid #bbf7d0' }}>
-                        <span style={{ flex: 1, fontWeight: 500 }}>{m.name}</span>
-                        <span style={{ color: 'var(--gray-600)' }}>{fmtYen(m.mediaCost)}</span>
-                        <span style={{ color: '#15803d', fontWeight: 700 }}>{m.hiredCount || 0}人採用</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 過去のAN調査（App221より） */}
-            {pastStudies && pastStudies.length > 0 && (
-              <div style={{ background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.78rem', color: '#92400e', marginBottom: 8 }}>
-                  📚 過去のAN調査（{pastStudies.length}件）
-                </div>
-                {pastStudies.map(s => (
-                  <details key={s.record_id} style={{ marginBottom: 6, background: 'var(--surface)', borderRadius: 6, padding: '6px 10px' }}>
-                    <summary style={{ cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}>
-                      {s.request_date ? String(s.request_date).slice(0,10) : '日付なし'}
-                      {s.requester && <span style={{ color: 'var(--gray-500)', marginLeft: 6, fontWeight: 400 }}>依頼: {s.requester}</span>}
-                      {s.status && <span style={{ marginLeft: 8, fontSize: '0.66rem', padding: '1px 7px', borderRadius: 99, background: '#fff7ed', color: '#9a3412', fontWeight: 600 }}>{s.status}</span>}
-                      <span style={{ marginLeft: 8, fontSize: '0.7rem', color: 'var(--gray-500)' }}>媒体 {s.media_slots?.length || 0}件</span>
-                    </summary>
-                    <div style={{ marginTop: 8, fontSize: '0.78rem' }}>
-                      {s.must_condition && <div style={{ marginBottom: 6 }}><b>MUST条件:</b> <pre style={{ display: 'inline', whiteSpace: 'pre-wrap', margin: 0 }}>{s.must_condition}</pre></div>}
-                      {s.media_slots?.length > 0 && (
-                        <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', marginTop: 6 }}>
-                          <thead><tr style={{ color: 'var(--gray-500)', textAlign: 'left' }}>
-                            <th style={{ padding: '3px 4px' }}>媒体</th>
-                            <th style={{ padding: '3px 4px', textAlign: 'right' }}>料金</th>
-                            <th style={{ padding: '3px 4px', textAlign: 'right' }}>予想/実応募</th>
-                            <th style={{ padding: '3px 4px' }}>担当</th>
-                          </tr></thead>
-                          <tbody>
-                            {s.media_slots.map((m, i) => (
-                              <tr key={i} style={{ borderTop: '1px solid var(--gray-100)' }}>
-                                <td style={{ padding: '3px 4px', fontWeight: 600 }}>{m.media_name || '—'}</td>
-                                <td style={{ padding: '3px 4px', textAlign: 'right' }}>{m.fee ? fmtYen(m.fee) : '—'}</td>
-                                <td style={{ padding: '3px 4px', textAlign: 'right', color: 'var(--gray-700)' }}>
-                                  {m.expected_apps ?? '—'} / <b style={{ color: m.effective_apps > 0 ? '#059669' : 'var(--gray-400)' }}>{m.effective_apps ?? '—'}</b>
-                                </td>
-                                <td style={{ padding: '3px 4px', color: 'var(--gray-500)' }}>{m.an_assignee || '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  </details>
-                ))}
-              </div>
-            )}
-
-            {/* 見積もり（構造化） */}
-            <div>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査結果（見積もり）</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
-                {[
-                  ['est_media_cost', '媒体費（円）', 'number'],
-                  ['est_unit_price', '採用単価（円）', 'number'],
-                  ['est_budget', '推奨予算（円）', 'number'],
-                  ['est_hire_count', '想定採用人数', 'number'],
-                ].map(([key, label, type]) => (
-                  <div key={key}>
-                    <label style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>{label}</label>
-                    <input type={type} value={est[key]} onChange={e => setEst(p => ({ ...p, [key]: e.target.value }))}
-                      style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem', boxSizing: 'border-box', textAlign: 'right', background: 'var(--surface)' }} />
-                  </div>
-                ))}
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <label style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>推奨媒体</label>
-                    <MediaSuggestButton onPick={(name) => setEst(p => ({ ...p, recommended_media: p.recommended_media ? `${p.recommended_media} + ${name}` : name }))} />
-                  </div>
-                  <input type="text" value={est.recommended_media} onChange={e => setEst(p => ({ ...p, recommended_media: e.target.value }))}
-                    placeholder="例: Indeed + OfferBox"
-                    style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem', boxSizing: 'border-box', background: 'var(--surface)' }} />
-                </div>
-              </div>
-            </div>
-
-            {/* 回答入力（自由文） */}
-            <div>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査結果・回答（詳細）</div>
-              <textarea value={answer} onChange={e => setAnswer(e.target.value)} rows={8}
-                placeholder="調査結果の詳細・補足を入力してください..."
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--gray-300)', borderRadius: 8, fontSize: '0.84rem', resize: 'vertical', boxSizing: 'border-box', background: 'var(--surface)' }} />
-            </div>
-          </div>
-
-          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--gray-200)', display: 'flex', gap: 8 }}>
-            <button onClick={saveAnswer} disabled={saving}
-              style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1px solid var(--gray-300)', background: 'var(--surface)', fontWeight: 600, fontSize: '0.84rem', cursor: saving ? 'default' : 'pointer', color: 'var(--gray-700)' }}>
-              {saving ? '保存中...' : '💾 保存'}
-            </button>
-            <button onClick={postToSlack} disabled={posting || !answer.trim()}
-              style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none',
-                background: answer.trim() ? '#2563eb' : 'var(--gray-200)',
-                color: answer.trim() ? '#fff' : 'var(--gray-400)',
-                fontWeight: 600, fontSize: '0.84rem', cursor: (posting || !answer.trim()) ? 'default' : 'pointer' }}>
-              {posting ? '投稿中...' : '📤 Slackに投稿'}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

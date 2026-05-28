@@ -107,34 +107,55 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     return text.includes('【会社名】') && text.includes('【kintone】');
   }
 
-  // 1件取り込み（リスナー & backfill 共通）
+  // 1件取り込み（リスナー & backfill 共通）→ an_studies に新規作成
   async function ingestAnRequest({ teamId, channelId, messageTs, text }) {
     const parsed = parseAnRequest(text);
-    const crmDealId = await findCrmDealId(teamId, parsed.kintone_url, parsed.company_name);
-    const detail = [
-      parsed.hearing ? `【ヒアリング項目】\n${parsed.hearing}` : '',
-      parsed.budget  ? `【媒体予算】\n${parsed.budget}` : '',
+    // 担当営業を表示名に解決（mention抽出のため）
+    const salesName = await resolveUserName(teamId, parsed.sales_person);
+    const requesterDate = messageTs ? new Date(Number(messageTs.split('.')[0]) * 1000) : new Date();
+
+    // 重複防止: 同じ slack_message_ts が既にあればスキップ
+    if (messageTs) {
+      const { rows: dup } = await dbQuery(
+        `SELECT record_id FROM an_studies WHERE slack_message_ts=$1 LIMIT 1`, [messageTs]
+      );
+      if (dup.length > 0) return { inserted: false, parsed, recordId: dup[0].record_id };
+    }
+
+    // other_notes に媒体予算 / 依頼粒度 / 詳細をまとめる
+    const otherNotes = [
+      parsed.budget       ? `【媒体予算】\n${parsed.budget}` : '',
+      parsed.request_type ? `【依頼粒度】${parsed.request_type}` : '',
+      parsed.detail       ? `【その他】\n${parsed.detail}` : '',
     ].filter(Boolean).join('\n\n');
 
+    // record_id は slack message_ts ベースで生成（同一性確保）
+    const recordId = `slack-${(messageTs || Date.now()).toString().replace(/\./g,'')}`;
+
     const r = await dbQuery(`
-      INSERT INTO an_requests
-        (team_id, channel_id, message_ts, company_name, crm_deal_id,
-         sales_person, request_type, priority, detail, raw_text, status, created_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',COALESCE($11, now()))
-      ON CONFLICT DO NOTHING
-      RETURNING id
+      INSERT INTO an_studies
+        (record_id, team_id, source, company_name, requester,
+         request_date, priority, status, employment_type,
+         must_condition, other_notes, slack_message_ts, slack_channel_id,
+         case_link, slack_link, data, kintone_updated_at, synced_at)
+      VALUES ($1,$2,'slack',$3,$4,$5::date,$6,'対応中',$7,$8,$9,$10,$11,$12,$13,$14::jsonb,now(),now())
+      ON CONFLICT (record_id) DO NOTHING
+      RETURNING record_id
     `, [
-      teamId, channelId, messageTs,
+      recordId, teamId,
       parsed.company_name || null,
-      crmDealId || null,
-      parsed.sales_person || null,
-      parsed.request_type || null,
+      salesName || null,
+      requesterDate.toISOString().slice(0,10),
       parsed.priority || null,
-      detail || parsed.detail || null,
-      text,
-      messageTs ? new Date(Number(messageTs.split('.')[0]) * 1000) : null,
+      parsed.hire_type || null,
+      parsed.hearing || null,
+      otherNotes || null,
+      messageTs || null, channelId || null,
+      parsed.kintone_url || null,
+      messageTs && channelId ? `https://slack.com/archives/${channelId}/p${String(messageTs).replace('.','')}` : null,
+      JSON.stringify({ raw_text: text, parsed, mentor: parsed.mentor || null }),
     ]);
-    return { inserted: r.rowCount > 0, parsed };
+    return { inserted: r.rowCount > 0, parsed, recordId };
   }
 
   // ── Slackリスナー：AN依頼チャンネルを監視 ──────────────
@@ -540,60 +561,28 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // ─── AN依頼/調査の統合一覧 ─────────────────────────────
-  // an_requests (slack) と an_studies (kintone App221) を統合して時系列で返す
+  // ─── AN依頼/調査の統合一覧（an_studies に統一） ─────────────
   expressApp.get('/api/dashboard/an/unified', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const q = (req.query.q || '').trim();
       const status = req.query.status || ''; // 'pending' | 'done' | ''
       const params = [teamId];
-      const qExpr = q ? `%${q}%` : null;
+      let where = `s.team_id=$1`;
+      if (q) { params.push(`%${q}%`); where += ` AND (s.company_name ILIKE $${params.length} OR s.requester ILIKE $${params.length})`; }
+      if (status === 'pending') where += ` AND COALESCE(s.status,'') NOT IN ('完了','対応済','クローズ')`;
+      if (status === 'done')    where += ` AND s.status IN ('完了','対応済','クローズ')`;
 
-      // slack側
-      let slackWhere = `a.team_id=$1`;
-      const slackParams = [teamId];
-      if (q) { slackParams.push(qExpr); slackWhere += ` AND (a.company_name ILIKE $${slackParams.length} OR a.sales_person ILIKE $${slackParams.length})`; }
-      if (status === 'pending') slackWhere += ` AND a.status='pending'`;
-      if (status === 'done')    slackWhere += ` AND a.status IN ('answered','closed')`;
-
-      const slack = await dbQuery(`
-        SELECT 'slack' AS source, a.id AS source_id, a.company_name, a.created_at AS requested_at,
-               a.status, a.priority, a.sales_person AS requester, a.request_type,
-               NULL::int AS media_count
-        FROM an_requests a WHERE ${slackWhere}
-        ORDER BY a.created_at DESC
-      `, slackParams);
-
-      // kintone側
-      let kWhere = `s.team_id=$1`;
-      const kParams = [teamId];
-      if (q) { kParams.push(qExpr); kWhere += ` AND (s.company_name ILIKE $${kParams.length} OR s.requester ILIKE $${kParams.length})`; }
-      if (status === 'pending') kWhere += ` AND COALESCE(s.status,'') NOT IN ('完了','対応済','クローズ')`;
-      if (status === 'done')    kWhere += ` AND s.status IN ('完了','対応済','クローズ')`;
-
-      const kintone = await dbQuery(`
-        SELECT 'kintone' AS source, s.record_id AS source_id, s.company_name,
+      const { rows } = await dbQuery(`
+        SELECT s.record_id AS source_id, s.company_name,
                s.request_date::timestamptz AS requested_at,
                s.status, s.priority, s.requester, s.job_type AS request_type,
+               s.source,
                (SELECT COUNT(*)::int FROM an_study_media m WHERE m.study_record_id=s.record_id) AS media_count
-        FROM an_studies s WHERE ${kWhere}
-        ORDER BY s.request_date DESC NULLS LAST
-      `, kParams);
-
-      // マージしてrequested_atで降順
-      const merged = [...slack.rows, ...kintone.rows].sort((a, b) => {
-        const ta = a.requested_at ? new Date(a.requested_at).getTime() : 0;
-        const tb = b.requested_at ? new Date(b.requested_at).getTime() : 0;
-        return tb - ta;
-      });
-      res.json({
-        rows: merged,
-        counts: {
-          total: merged.length,
-          slack_total: slack.rowCount, kintone_total: kintone.rowCount,
-        },
-      });
+        FROM an_studies s WHERE ${where}
+        ORDER BY s.request_date DESC NULLS LAST, s.synced_at DESC
+      `, params);
+      res.json({ rows, counts: { total: rows.length } });
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 

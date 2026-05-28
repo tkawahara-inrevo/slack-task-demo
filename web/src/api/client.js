@@ -617,6 +617,11 @@ export const api = {
   mediaMasterDetail:  (id) => apiFetch(`/media-master/${id}`),
   mediaMasterSync:    ()   => apiFetch(`/media-master/sync`, { method: 'POST' }),
   anStudies:          (company) => apiFetch(`/an/studies${company ? `?company=${encodeURIComponent(company)}` : ''}`),
+  anStudyDetail:      (id) => apiFetch(`/an/studies/${id}`),
+  anUnified:          (filters = {}) => {
+    const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
+    return apiFetch(`/an/unified${qs ? `?${qs}` : ''}`);
+  },
   anStudiesSync:      ()   => apiFetch(`/an/studies/sync`, { method: 'POST' }),
   anMediaRoi:         ()   => apiFetch(`/an/media-roi`),
   mediaSuggest:       (filters = {}) => {

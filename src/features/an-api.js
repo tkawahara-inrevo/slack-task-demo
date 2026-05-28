@@ -540,6 +540,80 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ─── AN依頼/調査の統合一覧 ─────────────────────────────
+  // an_requests (slack) と an_studies (kintone App221) を統合して時系列で返す
+  expressApp.get('/api/dashboard/an/unified', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const q = (req.query.q || '').trim();
+      const status = req.query.status || ''; // 'pending' | 'done' | ''
+      const params = [teamId];
+      const qExpr = q ? `%${q}%` : null;
+
+      // slack側
+      let slackWhere = `a.team_id=$1`;
+      const slackParams = [teamId];
+      if (q) { slackParams.push(qExpr); slackWhere += ` AND (a.company_name ILIKE $${slackParams.length} OR a.sales_person ILIKE $${slackParams.length})`; }
+      if (status === 'pending') slackWhere += ` AND a.status='pending'`;
+      if (status === 'done')    slackWhere += ` AND a.status IN ('answered','closed')`;
+
+      const slack = await dbQuery(`
+        SELECT 'slack' AS source, a.id AS source_id, a.company_name, a.created_at AS requested_at,
+               a.status, a.priority, a.sales_person AS requester, a.request_type,
+               NULL::int AS media_count
+        FROM an_requests a WHERE ${slackWhere}
+        ORDER BY a.created_at DESC
+      `, slackParams);
+
+      // kintone側
+      let kWhere = `s.team_id=$1`;
+      const kParams = [teamId];
+      if (q) { kParams.push(qExpr); kWhere += ` AND (s.company_name ILIKE $${kParams.length} OR s.requester ILIKE $${kParams.length})`; }
+      if (status === 'pending') kWhere += ` AND COALESCE(s.status,'') NOT IN ('完了','対応済','クローズ')`;
+      if (status === 'done')    kWhere += ` AND s.status IN ('完了','対応済','クローズ')`;
+
+      const kintone = await dbQuery(`
+        SELECT 'kintone' AS source, s.record_id AS source_id, s.company_name,
+               s.request_date::timestamptz AS requested_at,
+               s.status, s.priority, s.requester, s.job_type AS request_type,
+               (SELECT COUNT(*)::int FROM an_study_media m WHERE m.study_record_id=s.record_id) AS media_count
+        FROM an_studies s WHERE ${kWhere}
+        ORDER BY s.request_date DESC NULLS LAST
+      `, kParams);
+
+      // マージしてrequested_atで降順
+      const merged = [...slack.rows, ...kintone.rows].sort((a, b) => {
+        const ta = a.requested_at ? new Date(a.requested_at).getTime() : 0;
+        const tb = b.requested_at ? new Date(b.requested_at).getTime() : 0;
+        return tb - ta;
+      });
+      res.json({
+        rows: merged,
+        counts: {
+          total: merged.length,
+          slack_total: slack.rowCount, kintone_total: kintone.rowCount,
+        },
+      });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // kintone調査 単体取得（an_studies + media_slots）
+  expressApp.get('/api/dashboard/an/studies/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [s] } = await dbQuery(
+        `SELECT * FROM an_studies WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!s) return res.status(404).json({ error: 'not_found' });
+      const { rows: media } = await dbQuery(
+        `SELECT * FROM an_study_media WHERE study_record_id=$1 ORDER BY slot`,
+        [req.params.id]
+      );
+      res.json({ study: s, media });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ─── AN調査管理表（App221） ─────────────────────────────
   // 過去調査一覧（会社名でフィルタ可。media展開も同時に返す）
   expressApp.get('/api/dashboard/an/studies', authWithRole, async (req, res) => {

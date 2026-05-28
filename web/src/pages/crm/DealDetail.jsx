@@ -375,7 +375,7 @@ export default function DealDetail() {
   if (loading) return <div className="loading">読み込み中...</div>;
   if (!data) return <div className="loading">案件が見つかりません</div>;
 
-  const { deal, members, activities, kintoneActivities = [], kintoneDealRecordId, payments, tasks, deliverables = [], positions = [], mediaplans = [], calcDefs = [] } = data;
+  const { deal, members, activities, payments, tasks, deliverables = [], positions = [], mediaplans = [], calcDefs = [] } = data;
   const stageIdx = STAGES.findIndex(s => s.value === deal.stage);
 
   const inPayments = payments.filter(p => (p.direction || '入金') === '入金');
@@ -463,52 +463,6 @@ export default function DealDetail() {
           {/* 活動タブ */}
           {tab === 'activity' && (
             <div>
-              {/* kintone活動履歴セクション */}
-              {kintoneDealRecordId && (
-                <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: '#0369a1' }}>
-                      📋 kintone活動履歴（App103） — {kintoneActivities.length}件
-                    </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <a href={`https://ca7n5wh2hfvv.cybozu.com/k/103/?related_id=${kintoneDealRecordId}`} target="_blank" rel="noreferrer"
-                        style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #0284c7', background: '#fff', color: '#0284c7', fontWeight: 600, textDecoration: 'none' }}>
-                        kintoneで開く
-                      </a>
-                      <a href={`https://ca7n5wh2hfvv.cybozu.com/k/103/edit?関連レコード紐付用=${kintoneDealRecordId}`} target="_blank" rel="noreferrer"
-                        style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: 'none', background: '#0284c7', color: '#fff', fontWeight: 700, textDecoration: 'none' }}>
-                        ＋ kintoneで追加
-                      </a>
-                    </div>
-                  </div>
-                  {kintoneActivities.length === 0 ? (
-                    <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center', padding: 12 }}>kintone上の活動履歴はありません</div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {kintoneActivities.map(a => (
-                        <div key={a.record_id} style={{ background: '#fff', borderRadius: 6, padding: '10px 12px', borderLeft: '3px solid #0284c7' }}>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-                            {a.activity_date && <span style={{ fontSize: 11, color: '#0369a1', fontWeight: 700 }}>{a.activity_date}</span>}
-                            {a.activity_type && <span style={{ fontSize: 11, background: '#e0f2fe', color: '#0369a1', padding: '1px 7px', borderRadius: 10 }}>{a.activity_type}</span>}
-                            {a.assignee && <span style={{ fontSize: 11, color: '#64748b' }}>{a.assignee}</span>}
-                            {a.yomi_at_time && <span style={{ fontSize: 10, color: '#94a3b8' }}>ヨミ: {a.yomi_at_time}</span>}
-                            <a href={`https://ca7n5wh2hfvv.cybozu.com/k/103/show#record=${a.record_id}`} target="_blank" rel="noreferrer"
-                              style={{ marginLeft: 'auto', fontSize: 10, color: '#0284c7', textDecoration: 'none' }}>編集 →</a>
-                          </div>
-                          {a.content && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#0f172a' }}>{a.content}</div>}
-                          {(a.next_action_date || a.next_action_content) && (
-                            <div style={{ marginTop: 6, padding: '4px 8px', background: '#fef3c7', borderRadius: 4, fontSize: 11, color: '#92400e' }}>
-                              次回: {a.next_action_date || ''} {a.next_action_content || ''}
-                              {a.next_assignee && ` （${a.next_assignee}）`}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <form onSubmit={handleAddActivity} style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
                   {ACTIVITY_TYPES.filter(a => a.value !== 'stage_change').map(a => (

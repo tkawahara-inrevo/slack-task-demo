@@ -367,12 +367,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.post('/api/crm/deals/:id/activities', authWithRole, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
-      const { activityType, result, content, yomiAtTime } = req.body || {};
+      const { activityType, result, content, yomiAtTime,
+              activityDate, nextActionDate, nextActionContent, nextPersonId } = req.body || {};
       if (!activityType) return res.status(400).json({ error: 'activityType required' });
       const { rows: [row] } = await dbQuery(
-        `INSERT INTO deal_activities (id, deal_id, team_id, user_id, activity_type, result, content, yomi_at_time, metadata)
-         VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,$6,$7,'{}') RETURNING *`,
-        [req.params.id, teamId, userId, activityType, result||null, content||null, yomiAtTime||null]
+        `INSERT INTO deal_activities
+           (id, deal_id, team_id, user_id, activity_type, result, content, yomi_at_time,
+            activity_date, next_action_date, next_action_content, next_person_id, metadata)
+         VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,$6,$7,
+                 NULLIF($8,'')::date, NULLIF($9,'')::date, $10, $11, '{}') RETURNING *`,
+        [req.params.id, teamId, userId, activityType, result||null, content||null, yomiAtTime||null,
+         activityDate||'', nextActionDate||'', nextActionContent||null, nextPersonId||null]
       );
       res.status(201).json({ activity: row });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }

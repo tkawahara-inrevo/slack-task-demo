@@ -191,8 +191,12 @@ function SubTableEditor({ dealId, path, columns }) {
 // ─── DealActivitySection ──────────────────────────────────
 function DealActivitySection({ deal, activitySettings }) {
   const [activities, setActivities] = useState(null);
-  const [form, setForm] = useState({ activityType: '', result: '', content: '' });
+  const today = new Date().toISOString().slice(0,10);
+  const emptyForm = { activityDate: today, activityType: '', result: '', content: '',
+                      nextActionDate: '', nextActionContent: '', nextPersonId: '' };
+  const [form, setForm] = useState(emptyForm);
   const [adding, setAdding] = useState(false);
+  const [open, setOpen] = useState(true);
 
   const { activityTypes = ['架電','商談','メール','受電','その他'], resultOptions = ['アポ獲得','有効会話','不通','折り返し','NG','その他'] } = activitySettings || {};
 
@@ -201,7 +205,7 @@ function DealActivitySection({ deal, activitySettings }) {
   }, [deal.id]);
 
   const handleAdd = async () => {
-    if (!form.activityType) return;
+    if (!form.activityType) { alert('対応内容を選択してください'); return; }
     setAdding(true);
     try {
       const d = await api.crmAddActivity(deal.id, {
@@ -209,89 +213,118 @@ function DealActivitySection({ deal, activitySettings }) {
         result: form.result || null,
         content: form.content || null,
         yomiAtTime: deal.yomi,
+        activityDate: form.activityDate || null,
+        nextActionDate: form.nextActionDate || null,
+        nextActionContent: form.nextActionContent || null,
+        nextPersonId: form.nextPersonId || null,
       });
       setActivities(prev => [d.activity, ...(prev || [])]);
-      setForm({ activityType: '', result: '', content: '' });
+      setForm({ ...emptyForm });
     } catch { alert('追加に失敗しました'); }
     finally { setAdding(false); }
   };
 
   const handleDelete = async (actId) => {
+    if (!window.confirm('この記録を削除しますか？')) return;
     await api.crmDeleteActivity(deal.id, actId).catch(() => {});
     setActivities(prev => (prev || []).filter(a => a.id !== actId));
   };
 
-  const fmtDate = (d) => {
-    if (!d) return '';
-    const dt = new Date(d);
-    return `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-  };
+  const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d); return `${dt.getFullYear()}/${dt.getMonth()+1}/${dt.getDate()}`; };
+  const L = { fontSize:'0.7rem', color:'var(--gray-500)', fontWeight:600, marginBottom:3, display:'block' };
+  const I = { width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1.5px solid var(--gray-200)', borderRadius:7, fontSize:'0.85rem', outline:'none', background:'var(--surface)', color:'var(--gray-900)' };
 
   return (
     <div style={{ borderTop: '1px solid var(--gray-200)', padding: '14px 18px', background: '#fafafa' }}>
-      <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--gray-700)', marginBottom: 12 }}>アクティビティ記録</div>
+      <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--gray-700)', marginBottom: 12 }}>活動履歴</div>
 
-      {/* 追加フォーム */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14,
-        padding: '10px 12px', background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--gray-200)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--gray-400)' }}>アクション種別</span>
-          <select value={form.activityType} onChange={e => setForm(p => ({...p, activityType: e.target.value}))}
-            style={{ padding: '5px 10px', border: '1.5px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', background: 'var(--surface)', color: 'var(--gray-900)', cursor: 'pointer' }}>
-            <option value="">選択</option>
-            {activityTypes.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+      {/* 追加フォーム（kintone 活動履歴の項目ベース） */}
+      <div style={{ marginBottom: 16, padding: '14px 16px', background: 'var(--surface)', borderRadius: 10, border: '1px solid var(--gray-200)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: open?12:0, cursor:'pointer' }}
+             onClick={() => setOpen(o => !o)}>
+          <span style={{ fontSize:'0.8rem', fontWeight:700, color:'var(--gray-700)' }}>＋ 活動を記録</span>
+          <span style={{ fontSize:'0.72rem', color:'var(--gray-400)' }}>{open ? '▲ 閉じる' : '▼ 開く'}</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--gray-400)' }}>結果</span>
-          <select value={form.result} onChange={e => setForm(p => ({...p, result: e.target.value}))}
-            style={{ padding: '5px 10px', border: '1.5px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', background: 'var(--surface)', color: 'var(--gray-900)', cursor: 'pointer' }}>
-            <option value="">-</option>
-            {resultOptions.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 140 }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--gray-400)' }}>メモ</span>
-          <input value={form.content} onChange={e => setForm(p => ({...p, content: e.target.value}))}
-            placeholder="詳細メモ（任意）"
-            style={{ padding: '5px 10px', border: '1.5px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', outline: 'none', background: 'var(--surface)', color: 'var(--gray-900)' }}
-            onFocus={e => e.target.style.borderColor='#6366f1'}
-            onBlur={e => e.target.style.borderColor='var(--gray-200)'}
-            onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
-          />
-        </div>
-        <button onClick={handleAdd} disabled={adding || !form.activityType}
-          style={{ padding: '5px 14px', border: 'none', borderRadius: 6, background: form.activityType ? '#1e293b' : 'var(--gray-200)',
-            color: form.activityType ? '#fff' : 'var(--gray-400)', fontSize: '0.82rem', cursor: form.activityType ? 'pointer' : 'default', fontWeight: 600, whiteSpace: 'nowrap' }}>
-          {adding ? '追加中…' : '＋ 記録'}
-        </button>
+        {open && (<>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:10 }}>
+            <div>
+              <label style={L}>対応日付</label>
+              <input type="date" value={form.activityDate} onChange={e=>setForm(p=>({...p,activityDate:e.target.value}))} style={I} />
+            </div>
+            <div>
+              <label style={L}>対応内容 <span style={{color:'#dc2626'}}>*</span></label>
+              <select value={form.activityType} onChange={e=>setForm(p=>({...p,activityType:e.target.value}))} style={{...I, cursor:'pointer'}}>
+                <option value="">選択</option>
+                {activityTypes.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={L}>結果</label>
+              <select value={form.result} onChange={e=>setForm(p=>({...p,result:e.target.value}))} style={{...I, cursor:'pointer'}}>
+                <option value="">-</option>
+                {resultOptions.map(r=><option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom:10 }}>
+            <label style={L}>MEMO（対応内容の詳細）</label>
+            <textarea value={form.content} onChange={e=>setForm(p=>({...p,content:e.target.value}))}
+              rows={5} placeholder="商談メモ、やり取りの記録などを自由に記入…"
+              style={{...I, resize:'vertical', lineHeight:1.6, minHeight:100 }}
+              onFocus={e=>e.target.style.borderColor='#6366f1'} onBlur={e=>e.target.style.borderColor='var(--gray-200)'} />
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:12, paddingTop:10, borderTop:'1px dashed var(--gray-200)' }}>
+            <div>
+              <label style={L}>次回対応日</label>
+              <input type="date" value={form.nextActionDate} onChange={e=>setForm(p=>({...p,nextActionDate:e.target.value}))} style={I} />
+            </div>
+            <div>
+              <label style={L}>次回アクション</label>
+              <input value={form.nextActionContent} onChange={e=>setForm(p=>({...p,nextActionContent:e.target.value}))} placeholder="例: 見積提示" style={I} />
+            </div>
+            <div>
+              <label style={L}>次回対応者</label>
+              <select value={form.nextPersonId} onChange={e=>setForm(p=>({...p,nextPersonId:e.target.value}))} style={{...I, cursor:'pointer'}}>
+                <option value="">-</option>
+                {BC_MEMBERS.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ textAlign:'right' }}>
+            <button onClick={handleAdd} disabled={adding || !form.activityType}
+              style={{ padding:'8px 24px', border:'none', borderRadius:8, background: form.activityType ? '#1e40af' : 'var(--gray-200)',
+                color: form.activityType ? '#fff' : 'var(--gray-400)', fontSize:'0.85rem', cursor: form.activityType ? 'pointer' : 'default', fontWeight:700 }}>
+              {adding ? '記録中…' : '記録する'}
+            </button>
+          </div>
+        </>)}
       </div>
 
-      {/* ログ */}
+      {/* ログ（タイムライン） */}
       {activities === null ? (
         <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem' }}>読み込み中…</div>
       ) : activities.length === 0 ? (
-        <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem' }}>記録がありません</div>
+        <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem', textAlign:'center', padding:16 }}>活動記録がありません</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {activities.map(a => (
-            <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 10px',
-              background: 'var(--surface)', borderRadius: 7, border: '1px solid var(--gray-200)' }}>
-              <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', flexShrink: 0, marginTop: 1 }}>{fmtDate(a.created_at)}</span>
-              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-900)', flexShrink: 0,
-                background: 'var(--surface-2)', borderRadius: 4, padding: '1px 7px' }}>{a.activity_type}</span>
-              {a.result && (
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#059669',
-                  background: '#f0fdf4', borderRadius: 4, padding: '1px 7px', flexShrink: 0 }}>{a.result}</span>
+            <div key={a.id} style={{ background:'var(--surface)', borderRadius:8, border:'1px solid var(--gray-200)', borderLeft:'3px solid #93c5fd', padding:'10px 14px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom: a.content?6:0 }}>
+                <span style={{ fontSize:'0.74rem', fontWeight:700, color:'#1d4ed8' }}>{fmtDate(a.activity_date || a.created_at)}</span>
+                <span style={{ fontSize:'0.76rem', fontWeight:700, color:'var(--gray-900)', background:'var(--surface-2)', borderRadius:4, padding:'1px 8px' }}>{a.activity_type}</span>
+                {a.result && <span style={{ fontSize:'0.72rem', fontWeight:600, color:'#059669', background:'#f0fdf4', borderRadius:4, padding:'1px 8px' }}>{a.result}</span>}
+                {a.yomi_at_time && <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>[{a.yomi_at_time}]</span>}
+                {a.displayName && <span style={{ fontSize:'0.72rem', color:'var(--gray-500)' }}>{a.displayName}</span>}
+                <button onClick={() => handleDelete(a.id)}
+                  style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#d1d5db', fontSize:14, padding:'0 2px', lineHeight:1 }}>×</button>
+              </div>
+              {a.content && <div style={{ fontSize:'0.84rem', color:'var(--gray-700)', whiteSpace:'pre-wrap', lineHeight:1.6 }}>{a.content}</div>}
+              {(a.next_action_date || a.next_action_content) && (
+                <div style={{ marginTop:6, padding:'4px 8px', background:'#fffbeb', borderRadius:4, fontSize:'0.74rem', color:'#92400e' }}>
+                  次回: {a.next_action_date ? fmtDate(a.next_action_date) : ''} {a.next_action_content || ''}
+                  {a.next_person_id && ` （${a.next_person_id}）`}
+                </div>
               )}
-              {a.yomi_at_time && (
-                <span style={{ fontSize: '0.72rem', color: 'var(--gray-400)', flexShrink: 0 }}>[{a.yomi_at_time}]</span>
-              )}
-              {a.content && (
-                <span style={{ fontSize: '0.78rem', color: 'var(--gray-700)', flex: 1 }}>{a.content}</span>
-              )}
-              <button onClick={() => handleDelete(a.id)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 12, flexShrink: 0, padding: '0 2px', lineHeight: 1 }}>×</button>
             </div>
           ))}
         </div>
@@ -511,7 +544,13 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
       <div style={{ padding:'14px 18px 0' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, marginBottom:10 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', flex:1 }}>
-            <span style={{ fontWeight:800, fontSize:'0.98rem', color:'var(--gray-900)' }}>{deal.name}</span>
+            <span onClick={() => { if (!editing) { setForm(normalizeDealDates({...deal,...deal.data})); setSavedAt(null); setEditing(true); } }}
+              title="クリックで編集"
+              style={{ fontWeight:800, fontSize:'0.98rem', color:'var(--gray-900)', cursor:'pointer', borderBottom:'1px dashed transparent' }}
+              onMouseEnter={e=>e.currentTarget.style.borderBottomColor='var(--gray-300)'}
+              onMouseLeave={e=>e.currentTarget.style.borderBottomColor='transparent'}>
+              {deal.name}
+            </span>
             <YomiBadge yomi={deal.yomi} />
             {rpoId && (
               <Link to={`/rpo/${rpoId}`} onClick={e=>e.stopPropagation()}

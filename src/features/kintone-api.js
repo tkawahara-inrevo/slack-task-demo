@@ -167,8 +167,8 @@ async function runSync() {
     await syncDealsFromKintoneCache();
     // kintone_payments（App170）同期
     await syncKintonePayments();
-    // kintone_activities（App103: 活動履歴）同期
-    await syncKintoneActivities().catch(e => console.error('[kintone] activities sync error:', e.message));
+    // ※ App103（活動履歴）連携は方針変更により停止。活動履歴はTaskHub側UIで完結。
+    // await syncKintoneActivities();
     // リード管理ダッシュボード用マテリアライズドビューをリフレッシュ
     await dbQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_lead_customers').catch(() => {});
     await dbQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_lead_flags').catch(() => {});

@@ -143,6 +143,7 @@ export default function CustomerList({ scope = 'all' }) {
     quickFilter: (params.quickFilter ?? quickFilter) === 'self' ? undefined : (params.quickFilter ?? quickFilter) === 'all' ? undefined : (params.quickFilter ?? quickFilter),
     salesUser: (params.quickFilter ?? quickFilter) === 'self' ? 'self_token' : (params.filterSales ?? filterSales),
     stage: [...(params.filterStages ?? filterStages)].join(','),
+    yomi: [...(params.filterYomis ?? filterYomis)].join(','),
     showDormant: (params.showDormant ?? showDormant) ? '1' : undefined,
   });
 
@@ -157,7 +158,7 @@ export default function CustomerList({ scope = 'all' }) {
       setSalesUsers(r.salesUsers || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [q, quickFilter, filterStages, filterSales, showDormant, scope]);
+  }, [q, quickFilter, filterStages, filterYomis, filterSales, showDormant, scope]);
 
   const loadMore = async () => {
     setLoadingMore(true);
@@ -175,6 +176,10 @@ export default function CustomerList({ scope = 'all' }) {
   const toggleStage = (s) => {
     const n = new Set(filterStages); n.has(s)?n.delete(s):n.add(s);
     setFilterStages(n); load({ filterStages: n });
+  };
+  const toggleYomi = (y) => {
+    const n = new Set(filterYomis); n.has(y)?n.delete(y):n.add(y);
+    setFilterYomis(n); load({ filterYomis: n });
   };
   const clearFilters = () => { setFilterStages(new Set()); setFilterYomis(new Set()); setFilterSales(''); setQ(''); load({ filterStages:new Set(), q:'', filterSales:'', quickFilter:'all' }); setQuickFilter('all'); };
   const hasFilter = filterStages.size>0||filterYomis.size>0||filterSales||q;
@@ -245,21 +250,6 @@ export default function CustomerList({ scope = 'all' }) {
           </div>
         </div>
 
-        {/* クイックフィルタータブ */}
-        <div style={{ display:'flex', gap:2, borderBottom:'1px solid var(--gray-200)', paddingBottom:0, overflow:'hidden' }}>
-          {QUICK_FILTERS.map(f => (
-            <button key={f.key} onClick={() => handleQuickFilter(f.key)}
-              style={{ padding:'6px 14px', border:'none', background:'none', cursor:'pointer', fontSize:'0.82rem', whiteSpace:'nowrap',
-                fontWeight:quickFilter===f.key?700:400, color:quickFilter===f.key?'#1d4ed8':'var(--gray-500)',
-                borderBottom:quickFilter===f.key?'2px solid #1d4ed8':'2px solid transparent' }}>
-              {f.label}
-              <span style={{ marginLeft:5, fontSize:'0.68rem', color:quickFilter===f.key?'#1d4ed8':'var(--gray-400)',
-                background:quickFilter===f.key?'#dbeafe':'var(--surface-2)', borderRadius:99, padding:'1px 6px' }}>
-                {qfCounts[f.key]||0}
-              </span>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* ── メインエリア ── */}
@@ -294,7 +284,6 @@ export default function CustomerList({ scope = 'all' }) {
                     <label key={s} style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 0', cursor:'pointer' }}>
                       <input type="checkbox" checked={on} onChange={()=>toggleStage(s)} style={{ accentColor:cfg.color, width:13, height:13, cursor:'pointer' }} />
                       <span style={{ fontSize:'0.78rem', color:on?cfg.color:'var(--gray-700)', fontWeight:on?700:400, flex:1 }}>{s}</span>
-                      <span style={{ fontSize:'0.68rem', color:'var(--gray-400)' }}>{stageCounts[s]||0}</span>
                     </label>
                   );
                 })}
@@ -302,6 +291,21 @@ export default function CustomerList({ scope = 'all' }) {
                   <input type="checkbox" checked={showDormant} onChange={e=>{setShowDormant(e.target.checked);load({showDormant:e.target.checked});}} style={{ width:13, height:13, cursor:'pointer' }} />
                   <span style={{ fontSize:'0.75rem', color:'var(--gray-400)' }}>見送りを表示</span>
                 </label>
+              </div>
+
+              {/* ヨミ */}
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:'0.68rem', fontWeight:700, color:'var(--gray-400)', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.05em' }}>ヨミ</div>
+                {['S 90％','A 70％','B 50％','C 30％','D 15％','E 5％'].map(y => {
+                  const cfg = YOMI_CFG[y] || {};
+                  const on = filterYomis.has(y);
+                  return (
+                    <label key={y} style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 0', cursor:'pointer' }}>
+                      <input type="checkbox" checked={on} onChange={()=>toggleYomi(y)} style={{ accentColor:cfg.color, width:13, height:13, cursor:'pointer' }} />
+                      <span style={{ fontSize:'0.78rem', color:on?cfg.color:'var(--gray-700)', fontWeight:on?700:400, flex:1 }}>{y}</span>
+                    </label>
+                  );
+                })}
               </div>
 
               {/* 担当者 */}

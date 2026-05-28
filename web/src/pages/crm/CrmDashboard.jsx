@@ -107,8 +107,8 @@ function Drilldown({ rep, type, start, end, onClose, onSaved }) {
   };
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
-      <div style={{ background:C.surface2, borderRadius:16, width:'min(600px,92vw)', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.4)', zIndex:1100, display:'flex', justifyContent:'flex-end' }} onClick={onClose}>
+      <div style={{ background:C.surface2, width:'min(540px,94vw)', height:'100%', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'-8px 0 32px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
 
         {/* ヘッダー */}
         <div style={{ padding:'16px 20px', background:C.surface, borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
@@ -205,6 +205,7 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
   const [deal, setDeal] = useState(null);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState(null);
 
   useEffect(() => {
     api.crmDealDetail(dealRow.id).then(r => {
@@ -215,7 +216,9 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         contract_type: d.contract_type || '',
         monthly_fee: d.monthly_fee ?? '',
         initial_fee: d.initial_fee ?? '',
+        unit_price: d.unit_price ?? '',
         guarantee_count: d.guarantee_count ?? '',
+        contract_months: d.contract_months ?? '',
         next_action_date: (String(d.next_action_date || '').split('T')[0]) || '',
         next_action_content: d.next_action_content || '',
         sales_memo: d.sales_memo || '',
@@ -223,6 +226,7 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         forecast_confidence: d.forecast_confidence || '',
       });
     }).catch(() => onBack());
+    api.crmDealPayments(dealRow.id).then(r => setHistory(r.payments || [])).catch(() => setHistory([]));
   }, [dealRow.id]);
 
   const isSA = form && (form.yomi === 'A 70％' || form.yomi === 'S 90％');
@@ -236,6 +240,8 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         monthlyFee: form.monthly_fee === '' ? null : Number(form.monthly_fee),
         initialFee: form.initial_fee === '' ? null : Number(form.initial_fee),
         guaranteeCount: form.guarantee_count === '' ? null : Number(form.guarantee_count),
+        unitPrice: form.unit_price === '' ? null : Number(form.unit_price),
+        contractMonths: form.contract_months === '' ? null : Number(form.contract_months),
         data: { ...(deal.data||{}), next_action_date: form.next_action_date || null, next_action_content: form.next_action_content || null },
         memo: deal.memo,
         salesMemo: form.sales_memo,
@@ -291,18 +297,24 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
             <input type="number" value={form.monthly_fee} onChange={e=>setForm(f=>({...f,monthly_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
           <div><label style={L}>初期費用（円）</label>
             <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>採用単価（円）</label>
+            <input type="number" value={form.unit_price} onChange={e=>setForm(f=>({...f,unit_price:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>契約月数</label>
+            <input type="number" value={form.contract_months} onChange={e=>setForm(f=>({...f,contract_months:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
         </>)}
         {isWarranty && (<>
           <div><label style={L}>保証額（初期費用 円）</label>
             <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>採用単価（円）</label>
+            <input type="number" value={form.unit_price} onChange={e=>setForm(f=>({...f,unit_price:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
           <div><label style={L}>採用人数</label>
             <input type="number" value={form.guarantee_count ?? ''} onChange={e=>setForm(f=>({...f,guarantee_count:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
         </>)}
         {!isMonthly && !isWarranty && (<>
           <div><label style={L}>金額（円）</label>
             <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
-          <div><label style={L}>月額（円）※必要なら</label>
-            <input type="number" value={form.monthly_fee} onChange={e=>setForm(f=>({...f,monthly_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>採用単価（円）</label>
+            <input type="number" value={form.unit_price} onChange={e=>setForm(f=>({...f,unit_price:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
         </>)}
       </div>
       {isSA && (
@@ -330,6 +342,33 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
       <div><label style={L}>商談メモ</label>
         <textarea value={form.sales_memo} onChange={e=>setForm(f=>({...f,sales_memo:e.target.value}))} rows={4}
           style={{...I, resize:'vertical', lineHeight:1.5}} /></div>
+
+      {/* 入金履歴（会社単位） */}
+      <div style={{ marginTop:4, padding:'10px 12px', background:C.surface2, borderRadius:8, border:`1px solid ${C.border}` }}>
+        <div style={{ fontSize:'0.74rem', fontWeight:700, color:C.text, marginBottom:6 }}>
+          入金履歴
+          {history && <span style={{ marginLeft:6, fontSize:'0.66rem', color:C.textSub, fontWeight:500 }}>{history.length}件</span>}
+        </div>
+        {history === null ? (
+          <div style={{ fontSize:'0.72rem', color:C.textSub }}>読み込み中…</div>
+        ) : history.length === 0 ? (
+          <div style={{ fontSize:'0.72rem', color:C.textSub, textAlign:'center', padding:'6px' }}>入金履歴なし</div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:200, overflowY:'auto' }}>
+            {history.map((h, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 8px', background:C.surface, borderRadius:6, fontSize:'0.74rem' }}>
+                <span style={{ color:C.textSub, fontWeight:600, minWidth:50 }}>{String(h.payment_date||'').slice(0,10)}</span>
+                <span style={{ flex:1, color:C.text }}>
+                  {h.plan || '—'}{h.month_num ? `（${h.month_num}ヶ月目）` : ''}
+                </span>
+                <span style={{ color:C.text, minWidth:80, textAlign:'right' }}>{yen(h.amount)}</span>
+                <span style={{ color:'#059669', fontWeight:700, minWidth:70, textAlign:'right' }}>{yen(h.incentive_amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <button onClick={save} disabled={saving}
         style={{ padding:'9px', border:'none', borderRadius:8, background:saving?'#94a3b8':'#1e40af', color:'#fff', fontWeight:700, fontSize:'0.85rem', cursor:saving?'default':'pointer' }}>
         {saving ? '保存中…' : '保存'}

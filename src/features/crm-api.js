@@ -1360,13 +1360,36 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
+  // 案件に紐づく入金履歴（会社名マッチ）
+  expressApp.get('/api/crm/deals/:id/payments', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [deal] } = await dbQuery(
+        `SELECT d.id, c.name AS company FROM deals d JOIN customers c ON c.id=d.customer_id
+         WHERE d.id=$1 AND d.team_id=$2`, [req.params.id, teamId]
+      );
+      if (!deal) return res.json({ payments: [] });
+      const { rows } = await dbQuery(`
+        SELECT payment_date, plan, amount, incentive_amount, staff,
+          CASE WHEN plan LIKE '%月額%' THEN (
+            SELECT COUNT(*)::int FROM kintone_payments kp2
+            WHERE kp2.company = kp.company AND kp2.plan LIKE '%月額%' AND kp2.payment_date <= kp.payment_date
+          ) ELSE NULL END AS month_num
+        FROM kintone_payments kp
+        WHERE company = $1 AND amount > 0
+        ORDER BY payment_date DESC, record_id DESC
+      `, [deal.company]);
+      res.json({ company: deal.company, payments: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
   expressApp.patch('/api/crm/deals/:id', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const { name, yomi, contractType, paymentType, salesUserId, naUserId,
               initialFee, monthlyFee, contractMonths, hiringTarget, employmentType,
               lostReason, status, memo, data, firstMeetingDate,
-              settlementForecast, forecastConfidence, guaranteeCount,
+              settlementForecast, forecastConfidence, guaranteeCount, unitPrice,
               updatedAt, force } = req.body || {};
       const { rows: [existing] } = await dbQuery(
         `SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]
@@ -1397,7 +1420,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           data=COALESCE($17::jsonb, data),
           first_meeting_date=COALESCE($18::date, first_meeting_date),
           settlement_forecast=$19, forecast_confidence=$20,
-          guarantee_count=$21,
+          guarantee_count=$21, unit_price=$22,
           updated_at=now()
         WHERE id=$1 AND team_id=$2 RETURNING *
       `, [req.params.id, teamId,
@@ -1411,7 +1434,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
           firstMeetingDate||null,
           settlementForecast!==undefined ? (settlementForecast||null) : existing.settlement_forecast,
           forecastConfidence!==undefined ? (forecastConfidence||null) : existing.forecast_confidence,
-          guaranteeCount!==undefined ? (guaranteeCount===''||guaranteeCount==null?null:Number(guaranteeCount)) : existing.guarantee_count]);
+          guaranteeCount!==undefined ? (guaranteeCount===''||guaranteeCount==null?null:Number(guaranteeCount)) : existing.guarantee_count,
+          unitPrice!==undefined      ? (unitPrice===''||unitPrice==null?null:Number(unitPrice))                : existing.unit_price]);
 
       // 受注になった場合、RPO案件を自動生成（まだなければ）
       let rpoClientId = row.data?.rpo_client_id || null;

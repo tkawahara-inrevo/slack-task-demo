@@ -47,9 +47,9 @@ function DealDetailModal({ deal, onClose, onMemoSave }) {
   };
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.4)', zIndex:1000, display:'flex', justifyContent:'flex-end' }}
       onClick={onClose}>
-      <div style={{ background:'#fff', borderRadius:16, width:'min(520px,92vw)', maxHeight:'82vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 32px 64px rgba(0,0,0,0.25)' }}
+      <div style={{ background:'#fff', width:'min(540px,94vw)', height:'100%', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'-8px 0 32px rgba(0,0,0,0.2)' }}
         onClick={e => e.stopPropagation()}>
 
         {/* ヘッダー */}

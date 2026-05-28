@@ -23,8 +23,8 @@ export default function AnList() {
   const [rpoResults, setRpoResults] = useState(null);
   const [pastStudies, setPastStudies] = useState(null);
   const [mediaStats, setMediaStats] = useState([]);
-  const [mediaFacets, setMediaFacets] = useState({ industries: [], prefectures: [], hire_types: [], size_buckets: [] });
-  const [mediaFilters, setMediaFilters] = useState({ industry: '', hire_type: '', prefecture: '', size_bucket: '' });
+  const [mediaFacets, setMediaFacets] = useState({ employment_types: [], job_types: [], priorities: [], requesters: [] });
+  const [mediaFilters, setMediaFilters] = useState({ employment_type: '', job_type: '', priority: '', requester: '' });
   const [mediaLoading, setMediaLoading] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState({});
   const [mediaRoi, setMediaRoi] = useState(null);
@@ -221,22 +221,22 @@ export default function AnList() {
               {/* フィルタバー */}
               <div style={{ marginBottom: 10, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 6 }}>
                 {[
-                  ['industry',    '業界',     mediaFacets.industries.map(v => [v,v])],
-                  ['hire_type',   '雇用形態', mediaFacets.hire_types.map(v => [v,v])],
-                  ['prefecture',  'エリア',   mediaFacets.prefectures.map(v => [v,v])],
-                  ['size_bucket', '採用規模', mediaFacets.size_buckets],
+                  ['employment_type', '雇用形態', mediaFacets.employment_types || []],
+                  ['job_type',        '職種',     mediaFacets.job_types || []],
+                  ['priority',        '優先度',   mediaFacets.priorities || []],
+                  ['requester',       '依頼者',   mediaFacets.requesters || []],
                 ].map(([key, label, opts]) => (
                   <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <label style={{ fontSize: '0.66rem', color: 'var(--gray-500)', fontWeight: 600 }}>{label}</label>
                     <select value={mediaFilters[key]} onChange={e => setMediaFilters(f => ({ ...f, [key]: e.target.value }))}
                       style={{ padding: '4px 6px', fontSize: '0.76rem', border: '1px solid var(--gray-300)', borderRadius: 5, background: 'var(--surface)' }}>
                       <option value="">すべて</option>
-                      {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      {opts.map(v => <option key={v} value={v}>{v}</option>)}
                     </select>
                   </div>
                 ))}
                 {Object.values(mediaFilters).some(Boolean) && (
-                  <button onClick={() => setMediaFilters({ industry:'', hire_type:'', prefecture:'', size_bucket:'' })}
+                  <button onClick={() => setMediaFilters({ employment_type:'', job_type:'', priority:'', requester:'' })}
                     style={{ gridColumn: '1 / -1', padding: '4px', fontSize: '0.72rem', background: 'transparent', border: '1px dashed var(--gray-300)', borderRadius: 5, color: 'var(--gray-500)', cursor: 'pointer' }}>
                     フィルタをクリア
                   </button>
@@ -258,12 +258,12 @@ export default function AnList() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
                     {[
-                      ['掲載回数', `${s.campaigns}回`],
-                      ['採用数', `${s.total_hired}人`],
-                      ['採用率', s.campaigns > 0 ? `${Math.round(s.success_campaigns/s.campaigns*100)}%` : '—'],
-                      ['総費用', fmtYen(s.total_cost)],
-                      ['採用単価', s.cost_per_hire ? fmtYen(s.cost_per_hire) : '—'],
-                      ['平均費用', fmtYen(s.avg_cost)],
+                      ['調査件数', `${s.cases}件`],
+                      ['総料金', fmtYen(s.total_fee)],
+                      ['平均料金', s.avg_fee ? fmtYen(s.avg_fee) : '—'],
+                      ['予測応募(平均)', s.avg_expected != null ? `${s.avg_expected}件` : '—'],
+                      ['実応募(平均)', s.avg_effective != null ? `${s.avg_effective}件` : '—'],
+                      ['予測精度', s.forecast_accuracy_pct != null ? `${s.forecast_accuracy_pct}%` : '—'],
                     ].map(([label, val]) => (
                       <div key={label} style={{ background: 'var(--surface-2)', borderRadius: 6, padding: '5px 8px' }}>
                         <div style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>{label}</div>
@@ -275,24 +275,24 @@ export default function AnList() {
                   {expanded && (
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--gray-200)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <div>
-                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>業界別</div>
-                        {(s.by_industry || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
-                        {(s.by_industry || []).map((b, i) => (
+                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>雇用形態別</div>
+                        {(s.by_employment_type || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
+                        {(s.by_employment_type || []).map((b, i) => (
                           <div key={i} style={{ display: 'flex', fontSize: '0.74rem', padding: '2px 0', borderBottom: '1px solid var(--gray-100)' }}>
-                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.industry}</span>
-                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.hired}人</span>
-                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.cost)}</span>
+                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.employment_type || '—'}</span>
+                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.cases}件</span>
+                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.total_fee)}</span>
                           </div>
                         ))}
                       </div>
                       <div>
-                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>雇用形態別</div>
-                        {(s.by_hire_type || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
-                        {(s.by_hire_type || []).map((b, i) => (
+                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>職種別</div>
+                        {(s.by_job_type || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
+                        {(s.by_job_type || []).map((b, i) => (
                           <div key={i} style={{ display: 'flex', fontSize: '0.74rem', padding: '2px 0', borderBottom: '1px solid var(--gray-100)' }}>
-                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.hire_type}</span>
-                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.hired}人</span>
-                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.cost)}</span>
+                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.job_type || '—'}</span>
+                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.cases}件</span>
+                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.total_fee)}</span>
                           </div>
                         ))}
                       </div>
@@ -713,6 +713,11 @@ function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtY
           />
         </Card>
 
+        {/* Slackスレッド */}
+        {study.slack_message_ts && study.slack_channel_id && (
+          <SlackThreadCard studyId={study.record_id} slackLink={study.slack_link} />
+        )}
+
         {/* 調査媒体 */}
         <Card title={`調査媒体（${media.length}件）`} accent="#0891b2"
           action={<button onClick={addMedia} style={S_panel.addBtn}>＋ 媒体追加</button>}>
@@ -863,6 +868,73 @@ function MediaSlotRow({ m, fmtYen, isEditing, onEdit, onCancel, onSaved, onDelet
       {m.responses?.length > 0 && <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#475569' }}>対応: {m.responses.join(', ')}</div>}
       {m.note && <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#475569' }}>備考: {m.note}</div>}
     </div>
+  );
+}
+
+// Slackスレッドカード（読み込み＋返信）
+function SlackThreadCard({ studyId, slackLink }) {
+  const [messages, setMessages] = useState(null);
+  const [reply, setReply] = useState('');
+  const [posting, setPosting] = useState(false);
+
+  const reload = async () => {
+    try {
+      const r = await api.anStudySlackThread(studyId);
+      setMessages(r.messages || []);
+    } catch { setMessages([]); }
+  };
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [studyId]);
+
+  const send = async () => {
+    if (!reply.trim()) return;
+    setPosting(true);
+    try {
+      await api.anStudySlackReply(studyId, reply.trim());
+      setReply('');
+      await reload();
+    } catch (e) { alert('返信失敗: ' + e.message); }
+    finally { setPosting(false); }
+  };
+
+  const fmtTs = (ts) => {
+    if (!ts) return '';
+    const d = new Date(Number(ts) * 1000);
+    return d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <Card title={`Slackスレッド${messages ? `（${messages.length}件）` : ''}`} accent="#4a154b"
+      action={slackLink && <a href={slackLink} target="_blank" rel="noreferrer" style={{ fontSize: '0.7rem', color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>↗ Slackで開く</a>}>
+      {messages === null ? (
+        <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.78rem' }}>読み込み中…</div>
+      ) : messages.length === 0 ? (
+        <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.78rem' }}>メッセージなし</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ background: i === 0 ? '#fffbeb' : '#f8fafc', borderRadius: 8, padding: '8px 10px', border: '1px solid ' + (i === 0 ? '#fde68a' : '#e2e8f0') }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: '0.76rem', color: '#0f172a' }}>{m.user_name || m.username || m.user || '(bot)'}</span>
+                {i === 0 && <span style={{ fontSize: '0.62rem', padding: '1px 6px', borderRadius: 99, background: '#fde68a', color: '#92400e', fontWeight: 700 }}>親メッセージ</span>}
+                <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: '#94a3b8' }}>{fmtTs(m.ts)}</span>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{m.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #e2e8f0' }}>
+        <textarea value={reply} onChange={e => setReply(e.target.value)} rows={2}
+          placeholder="スレッドへ返信（Slack に投稿されます）"
+          style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem', resize: 'vertical' }} />
+        <div style={{ marginTop: 4, display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={send} disabled={posting || !reply.trim()}
+            style={{ fontSize: '0.74rem', fontWeight: 700, padding: '5px 14px', borderRadius: 6, border: 'none', background: '#4a154b', color: '#fff', cursor: posting || !reply.trim() ? 'not-allowed' : 'pointer', opacity: posting || !reply.trim() ? 0.5 : 1 }}>
+            {posting ? '送信中…' : '返信する'}
+          </button>
+        </div>
+      </div>
+    </Card>
   );
 }
 

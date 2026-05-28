@@ -378,115 +378,105 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
-  // ─── 媒体実績DB（全案件横断集計 + フィルタ + ファセット） ─────────
+  // ─── 媒体実績DB（an_study_media + an_studies ベース） ─────────────
   expressApp.get('/api/dashboard/an/media-stats', authWithRole, async (req, res) => {
     try {
-      const { teamId } = req.dashboardUser;
-      const { industry, hire_type, prefecture, size_bucket, period_from, period_to } = req.query;
+      const { employment_type, job_type, priority, requester, period_from, period_to } = req.query;
 
-      // size_bucket: small(<=5) / mid(6-10) / large(11+)
-      const filters = [`rc.team_id=$1`, `rc.status != 'archived'`, `(m->>'name') IS NOT NULL`, `(m->>'name') != ''`,
-        `((m->>'mediaCost')::numeric > 0 OR (m->>'hiredCount')::int > 0)`];
-      const params = [teamId];
+      const filters = [`m.media_name IS NOT NULL`, `m.media_name <> ''`];
+      const params = [];
       const add = (sql, val) => { params.push(val); filters.push(sql.replace('?', `$${params.length}`)); };
-      if (industry)     add(`c.industry = ?`, industry);
-      if (prefecture)   add(`c.prefecture = ?`, prefecture);
-      if (hire_type)    add(`d.hire_type @> ?::jsonb`, JSON.stringify([hire_type]));
-      if (size_bucket === 'small') filters.push(`COALESCE((rc.data->'projectInfo'->>'hiringTarget')::int, 0) BETWEEN 1 AND 5`);
-      if (size_bucket === 'mid')   filters.push(`COALESCE((rc.data->'projectInfo'->>'hiringTarget')::int, 0) BETWEEN 6 AND 10`);
-      if (size_bucket === 'large') filters.push(`COALESCE((rc.data->'projectInfo'->>'hiringTarget')::int, 0) >= 11`);
-      if (period_from) add(`(m->>'periodStart')::date >= ?`, period_from);
-      if (period_to)   add(`(m->>'periodEnd')::date <= ?`, period_to);
+      if (employment_type) add(`s.employment_type = ?`, employment_type);
+      if (job_type)        add(`s.job_type = ?`, job_type);
+      if (priority)        add(`s.priority = ?`, priority);
+      if (requester)       add(`s.requester = ?`, requester);
+      if (period_from)     add(`s.request_date >= ?::date`, period_from);
+      if (period_to)       add(`s.request_date <= ?::date`, period_to);
 
-      const baseTables = `
-        FROM rpo_clients rc
-        LEFT JOIN deals d     ON d.id = rc.data->>'crmDealId'
-        LEFT JOIN customers c ON c.id = d.customer_id
-        CROSS JOIN LATERAL jsonb_array_elements(
-          CASE WHEN rc.data ? 'mediaStatus' THEN rc.data->'mediaStatus' ELSE '[]'::jsonb END
-        ) AS m
-      `;
-      const baseWhere = `WHERE ${filters.join(' AND ')}`;
-      const baseFrom = `${baseTables} ${baseWhere}`;
+      const baseFrom = `FROM an_study_media m JOIN an_studies s ON s.record_id = m.study_record_id WHERE ${filters.join(' AND ')}`;
 
-      // 媒体別の集計
+      // 媒体別 集計
       const { rows } = await dbQuery(`
-        SELECT
-          m->>'name'                             AS media_name,
-          COUNT(*)::int                          AS campaigns,
-          SUM((m->>'mediaCost')::numeric)        AS total_cost,
-          SUM((m->>'hiredCount')::int)           AS total_hired,
-          AVG((m->>'mediaCost')::numeric)        AS avg_cost,
-          SUM(CASE WHEN (m->>'hiredCount')::int > 0 THEN 1 ELSE 0 END)::int AS success_campaigns
+        SELECT m.media_name,
+          COUNT(*)::int AS cases,
+          ROUND(AVG(NULLIF(m.fee,0)))::bigint           AS avg_fee,
+          SUM(COALESCE(m.fee,0))::bigint                AS total_fee,
+          ROUND(SUM(COALESCE(m.expected_apps,0))::numeric,1) AS total_expected,
+          ROUND(SUM(COALESCE(m.effective_apps,0))::numeric,1) AS total_effective,
+          ROUND(AVG(NULLIF(m.expected_apps,0))::numeric,1)    AS avg_expected,
+          ROUND(AVG(NULLIF(m.effective_apps,0))::numeric,1)   AS avg_effective,
+          ROUND(AVG(NULLIF(m.reply_rate,0))::numeric,2)       AS avg_reply_rate,
+          ROUND(CASE WHEN AVG(NULLIF(m.expected_apps,0))>0
+                THEN AVG(NULLIF(m.effective_apps,0))/AVG(NULLIF(m.expected_apps,0))*100
+                ELSE NULL END, 1) AS forecast_accuracy_pct
         ${baseFrom}
-        GROUP BY media_name
-        ORDER BY total_hired DESC NULLS LAST, total_cost DESC NULLS LAST
+        GROUP BY m.media_name
+        ORDER BY cases DESC, total_effective DESC NULLS LAST
       `, params);
 
-      // 媒体 × 業界 のブレイクダウン
-      const { rows: byInd } = await dbQuery(`
-        SELECT m->>'name' AS media_name,
-               COALESCE(c.industry,'未設定') AS industry,
-               SUM((m->>'hiredCount')::int)    AS hired,
-               SUM((m->>'mediaCost')::numeric) AS cost,
-               COUNT(*)::int                   AS campaigns
+      // 媒体×雇用形態 breakdown
+      const { rows: byEmp } = await dbQuery(`
+        SELECT m.media_name,
+               COALESCE(NULLIF(s.employment_type,''),'未設定') AS employment_type,
+               COUNT(*)::int AS cases,
+               ROUND(SUM(COALESCE(m.effective_apps,0))::numeric,1) AS effective,
+               ROUND(AVG(NULLIF(m.fee,0)))::bigint AS avg_fee
         ${baseFrom}
-        GROUP BY media_name, industry
-        ORDER BY media_name, hired DESC NULLS LAST
+        GROUP BY m.media_name, employment_type
+        ORDER BY m.media_name, effective DESC NULLS LAST
       `, params);
 
-      // 媒体 × 雇用形態 のブレイクダウン
-      const { rows: byHire } = await dbQuery(`
-        SELECT m->>'name' AS media_name,
-               COALESCE(NULLIF(ht.value, ''), '未設定') AS hire_type,
-               SUM((m->>'hiredCount')::int)    AS hired,
-               SUM((m->>'mediaCost')::numeric) AS cost
-        ${baseTables}
-        LEFT JOIN LATERAL jsonb_array_elements_text(
-          CASE WHEN d.hire_type IS NOT NULL AND jsonb_typeof(d.hire_type)='array' AND jsonb_array_length(d.hire_type)>0
-               THEN d.hire_type ELSE '["未設定"]'::jsonb END
-        ) AS ht(value) ON true
-        ${baseWhere}
-        GROUP BY media_name, hire_type
-        ORDER BY media_name, hired DESC NULLS LAST
+      // 媒体×職種 breakdown
+      const { rows: byJob } = await dbQuery(`
+        SELECT m.media_name,
+               COALESCE(NULLIF(s.job_type,''),'未設定') AS job_type,
+               COUNT(*)::int AS cases,
+               ROUND(SUM(COALESCE(m.effective_apps,0))::numeric,1) AS effective,
+               ROUND(AVG(NULLIF(m.fee,0)))::bigint AS avg_fee
+        ${baseFrom}
+        GROUP BY m.media_name, job_type
+        ORDER BY m.media_name, effective DESC NULLS LAST
       `, params);
 
-      // ファセット（フィルタ選択肢、フィルタ適用前の全体から）
-      const { rows: facetRows } = await dbQuery(`
-        SELECT DISTINCT
-          c.industry, c.prefecture
-        FROM rpo_clients rc
-        LEFT JOIN deals d     ON d.id = rc.data->>'crmDealId'
-        LEFT JOIN customers c ON c.id = d.customer_id
-        WHERE rc.team_id=$1 AND rc.status != 'archived'
-      `, [teamId]);
-      const industries  = [...new Set(facetRows.map(r => r.industry).filter(Boolean))].sort();
-      const prefectures = [...new Set(facetRows.map(r => r.prefecture).filter(Boolean))].sort();
+      // ファセット（全体から）
+      const { rows: facetEmp }  = await dbQuery(`SELECT DISTINCT employment_type FROM an_studies WHERE employment_type IS NOT NULL AND employment_type <> '' ORDER BY employment_type`);
+      const { rows: facetJob }  = await dbQuery(`SELECT DISTINCT job_type FROM an_studies WHERE job_type IS NOT NULL AND job_type <> '' ORDER BY job_type`);
+      const { rows: facetPrio } = await dbQuery(`SELECT DISTINCT priority FROM an_studies WHERE priority IS NOT NULL AND priority <> '' ORDER BY priority`);
+      const { rows: facetReq }  = await dbQuery(`SELECT DISTINCT requester FROM an_studies WHERE requester IS NOT NULL AND requester <> '' ORDER BY requester`);
 
-      const groupBy = (arr, key) => arr.reduce((m, r) => {
+      const groupBy = (arr) => arr.reduce((m, r) => {
         (m[r.media_name] = m[r.media_name] || []).push(r); return m;
       }, {});
-      const indByMedia  = groupBy(byInd);
-      const hireByMedia = groupBy(byHire);
+      const empByMedia = groupBy(byEmp);
+      const jobByMedia = groupBy(byJob);
 
       res.json({
         stats: rows.map(r => ({
           media_name: r.media_name,
-          campaigns: r.campaigns,
-          total_cost: Number(r.total_cost) || 0,
-          total_hired: Number(r.total_hired) || 0,
-          avg_cost: Math.round(Number(r.avg_cost) || 0),
-          cost_per_hire: r.total_hired > 0 ? Math.round(Number(r.total_cost) / r.total_hired) : null,
-          success_campaigns: r.success_campaigns,
-          by_industry: (indByMedia[r.media_name] || []).map(x => ({
-            industry: x.industry, hired: Number(x.hired)||0, cost: Number(x.cost)||0, campaigns: x.campaigns,
+          cases: r.cases,
+          total_fee: Number(r.total_fee) || 0,
+          avg_fee: Number(r.avg_fee) || 0,
+          total_expected: Number(r.total_expected) || 0,
+          total_effective: Number(r.total_effective) || 0,
+          avg_expected: Number(r.avg_expected) || 0,
+          avg_effective: Number(r.avg_effective) || 0,
+          avg_reply_rate: Number(r.avg_reply_rate) || 0,
+          forecast_accuracy_pct: r.forecast_accuracy_pct,
+          by_employment_type: (empByMedia[r.media_name] || []).map(x => ({
+            employment_type: x.employment_type, cases: x.cases,
+            effective: Number(x.effective)||0, avg_fee: Number(x.avg_fee)||0,
           })),
-          by_hire_type: (hireByMedia[r.media_name] || []).map(x => ({
-            hire_type: x.hire_type, hired: Number(x.hired)||0, cost: Number(x.cost)||0,
+          by_job_type: (jobByMedia[r.media_name] || []).map(x => ({
+            job_type: x.job_type, cases: x.cases,
+            effective: Number(x.effective)||0, avg_fee: Number(x.avg_fee)||0,
           })),
         })),
-        facets: { industries, prefectures, hire_types: ['新卒','中途'],
-          size_buckets: [['small','〜5名'],['mid','6〜10名'],['large','11名〜']] },
+        facets: {
+          employment_types: facetEmp.map(r => r.employment_type),
+          job_types: facetJob.map(r => r.job_type),
+          priorities: facetPrio.map(r => r.priority),
+          requesters: facetReq.map(r => r.requester),
+        },
       });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
@@ -605,6 +595,61 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
         req.body?.notes || null,
       ]);
       res.json({ media: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Slack スレッド取得（slack_message_ts/channel_id が紐付いた案件）
+  expressApp.get('/api/dashboard/an/studies/:id/slack-thread', authWithRole, async (req, res) => {
+    try {
+      if (!slackApp) return res.status(500).json({ error: 'slack_not_configured' });
+      const { teamId } = req.dashboardUser;
+      const { rows: [s] } = await dbQuery(
+        `SELECT slack_message_ts, slack_channel_id FROM an_studies WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!s || !s.slack_message_ts || !s.slack_channel_id) return res.json({ messages: [] });
+
+      const r = await slackApp.client.conversations.replies({
+        channel: s.slack_channel_id,
+        ts: s.slack_message_ts,
+        limit: 100,
+      });
+      // user_id → 表示名（簡易キャッシュ）
+      const messages = await Promise.all((r.messages || []).map(async (m) => {
+        let user_name = null;
+        if (m.user) user_name = await resolveUserName(teamId, m.user);
+        return {
+          ts: m.ts,
+          user: m.user,
+          user_name,
+          bot_id: m.bot_id,
+          username: m.username,
+          text: m.text,
+          subtype: m.subtype,
+        };
+      }));
+      res.json({ channel_id: s.slack_channel_id, root_ts: s.slack_message_ts, messages });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 案件詳細からSlackスレッドに返信
+  expressApp.post('/api/dashboard/an/studies/:id/slack-reply', authWithRole, async (req, res) => {
+    try {
+      if (!slackApp) return res.status(500).json({ error: 'slack_not_configured' });
+      const { teamId } = req.dashboardUser;
+      const text = (req.body?.text || '').trim();
+      if (!text) return res.status(400).json({ error: 'text required' });
+      const { rows: [s] } = await dbQuery(
+        `SELECT slack_message_ts, slack_channel_id FROM an_studies WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!s?.slack_message_ts || !s?.slack_channel_id) return res.status(400).json({ error: 'slack_not_linked' });
+      await slackApp.client.chat.postMessage({
+        channel: s.slack_channel_id,
+        thread_ts: s.slack_message_ts,
+        text,
+      });
+      res.json({ ok: true });
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 

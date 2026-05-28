@@ -599,6 +599,10 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS est_budget BIGINT`).catch(() => {});
   await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS est_hire_count INTEGER`).catch(() => {});
   await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS recommended_media TEXT`).catch(() => {});
+
+  // deals: 締結見込み（ヨミS/A向けの営業の手動見込み）
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS settlement_forecast TEXT`).catch(() => {});  // '今月可能性あり' | '来月締結見込み'
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS forecast_confidence TEXT`).catch(() => {});  // '高' | '中' | '低'
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});
@@ -2342,6 +2346,7 @@ async function dbUpdateDeal(teamId, id, fields) {
     'hearing_challenges', 'preliminary_info',
     'invoice_to_name', 'invoice_to_email', 'invoice_cc_email',
     'contract_to_name', 'contract_to_email', 'contract_cc_email',
+    'settlement_forecast', 'forecast_confidence',
   ];
   const sets = [];
   const vals = [];

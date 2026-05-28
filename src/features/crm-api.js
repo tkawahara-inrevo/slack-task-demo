@@ -1353,6 +1353,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { name, yomi, contractType, paymentType, salesUserId, naUserId,
               initialFee, monthlyFee, contractMonths, hiringTarget, employmentType,
               lostReason, status, memo, data, firstMeetingDate,
+              settlementForecast, forecastConfidence,
               updatedAt, force } = req.body || {};
       const { rows: [existing] } = await dbQuery(
         `SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]
@@ -1382,6 +1383,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           lost_reason=$14, status=$15, memo=$16,
           data=COALESCE($17::jsonb, data),
           first_meeting_date=COALESCE($18::date, first_meeting_date),
+          settlement_forecast=$19, forecast_confidence=$20,
           updated_at=now()
         WHERE id=$1 AND team_id=$2 RETURNING *
       `, [req.params.id, teamId,
@@ -1392,7 +1394,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
           contractMonths??existing.contract_months, hiringTarget??existing.hiring_target,
           employmentType??existing.employment_type, lostReason??existing.lost_reason,
           newStatus, memo??existing.memo, data ? JSON.stringify(data) : null,
-          firstMeetingDate||null]);
+          firstMeetingDate||null,
+          settlementForecast!==undefined ? (settlementForecast||null) : existing.settlement_forecast,
+          forecastConfidence!==undefined ? (forecastConfidence||null) : existing.forecast_confidence]);
 
       // 受注になった場合、RPO案件を自動生成（まだなければ）
       let rpoClientId = row.data?.rpo_client_id || null;
@@ -1546,7 +1550,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const highRes = await dbQuery(`
         SELECT d.id, d.name, d.yomi, d.contract_type, d.initial_fee, d.monthly_fee,
                d.unit_price, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
-               d.conclusion_date, c.name AS customer_name, c.id AS customer_id
+               d.conclusion_date, d.settlement_forecast, d.forecast_confidence,
+               c.name AS customer_name, c.id AS customer_id
         FROM deals d JOIN customers c ON c.id = d.customer_id
         WHERE d.team_id=$1 ${salesFilter}
           AND d.yomi IN ('A 70％','S 90％')
@@ -1586,7 +1591,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const staffMap = {};
       const addToStaff = (name, key, amount) => {
         const n = name || '未設定';
-        if (!staffMap[n]) staffMap[n] = { name: n, confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0 };
+        if (!staffMap[n]) staffMap[n] = { name: n, confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0, thisMonthMaybe: 0, nextMonthForecast: 0 };
         staffMap[n][key] += amount;
       };
 
@@ -1599,6 +1604,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
         const amt = Number(d.monthly_fee || d.initial_fee || 0) * 1.1;
         addToStaff(staffName, 'high', Math.round(amt));       // 売上見込み（表示用）
         addToStaff(staffName, 'highKpi', calcKpi(d));         // インセン見込み（KPI用）
+        // 営業手動の締結見込み（今月可能性あり / 来月締結見込み）
+        if (d.settlement_forecast === '今月可能性あり') addToStaff(staffName, 'thisMonthMaybe', Math.round(amt));
+        else if (d.settlement_forecast === '来月締結見込み') addToStaff(staffName, 'nextMonthForecast', Math.round(amt));
       });
       medRes.rows.forEach(d => {
         const staffName = d.sales_person || d.sales_user_id || '未設定';
@@ -1624,7 +1632,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
         total:              acc.total              + s.total,
         kpiTotal:           acc.kpiTotal           + (s.kpiTotal || 0),
         kpi:                acc.kpi                + (s.kpi || 0),
-      }), { confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0, total: 0, kpiTotal: 0, kpi: 0 });
+        thisMonthMaybe:     acc.thisMonthMaybe     + (s.thisMonthMaybe || 0),
+        nextMonthForecast:  acc.nextMonthForecast  + (s.nextMonthForecast || 0),
+      }), { confirmed: 0, confirmedIncentive: 0, high: 0, highKpi: 0, medium: 0, mediumKpi: 0, total: 0, kpiTotal: 0, kpi: 0, thisMonthMaybe: 0, nextMonthForecast: 0 });
 
       res.json({
         month: `${year}-${String(mon).padStart(2,'0')}`,
@@ -1823,6 +1833,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
                COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
                d.conclusion_date, d.updated_at, d.sales_memo, d.memo,
                d.next_action_date, d.next_action_content,
+               d.settlement_forecast, d.forecast_confidence,
                c.name AS customer_name
         FROM deals d JOIN customers c ON c.id = d.customer_id
         WHERE d.team_id=$1

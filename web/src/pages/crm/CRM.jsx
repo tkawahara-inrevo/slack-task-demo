@@ -146,6 +146,8 @@ function YomiPanel({ full = false }) {
     const [localMemo, setLocalMemo] = useState(memo);
     const [memoFocused, setMemoFocused] = useState(false);
     const [savingInline, setSavingInline] = useState(false);
+    const isSA = d.yomi === 'A 70％' || d.yomi === 'S 90％';
+    const [fc, setFc] = useState({ settlement: d.settlement_forecast || '', confidence: d.forecast_confidence || '' });
 
     const saveInlineMemo = async () => {
       if (localMemo === memo) { setMemoFocused(false); return; }
@@ -156,6 +158,41 @@ function YomiPanel({ full = false }) {
       } catch (e) { console.error(e); }
       finally { setSavingInline(false); setMemoFocused(false); }
     };
+
+    const saveForecast = async (settlement, confidence) => {
+      setFc({ settlement, confidence });
+      try {
+        await api.crmUpdateDeal(d.id, {
+          settlementForecast: settlement || null,
+          forecastConfidence: settlement === '来月締結見込み' ? (confidence || null) : null,
+        });
+        d.settlement_forecast = settlement; d.forecast_confidence = confidence; // ローカル反映
+      } catch (e) { console.error(e); }
+    };
+
+    // S/A案件の締結見込み入力
+    const FC_COLORS = { '今月可能性あり':'#1e40af', '来月締結見込み':'#d97706' };
+    const inlineForecast = isSA ? (
+      <div onClick={e => e.stopPropagation()} style={{ marginTop:7, display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+        <select value={fc.settlement} onChange={e => saveForecast(e.target.value, fc.confidence)}
+          style={{ fontSize:'0.7rem', padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, background:'#fff',
+            color: fc.settlement ? (FC_COLORS[fc.settlement]||'#0f172a') : '#94a3b8', fontWeight: fc.settlement?700:400 }}>
+          <option value="">締結見込み 未設定</option>
+          <option value="今月可能性あり">今月可能性あり</option>
+          <option value="来月締結見込み">来月締結見込み</option>
+        </select>
+        {fc.settlement === '来月締結見込み' && (
+          <select value={fc.confidence} onChange={e => saveForecast(fc.settlement, e.target.value)}
+            style={{ fontSize:'0.7rem', padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, background:'#fff', fontWeight:600,
+              color: fc.confidence==='高'?'#dc2626':fc.confidence==='中'?'#d97706':fc.confidence==='低'?'#64748b':'#94a3b8' }}>
+            <option value="">確度</option>
+            <option value="高">確度: 高</option>
+            <option value="中">確度: 中</option>
+            <option value="低">確度: 低</option>
+          </select>
+        )}
+      </div>
+    ) : null;
 
     const badges = (
       <div style={{ display:'flex', gap:5, marginTop: compact?3:4, alignItems:'center', flexWrap:'wrap' }}>
@@ -191,6 +228,7 @@ function YomiPanel({ full = false }) {
             <div style={{ flex:1, minWidth:0 }}>
               <div onClick={() => setSelectedDeal(d)} style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}>{d.customer_name}</div>
               {badges}
+              {inlineForecast}
               {inlineMemo}
             </div>
             <div style={{ textAlign:'right', flexShrink:0 }}>
@@ -207,6 +245,7 @@ function YomiPanel({ full = false }) {
           <div style={{ flex:1, minWidth:0 }}>
             <div onClick={() => setSelectedDeal(d)} style={{ fontWeight:800, fontSize:'0.92rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}>{d.customer_name}</div>
             {badges}
+            {inlineForecast}
             {inlineMemo}
           </div>
           <div style={{ textAlign:'right', flexShrink:0 }}>

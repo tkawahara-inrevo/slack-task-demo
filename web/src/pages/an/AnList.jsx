@@ -16,7 +16,9 @@ export default function AnList() {
   const [est, setEst]           = useState({ est_media_cost:'', est_unit_price:'', est_budget:'', est_hire_count:'', recommended_media:'' });
   const [saving, setSaving]     = useState(false);
   const [posting, setPosting]   = useState(false);
-  const [view, setView]         = useState('list'); // 'list' | 'media'
+  const [view, setView]         = useState('list'); // 'list' | 'media' | 'master'
+  // タブ切替時に右パネル閉じる
+  useEffect(() => { if (view !== 'list') setSelected(null); }, [view]);
   const [rpoResults, setRpoResults] = useState(null);
   const [pastStudies, setPastStudies] = useState(null);
   const [mediaStats, setMediaStats] = useState([]);
@@ -319,96 +321,16 @@ export default function AnList() {
         </div>
       </div>
 
-      {/* 右: 詳細・回答入力 */}
+      {/* 右: 詳細・編集 */}
       {selected && selected._kind === 'study' && (
-        <div style={S.detail}>
-          <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-500)', fontSize: '1.1rem', padding: 4 }}>←</button>
-            <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: '#fef3c7', color: '#92400e' }}>kintone調査</span>
-            <span style={{ fontWeight: 700, fontSize: '0.95rem', flex: 1 }}>{selected.company_name || '（会社名なし）'}</span>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>{selected.status || '対応中'}</span>
-          </div>
-          {studyDetail === null ? (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中…</div>
-          ) : (
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 8 }}>案件情報</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.82rem' }}>
-                  {[
-                    ['依頼者', studyDetail.study?.requester],
-                    ['依頼日', studyDetail.study?.request_date ? String(studyDetail.study.request_date).slice(0,10) : null],
-                    ['優先度', studyDetail.study?.priority],
-                    ['雇用形態', studyDetail.study?.employment_type],
-                    ['職種', studyDetail.study?.job_type],
-                    ['対象区分', studyDetail.study?.target_classification?.join(', ')],
-                    ['勤務地', studyDetail.study?.work_locations?.join(', ')],
-                    ['年収', [studyDetail.study?.min_salary, studyDetail.study?.max_salary].filter(Boolean).map(v => fmtYen(v)).join(' 〜 ')],
-                    ['年間休日', studyDetail.study?.annual_holidays],
-                    ['案件リンク', studyDetail.study?.case_link],
-                    ['Slack', studyDetail.study?.slack_link],
-                    ['求人票', studyDetail.study?.jobform_url ? <a key="j" href={studyDetail.study.jobform_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{studyDetail.study.jobform_url}</a> : null],
-                  ].filter(([,v]) => v).map(([label, val]) => (
-                    <div key={label} style={{ display: 'flex', gap: 10 }}>
-                      <div style={{ color: 'var(--gray-500)', fontSize: '0.72rem', width: 90, flexShrink: 0 }}>{label}</div>
-                      <div style={{ color: 'var(--gray-900)', fontWeight: 500, wordBreak: 'break-all', flex: 1 }}>{val}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {studyDetail.study?.must_condition && (
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>MUST条件</div>
-                  <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.6 }}>
-                    {studyDetail.study.must_condition}
-                  </pre>
-                </div>
-              )}
-              {studyDetail.study?.other_notes && (
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>その他特記事項</div>
-                  <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.6 }}>
-                    {studyDetail.study.other_notes}
-                  </pre>
-                </div>
-              )}
-              {studyDetail.media?.length > 0 && (
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査媒体（{studyDetail.media.length}件）</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {studyDetail.media.map((m, i) => (
-                      <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.86rem' }}>{m.media_name || `スロット${m.slot}`}</span>
-                          {m.an_assignee && <span style={{ fontSize: '0.66rem', color: 'var(--gray-500)' }}>AN: {m.an_assignee}</span>}
-                          {m.status_tags?.length > 0 && m.status_tags.map(t => <span key={t} style={{ fontSize: '0.62rem', padding: '1px 6px', borderRadius: 99, background: '#eef2ff', color: '#4f46e5', fontWeight: 600 }}>{t}</span>)}
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, fontSize: '0.74rem' }}>
-                          {[
-                            ['費用区分', m.cost_category],
-                            ['料金', m.fee ? fmtYen(m.fee) : null],
-                            ['掲載期間', m.duration],
-                            ['予測応募', m.expected_apps],
-                            ['実応募', m.effective_apps],
-                            ['返信率', m.reply_rate],
-                          ].filter(([,v]) => v != null).map(([k,v]) => (
-                            <div key={k} style={{ background: 'var(--surface-2)', borderRadius: 4, padding: '3px 6px' }}>
-                              <div style={{ fontSize: '0.62rem', color: 'var(--gray-500)' }}>{k}</div>
-                              <div style={{ fontWeight: 600 }}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {m.responses?.length > 0 && <div style={{ marginTop: 5, fontSize: '0.7rem', color: 'var(--gray-500)' }}>対応: {m.responses.join(', ')}</div>}
-                        {m.active_count && <div style={{ marginTop: 4, fontSize: '0.72rem' }}><b>アクティブ数:</b> <pre style={{ display: 'inline', whiteSpace: 'pre-wrap', margin: 0 }}>{m.active_count}</pre></div>}
-                        {m.note && <div style={{ marginTop: 4, fontSize: '0.72rem', color: 'var(--gray-600)' }}>備考: {m.note}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <StudyDetailPanel
+          selected={selected}
+          studyDetail={studyDetail}
+          setStudyDetail={setStudyDetail}
+          onClose={() => setSelected(null)}
+          fmtYen={fmtYen}
+          afterChange={() => load()}
+        />
       )}
 
     </div>
@@ -610,3 +532,294 @@ function MediaSuggestButton({ onPick }) {
     </div>
   );
 }
+
+
+// ── AN案件詳細パネル（編集可・モダン） ─────────────────────────
+function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtYen, afterChange }) {
+  const study = studyDetail?.study;
+  const media = studyDetail?.media || [];
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [mustOpen, setMustOpen] = useState(false);
+  const [mustVal, setMustVal] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesVal, setNotesVal] = useState('');
+  const [editingMedia, setEditingMedia] = useState(null); // media row being edited
+
+  if (!study) {
+    return (
+      <div style={S_panel.root}>
+        <PanelHeader title={selected.company_name || '...'} status={selected.status} onClose={onClose} />
+        <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>読み込み中…</div>
+      </div>
+    );
+  }
+
+  const isDone = ['完了','対応済','クローズ'].includes(study.status);
+
+  const updateStudy = async (patch) => {
+    try {
+      const r = await api.anStudyUpdate(study.record_id, patch);
+      setStudyDetail(prev => ({ ...prev, study: r.study }));
+      afterChange && afterChange();
+    } catch (e) { alert('保存失敗: ' + e.message); }
+  };
+
+  const toggleDone = async () => {
+    setSavingStatus(true);
+    await updateStudy({ status: isDone ? '対応中' : '完了' });
+    setSavingStatus(false);
+  };
+
+  const saveMust = async () => { await updateStudy({ must_condition: mustVal }); setMustOpen(false); };
+  const saveNotes = async () => { await updateStudy({ other_notes: notesVal }); setNotesOpen(false); };
+
+  const addMedia = async () => {
+    const name = window.prompt('媒体名を入力（後で編集可）') || '';
+    try {
+      const r = await api.anStudyMediaAdd(study.record_id, { media_name: name.trim() || null });
+      setStudyDetail(prev => ({ ...prev, media: [...(prev.media || []), r.slot] }));
+    } catch (e) { alert('追加失敗: ' + e.message); }
+  };
+
+  return (
+    <div style={S_panel.root}>
+      {/* ヘッダー */}
+      <div style={{ ...S_panel.header, background: isDone ? 'linear-gradient(135deg,#059669,#10b981)' : 'linear-gradient(135deg,#1e40af,#3b82f6)' }}>
+        <button onClick={onClose} style={S_panel.backBtn}>←</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.66rem', opacity: 0.85, letterSpacing: '0.04em', textTransform: 'uppercase' }}>AN案件</div>
+          <div style={{ fontWeight: 800, fontSize: '1.05rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{study.company_name || '（会社名なし）'}</div>
+        </div>
+        <button onClick={toggleDone} disabled={savingStatus}
+          style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', fontWeight: 700, fontSize: '0.78rem', padding: '6px 12px', borderRadius: 8, cursor: 'pointer' }}>
+          {savingStatus ? '...' : (isDone ? '完了 ✓' : '完了にする')}
+        </button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', background: '#f8fafc' }}>
+        {/* 案件情報グリッド */}
+        <Card title="案件情報" accent="#3b82f6">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
+            {[
+              ['依頼者', study.requester, '👤'],
+              ['依頼日', study.request_date ? String(study.request_date).slice(0,10) : null, '📅'],
+              ['優先度', study.priority, '🔥'],
+              ['雇用形態', study.employment_type, '💼'],
+              ['職種', study.job_type, '🎯'],
+              ['対象区分', study.target_classification?.join(', '), '🏷'],
+              ['勤務地', study.work_locations?.join(', '), '📍'],
+              ['年収', [study.min_salary, study.max_salary].filter(Boolean).length > 0 ? [study.min_salary, study.max_salary].filter(Boolean).map(v => fmtYen(v)).join(' 〜 ') : null, '💰'],
+              ['年間休日', study.annual_holidays, '🌿'],
+            ].filter(([,v]) => v).map(([label, val, icon]) => (
+              <div key={label} style={S_panel.statCell}>
+                <div style={S_panel.statLabel}>{icon} {label}</div>
+                <div style={S_panel.statVal}>{val}</div>
+              </div>
+            ))}
+          </div>
+          {(study.case_link || study.slack_link || study.jobform_url) && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0', display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.74rem' }}>
+              {study.case_link && <a href={study.case_link} target="_blank" rel="noreferrer" style={S_panel.link}>📂 案件リンク</a>}
+              {study.slack_link && <a href={study.slack_link} target="_blank" rel="noreferrer" style={S_panel.link}>💬 Slack</a>}
+              {study.jobform_url && <a href={study.jobform_url} target="_blank" rel="noreferrer" style={S_panel.link}>📄 求人票</a>}
+            </div>
+          )}
+        </Card>
+
+        {/* MUST条件 */}
+        <Card title="MUST条件" accent="#dc2626"
+          action={!mustOpen ? <button onClick={() => { setMustVal(study.must_condition || ''); setMustOpen(true); }} style={S_panel.editBtn}>編集</button>
+                            : <button onClick={() => setMustOpen(false)} style={S_panel.cancelBtn}>キャンセル</button>}>
+          {mustOpen ? (
+            <>
+              <textarea value={mustVal} onChange={e => setMustVal(e.target.value)} rows={5}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid #fca5a5', borderRadius: 6, fontSize: '0.82rem', resize: 'vertical', lineHeight: 1.5 }} />
+              <button onClick={saveMust} style={S_panel.saveBtn}>保存</button>
+            </>
+          ) : (
+            <pre style={S_panel.preBox}>{study.must_condition || '（未入力）'}</pre>
+          )}
+        </Card>
+
+        {/* その他特記事項 */}
+        <Card title="特記事項" accent="#7c3aed"
+          action={!notesOpen ? <button onClick={() => { setNotesVal(study.other_notes || ''); setNotesOpen(true); }} style={S_panel.editBtn}>編集</button>
+                             : <button onClick={() => setNotesOpen(false)} style={S_panel.cancelBtn}>キャンセル</button>}>
+          {notesOpen ? (
+            <>
+              <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} rows={5}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid #c4b5fd', borderRadius: 6, fontSize: '0.82rem', resize: 'vertical', lineHeight: 1.5 }} />
+              <button onClick={saveNotes} style={S_panel.saveBtn}>保存</button>
+            </>
+          ) : (
+            <pre style={S_panel.preBox}>{study.other_notes || '（未入力）'}</pre>
+          )}
+        </Card>
+
+        {/* 調査媒体 */}
+        <Card title={`調査媒体（${media.length}件）`} accent="#0891b2"
+          action={<button onClick={addMedia} style={S_panel.addBtn}>＋ 媒体追加</button>}>
+          {media.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>媒体未登録</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {media.map(m => (
+                <MediaSlotRow key={m.id || m.slot} m={m} fmtYen={fmtYen}
+                  isEditing={editingMedia === (m.id || m.slot)}
+                  onEdit={() => setEditingMedia(m.id || m.slot)}
+                  onCancel={() => setEditingMedia(null)}
+                  onSaved={(updated) => {
+                    setStudyDetail(prev => ({ ...prev, media: prev.media.map(x => (x.id||x.slot) === (m.id||m.slot) ? updated : x) }));
+                    setEditingMedia(null);
+                  }}
+                  onDeleted={() => {
+                    setStudyDetail(prev => ({ ...prev, media: prev.media.filter(x => (x.id||x.slot) !== (m.id||m.slot)) }));
+                    setEditingMedia(null);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function PanelHeader({ title, status, onClose }) {
+  return (
+    <div style={S_panel.header}>
+      <button onClick={onClose} style={S_panel.backBtn}>←</button>
+      <span style={{ flex: 1, fontWeight: 800 }}>{title}</span>
+      {status && <span>{status}</span>}
+    </div>
+  );
+}
+
+function Card({ title, accent, action, children }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, marginBottom: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', background: '#fafbfc' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 4, height: 16, background: accent, borderRadius: 2 }} />
+          <span style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a' }}>{title}</span>
+        </div>
+        {action}
+      </div>
+      <div style={{ padding: '12px 14px' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function MediaSlotRow({ m, fmtYen, isEditing, onEdit, onCancel, onSaved, onDeleted }) {
+  const [form, setForm] = useState({
+    media_name: m.media_name || '',
+    cost_category: m.cost_category || '',
+    fee: m.fee ?? '',
+    duration: m.duration ?? '',
+    expected_apps: m.expected_apps ?? '',
+    effective_apps: m.effective_apps ?? '',
+    reply_rate: m.reply_rate ?? '',
+    responses: (m.responses || []).join(', '),
+    status_tags: (m.status_tags || []).join(', '),
+    note: m.note || '',
+    an_assignee: m.an_assignee || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await api.anStudyMediaUpdate(m.id, form);
+      onSaved(r.slot);
+    } catch (e) { alert('保存失敗: ' + e.message); }
+    finally { setSaving(false); }
+  };
+  const del = async () => {
+    if (!window.confirm(`媒体「${m.media_name || `スロット${m.slot}`}」を削除しますか？`)) return;
+    try { await api.anStudyMediaDelete(m.id); onDeleted(); } catch (e) { alert('削除失敗: ' + e.message); }
+  };
+
+  if (isEditing) {
+    const Fld = ({ k, label, type = 'text' }) => (
+      <div>
+        <label style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 2 }}>{label}</label>
+        <input type={type} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 5, fontSize: '0.78rem' }} />
+      </div>
+    );
+    return (
+      <div style={{ background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 10, padding: '12px 14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 8 }}>
+          <Fld k="media_name" label="媒体名" />
+          <Fld k="an_assignee" label="AN担当" />
+          <Fld k="cost_category" label="費用区分" />
+          <Fld k="fee" label="料金(円)" type="number" />
+          <Fld k="duration" label="掲載期間(週)" type="number" />
+          <Fld k="reply_rate" label="返信率(%)" type="number" />
+          <Fld k="expected_apps" label="予測応募" type="number" />
+          <Fld k="effective_apps" label="実応募" type="number" />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <Fld k="responses" label="対応（カンマ区切り）" />
+          <Fld k="status_tags" label="ステータス（カンマ区切り）" />
+        </div>
+        <div>
+          <label style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 2 }}>備考</label>
+          <textarea value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} rows={2}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 5, fontSize: '0.78rem', resize: 'vertical' }} />
+        </div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+          <button onClick={del} style={{ ...S_panel.cancelBtn, color: '#dc2626', border: '1px solid #fca5a5' }}>削除</button>
+          <button onClick={onCancel} style={S_panel.cancelBtn}>キャンセル</button>
+          <button onClick={save} disabled={saving} style={S_panel.saveBtn}>{saving ? '保存中…' : '保存'}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: '#f8fafc', borderRadius: 10, padding: '10px 12px', border: '1px solid #e2e8f0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0f172a' }}>{m.media_name || `スロット${m.slot}`}</span>
+        {m.an_assignee && <span style={{ fontSize: '0.66rem', color: '#475569' }}>AN: {m.an_assignee}</span>}
+        {m.status_tags?.length > 0 && m.status_tags.map(t => <span key={t} style={{ fontSize: '0.62rem', padding: '1px 6px', borderRadius: 99, background: '#eef2ff', color: '#4f46e5', fontWeight: 600 }}>{t}</span>)}
+        <button onClick={onEdit} style={{ ...S_panel.editBtn, marginLeft: 'auto' }}>編集</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, fontSize: '0.74rem' }}>
+        {[
+          ['料金', m.fee != null ? fmtYen(m.fee) : null],
+          ['掲載', m.duration ? `${m.duration}週` : null],
+          ['予測応募', m.expected_apps],
+          ['実応募', m.effective_apps],
+          ['返信率', m.reply_rate != null ? `${m.reply_rate}%` : null],
+          ['費用区分', m.cost_category],
+        ].filter(([,v]) => v != null && v !== '').map(([k,v]) => (
+          <div key={k} style={{ background: '#fff', borderRadius: 6, padding: '4px 8px', border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: '0.62rem', color: '#64748b' }}>{k}</div>
+            <div style={{ fontWeight: 700, color: '#0f172a' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      {m.responses?.length > 0 && <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#475569' }}>対応: {m.responses.join(', ')}</div>}
+      {m.note && <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#475569' }}>備考: {m.note}</div>}
+    </div>
+  );
+}
+
+const S_panel = {
+  root: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f8fafc' },
+  header: { padding: '14px 20px', color: '#fff', display: 'flex', alignItems: 'center', gap: 12 },
+  backBtn: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', width: 30, height: 30, borderRadius: 8, cursor: 'pointer', fontSize: '1rem' },
+  statCell: { background: '#fafbfc', borderRadius: 8, padding: '6px 10px', border: '1px solid #f1f5f9' },
+  statLabel: { fontSize: '0.65rem', color: '#64748b', marginBottom: 2 },
+  statVal: { fontSize: '0.84rem', fontWeight: 700, color: '#0f172a', wordBreak: 'break-all' },
+  link: { color: '#2563eb', textDecoration: 'none', fontWeight: 600 },
+  preBox: { fontSize: '0.8rem', color: '#334155', whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.6 },
+  editBtn: { fontSize: '0.7rem', padding: '3px 10px', borderRadius: 5, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 600 },
+  cancelBtn: { fontSize: '0.7rem', padding: '3px 10px', borderRadius: 5, border: '1px solid #cbd5e1', background: '#fff', color: '#64748b', cursor: 'pointer' },
+  saveBtn: { fontSize: '0.74rem', fontWeight: 700, padding: '5px 14px', borderRadius: 6, border: 'none', background: '#1e40af', color: '#fff', cursor: 'pointer', marginTop: 6 },
+  addBtn: { fontSize: '0.7rem', padding: '3px 10px', borderRadius: 5, border: '1px solid #67e8f9', background: '#ecfeff', color: '#0e7490', cursor: 'pointer', fontWeight: 700 },
+};

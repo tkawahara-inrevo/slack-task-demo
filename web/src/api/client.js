@@ -618,6 +618,10 @@ export const api = {
   mediaMasterSync:    ()   => apiFetch(`/media-master/sync`, { method: 'POST' }),
   anStudies:          (company) => apiFetch(`/an/studies${company ? `?company=${encodeURIComponent(company)}` : ''}`),
   anStudyDetail:      (id) => apiFetch(`/an/studies/${id}`),
+  anStudyUpdate:      (id, body) => apiFetch(`/an/studies/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  anStudyMediaAdd:    (studyId, body = {}) => apiFetch(`/an/studies/${studyId}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  anStudyMediaUpdate: (id, body) => apiFetch(`/an/study-media/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  anStudyMediaDelete: (id) => apiFetch(`/an/study-media/${id}`, { method: 'DELETE' }),
   anUnified:          (filters = {}) => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
     return apiFetch(`/an/unified${qs ? `?${qs}` : ''}`);

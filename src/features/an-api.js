@@ -586,6 +586,77 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 
+  // 案件のstatusや特記事項を更新
+  expressApp.patch('/api/dashboard/an/studies/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const allowed = ['status', 'priority', 'must_condition', 'other_notes', 'requester', 'employment_type', 'job_type'];
+      const sets = [], vals = [];
+      let i = 1;
+      for (const k of allowed) {
+        if (k in req.body) { sets.push(`${k}=$${i++}`); vals.push(req.body[k] || null); }
+      }
+      if (sets.length === 0) return res.json({ ok: true });
+      sets.push(`synced_at=now()`);
+      vals.push(req.params.id, teamId);
+      const { rows: [row] } = await dbQuery(
+        `UPDATE an_studies SET ${sets.join(',')} WHERE record_id=$${i++} AND team_id=$${i++} RETURNING *`, vals
+      );
+      res.json({ study: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 媒体スロット 追加
+  expressApp.post('/api/dashboard/an/studies/:id/media', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [maxSlot] } = await dbQuery(
+        `SELECT COALESCE(MAX(slot),0) AS s FROM an_study_media WHERE study_record_id=$1`, [req.params.id]
+      );
+      const slot = (maxSlot?.s || 0) + 1;
+      const { rows: [row] } = await dbQuery(`
+        INSERT INTO an_study_media (team_id, study_record_id, slot, media_name)
+        VALUES ($1, $2, $3, $4) RETURNING *
+      `, [teamId, req.params.id, slot, req.body?.media_name || null]);
+      res.json({ slot: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 媒体スロット 更新
+  expressApp.patch('/api/dashboard/an/study-media/:id', authWithRole, async (req, res) => {
+    try {
+      const allowed = ['media_name', 'cost_category', 'fee', 'duration', 'responses',
+        'active_count', 'expected_apps', 'reply_rate', 'effective_apps', 'effective_rate',
+        'status_tags', 'note', 'an_assignee'];
+      const sets = [], vals = [];
+      let i = 1;
+      const numFields = new Set(['fee','duration','expected_apps','reply_rate','effective_apps','effective_rate']);
+      const arrFields = new Set(['responses','status_tags']);
+      for (const k of allowed) {
+        if (k in req.body) {
+          let v = req.body[k];
+          if (numFields.has(k)) v = (v === '' || v == null) ? null : Number(v);
+          if (arrFields.has(k)) v = Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? v.split(',').map(s=>s.trim()) : []);
+          sets.push(`${k}=$${i++}`); vals.push(v);
+        }
+      }
+      if (sets.length === 0) return res.json({ ok: true });
+      vals.push(req.params.id);
+      const { rows: [row] } = await dbQuery(
+        `UPDATE an_study_media SET ${sets.join(',')} WHERE id=$${i} RETURNING *`, vals
+      );
+      res.json({ slot: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 媒体スロット 削除
+  expressApp.delete('/api/dashboard/an/study-media/:id', authWithRole, async (req, res) => {
+    try {
+      await dbQuery(`DELETE FROM an_study_media WHERE id=$1`, [req.params.id]);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // kintone調査 単体取得（an_studies + media_slots）
   expressApp.get('/api/dashboard/an/studies/:id', authWithRole, async (req, res) => {
     try {

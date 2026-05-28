@@ -603,6 +603,26 @@ async function dbEnsureSettingsSchema() {
   // deals: 締結見込み（ヨミS/A向けの営業の手動見込み）
   await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS settlement_forecast TEXT`).catch(() => {});  // '今月可能性あり' | '来月締結見込み'
   await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS forecast_confidence TEXT`).catch(() => {});  // '高' | '中' | '低'
+
+  // 案件から自動生成される入金予定（kintone⑥の代替）
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS deal_expected_payments (
+      id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      team_id TEXT NOT NULL DEFAULT 'T086C06L5V0',
+      deal_id TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+      expected_date DATE NOT NULL,
+      expected_amount BIGINT NOT NULL DEFAULT 0,
+      kind TEXT NOT NULL,
+      month_seq INTEGER,
+      status TEXT NOT NULL DEFAULT 'planned',
+      actual_payment_record_id TEXT,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_dep_deal ON deal_expected_payments(deal_id)`).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_dep_status ON deal_expected_payments(team_id, status, expected_date)`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

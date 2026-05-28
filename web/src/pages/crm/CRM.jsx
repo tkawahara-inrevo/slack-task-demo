@@ -988,11 +988,12 @@ export default function CRM() {
     { key:'yomi',        label:'ヨミ管理',       msg:'BC所属のみ' },
     { key:'performance', label:'成績',           msg:'管理者またはBC管理職のみ' },
     { key:'incentive',   label:'インセン監査',   msg:'管理者またはBC管理職のみ' },
+    { key:'payments',    label:'入金管理',       msg:'管理者またはBC管理職のみ' },
     { key:'settings',    label:'設定',           msg:'管理者またはBC管理職のみ' },
   ];
 
   // 顧客一覧は常に表示。インセン監査は成績と同じ権限
-  const tabVisible = (key) => key === 'incentive' ? access.tabs.performance?.visible : access.tabs[key]?.visible;
+  const tabVisible = (key) => (key === 'incentive' || key === 'payments') ? access.tabs.performance?.visible : access.tabs[key]?.visible;
   const visibleTabs = tabDefs.filter(t => t.key === 'customers' || tabVisible(t.key));
 
   return (
@@ -1030,6 +1031,11 @@ export default function CRM() {
         {tab === 'incentive' && (
           access.tabs.performance?.visible
             ? <div style={{ flex:1, overflow:'auto' }}><IncentiveAudit /></div>
+            : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
+        )}
+        {tab === 'payments' && (
+          access.tabs.performance?.visible
+            ? <div style={{ flex:1, overflow:'auto' }}><PaymentsManager /></div>
             : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
         )}
         {tab === 'settings' && (
@@ -1134,3 +1140,100 @@ function IncentiveAudit() {
   );
 }
 
+
+// ── 入金管理（自動生成された入金予定 vs 実際の入金）─────────────────
+function PaymentsManager() {
+  const [rows, setRows] = useState(null);
+  const [month, setMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  });
+  const yen = (n) => n != null && n !== '' ? `¥${Number(n).toLocaleString()}` : '—';
+  const load = () => {
+    setRows(null);
+    api.crmExpectedPayments(month).then(r => setRows(r.rows || [])).catch(() => setRows([]));
+  };
+  useEffect(() => { load(); }, [month]); // eslint-disable-line
+
+  const totalExp = (rows||[]).reduce((s,r) => s + Number(r.expected_amount||0), 0);
+  const totalAct = (rows||[]).reduce((s,r) => s + Number(r.actual_amount||0), 0);
+  const matchedCount = (rows||[]).filter(r => r.actual_record_id).length;
+
+  const KIND_LABEL = { initial:'初期', monthly:'月額', guarantee:'採用保証', other:'その他' };
+  const KIND_COLOR = { initial:'#6366f1', monthly:'#0ea5e9', guarantee:'#059669', other:'#94a3b8' };
+
+  return (
+    <div style={{ padding:'20px 24px' }}>
+      <div style={{ fontWeight:700, fontSize:'1rem', color:'#0f172a', marginBottom:4 }}>入金管理</div>
+      <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:16 }}>
+        受注時に自動生成された入金予定と、kintone⑥の実入金を会社名・日付±15日で照合
+      </div>
+      <div style={{ display:'flex', gap:12, marginBottom:14, alignItems:'center', flexWrap:'wrap' }}>
+        <label style={{ fontSize:'0.78rem', color:'#374151', fontWeight:600 }}>対象月</label>
+        <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
+          style={{ padding:'6px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.85rem' }} />
+        <div style={{ marginLeft:'auto', display:'flex', gap:18, fontSize:'0.82rem' }}>
+          <div><span style={{ color:'#94a3b8' }}>予定額 </span><b>{yen(totalExp)}</b></div>
+          <div><span style={{ color:'#94a3b8' }}>実入金 </span><b style={{ color:'#059669' }}>{yen(totalAct)}</b></div>
+          <div><span style={{ color:'#94a3b8' }}>照合済 </span><b>{matchedCount}/{rows?.length||0}</b></div>
+        </div>
+      </div>
+
+      {rows === null ? (
+        <div style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>読み込み中…</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding:40, textAlign:'center', color:'#94a3b8', background:'#fff', border:'1px solid #e2e8f0', borderRadius:12 }}>
+          この月の入金予定はありません。受注済み案件があるのに表示されない場合、案件詳細から「入金予定を生成」してください。
+        </div>
+      ) : (
+        <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+            <thead>
+              <tr style={{ background:'#f8fafc', color:'#64748b', fontSize:'0.7rem', textAlign:'left' }}>
+                <th style={{ padding:'8px 10px' }}>予定日</th>
+                <th style={{ padding:'8px 10px' }}>会社</th>
+                <th style={{ padding:'8px 10px' }}>区分</th>
+                <th style={{ padding:'8px 10px', textAlign:'right' }}>予定額</th>
+                <th style={{ padding:'8px 10px' }}>照合</th>
+                <th style={{ padding:'8px 10px', textAlign:'right' }}>実入金日 / 金額</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => {
+                const matched = !!r.actual_record_id;
+                const diff = matched ? Number(r.actual_amount) - Number(r.expected_amount) : null;
+                return (
+                  <tr key={r.id} style={{ borderTop:'1px solid #f1f5f9' }}>
+                    <td style={{ padding:'8px 10px', color:'#0f172a', fontWeight:600 }}>{String(r.expected_date).slice(5,10)}</td>
+                    <td style={{ padding:'8px 10px', color:'#0f172a' }}>{r.company}
+                      <div style={{ fontSize:'0.66rem', color:'#94a3b8' }}>{r.contract_type||''}{r.sales_person?` · ${r.sales_person}`:''}</div>
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 7px', borderRadius:99, background:'#f1f5f9', color:KIND_COLOR[r.kind]||'#64748b' }}>
+                        {KIND_LABEL[r.kind]||r.kind}{r.month_seq?`(${r.month_seq})`:''}
+                      </span>
+                    </td>
+                    <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:600 }}>{yen(r.expected_amount)}</td>
+                    <td style={{ padding:'8px 10px' }}>
+                      {matched
+                        ? <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 8px', borderRadius:99, background:'#f0fdf4', color:'#059669' }}>✓ 照合済</span>
+                        : <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 8px', borderRadius:99, background:'#fef3c7', color:'#d97706' }}>未入金</span>}
+                    </td>
+                    <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                      {matched ? (
+                        <div>
+                          <div style={{ color:'#059669', fontWeight:700 }}>{yen(r.actual_amount)}</div>
+                          <div style={{ fontSize:'0.66rem', color:'#94a3b8' }}>{String(r.actual_date).slice(0,10)}{diff!==0?` · 差${diff>0?'+':''}${yen(diff)}`:''}</div>
+                        </div>
+                      ) : <span style={{ color:'#cbd5e1' }}>—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

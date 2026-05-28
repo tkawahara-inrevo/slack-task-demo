@@ -1360,6 +1360,142 @@ function registerCrmApi({ expressApp, authWithRole }) {
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
+  // ── 入金予定（受注後の自動生成・経理連携） ───────────────────────
+  // 月加算ヘルパー
+  function addMonths(dateStr, n) {
+    const d = new Date(dateStr);
+    d.setMonth(d.getMonth() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // dealから入金予定を自動生成（idempotent: 既存があればスキップ）
+  async function generateExpectedPayments(teamId, dealId) {
+    const { rows: [d] } = await dbQuery(`SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [dealId, teamId]);
+    if (!d) return { created: 0 };
+    const { rows: existing } = await dbQuery(
+      `SELECT id FROM deal_expected_payments WHERE deal_id=$1 LIMIT 1`, [dealId]
+    );
+    if (existing.length > 0) return { created: 0, note: 'already_generated' };
+
+    const ct = String(d.contract_type || '');
+    const baseDate = d.order_date || d.conclusion_date || new Date().toISOString().slice(0, 10);
+    const initial = Number(d.initial_fee || 0);
+    const monthly = Number(d.monthly_fee || 0);
+    const months  = Math.max(0, Number(d.contract_months || 0));
+    const unit    = Number(d.unit_price || 0);
+    const gcount  = Number(d.guarantee_count || 0);
+
+    const inserts = [];
+    if (ct.includes('月額')) {
+      if (initial > 0) inserts.push({ date: baseDate, amount: initial, kind: 'initial', seq: null });
+      const m = months > 0 ? months : 12; // 未設定は12ヶ月としてバッファ
+      for (let i = 1; i <= m; i++) {
+        inserts.push({ date: addMonths(baseDate, i - 1), amount: monthly, kind: 'monthly', seq: i });
+      }
+    } else if (ct.includes('採用保証')) {
+      const amount = initial > 0 ? initial : (unit * Math.max(1, gcount));
+      inserts.push({ date: addMonths(baseDate, 1), amount, kind: 'guarantee', seq: null });
+    } else if (ct.includes('後払い')) {
+      const amount = initial > 0 ? initial : (unit * Math.max(1, gcount));
+      inserts.push({ date: addMonths(baseDate, 1), amount, kind: 'other', seq: null, note: '後払い' });
+    } else {
+      // その他: 初期費用があれば1件のみ
+      if (initial > 0) inserts.push({ date: baseDate, amount: initial, kind: 'other', seq: null });
+      if (monthly > 0) inserts.push({ date: baseDate, amount: monthly, kind: 'monthly', seq: 1, note: '月額相当' });
+    }
+
+    for (const r of inserts) {
+      await dbQuery(`
+        INSERT INTO deal_expected_payments
+          (team_id, deal_id, expected_date, expected_amount, kind, month_seq, note, status)
+        VALUES ($1,$2,$3::date,$4,$5,$6,$7,'planned')
+      `, [teamId, dealId, r.date, r.amount, r.kind, r.seq, r.note || null]);
+    }
+    return { created: inserts.length };
+  }
+
+  // 案件単体 → expected再生成（手動）
+  expressApp.post('/api/crm/deals/:id/generate-expected', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { force } = req.body || {};
+      if (force) {
+        await dbQuery(`DELETE FROM deal_expected_payments WHERE deal_id=$1 AND team_id=$2`, [req.params.id, teamId]);
+      }
+      const r = await generateExpectedPayments(teamId, req.params.id);
+      res.json({ ok: true, ...r });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 月額延長: Nヶ月分の expected_payments を追加
+  expressApp.post('/api/crm/deals/:id/extend', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const addMonthsN = Math.max(1, Math.min(36, Number(req.body?.months) || 0));
+      if (!addMonthsN) return res.status(400).json({ error: 'months required' });
+      const { rows: [d] } = await dbQuery(`SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]);
+      if (!d) return res.status(404).json({ error: 'not_found' });
+      const monthly = Number(d.monthly_fee || 0);
+      if (monthly <= 0) return res.status(400).json({ error: 'monthly_fee not set' });
+      // 既存monthly のうち最後の expected_date と seq を取得
+      const { rows: [last] } = await dbQuery(
+        `SELECT expected_date, month_seq FROM deal_expected_payments
+         WHERE deal_id=$1 AND kind='monthly' ORDER BY month_seq DESC NULLS LAST, expected_date DESC LIMIT 1`,
+        [req.params.id]
+      );
+      let baseDate = last?.expected_date || d.order_date || new Date().toISOString().slice(0, 10);
+      let startSeq = (last?.month_seq || 0);
+      let created = 0;
+      for (let i = 1; i <= addMonthsN; i++) {
+        const dt = addMonths(String(baseDate).slice(0, 10), i);
+        await dbQuery(`
+          INSERT INTO deal_expected_payments (team_id, deal_id, expected_date, expected_amount, kind, month_seq, status, note)
+          VALUES ($1,$2,$3::date,$4,'monthly',$5,'planned','延長')
+        `, [teamId, req.params.id, dt, monthly, startSeq + i]);
+        created++;
+      }
+      // 必要なら deals.contract_months も延長
+      if (d.contract_months) {
+        await dbQuery(`UPDATE deals SET contract_months=$1, updated_at=now() WHERE id=$2`, [Number(d.contract_months) + addMonthsN, req.params.id]);
+      }
+      res.json({ ok: true, created });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 入金予定一覧（月指定。マッチ済みactualも含む）
+  expressApp.get('/api/crm/expected-payments', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const month = req.query.month; // YYYY-MM or null=all
+      const params = [teamId];
+      let where = `ep.team_id=$1`;
+      if (month && /^\d{4}-\d{2}$/.test(month)) {
+        params.push(`${month}-01`);
+        where += ` AND ep.expected_date BETWEEN $${params.length}::date AND ($${params.length}::date + interval '1 month - 1 day')::date`;
+      }
+      // expected と kintone入金（±15日・同会社）の近接マッチを計算
+      const { rows } = await dbQuery(`
+        SELECT ep.id, ep.deal_id, ep.expected_date, ep.expected_amount, ep.kind, ep.month_seq, ep.status, ep.note,
+               c.id AS customer_id, c.name AS company,
+               d.contract_type, d.yomi, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
+               kp.record_id AS actual_record_id, kp.payment_date AS actual_date, kp.amount AS actual_amount,
+               kp.incentive_amount AS actual_incentive
+        FROM deal_expected_payments ep
+        JOIN deals d ON d.id = ep.deal_id
+        JOIN customers c ON c.id = d.customer_id
+        LEFT JOIN LATERAL (
+          SELECT * FROM kintone_payments k
+          WHERE k.company = c.name
+            AND k.payment_date BETWEEN ep.expected_date - INTERVAL '15 days' AND ep.expected_date + INTERVAL '15 days'
+          ORDER BY ABS(k.payment_date - ep.expected_date) LIMIT 1
+        ) kp ON true
+        WHERE ${where}
+        ORDER BY ep.expected_date, c.name
+      `, params);
+      res.json({ rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
   // 案件に紐づく入金履歴（会社名マッチ）
   expressApp.get('/api/crm/deals/:id/payments', authWithRole, async (req, res) => {
     try {
@@ -1436,6 +1572,12 @@ function registerCrmApi({ expressApp, authWithRole }) {
           forecastConfidence!==undefined ? (forecastConfidence||null) : existing.forecast_confidence,
           guaranteeCount!==undefined ? (guaranteeCount===''||guaranteeCount==null?null:Number(guaranteeCount)) : existing.guarantee_count,
           unitPrice!==undefined      ? (unitPrice===''||unitPrice==null?null:Number(unitPrice))                : existing.unit_price]);
+
+      // 受注になった場合、入金予定を自動生成
+      if (newYomi === '受注' && existing.yomi !== '受注') {
+        try { await generateExpectedPayments(teamId, row.id); }
+        catch (e) { console.error('[CRM] expected_payments生成エラー:', e.message); }
+      }
 
       // 受注になった場合、RPO案件を自動生成（まだなければ）
       let rpoClientId = row.data?.rpo_client_id || null;

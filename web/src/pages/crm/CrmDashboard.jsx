@@ -94,13 +94,13 @@ function Drilldown({ rep, type, start, end, onClose, onSaved }) {
     ? rows.reduce((s, r) => s + Number(r.incentive_amount || 0), 0) : 0;
 
   // 会社名から案件を解決して編集を開く（入金ドリルダウン用）
-  const openByCompany = async (company) => {
+  const openByCompany = async (company, paymentRow) => {
     if (!company || resolving) return;
     setResolving(true);
     try {
       const r = await api.crmDealsList({ q: company, limit: 1 });
       const d = (r.deals || [])[0];
-      if (d) setEditRow({ id: d.id, customer_name: d.customer_name });
+      if (d) setEditRow({ id: d.id, customer_name: d.customer_name, payment: paymentRow });
       else alert('該当する案件が見つかりませんでした');
     } catch { alert('案件の取得に失敗しました'); }
     finally { setResolving(false); }
@@ -129,7 +129,7 @@ function Drilldown({ rep, type, start, end, onClose, onSaved }) {
         {/* コンテンツ */}
         {editRow ? (
           <div style={{ overflowY:'auto' }}>
-            <DealQuickEdit dealRow={editRow} onBack={() => setEditRow(null)} onSaved={onSaved} />
+            <DealQuickEdit dealRow={editRow} payment={editRow.payment} onBack={() => setEditRow(null)} onSaved={onSaved} />
           </div>
         ) : (
         <div style={{ overflowY:'auto', padding:'8px 16px 16px' }}>
@@ -140,7 +140,7 @@ function Drilldown({ rep, type, start, end, onClose, onSaved }) {
           ) : type === 'payments' ? (
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
               {rows.map((r, i) => (
-                <div key={i} onClick={() => openByCompany(r.company)}
+                <div key={i} onClick={() => openByCompany(r.company, r)}
                   style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)', cursor:'pointer' }}
                   onMouseEnter={e=>e.currentTarget.style.borderColor='#93c5fd'} onMouseLeave={e=>e.currentTarget.style.borderColor='#f1f5f9'}>
                   <div style={{ width:36, fontSize:'0.68rem', color:C.textSub, flexShrink:0, textAlign:'center', background:C.surface2, borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
@@ -201,7 +201,7 @@ function Drilldown({ rep, type, start, end, onClose, onSaved }) {
 
 // 案件の主要項目をその場編集（ドリルダウン内）
 const YOMI_OPTS = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
-function DealQuickEdit({ dealRow, onBack, onSaved }) {
+function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
   const [deal, setDeal] = useState(null);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -215,7 +215,8 @@ function DealQuickEdit({ dealRow, onBack, onSaved }) {
         contract_type: d.contract_type || '',
         monthly_fee: d.monthly_fee ?? '',
         initial_fee: d.initial_fee ?? '',
-        next_action_date: (d.next_action_date || '').split('T')[0] || '',
+        guarantee_count: d.guarantee_count ?? '',
+        next_action_date: (String(d.next_action_date || '').split('T')[0]) || '',
         next_action_content: d.next_action_content || '',
         sales_memo: d.sales_memo || '',
         settlement_forecast: d.settlement_forecast || '',
@@ -234,6 +235,7 @@ function DealQuickEdit({ dealRow, onBack, onSaved }) {
         contractType: form.contract_type || null,
         monthlyFee: form.monthly_fee === '' ? null : Number(form.monthly_fee),
         initialFee: form.initial_fee === '' ? null : Number(form.initial_fee),
+        guaranteeCount: form.guarantee_count === '' ? null : Number(form.guarantee_count),
         data: { ...(deal.data||{}), next_action_date: form.next_action_date || null, next_action_content: form.next_action_content || null },
         memo: deal.memo,
         salesMemo: form.sales_memo,
@@ -251,10 +253,31 @@ function DealQuickEdit({ dealRow, onBack, onSaved }) {
   const I = { width:'100%', boxSizing:'border-box', padding:'7px 9px', border:`1.5px solid ${C.border}`, borderRadius:7, fontSize:'0.84rem', outline:'none', background:C.surface, color:C.text };
 
   if (!form) return <div style={{ padding:40, textAlign:'center', color:C.textSub }}>読み込み中…</div>;
+  const yen = (n) => n != null && n !== '' ? `¥${Number(n).toLocaleString()}` : '—';
+  const ct = String(form.contract_type || '');
+  const isMonthly  = ct.includes('月額');
+  const isWarranty = ct.includes('採用保証');
   return (
     <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:11 }}>
       <button onClick={onBack} style={{ alignSelf:'flex-start', background:'none', border:'none', color:'#2563eb', cursor:'pointer', fontSize:'0.78rem', padding:0 }}>← 一覧に戻る</button>
       <div style={{ fontWeight:800, fontSize:'0.95rem', color:C.text }}>{dealRow.customer_name}</div>
+
+      {/* 入金行から開いた時の文脈表示 */}
+      {payment && (
+        <div style={{ padding:'10px 12px', background:'#eff6ff', borderRadius:8, border:'1px solid #bfdbfe', display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:6 }}>
+          <div style={{ fontSize:'0.66rem', color:'#1e40af' }}>入金日</div>
+          <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#1e40af', textAlign:'right' }}>{payment.payment_date ? String(payment.payment_date).slice(0,10) : '—'}</div>
+          <div style={{ fontSize:'0.66rem', color:'#1e40af' }}>プラン</div>
+          <div style={{ fontSize:'0.78rem', fontWeight:700, color:'#1e40af', textAlign:'right' }}>
+            {payment.plan || '—'}{payment.month_num && payment.plan?.includes('月額') ? `（${payment.month_num}ヶ月目）` : ''}
+          </div>
+          <div style={{ fontSize:'0.66rem', color:'#1e40af' }}>入金額</div>
+          <div style={{ fontSize:'0.82rem', fontWeight:800, color:'#0f172a', textAlign:'right' }}>{yen(payment.amount)}</div>
+          <div style={{ fontSize:'0.66rem', color:'#1e40af' }}>インセン</div>
+          <div style={{ fontSize:'0.82rem', fontWeight:800, color:'#059669', textAlign:'right' }}>{yen(payment.incentive_amount)}</div>
+        </div>
+      )}
+
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
         <div><label style={L}>ヨミ</label>
           <select value={form.yomi} onChange={e=>setForm(f=>({...f,yomi:e.target.value}))} style={{...I,cursor:'pointer'}}>
@@ -262,10 +285,25 @@ function DealQuickEdit({ dealRow, onBack, onSaved }) {
           </select></div>
         <div><label style={L}>契約形態</label>
           <input value={form.contract_type} onChange={e=>setForm(f=>({...f,contract_type:e.target.value}))} style={I} /></div>
-        <div><label style={L}>月額（円）</label>
-          <input type="number" value={form.monthly_fee} onChange={e=>setForm(f=>({...f,monthly_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
-        <div><label style={L}>初期費用（円）</label>
-          <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+        {/* 契約形態に応じて表示する金額欄を変える */}
+        {isMonthly && (<>
+          <div><label style={L}>月額（円）</label>
+            <input type="number" value={form.monthly_fee} onChange={e=>setForm(f=>({...f,monthly_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>初期費用（円）</label>
+            <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+        </>)}
+        {isWarranty && (<>
+          <div><label style={L}>保証額（初期費用 円）</label>
+            <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>採用人数</label>
+            <input type="number" value={form.guarantee_count ?? ''} onChange={e=>setForm(f=>({...f,guarantee_count:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+        </>)}
+        {!isMonthly && !isWarranty && (<>
+          <div><label style={L}>金額（円）</label>
+            <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          <div><label style={L}>月額（円）※必要なら</label>
+            <input type="number" value={form.monthly_fee} onChange={e=>setForm(f=>({...f,monthly_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+        </>)}
       </div>
       {isSA && (
         <div style={{ display:'grid', gridTemplateColumns: form.settlement_forecast==='来月締結見込み' ? '1fr 1fr' : '1fr', gap:9, padding:'9px', background:C.surface2, borderRadius:8 }}>
@@ -304,9 +342,23 @@ function DealQuickEdit({ dealRow, onBack, onSaved }) {
 function ForecastDrillPanel({ label, color, items, kind, onClose, onSaved }) {
   const list = items || [];
   const [editRow, setEditRow] = useState(null);
+  const [resolving, setResolving] = useState(false);
   const total = kind === 'payments'
     ? list.reduce((s, r) => s + Number(r.incentive_amount || 0), 0)
     : list.reduce((s, r) => s + Number(r.monthly_fee || r.initial_fee || 0), 0);
+
+  // 入金行: 会社名から案件を検索して編集を開く
+  const openByCompany = async (paymentRow) => {
+    if (resolving) return;
+    setResolving(true);
+    try {
+      const r = await api.crmDealsList({ q: paymentRow.company, limit: 1 });
+      const d = (r.deals || [])[0];
+      if (d) setEditRow({ id: d.id, customer_name: d.customer_name, payment: paymentRow });
+      else alert('該当する案件が見つかりませんでした');
+    } catch { alert('案件の取得に失敗しました'); }
+    finally { setResolving(false); }
+  };
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.4)', zIndex:1100, display:'flex', justifyContent:'flex-end' }} onClick={onClose}>
@@ -323,7 +375,7 @@ function ForecastDrillPanel({ label, color, items, kind, onClose, onSaved }) {
         </div>
         {editRow ? (
           <div style={{ flex:1, overflowY:'auto' }}>
-            <DealQuickEdit dealRow={editRow} onBack={() => setEditRow(null)} onSaved={onSaved} />
+            <DealQuickEdit dealRow={editRow} payment={editRow.payment} onBack={() => setEditRow(null)} onSaved={onSaved} />
           </div>
         ) : (
         <div style={{ flex:1, overflowY:'auto', padding:'10px 16px' }}>
@@ -333,10 +385,11 @@ function ForecastDrillPanel({ label, color, items, kind, onClose, onSaved }) {
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               {list.map((r, i) => {
                 const companyName = r.customer_name || r.company;
-                const clickable = kind === 'deals' && r.id;
+                const clickable = kind === 'deals' ? !!r.id : !!r.company;
+                const handleClick = kind === 'deals' ? () => setEditRow(r) : () => openByCompany(r);
                 return (
                   <div key={r.id || i}
-                    onClick={() => clickable && setEditRow(r)}
+                    onClick={() => clickable && handleClick()}
                     style={{ background:C.surface2, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10,
                       border:`1px solid ${C.border}`, cursor: clickable ? 'pointer' : 'default' }}
                     onMouseEnter={e => { if (clickable) e.currentTarget.style.borderColor = color; }}

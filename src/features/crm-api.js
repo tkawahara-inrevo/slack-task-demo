@@ -1366,7 +1366,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const { name, yomi, contractType, paymentType, salesUserId, naUserId,
               initialFee, monthlyFee, contractMonths, hiringTarget, employmentType,
               lostReason, status, memo, data, firstMeetingDate,
-              settlementForecast, forecastConfidence,
+              settlementForecast, forecastConfidence, guaranteeCount,
               updatedAt, force } = req.body || {};
       const { rows: [existing] } = await dbQuery(
         `SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]
@@ -1397,6 +1397,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           data=COALESCE($17::jsonb, data),
           first_meeting_date=COALESCE($18::date, first_meeting_date),
           settlement_forecast=$19, forecast_confidence=$20,
+          guarantee_count=$21,
           updated_at=now()
         WHERE id=$1 AND team_id=$2 RETURNING *
       `, [req.params.id, teamId,
@@ -1409,7 +1410,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
           newStatus, memo??existing.memo, data ? JSON.stringify(data) : null,
           firstMeetingDate||null,
           settlementForecast!==undefined ? (settlementForecast||null) : existing.settlement_forecast,
-          forecastConfidence!==undefined ? (forecastConfidence||null) : existing.forecast_confidence]);
+          forecastConfidence!==undefined ? (forecastConfidence||null) : existing.forecast_confidence,
+          guaranteeCount!==undefined ? (guaranteeCount===''||guaranteeCount==null?null:Number(guaranteeCount)) : existing.guarantee_count]);
 
       // 受注になった場合、RPO案件を自動生成（まだなければ）
       let rpoClientId = row.data?.rpo_client_id || null;

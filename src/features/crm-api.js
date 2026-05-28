@@ -1546,7 +1546,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const highRes = await dbQuery(`
         SELECT d.id, d.name, d.yomi, d.contract_type, d.initial_fee, d.monthly_fee,
                d.unit_price, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
-               d.conclusion_date, c.name AS customer_name
+               d.conclusion_date, c.name AS customer_name, c.id AS customer_id
         FROM deals d JOIN customers c ON c.id = d.customer_id
         WHERE d.team_id=$1 ${salesFilter}
           AND d.yomi IN ('A 70％','S 90％')
@@ -1558,7 +1558,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const medRes = await dbQuery(`
         SELECT d.id, d.name, d.yomi, d.contract_type, d.initial_fee, d.monthly_fee,
                d.unit_price, COALESCE(d.sales_person, d.sales_user_id) AS sales_person,
-               d.conclusion_date, c.name AS customer_name
+               d.conclusion_date, c.name AS customer_name, c.id AS customer_id
         FROM deals d JOIN customers c ON c.id = d.customer_id
         WHERE d.team_id=$1 ${salesFilter}
           AND d.yomi IN ('B 50％','C 30％')

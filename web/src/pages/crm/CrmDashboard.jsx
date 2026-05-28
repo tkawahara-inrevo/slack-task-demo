@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBreakpoint } from '../../hooks/useWindowWidth';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine, LabelList } from 'recharts';
 import { api } from '../../api/client';
@@ -173,8 +174,80 @@ function Drilldown({ rep, type, start, end, onClose }) {
   );
 }
 
+// 予測カードのドリルダウン（右スライドパネル）
+function ForecastDrillPanel({ label, color, items, kind, onClose, onOpenDeal }) {
+  const list = items || [];
+  const total = kind === 'payments'
+    ? list.reduce((s, r) => s + Number(r.incentive_amount || 0), 0)
+    : list.reduce((s, r) => s + Number(r.monthly_fee || r.initial_fee || 0), 0);
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.4)', zIndex:1100, display:'flex', justifyContent:'flex-end' }} onClick={onClose}>
+      <div style={{ width:'min(480px,94vw)', height:'100%', background:C.surface, boxShadow:'-8px 0 32px rgba(0,0,0,0.2)', display:'flex', flexDirection:'column', animation:'none' }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <span style={{ width:10, height:10, borderRadius:3, background:color, display:'inline-block' }} />
+              <span style={{ fontWeight:800, fontSize:'1rem', color:C.text }}>{label}</span>
+            </div>
+            <div style={{ marginTop:3, fontSize:'0.8rem', fontWeight:700, color }}>{fmtMYen(total)} / {list.length}件</div>
+          </div>
+          <button onClick={onClose} style={{ width:30, height:30, borderRadius:8, background:C.surface2, border:'none', cursor:'pointer', color:C.textSub, fontSize:16, fontWeight:700 }}>×</button>
+        </div>
+        <div style={{ flex:1, overflowY:'auto', padding:'10px 16px' }}>
+          {list.length === 0 ? (
+            <div style={{ padding:40, textAlign:'center', color:C.textSub, fontSize:'0.85rem' }}>データがありません</div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {list.map((r, i) => {
+                const companyName = r.customer_name || r.company;
+                const clickable = kind === 'deals' && r.customer_id;
+                return (
+                  <div key={r.id || i}
+                    onClick={() => clickable && onOpenDeal(r.customer_id)}
+                    style={{ background:C.surface2, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10,
+                      border:`1px solid ${C.border}`, cursor: clickable ? 'pointer' : 'default' }}
+                    onMouseEnter={e => { if (clickable) e.currentTarget.style.borderColor = color; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; }}>
+                    {r.yomi && (
+                      <span style={{ fontSize:'0.62rem', fontWeight:700, color, flexShrink:0, background:C.surface, borderRadius:4, padding:'2px 6px' }}>{r.yomi}</span>
+                    )}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:700, color: clickable ? '#1d4ed8' : C.text, fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {companyName}{clickable && ' ›'}
+                      </div>
+                      <div style={{ fontSize:'0.66rem', color:C.textSub, marginTop:1 }}>
+                        {r.contract_type || r.plan || ''}{r.sales_person ? ` · ${r.sales_person}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ textAlign:'right', flexShrink:0 }}>
+                      {kind === 'payments' ? (
+                        <div style={{ fontWeight:800, color:'#059669', fontSize:'0.85rem' }}>{fmtMYen(r.incentive_amount)}</div>
+                      ) : (
+                        <div style={{ fontWeight:700, color:'#059669', fontSize:'0.8rem' }}>
+                          {String(r.contract_type||'').includes('月額')
+                            ? (r.monthly_fee > 0 ? `月${fmtM(r.monthly_fee)}` : fmtM(r.initial_fee))
+                            : fmtM(r.initial_fee || r.monthly_fee)}
+                        </div>
+                      )}
+                      {kind === 'payments' && r.payment_date && (
+                        <div style={{ fontSize:'0.62rem', color:C.textSub, marginTop:1 }}>{fmtDate(r.payment_date).substring(5)}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CrmDashboard() {
   const { isTablet } = useBreakpoint();
+  const navigate = useNavigate();
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -187,6 +260,7 @@ export default function CrmDashboard() {
   const [period, setPeriod]       = useState('custom');
   const [customMonth, setCustomMonth] = useState(currentMonth);
   const [drill, setDrill]         = useState(null);
+  const [forecastDrill, setForecastDrill] = useState(null); // { label, color, items }
   const [alertOpen, setAlertOpen] = useState(true);
   const [planMode, setPlanMode]   = useState('amount'); // 'amount' | 'count'
   const [syncing, setSyncing]     = useState(false);
@@ -701,24 +775,28 @@ export default function CrmDashboard() {
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                 {[
-                  { label:'入金確定',            amount:forecast.confirmed,  sub:`インセン ${fmtM(forecast.confirmedIncentive)}`,       color:'#059669', count:summary?.payments?.length },
-                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.high,       sub:`インセン見込 ${fmtM(forecast.highKpi)}`,             color:'#1e40af', count:summary?.highDeals?.length },
-                  { label:'締結多分いける [B/C]', amount:forecast.medium,     sub:`インセン見込 ${fmtM(forecast.mediumKpi)}`,           color:'#d97706', count:summary?.mediumDeals?.length },
+                  { label:'入金確定',            amount:forecast.confirmed,  sub:`インセン ${fmtM(forecast.confirmedIncentive)}`,       color:'#059669', items:summary?.payments,    kind:'payments' },
+                  { label:'締結ほぼ確実 [A/S]',  amount:forecast.high,       sub:`インセン見込 ${fmtM(forecast.highKpi)}`,             color:'#1e40af', items:summary?.highDeals,   kind:'deals' },
+                  { label:'締結多分いける [B/C]', amount:forecast.medium,     sub:`インセン見込 ${fmtM(forecast.mediumKpi)}`,           color:'#d97706', items:summary?.mediumDeals, kind:'deals' },
                 ].map(item => {
                   const pct = forecastDispTotal > 0 ? Math.round((item.amount / forecastDispTotal) * 100) : 0;
+                  const count = item.items?.length;
                   return (
-                    <div key={item.label}>
+                    <div key={item.label} onClick={() => count > 0 && setForecastDrill({ label:item.label, color:item.color, items:item.items, kind:item.kind })}
+                      style={{ cursor: count > 0 ? 'pointer' : 'default', borderRadius:6, padding:'2px 4px', margin:'0 -4px', transition:'background 0.1s' }}
+                      onMouseEnter={e => { if (count>0) e.currentTarget.style.background = C.surface2; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
                       <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
                         <div style={{ display:'flex', alignItems:'center', gap:5 }}>
                           <span style={{ width:10, height:10, borderRadius:3, background:item.color, display:'inline-block' }} />
                           <div>
-                            <span style={{ fontSize:'0.7rem', color:C.textMid }}>{item.label}</span>
+                            <span style={{ fontSize:'0.7rem', color:C.textMid }}>{item.label}{count > 0 && <span style={{ color:item.color, marginLeft:4 }}>›</span>}</span>
                             {item.sub && <div style={{ fontSize:'0.6rem', color:C.textSub }}>{item.sub}</div>}
                           </div>
                         </div>
                         <div style={{ textAlign:'right' }}>
                           <span style={{ fontSize:'0.78rem', fontWeight:700, color:item.color }}>{fmtM(item.amount)}</span>
-                          {item.count != null && <span style={{ fontSize:'0.65rem', color:C.textSub, marginLeft:5 }}>{item.count}件</span>}
+                          {count != null && <span style={{ fontSize:'0.65rem', color:C.textSub, marginLeft:5 }}>{count}件</span>}
                         </div>
                       </div>
                       <div style={{ height:8, background:C.surface2, borderRadius:4, overflow:'hidden' }}>
@@ -811,6 +889,14 @@ export default function CrmDashboard() {
 
       {drill && (
         <Drilldown rep={drill.rep} type={drill.type} start={rangeStart} end={rangeEnd} onClose={() => setDrill(null)} />
+      )}
+
+      {forecastDrill && (
+        <ForecastDrillPanel
+          {...forecastDrill}
+          onClose={() => setForecastDrill(null)}
+          onOpenDeal={(customerId) => { if (customerId) navigate(`/crm/customers/${customerId}`); }}
+        />
       )}
 
       {/* KPIカード詳細モーダル */}

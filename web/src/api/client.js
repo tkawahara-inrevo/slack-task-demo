@@ -254,6 +254,7 @@ export const api = {
     return crmFetch(`/deals${qs ? '?' + qs : ''}`);
   },
   crmDealDetail: (id) => crmFetch(`/deals/${id}`),
+  crmIncentiveAudit: () => crmFetch('/incentive-audit'),
   crmCreateDeal: (body) => crmPost('/deals', body),
   crmUpdateDeal: (id, body) => crmFetch(`/deals/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   crmDeleteDeal: (id) => crmDelete(`/deals/${id}`),

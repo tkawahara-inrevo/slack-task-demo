@@ -1663,6 +1663,99 @@ function registerCrmApi({ expressApp, authWithRole }) {
     }
   });
 
+  // ── インセン自動計算 監査（不一致レポート）──────────────────────
+  expressApp.get('/api/crm/incentive-audit', authWithRole, async (req, res) => {
+    try {
+      // 全入金（金額>0）を会社ごと・日付順に取得
+      const { rows } = await dbQuery(`
+        SELECT record_id, company, plan, staff, payment_date,
+               COALESCE(amount,0)::bigint AS amount,
+               COALESCE(incentive_amount,0)::bigint AS incentive_amount,
+               inflow_source
+        FROM kintone_payments
+        WHERE COALESCE(amount,0) > 0
+        ORDER BY company, payment_date, record_id
+      `);
+
+      // プラン分類
+      const classify = (plan) => {
+        const p = (plan || '').trim();
+        if (!p) return { cat: 'unknown' };
+        if (p.includes('採用保証')) {
+          if (/2(st|nd)|３|3/.test(p)) return { cat: 'hosho', seq: 3 };
+          if (/1(st)|upsell|２|2/.test(p)) return { cat: 'hosho', seq: 2 };
+          return { cat: 'hosho', seq: 1 };
+        }
+        if (p.includes('月額')) return { cat: 'getsugaku' };
+        if (p.includes('後払い')) {
+          if (p.includes('クライアント')) return { cat: 'atobarai_client' };
+          if (p.includes('INREVO'))     return { cat: 'atobarai_inrevo' };
+          return { cat: 'unknown' };
+        }
+        if (p.includes('研修')) return { cat: 'kenshu' };
+        if (/saas/i.test(p))   return { cat: 'saas' };
+        if (p.includes('ヒトツメ') || p.includes('送客')) return { cat: 'hitotsume' };
+        return { cat: 'unknown' };
+      };
+
+      // 会社ごとの状態（月額連番・採用保証の有無）
+      const state = {};
+      const out = [];
+      for (const r of rows) {
+        const co = r.company || '(空)';
+        if (!state[co]) state[co] = { monthlyCount: 0, hadHosho: false };
+        const st = state[co];
+        const cl = classify(r.plan);
+
+        let rate = null, label = '', note = '';
+        if (cl.cat === 'hosho') {
+          st.hadHosho = true;
+          rate = cl.seq === 1 ? 0.6 : cl.seq === 2 ? 0.3 : 0.2;
+          label = `採用保証${cl.seq === 1 ? '初回' : cl.seq === 2 ? '2回目' : '3回目以降'}`;
+        } else if (cl.cat === 'getsugaku') {
+          st.monthlyCount += 1;
+          const n = st.monthlyCount;
+          if (n === 1 && st.hadHosho) { rate = 0.4; label = '月額 切替契約'; }
+          else if (n === 1)           { rate = 1.0; label = '月額 初回'; }
+          else if (n <= 5)            { rate = 3.0; label = `月額 継続(${n}ヶ月目)`; }
+          else                        { rate = 0.5; label = `月額 継続(${n}ヶ月目)`; }
+        } else if (cl.cat === 'atobarai_client') { rate = 0.2; label = '後払い(クライアント)'; }
+        else if (cl.cat === 'atobarai_inrevo')   { rate = 0.1; label = '後払い(INREVO)'; }
+        else if (cl.cat === 'kenshu')   { rate = 1.0; label = '研修'; }
+        else if (cl.cat === 'saas')     { rate = 0.7; label = 'Saas'; }
+        else if (cl.cat === 'hitotsume'){ rate = 1.0; label = 'ヒトツメ送客'; }
+        else { label = '未分類'; note = `プラン「${r.plan || '(空)'}」はルール対象外`; }
+
+        const calc = rate != null ? Math.round(Number(r.amount) * rate) : null;
+        const stored = Number(r.incentive_amount);
+        let status;
+        if (rate == null) status = 'anomaly';
+        else if (Math.abs(calc - stored) <= 1) status = 'match';
+        else status = 'mismatch';
+
+        out.push({
+          record_id: r.record_id, company: co, plan: r.plan, staff: r.staff,
+          payment_date: r.payment_date, amount: Number(r.amount),
+          stored_incentive: stored, calc_rate: rate, calc_incentive: calc,
+          rule_label: label, status, note,
+        });
+      }
+
+      const summary = {
+        total: out.length,
+        match: out.filter(o => o.status === 'match').length,
+        mismatch: out.filter(o => o.status === 'mismatch').length,
+        anomaly: out.filter(o => o.status === 'anomaly').length,
+      };
+      // 不一致・要確認を優先表示
+      out.sort((a, b) => {
+        const order = { mismatch: 0, anomaly: 1, match: 2 };
+        return order[a.status] - order[b.status] || Math.abs(b.calc_incentive - b.stored_incentive || 0) - Math.abs(a.calc_incentive - a.stored_incentive || 0);
+      });
+      res.json({ summary, rows: out });
+    } catch (e) { console.error('[CRM] incentive-audit error:', e); res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── 個人成績評価 ──────────────────────────────────────────────
 
   // ロール目標 GET/PUT

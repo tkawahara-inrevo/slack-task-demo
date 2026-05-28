@@ -987,11 +987,13 @@ export default function CRM() {
     { key:'customers',   label:'顧客一覧',       msg:'' },
     { key:'yomi',        label:'ヨミ管理',       msg:'BC所属のみ' },
     { key:'performance', label:'成績',           msg:'管理者またはBC管理職のみ' },
+    { key:'incentive',   label:'インセン監査',   msg:'管理者またはBC管理職のみ' },
     { key:'settings',    label:'設定',           msg:'管理者またはBC管理職のみ' },
   ];
 
-  // 顧客一覧は常に表示（ただし非BC/非adminはダッシュボードに飛ばさない）
-  const visibleTabs = tabDefs.filter(t => t.key === 'customers' || access.tabs[t.key]?.visible);
+  // 顧客一覧は常に表示。インセン監査は成績と同じ権限
+  const tabVisible = (key) => key === 'incentive' ? access.tabs.performance?.visible : access.tabs[key]?.visible;
+  const visibleTabs = tabDefs.filter(t => t.key === 'customers' || tabVisible(t.key));
 
   return (
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
@@ -1025,6 +1027,11 @@ export default function CRM() {
             ? <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>
             : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
         )}
+        {tab === 'incentive' && (
+          access.tabs.performance?.visible
+            ? <div style={{ flex:1, overflow:'auto' }}><IncentiveAudit /></div>
+            : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
+        )}
         {tab === 'settings' && (
           access.tabs.settings?.visible
             ? <CrmSettings />
@@ -1034,3 +1041,96 @@ export default function CRM() {
     </div>
   );
 }
+
+// ── インセン自動計算 監査（不一致レポート）──────────────────────
+function IncentiveAudit() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('mismatch');
+  const yen = (n) => n != null ? `¥${Math.round(Number(n)).toLocaleString()}` : '—';
+
+  useEffect(() => {
+    api.crmIncentiveAudit().then(setData).catch(() => setData({ summary:{}, rows:[] })).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>計算中…</div>;
+  if (!data) return null;
+  const { summary = {}, rows = [] } = data;
+  const filtered = filter === 'all' ? rows : rows.filter(r => r.status === filter);
+  const STATUS = {
+    mismatch: { label:'不一致', color:'#dc2626', bg:'#fef2f2' },
+    anomaly:  { label:'要確認', color:'#d97706', bg:'#fffbeb' },
+    match:    { label:'一致',   color:'#059669', bg:'#f0fdf4' },
+  };
+
+  return (
+    <div style={{ padding:'20px 24px' }}>
+      <div style={{ fontWeight:700, fontSize:'1rem', color:'#0f172a', marginBottom:4 }}>インセン自動計算 監査</div>
+      <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:16 }}>
+        プラン・契約回数・月数ルールでインセンを自動計算し、現在のkintone登録値と比較します
+      </div>
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {[
+          ['mismatch', `不一致 ${summary.mismatch||0}`, '#dc2626'],
+          ['anomaly',  `要確認 ${summary.anomaly||0}`,  '#d97706'],
+          ['match',    `一致 ${summary.match||0}`,      '#059669'],
+          ['all',      `全件 ${summary.total||0}`,      '#1d4ed8'],
+        ].map(([k, label, color]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            style={{ padding:'6px 14px', borderRadius:8, border:`1px solid ${filter===k?color:'#e2e8f0'}`,
+              background: filter===k?color:'#fff', color: filter===k?'#fff':'#475569', fontWeight:700, fontSize:'0.8rem', cursor:'pointer' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', overflow:'auto' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
+          <thead>
+            <tr style={{ background:'#f8fafc', color:'#64748b', fontSize:'0.7rem', textAlign:'left' }}>
+              <th style={{ padding:'8px 10px' }}>状態</th>
+              <th style={{ padding:'8px 10px' }}>会社</th>
+              <th style={{ padding:'8px 10px' }}>プラン / 適用ルール</th>
+              <th style={{ padding:'8px 10px', textAlign:'right' }}>入金額</th>
+              <th style={{ padding:'8px 10px', textAlign:'right' }}>計算インセン</th>
+              <th style={{ padding:'8px 10px', textAlign:'right' }}>現インセン</th>
+              <th style={{ padding:'8px 10px', textAlign:'right' }}>差額</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>該当なし</td></tr>
+            )}
+            {filtered.slice(0, 500).map(r => {
+              const s = STATUS[r.status] || {};
+              const diff = (r.calc_incentive != null) ? r.calc_incentive - r.stored_incentive : null;
+              return (
+                <tr key={r.record_id} style={{ borderTop:'1px solid #f1f5f9' }}>
+                  <td style={{ padding:'8px 10px' }}>
+                    <span style={{ fontSize:'0.68rem', fontWeight:700, padding:'2px 8px', borderRadius:99, color:s.color, background:s.bg }}>{s.label}</span>
+                  </td>
+                  <td style={{ padding:'8px 10px', fontWeight:600, color:'#0f172a' }}>{r.company}
+                    <div style={{ fontSize:'0.66rem', color:'#94a3b8' }}>{r.staff||''}{r.payment_date?` · ${String(r.payment_date).slice(0,10)}`:''}</div>
+                  </td>
+                  <td style={{ padding:'8px 10px', color:'#475569' }}>
+                    {r.plan || '(空)'}
+                    <div style={{ fontSize:'0.66rem', color:'#94a3b8' }}>
+                      {r.rule_label}{r.calc_rate!=null?`（${Math.round(r.calc_rate*100)}%）`:''}{r.note?` · ${r.note}`:''}
+                    </div>
+                  </td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', color:'#0f172a' }}>{yen(r.amount)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700, color: r.calc_incentive!=null?'#1d4ed8':'#cbd5e1' }}>{r.calc_incentive!=null?yen(r.calc_incentive):'—'}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', color:'#475569' }}>{yen(r.stored_incentive)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700, color: diff==null?'#cbd5e1':diff===0?'#94a3b8':diff>0?'#059669':'#dc2626' }}>
+                    {diff==null?'—':`${diff>0?'+':''}${yen(diff)}`}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {filtered.length > 500 && <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:8 }}>※ 先頭500件を表示中（全{filtered.length}件）</div>}
+    </div>
+  );
+}
+

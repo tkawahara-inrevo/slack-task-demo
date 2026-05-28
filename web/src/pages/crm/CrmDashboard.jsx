@@ -174,16 +174,118 @@ function Drilldown({ rep, type, start, end, onClose }) {
   );
 }
 
+// 案件の主要項目をその場編集（ドリルダウン内）
+const YOMI_OPTS = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
+function DealQuickEdit({ dealRow, onBack, onSaved }) {
+  const [deal, setDeal] = useState(null);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.crmDealDetail(dealRow.id).then(r => {
+      const d = r.deal || {};
+      setDeal(d);
+      setForm({
+        yomi: d.yomi || '',
+        contract_type: d.contract_type || '',
+        monthly_fee: d.monthly_fee ?? '',
+        initial_fee: d.initial_fee ?? '',
+        next_action_date: (d.next_action_date || '').split('T')[0] || '',
+        next_action_content: d.next_action_content || '',
+        sales_memo: d.sales_memo || '',
+        settlement_forecast: d.settlement_forecast || '',
+        forecast_confidence: d.forecast_confidence || '',
+      });
+    }).catch(() => onBack());
+  }, [dealRow.id]);
+
+  const isSA = form && (form.yomi === 'A 70％' || form.yomi === 'S 90％');
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.crmUpdateDeal(dealRow.id, {
+        yomi: form.yomi,
+        contractType: form.contract_type || null,
+        monthlyFee: form.monthly_fee === '' ? null : Number(form.monthly_fee),
+        initialFee: form.initial_fee === '' ? null : Number(form.initial_fee),
+        data: { ...(deal.data||{}), next_action_date: form.next_action_date || null, next_action_content: form.next_action_content || null },
+        memo: deal.memo,
+        salesMemo: form.sales_memo,
+        settlementForecast: form.settlement_forecast || null,
+        forecastConfidence: form.settlement_forecast === '来月締結見込み' ? (form.forecast_confidence || null) : null,
+        updatedAt: deal.updated_at, force: true,
+      });
+      onSaved && onSaved();
+      onBack();
+    } catch (e) { alert('保存失敗: ' + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const L = { fontSize:'0.66rem', color:C.textSub, fontWeight:600, marginBottom:3, display:'block' };
+  const I = { width:'100%', boxSizing:'border-box', padding:'7px 9px', border:`1.5px solid ${C.border}`, borderRadius:7, fontSize:'0.84rem', outline:'none', background:C.surface, color:C.text };
+
+  if (!form) return <div style={{ padding:40, textAlign:'center', color:C.textSub }}>読み込み中…</div>;
+  return (
+    <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:11 }}>
+      <button onClick={onBack} style={{ alignSelf:'flex-start', background:'none', border:'none', color:'#2563eb', cursor:'pointer', fontSize:'0.78rem', padding:0 }}>← 一覧に戻る</button>
+      <div style={{ fontWeight:800, fontSize:'0.95rem', color:C.text }}>{dealRow.customer_name}</div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
+        <div><label style={L}>ヨミ</label>
+          <select value={form.yomi} onChange={e=>setForm(f=>({...f,yomi:e.target.value}))} style={{...I,cursor:'pointer'}}>
+            {YOMI_OPTS.map(y=><option key={y} value={y}>{y}</option>)}
+          </select></div>
+        <div><label style={L}>契約形態</label>
+          <input value={form.contract_type} onChange={e=>setForm(f=>({...f,contract_type:e.target.value}))} style={I} /></div>
+        <div><label style={L}>月額（円）</label>
+          <input type="number" value={form.monthly_fee} onChange={e=>setForm(f=>({...f,monthly_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+        <div><label style={L}>初期費用（円）</label>
+          <input type="number" value={form.initial_fee} onChange={e=>setForm(f=>({...f,initial_fee:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+      </div>
+      {isSA && (
+        <div style={{ display:'grid', gridTemplateColumns: form.settlement_forecast==='来月締結見込み' ? '1fr 1fr' : '1fr', gap:9, padding:'9px', background:C.surface2, borderRadius:8 }}>
+          <div><label style={L}>締結見込み</label>
+            <select value={form.settlement_forecast} onChange={e=>setForm(f=>({...f,settlement_forecast:e.target.value}))} style={{...I,cursor:'pointer'}}>
+              <option value="">未設定</option>
+              <option value="今月可能性あり">今月可能性あり</option>
+              <option value="来月締結見込み">来月締結見込み</option>
+            </select></div>
+          {form.settlement_forecast==='来月締結見込み' && (
+            <div><label style={L}>確度</label>
+              <select value={form.forecast_confidence} onChange={e=>setForm(f=>({...f,forecast_confidence:e.target.value}))} style={{...I,cursor:'pointer'}}>
+                <option value="">-</option><option value="高">高</option><option value="中">中</option><option value="低">低</option>
+              </select></div>
+          )}
+        </div>
+      )}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
+        <div><label style={L}>次回対応日</label>
+          <input type="date" value={form.next_action_date} onChange={e=>setForm(f=>({...f,next_action_date:e.target.value}))} style={I} /></div>
+        <div><label style={L}>次回アクション</label>
+          <input value={form.next_action_content} onChange={e=>setForm(f=>({...f,next_action_content:e.target.value}))} style={I} /></div>
+      </div>
+      <div><label style={L}>商談メモ</label>
+        <textarea value={form.sales_memo} onChange={e=>setForm(f=>({...f,sales_memo:e.target.value}))} rows={4}
+          style={{...I, resize:'vertical', lineHeight:1.5}} /></div>
+      <button onClick={save} disabled={saving}
+        style={{ padding:'9px', border:'none', borderRadius:8, background:saving?'#94a3b8':'#1e40af', color:'#fff', fontWeight:700, fontSize:'0.85rem', cursor:saving?'default':'pointer' }}>
+        {saving ? '保存中…' : '保存'}
+      </button>
+    </div>
+  );
+}
+
 // 予測カードのドリルダウン（右スライドパネル）
-function ForecastDrillPanel({ label, color, items, kind, onClose, onOpenDeal }) {
+function ForecastDrillPanel({ label, color, items, kind, onClose, onSaved }) {
   const list = items || [];
+  const [editRow, setEditRow] = useState(null);
   const total = kind === 'payments'
     ? list.reduce((s, r) => s + Number(r.incentive_amount || 0), 0)
     : list.reduce((s, r) => s + Number(r.monthly_fee || r.initial_fee || 0), 0);
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.4)', zIndex:1100, display:'flex', justifyContent:'flex-end' }} onClick={onClose}>
-      <div style={{ width:'min(480px,94vw)', height:'100%', background:C.surface, boxShadow:'-8px 0 32px rgba(0,0,0,0.2)', display:'flex', flexDirection:'column', animation:'none' }} onClick={e => e.stopPropagation()}>
+      <div style={{ width:'min(480px,94vw)', height:'100%', background:C.surface, boxShadow:'-8px 0 32px rgba(0,0,0,0.2)', display:'flex', flexDirection:'column' }} onClick={e => e.stopPropagation()}>
         <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
@@ -194,6 +296,11 @@ function ForecastDrillPanel({ label, color, items, kind, onClose, onOpenDeal }) 
           </div>
           <button onClick={onClose} style={{ width:30, height:30, borderRadius:8, background:C.surface2, border:'none', cursor:'pointer', color:C.textSub, fontSize:16, fontWeight:700 }}>×</button>
         </div>
+        {editRow ? (
+          <div style={{ flex:1, overflowY:'auto' }}>
+            <DealQuickEdit dealRow={editRow} onBack={() => setEditRow(null)} onSaved={onSaved} />
+          </div>
+        ) : (
         <div style={{ flex:1, overflowY:'auto', padding:'10px 16px' }}>
           {list.length === 0 ? (
             <div style={{ padding:40, textAlign:'center', color:C.textSub, fontSize:'0.85rem' }}>データがありません</div>
@@ -201,10 +308,10 @@ function ForecastDrillPanel({ label, color, items, kind, onClose, onOpenDeal }) 
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               {list.map((r, i) => {
                 const companyName = r.customer_name || r.company;
-                const clickable = kind === 'deals' && r.customer_id;
+                const clickable = kind === 'deals' && r.id;
                 return (
                   <div key={r.id || i}
-                    onClick={() => clickable && onOpenDeal(r.customer_id)}
+                    onClick={() => clickable && setEditRow(r)}
                     style={{ background:C.surface2, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10,
                       border:`1px solid ${C.border}`, cursor: clickable ? 'pointer' : 'default' }}
                     onMouseEnter={e => { if (clickable) e.currentTarget.style.borderColor = color; }}
@@ -218,6 +325,7 @@ function ForecastDrillPanel({ label, color, items, kind, onClose, onOpenDeal }) 
                       </div>
                       <div style={{ fontSize:'0.66rem', color:C.textSub, marginTop:1 }}>
                         {r.contract_type || r.plan || ''}{r.sales_person ? ` · ${r.sales_person}` : ''}
+                        {r.settlement_forecast ? ` · ${r.settlement_forecast}${r.forecast_confidence?`(${r.forecast_confidence})`:''}` : ''}
                       </div>
                     </div>
                     <div style={{ textAlign:'right', flexShrink:0 }}>
@@ -240,6 +348,7 @@ function ForecastDrillPanel({ label, color, items, kind, onClose, onOpenDeal }) 
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -938,7 +1047,7 @@ export default function CrmDashboard() {
         <ForecastDrillPanel
           {...forecastDrill}
           onClose={() => setForecastDrill(null)}
-          onOpenDeal={(customerId) => { if (customerId) navigate(`/crm/customers/${customerId}`); }}
+          onSaved={() => load(salesUser, period, customMonth)}
         />
       )}
 

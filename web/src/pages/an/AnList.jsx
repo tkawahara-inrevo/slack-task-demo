@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 const STATUS_LABEL = { pending: '未回答', answered: '回答済み', closed: 'クローズ' };
 const STATUS_COLOR = { pending: '#dc2626', answered: '#2563eb', closed: '#6b7280' };
@@ -27,6 +28,7 @@ export default function AnList() {
   const [mediaLoading, setMediaLoading] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState({});
   const [mediaRoi, setMediaRoi] = useState(null);
+  const [mediaDash, setMediaDash] = useState(null);
   const [unified, setUnified] = useState([]);
   const [unifiedCounts, setUnifiedCounts] = useState({ total: 0, slack_total: 0, kintone_total: 0 });
   const [searchQ, setSearchQ] = useState('');
@@ -68,6 +70,7 @@ export default function AnList() {
     if (view === 'media') {
       loadMediaStats(mediaFilters);
       if (mediaRoi === null) api.anMediaRoi().then(r => setMediaRoi(r.rows || [])).catch(() => setMediaRoi([]));
+      if (mediaDash === null) api.anDashboardSummary().then(setMediaDash).catch(() => setMediaDash({}));
     }
   }, [mediaFilters, view]); // eslint-disable-line
 
@@ -144,7 +147,48 @@ export default function AnList() {
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {/* 媒体実績DBビュー */}
           {view === 'media' && (
-            <div style={{ padding: 12 }}>
+            <div style={{ padding: '16px 20px', background: '#f8fafc', minHeight: '100%' }}>
+              {/* KPIカード */}
+              {mediaDash?.kpi && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, marginBottom: 14 }}>
+                  {[
+                    { label: '総調査件数', value: mediaDash.kpi.total_studies?.toLocaleString() || 0, sub: `うち完了 ${mediaDash.kpi.done_studies || 0}`, color: '#3b82f6', icon: '📚' },
+                    { label: '利用媒体数', value: mediaDash.kpi.unique_media?.toLocaleString() || 0, sub: `延べ ${mediaDash.kpi.total_slots || 0}件`, color: '#0891b2', icon: '📡' },
+                    { label: '平均料金', value: mediaDash.kpi.avg_fee ? `¥${Math.round(mediaDash.kpi.avg_fee/10000).toLocaleString()}万` : '—', sub: '媒体スロット平均', color: '#059669', icon: '💰' },
+                    { label: '予測精度', value: mediaDash.kpi.forecast_accuracy_pct != null ? `${mediaDash.kpi.forecast_accuracy_pct}%` : '—', sub: '実応募 / 予測応募', color: mediaDash.kpi.forecast_accuracy_pct >= 80 ? '#059669' : mediaDash.kpi.forecast_accuracy_pct >= 50 ? '#d97706' : '#dc2626', icon: '🎯' },
+                  ].map(k => (
+                    <div key={k.label} style={{ background: '#fff', borderRadius: 10, padding: '12px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', position: 'relative', overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute', top: 8, right: 10, fontSize: '1rem', opacity: 0.4 }}>{k.icon}</div>
+                      <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>{k.label}</div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 800, color: k.color, marginTop: 2 }}>{k.value}</div>
+                      <div style={{ fontSize: '0.62rem', color: '#94a3b8', marginTop: 1 }}>{k.sub}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 採用数 TOP10 媒体（バーチャート） */}
+              {mediaDash?.top_media?.length > 0 && (
+                <div style={{ background: '#fff', borderRadius: 10, padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                    <span style={{ width: 4, height: 16, background: '#3b82f6', borderRadius: 2 }} />
+                    <span style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a' }}>媒体別 累計実応募 TOP10</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={mediaDash.top_media} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="media_name" tick={{ fontSize: 10, fill: '#64748b' }} interval={0} angle={-20} textAnchor="end" height={50} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={44} />
+                      <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11 }} />
+                      <Bar dataKey="total_effective" radius={[6, 6, 0, 0]} name="実応募合計">
+                        <LabelList dataKey="total_effective" position="top" style={{ fontSize: 9, fill: '#64748b' }} />
+                        {mediaDash.top_media.map((_, i) => <Cell key={i} fill={i===0?'#1d4ed8':i<3?'#3b82f6':'#93c5fd'} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
               {/* 媒体ROI（kintone App221 のAN調査から集計） */}
               {mediaRoi && mediaRoi.length > 0 && (
                 <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>

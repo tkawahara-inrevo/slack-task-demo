@@ -628,6 +628,7 @@ export const api = {
   },
   anStudiesSync:      ()   => apiFetch(`/an/studies/sync`, { method: 'POST' }),
   anMediaRoi:         ()   => apiFetch(`/an/media-roi`),
+  anDashboardSummary: ()   => apiFetch(`/an/dashboard-summary`),
   mediaSuggest:       (filters = {}) => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
     return apiFetch(`/media-suggest${qs ? `?${qs}` : ''}`);

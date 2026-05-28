@@ -704,6 +704,50 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 
+  // 媒体実績ダッシュボード用の概要KPI
+  expressApp.get('/api/dashboard/an/dashboard-summary', authWithRole, async (req, res) => {
+    try {
+      const { rows: [k] } = await dbQuery(`
+        SELECT
+          (SELECT COUNT(*)::int FROM an_studies)                        AS total_studies,
+          (SELECT COUNT(DISTINCT media_name)::int FROM an_study_media WHERE media_name IS NOT NULL AND media_name <> '')  AS unique_media,
+          (SELECT COUNT(*)::int FROM an_study_media WHERE media_name IS NOT NULL)  AS total_slots,
+          (SELECT COUNT(*)::int FROM an_studies WHERE status IN ('完了','対応済','クローズ')) AS done_studies,
+          ROUND((SELECT AVG(fee) FROM an_study_media WHERE fee > 0))::bigint AS avg_fee,
+          ROUND((SELECT
+                  CASE WHEN AVG(NULLIF(expected_apps,0))>0
+                       THEN AVG(NULLIF(effective_apps,0))/AVG(NULLIF(expected_apps,0))*100
+                       ELSE NULL END
+                FROM an_study_media), 1) AS forecast_accuracy_pct
+      `);
+      // 媒体別 採用数（実応募）TOP10
+      const top = await dbQuery(`
+        SELECT media_name,
+               COUNT(*)::int AS cases,
+               ROUND(SUM(COALESCE(effective_apps,0)))::int AS total_effective,
+               ROUND(AVG(NULLIF(fee,0)))::bigint AS avg_fee
+        FROM an_study_media
+        WHERE media_name IS NOT NULL AND media_name <> ''
+        GROUP BY media_name
+        ORDER BY total_effective DESC NULLS LAST
+        LIMIT 10
+      `);
+      // 業種(雇用形態) × 媒体 マトリクス（採用数ベース、雇用形態主軸）
+      const matrix = await dbQuery(`
+        SELECT COALESCE(NULLIF(s.employment_type,''),'未設定') AS group_key,
+               m.media_name,
+               COUNT(*)::int AS cases,
+               ROUND(SUM(COALESCE(m.effective_apps,0)))::int AS effective
+        FROM an_study_media m
+        JOIN an_studies s ON s.record_id = m.study_record_id
+        WHERE m.media_name IS NOT NULL AND m.media_name <> ''
+        GROUP BY group_key, m.media_name
+        ORDER BY group_key, effective DESC NULLS LAST
+      `);
+      res.json({ kpi: k, top_media: top.rows, matrix: matrix.rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
   // 媒体ROI 集計（媒体名でグルーピングして応募予測精度／費用効率を集計）
   expressApp.get('/api/dashboard/an/media-roi', authWithRole, async (req, res) => {
     try {

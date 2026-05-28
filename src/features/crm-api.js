@@ -1073,8 +1073,8 @@ function registerCrmApi({ expressApp, authWithRole }) {
         res.json({ rows });
       } else if (type === 'won') {
         const { rows } = await dbQuery(`
-          SELECT d.order_date, c.name AS customer_name,
-                 d.contract_type, d.initial_fee, d.monthly_fee
+          SELECT d.id, d.yomi, c.id AS customer_id, d.order_date, c.name AS customer_name,
+                 d.contract_type, d.initial_fee, d.monthly_fee, d.settlement_forecast, d.forecast_confidence
           FROM deals d JOIN customers c ON c.id=d.customer_id
           WHERE d.team_id=$1
             AND COALESCE(d.sales_person, d.sales_user_id)=$2
@@ -1345,6 +1345,19 @@ function registerCrmApi({ expressApp, authWithRole }) {
       console.error('[CRM] create deal error:', e);
       res.status(500).json({ error: 'internal' });
     }
+  });
+
+  // 案件単体取得（ドリルダウン等のクイック編集用）
+  expressApp.get('/api/crm/deals/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [deal] } = await dbQuery(
+        `SELECT d.*, c.name AS customer_name FROM deals d JOIN customers c ON c.id=d.customer_id
+         WHERE d.id=$1 AND d.team_id=$2`, [req.params.id, teamId]
+      );
+      if (!deal) return res.status(404).json({ error: 'not_found' });
+      res.json({ deal });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
   expressApp.patch('/api/crm/deals/:id', authWithRole, async (req, res) => {

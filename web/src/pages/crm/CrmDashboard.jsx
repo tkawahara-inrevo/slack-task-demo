@@ -80,8 +80,10 @@ function buildRepTable(repTable, targetReps, filterRep) {
   });
 }
 
-function Drilldown({ rep, type, start, end, onClose }) {
+function Drilldown({ rep, type, start, end, onClose, onSaved }) {
   const [rows, setRows] = useState(null);
+  const [editRow, setEditRow] = useState(null);
+  const [resolving, setResolving] = useState(false);
   useEffect(() => {
     api.crmDashboardDrilldown({ rep, type, start, end })
       .then(d => setRows(d.rows || []))
@@ -90,6 +92,19 @@ function Drilldown({ rep, type, start, end, onClose }) {
 
   const payTotal = type === 'payments' && rows
     ? rows.reduce((s, r) => s + Number(r.incentive_amount || 0), 0) : 0;
+
+  // 会社名から案件を解決して編集を開く（入金ドリルダウン用）
+  const openByCompany = async (company) => {
+    if (!company || resolving) return;
+    setResolving(true);
+    try {
+      const r = await api.crmDealsList({ q: company, limit: 1 });
+      const d = (r.deals || [])[0];
+      if (d) setEditRow({ id: d.id, customer_name: d.customer_name });
+      else alert('該当する案件が見つかりませんでした');
+    } catch { alert('案件の取得に失敗しました'); }
+    finally { setResolving(false); }
+  };
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
@@ -112,6 +127,11 @@ function Drilldown({ rep, type, start, end, onClose }) {
         </div>
 
         {/* コンテンツ */}
+        {editRow ? (
+          <div style={{ overflowY:'auto' }}>
+            <DealQuickEdit dealRow={editRow} onBack={() => setEditRow(null)} onSaved={onSaved} />
+          </div>
+        ) : (
         <div style={{ overflowY:'auto', padding:'8px 16px 16px' }}>
           {rows === null ? (
             <div style={{ padding:40, textAlign:'center', color:C.textSub, fontSize:'0.85rem' }}>読み込み中…</div>
@@ -120,12 +140,14 @@ function Drilldown({ rep, type, start, end, onClose }) {
           ) : type === 'payments' ? (
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
               {rows.map((r, i) => (
-                <div key={i} style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div key={i} onClick={() => openByCompany(r.company)}
+                  style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)', cursor:'pointer' }}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor='#93c5fd'} onMouseLeave={e=>e.currentTarget.style.borderColor='#f1f5f9'}>
                   <div style={{ width:36, fontSize:'0.68rem', color:C.textSub, flexShrink:0, textAlign:'center', background:C.surface2, borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
                     {r.payment_date ? fmtDate(r.payment_date).substring(5) : '—'}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:600, color:C.text, fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company}</div>
+                    <div style={{ fontWeight:600, color:'#1d4ed8', fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.company} ›</div>
                     {r.plan && (
                       <span style={{ fontSize:'0.62rem', background:'#eff6ff', color:'#1e40af', borderRadius:4, padding:'1px 7px', marginTop:3, display:'inline-block', fontWeight:600 }}>
                         {r.plan?.includes('月額') && r.month_num ? `月額（${r.month_num}ヶ月目）` : r.plan}
@@ -144,12 +166,14 @@ function Drilldown({ rep, type, start, end, onClose }) {
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
               {rows.map((r, i) => (
-                <div key={i} style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div key={i} onClick={() => r.id && setEditRow({ id:r.id, customer_name:r.customer_name })}
+                  style={{ background:C.surface, borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:10, border:'1px solid #f1f5f9', boxShadow:'0 1px 3px rgba(0,0,0,0.04)', cursor: r.id?'pointer':'default' }}
+                  onMouseEnter={e=>{ if(r.id) e.currentTarget.style.borderColor='#93c5fd'; }} onMouseLeave={e=>e.currentTarget.style.borderColor='#f1f5f9'}>
                   <div style={{ width:36, fontSize:'0.68rem', color:C.textSub, flexShrink:0, textAlign:'center', background:C.surface2, borderRadius:6, padding:'4px 0', lineHeight:1.4 }}>
                     {r.order_date ? fmtDate(r.order_date).substring(5) : '—'}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:600, color:C.text, fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.customer_name}</div>
+                    <div style={{ fontWeight:600, color: r.id?'#1d4ed8':C.text, fontSize:'0.85rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.customer_name}{r.id?' ›':''}</div>
                     {r.contract_type && (
                       <span style={{ fontSize:'0.65rem', color:'#6366f1', background:'#eef2ff', borderRadius:4, padding:'1px 6px', marginTop:2, display:'inline-block' }}>
                         {r.contract_type}
@@ -169,6 +193,7 @@ function Drilldown({ rep, type, start, end, onClose }) {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -1040,7 +1065,7 @@ export default function CrmDashboard() {
       </div>
 
       {drill && (
-        <Drilldown rep={drill.rep} type={drill.type} start={rangeStart} end={rangeEnd} onClose={() => setDrill(null)} />
+        <Drilldown rep={drill.rep} type={drill.type} start={rangeStart} end={rangeEnd} onClose={() => setDrill(null)} onSaved={() => load(salesUser, period, customMonth)} />
       )}
 
       {forecastDrill && (

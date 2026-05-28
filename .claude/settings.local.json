@@ -81,7 +81,8 @@
       "Bash(node --check ../src/features/crm-api.js)",
       "Read(//e/dev/**)",
       "Bash(node --check src/features/crm-api.js)",
-      "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem e:/dev/slack-task-demo/_import_forecast.sql ubuntu@3.222.101.208:/tmp/_import_forecast.sql)"
+      "Bash(scp -i ~/.ssh/lightsail-us-east-1.pem e:/dev/slack-task-demo/_import_forecast.sql ubuntu@3.222.101.208:/tmp/_import_forecast.sql)",
+      "Bash(node --check e:/dev/slack-task-demo/src/features/crm-api.js)"
     ]
   }
 }

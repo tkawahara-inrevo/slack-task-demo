@@ -465,7 +465,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         where += ` AND d.status IN ('active','won','lost')`;
       }
 
-      // ステージフィルター
+      // ステージフィルター（カンマ区切りで複数可、OR結合）
       if (stage) {
         const stageToYomi = {
           'リード獲得':    `d.yomi='アポ化前'`,
@@ -475,7 +475,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
           '失注':          `d.status='lost'`,
           '見送り':        `d.status='dormant'`,
         };
-        if (stageToYomi[stage]) where += ` AND (${stageToYomi[stage]})`;
+        const parts = String(stage).split(',').map(s => s.trim()).filter(Boolean)
+          .map(s => stageToYomi[s]).filter(Boolean);
+        if (parts.length > 0) where += ` AND (${parts.join(' OR ')})`;
       }
 
       // ヨミフィルター

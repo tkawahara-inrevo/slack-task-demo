@@ -1,5 +1,6 @@
-// AN依頼管理 API + Slackリスナー
+// AN依頼管理 API + Slackリスナー + 媒体マスタ
 const { dbQuery } = require('../db/index');
+const { syncMediaMaster } = require('./kintone-sync');
 
 const AN_CHANNEL_ID = process.env.AN_CHANNEL_ID || 'C09EFPSSAF2';
 
@@ -467,6 +468,76 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
           size_buckets: [['small','〜5名'],['mid','6〜10名'],['large','11名〜']] },
       });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ─── 媒体マスタ（App225） ─────────────────────────────
+  expressApp.get('/api/dashboard/media-master', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const q = (req.query.q || '').trim();
+      const industry = req.query.industry || '';
+      const jobType  = req.query.job_type || '';
+      const area     = req.query.area || '';
+      const hireMethod = req.query.hire_method || '';
+      const employmentType = req.query.employment_type || '';
+      const minScore = Number(req.query.min_score || 0);
+
+      const params = [teamId];
+      const where = [`team_id=$1`];
+      if (q) {
+        params.push(`%${q}%`);
+        where.push(`(name ILIKE $${params.length} OR vendor_url ILIKE $${params.length} OR notes ILIKE $${params.length})`);
+      }
+      if (industry)       { params.push(industry);       where.push(`$${params.length} = ANY(industries)`); }
+      if (jobType)        { params.push(jobType);        where.push(`$${params.length} = ANY(job_types)`); }
+      if (area)           { params.push(area);           where.push(`$${params.length} = ANY(areas)`); }
+      if (hireMethod)     { params.push(hireMethod);     where.push(`$${params.length} = ANY(hire_methods)`); }
+      if (employmentType) { params.push(employmentType); where.push(`$${params.length} = ANY(employment_types)`); }
+      if (minScore > 0)   { params.push(minScore);       where.push(`COALESCE(recommend_score,0) >= $${params.length}`); }
+
+      const { rows } = await dbQuery(`
+        SELECT record_id, name, vendor_url, recommend_score, service_type,
+               hire_methods, areas, age_targets, industries, job_types, employment_types,
+               basic_billing, norma, notes, caution
+        FROM media_master WHERE ${where.join(' AND ')}
+        ORDER BY recommend_score DESC NULLS LAST, name
+      `, params);
+
+      // ファセット用に全レコードから distinct を集める
+      const { rows: facetRows } = await dbQuery(
+        `SELECT industries, job_types, areas, hire_methods, employment_types FROM media_master WHERE team_id=$1`,
+        [teamId]
+      );
+      const uniq = (col) => [...new Set(facetRows.flatMap(r => r[col] || []))].sort();
+      const facets = {
+        industries: uniq('industries'),
+        job_types:  uniq('job_types'),
+        areas:      uniq('areas'),
+        hire_methods: uniq('hire_methods'),
+        employment_types: uniq('employment_types'),
+      };
+      res.json({ media: rows, facets, total: rows.length });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.get('/api/dashboard/media-master/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [m] } = await dbQuery(
+        `SELECT * FROM media_master WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!m) return res.status(404).json({ error: 'not_found' });
+      res.json({ media: m });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // 手動再同期
+  expressApp.post('/api/dashboard/media-master/sync', authWithRole, async (req, res) => {
+    try {
+      const n = await syncMediaMaster();
+      res.json({ ok: true, upserted: n });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 }
 

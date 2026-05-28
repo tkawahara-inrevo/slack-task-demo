@@ -623,6 +623,30 @@ async function dbEnsureSettingsSchema() {
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_dep_deal ON deal_expected_payments(deal_id)`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_dep_status ON deal_expected_payments(team_id, status, expected_date)`).catch(() => {});
+
+  // kintone App225 媒体マスタ
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS media_master (
+      record_id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL DEFAULT 'T086C06L5V0',
+      name TEXT,
+      vendor_url TEXT,
+      recommend_score INTEGER,
+      service_type TEXT,
+      hire_methods TEXT[],
+      areas TEXT[],
+      age_targets TEXT[],
+      industries TEXT[],
+      job_types TEXT[],
+      employment_types TEXT[],
+      basic_billing TEXT,
+      norma TEXT,
+      notes TEXT,
+      caution TEXT,
+      data JSONB NOT NULL DEFAULT '{}',
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

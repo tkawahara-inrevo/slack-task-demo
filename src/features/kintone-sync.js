@@ -20,6 +20,22 @@ const APPS = {
 
 // App103専用トークン（活動履歴）
 const APP_103_TOKEN = process.env.KINTONE_APP_103_TOKEN || 'cekSgk3whWbQU6KFOGhr7wnnFOiSp2hzRHQP0Zhz';
+// App225専用トークン（媒体マスタ）
+const APP_225_TOKEN = process.env.KINTONE_APP_225_TOKEN || 'N3ztvAhgRFJu0yzCYz5FhFLn8Hi4IzTqTrLamCzC';
+
+// App225用: 業種/職種カテゴリ判定（フィールド名がそのままカテゴリ名）
+const APP225_INDUSTRIES = [
+  '農業・林業','漁業','鉱業・採石業・砂利採取業','建設業','製造業',
+  '電気・ガス・熱供給・水道業','情報通信業','運輸業・郵便業','卸売業・小売業',
+  '金融業・保険業','不動産業・物品賃貸業','学術研究・専門・技術サービス業',
+  '宿泊業・飲食サービス業','生活関連サービス業・娯楽業','教育・学習支援業',
+  '医療・福祉','複合サービス事業','サービス業','公務','その他'
+];
+const APP225_JOBS = [
+  '経営・企画','事務・管理','専門職','営業',
+  'IT・Webエンジニア','マーケティング・クリエイティブ',
+  '技術_電気・機械・化学','建築・土木','販売・サービス'
+];
 
 // kintone Records APIをGET（fields が空配列の場合は全フィールド取得）
 function kintoneGet(appId, token, fields, offset) {
@@ -245,4 +261,98 @@ async function syncKintoneActivities() {
   return upserted;
 }
 
-module.exports = { syncKintoneApp, syncKintonePayments, syncKintoneActivities, APPS };
+// App225（媒体マスタ）→ media_master テーブルへ同期
+async function syncMediaMaster() {
+  const { dbQuery } = require('../db/index');
+  if (!APP_225_TOKEN) {
+    console.warn('[kintone] APP_225 token not set, skipping media_master sync');
+    return 0;
+  }
+
+  let offset = 0, upserted = 0;
+  const seenIds = new Set();
+  while (true) {
+    const data = await kintoneGet(225, APP_225_TOKEN, [], offset);
+    if (data.code) throw new Error(`kintone error [app225]: ${data.code} - ${data.message}`);
+    if (!data.records || data.records.length === 0) break;
+
+    for (const rec of data.records) {
+      const get = (k) => rec[k]?.value ?? null;
+      const getStr = (k) => {
+        const v = get(k);
+        if (Array.isArray(v)) return v.map(x => x.name || x.code || x).join(', ');
+        return v == null ? null : String(v);
+      };
+      const getArr = (k) => {
+        const v = get(k);
+        return Array.isArray(v) ? v.filter(Boolean) : [];
+      };
+      const isChecked = (k) => {
+        const v = get(k);
+        return Array.isArray(v) && v.length > 0;
+      };
+
+      const recordId = String(rec['$id']?.value || '');
+      if (!recordId) continue;
+      seenIds.add(recordId);
+
+      // 業種・職種チェックボックスから true のものだけ抽出
+      const industries = APP225_INDUSTRIES.filter(isChecked);
+      const job_types  = APP225_JOBS.filter(isChecked);
+
+      // 全フィールドを data に保存（値は plain）
+      const rawData = {};
+      for (const [k, fv] of Object.entries(rec)) {
+        if (k.startsWith('$')) continue;
+        rawData[k] = fv?.value ?? null;
+      }
+
+      const score = Number(getStr('オススメ度'));
+      await dbQuery(`
+        INSERT INTO media_master
+          (record_id, team_id, name, vendor_url, recommend_score, service_type,
+           hire_methods, areas, age_targets, industries, job_types, employment_types,
+           basic_billing, norma, notes, caution, data, synced_at)
+        VALUES ($1,'T086C06L5V0',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb, now())
+        ON CONFLICT (record_id) DO UPDATE SET
+          name=$2, vendor_url=$3, recommend_score=$4, service_type=$5,
+          hire_methods=$6, areas=$7, age_targets=$8, industries=$9, job_types=$10, employment_types=$11,
+          basic_billing=$12, norma=$13, notes=$14, caution=$15, data=$16::jsonb, synced_at=now()
+      `, [
+        recordId,
+        getStr('媒体名'),
+        getStr('公式HP'),
+        Number.isFinite(score) ? score : null,
+        getStr('種別'),
+        getArr('採用手法'),
+        getArr('エリア'),
+        getArr('利用者年齢層'),
+        industries,
+        job_types,
+        getArr('対象区分'),
+        getStr('基本請求先'),
+        getStr('ノルマ'),
+        getStr('媒体備考'),
+        getStr('注意事項'),
+        JSON.stringify(rawData),
+      ]).catch(e => console.error('[media_master] upsert err:', e.message));
+      upserted++;
+    }
+    if (data.records.length < 500) break;
+    offset += 500;
+  }
+
+  // kintone側で削除されたものをDBからも削除
+  if (seenIds.size > 0) {
+    const ids = Array.from(seenIds);
+    const del = await dbQuery(
+      `DELETE FROM media_master WHERE record_id NOT IN (${ids.map((_,i)=>`$${i+1}`).join(',')})`,
+      ids
+    );
+    if (del.rowCount > 0) console.log(`[media_master] removed ${del.rowCount} stale records`);
+  }
+  console.log(`[kintone] media_master upserted: ${upserted}`);
+  return upserted;
+}
+
+module.exports = { syncKintoneApp, syncKintonePayments, syncKintoneActivities, syncMediaMaster, APPS };

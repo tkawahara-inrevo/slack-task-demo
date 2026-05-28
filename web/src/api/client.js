@@ -610,6 +610,12 @@ export const api = {
   anBackfill:    (days = 30) => apiFetch(`/an/backfill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }),
   anByDeal:      (dealId) => apiFetch(`/an/by-deal/${dealId}`),
   anCreateFromDeal: (body) => apiFetch(`/an/from-deal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  mediaMaster:        (filters = {}) => {
+    const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
+    return apiFetch(`/media-master${qs ? `?${qs}` : ''}`);
+  },
+  mediaMasterDetail:  (id) => apiFetch(`/media-master/${id}`),
+  mediaMasterSync:    ()   => apiFetch(`/media-master/sync`, { method: 'POST' }),
   anMediaStats:  (filters = {}) => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
     return apiFetch(`/an/media-stats${qs ? `?${qs}` : ''}`);

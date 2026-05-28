@@ -99,7 +99,7 @@ export default function AnList() {
       <div style={S.list}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray-200)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 2 }}>
-            {[['list','AN依頼一覧'],['media','媒体実績DB']].map(([v,l]) => (
+            {[['list','AN依頼一覧'],['media','媒体実績DB'],['master','媒体マスタ']].map(([v,l]) => (
               <button key={v} onClick={() => setView(v)}
                 style={{ padding: '3px 10px', fontSize: '0.78rem', fontWeight: 700, borderRadius: 5, border: 'none', cursor: 'pointer', background: view===v ? '#2563eb' : 'transparent', color: view===v ? '#fff' : 'var(--gray-500)' }}>
                 {l}
@@ -219,6 +219,8 @@ export default function AnList() {
               );})}
             </div>
           )}
+          {/* 媒体マスタビュー */}
+          {view === 'master' && <MediaMasterView />}
           {/* AN依頼一覧ビュー */}
           {view === 'list' && loading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中...</div>}
           {view === 'list' && !loading && requests.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>該当なし</div>}
@@ -400,6 +402,151 @@ export default function AnList() {
                 fontWeight: 600, fontSize: '0.84rem', cursor: (posting || !answer.trim()) ? 'default' : 'pointer' }}>
               {posting ? '投稿中...' : '📤 Slackに投稿'}
             </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 媒体マスタ（kintone App225）─────────────────────────
+function MediaMasterView() {
+  const [data, setData] = useState({ media: [], facets: {} });
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({ q: '', industry: '', job_type: '', area: '', hire_method: '', employment_type: '', min_score: 0 });
+  const [selected, setSelected] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const load = (f) => {
+    setLoading(true);
+    api.mediaMaster(f).then(setData).catch(() => setData({ media: [], facets: {} })).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(filters); }, []); // eslint-disable-line
+  const setF = (k, v) => { const n = { ...filters, [k]: v }; setFilters(n); load(n); };
+
+  const doSync = async () => {
+    if (!window.confirm('kintone App225 から媒体マスタを再同期しますか？')) return;
+    setSyncing(true);
+    try {
+      const r = await api.mediaMasterSync();
+      alert('同期完了: ' + r.upserted + '件');
+      load(filters);
+    } catch (e) { alert('失敗: ' + e.message); }
+    finally { setSyncing(false); }
+  };
+
+  const SelectFacet = ({ label, k, options }) => (
+    <select value={filters[k]} onChange={e => setF(k, e.target.value)}
+      style={{ padding: '4px 8px', fontSize: '0.74rem', border: '1px solid var(--gray-300)', borderRadius: 6, background: 'var(--surface)', maxWidth: 150 }}>
+      <option value="">{label}: 全て</option>
+      {(options || []).map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+
+  return (
+    <div style={{ padding: 12 }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--gray-200)', padding: '10px 12px', marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input value={filters.q} onChange={e => setF('q', e.target.value)} placeholder="媒体名・備考で検索…"
+            style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem' }} />
+          <button onClick={doSync} disabled={syncing}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: '1px solid var(--gray-300)', background: 'var(--surface)', cursor: 'pointer' }}>
+            {syncing ? '同期中…' : '🔄 kintone同期'}
+          </button>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <SelectFacet label="業種" k="industry" options={data.facets.industries} />
+          <SelectFacet label="職種" k="job_type" options={data.facets.job_types} />
+          <SelectFacet label="エリア" k="area" options={data.facets.areas} />
+          <SelectFacet label="採用手法" k="hire_method" options={data.facets.hire_methods} />
+          <SelectFacet label="対象" k="employment_type" options={data.facets.employment_types} />
+          <select value={filters.min_score} onChange={e => setF('min_score', Number(e.target.value))}
+            style={{ padding: '4px 8px', fontSize: '0.74rem', border: '1px solid var(--gray-300)', borderRadius: 6, background: 'var(--surface)' }}>
+            <option value="0">オススメ度: 全て</option>
+            {[1,2,3,4,5].map(n => <option key={n} value={n}>★{n}以上</option>)}
+          </select>
+          {Object.values(filters).some(v => v && v !== 0) && (
+            <button onClick={() => { const r = { q:'', industry:'', job_type:'', area:'', hire_method:'', employment_type:'', min_score:0 }; setFilters(r); load(r); }}
+              style={{ padding: '4px 10px', fontSize: '0.7rem', borderRadius: 6, border: '1px dashed var(--gray-300)', background: 'transparent', color: 'var(--gray-500)', cursor: 'pointer' }}>
+              フィルタクリア
+            </button>
+          )}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--gray-500)' }}>該当 {data.total ?? data.media.length}件</div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>読み込み中…</div>
+      ) : data.media.length === 0 ? (
+        <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>該当する媒体がありません</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 10 }}>
+          {data.media.map(m => (
+            <div key={m.record_id} onClick={() => setSelected(m)}
+              style={{ background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', transition: 'border-color 0.1s' }}
+              onMouseEnter={e=>e.currentTarget.style.borderColor='#93c5fd'} onMouseLeave={e=>e.currentTarget.style.borderColor='var(--gray-200)'}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: '0.88rem', flex: 1, color: 'var(--gray-900)' }}>{m.name || '(無名)'}</span>
+                {m.recommend_score > 0 && (
+                  <span style={{ fontSize: '0.7rem', color: '#d97706', fontWeight: 700 }}>{'★'.repeat(m.recommend_score)}</span>
+                )}
+              </div>
+              {m.service_type && <span style={{ display: 'inline-block', fontSize: '0.66rem', background: '#eef2ff', color: '#4f46e5', borderRadius: 4, padding: '1px 6px', marginRight: 4 }}>{m.service_type}</span>}
+              {(m.hire_methods||[]).slice(0,2).map(h => <span key={h} style={{ display: 'inline-block', fontSize: '0.66rem', background: '#f0fdf4', color: '#15803d', borderRadius: 4, padding: '1px 6px', marginRight: 4 }}>{h}</span>)}
+              <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 6 }}>
+                {(m.areas||[]).join(' / ') || '—'}
+              </div>
+              {m.industries?.length > 0 && (
+                <div style={{ fontSize: '0.66rem', color: 'var(--gray-400)', marginTop: 4 }}>
+                  業種: {m.industries.slice(0,3).join(', ')}{m.industries.length>3?`…+${m.industries.length-3}`:''}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selected && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 1100, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setSelected(null)}>
+          <div style={{ width: 'min(520px,94vw)', height: '100%', background: 'var(--surface)', boxShadow: '-8px 0 32px rgba(0,0,0,0.2)', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--gray-900)' }}>{selected.name}</div>
+                {selected.recommend_score > 0 && <div style={{ fontSize: '0.8rem', color: '#d97706', fontWeight: 700 }}>{'★'.repeat(selected.recommend_score)}</div>}
+              </div>
+              <button onClick={() => setSelected(null)} style={{ background: 'var(--surface-2)', border: 'none', width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 16 }}>×</button>
+            </div>
+            <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 12, fontSize: '0.82rem' }}>
+              {selected.vendor_url && <div><a href={selected.vendor_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{selected.vendor_url}</a></div>}
+              {[
+                ['種別', selected.service_type],
+                ['採用手法', (selected.hire_methods||[]).join(', ')],
+                ['エリア', (selected.areas||[]).join(', ')],
+                ['対象区分', (selected.employment_types||[]).join(', ')],
+                ['利用者年齢層', (selected.age_targets||[]).join(', ')],
+                ['業種', (selected.industries||[]).join(', ')],
+                ['職種', (selected.job_types||[]).join(', ')],
+                ['基本請求先', selected.basic_billing],
+                ['ノルマ', selected.norma],
+              ].filter(([,v]) => v).map(([k,v]) => (
+                <div key={k} style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ width: 100, color: 'var(--gray-500)', fontSize: '0.72rem' }}>{k}</div>
+                  <div style={{ flex: 1, color: 'var(--gray-900)', wordBreak: 'break-all' }}>{v}</div>
+                </div>
+              ))}
+              {selected.notes && (
+                <div>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 4 }}>媒体備考</div>
+                  <pre style={{ fontSize: '0.78rem', whiteSpace: 'pre-wrap', background: 'var(--surface-2)', padding: '8px 10px', borderRadius: 6, margin: 0 }}>{selected.notes}</pre>
+                </div>
+              )}
+              {selected.caution && (
+                <div>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>注意事項</div>
+                  <pre style={{ fontSize: '0.78rem', whiteSpace: 'pre-wrap', background: '#fef2f2', padding: '8px 10px', borderRadius: 6, margin: 0, color: '#7f1d1d' }}>{selected.caution}</pre>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

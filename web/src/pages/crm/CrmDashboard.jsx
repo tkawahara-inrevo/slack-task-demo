@@ -242,7 +242,6 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         guaranteeCount: form.guarantee_count === '' ? null : Number(form.guarantee_count),
         unitPrice: form.unit_price === '' ? null : Number(form.unit_price),
         contractMonths: form.contract_months === '' ? null : Number(form.contract_months),
-        data: { ...(deal.data||{}), next_action_date: form.next_action_date || null, next_action_content: form.next_action_content || null },
         memo: deal.memo,
         salesMemo: form.sales_memo,
         settlementForecast: form.settlement_forecast || null,
@@ -333,38 +332,9 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
           )}
         </div>
       )}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
-        <div><label style={L}>次回対応日</label>
-          <input type="date" value={form.next_action_date} onChange={e=>setForm(f=>({...f,next_action_date:e.target.value}))} style={I} /></div>
-        <div><label style={L}>次回アクション</label>
-          <input value={form.next_action_content} onChange={e=>setForm(f=>({...f,next_action_content:e.target.value}))} style={I} /></div>
-      </div>
       <div><label style={L}>商談メモ</label>
         <textarea value={form.sales_memo} onChange={e=>setForm(f=>({...f,sales_memo:e.target.value}))} rows={4}
           style={{...I, resize:'vertical', lineHeight:1.5}} /></div>
-
-      {/* 入金予定 操作 */}
-      <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-        <button onClick={async () => {
-            if (!window.confirm('この案件の入金予定を生成しますか？')) return;
-            const r = await api.crmGenerateExpected(dealRow.id, false).catch(e=>({error:e.message}));
-            if (r.error) alert('失敗: ' + r.error);
-            else alert(`生成: ${r.created}件${r.note==='already_generated'?'（既に生成済み）':''}`);
-          }}
-          style={{ fontSize:'0.72rem', padding:'5px 10px', borderRadius:6, border:'1px solid #c7d2fe', background:'#eef2ff', color:'#4f46e5', fontWeight:700, cursor:'pointer' }}>
-          🧾 入金予定を生成
-        </button>
-        <button onClick={async () => {
-            const ms = window.prompt('延長月数（1〜36）', '12');
-            if (!ms) return;
-            const r = await api.crmExtendDeal(dealRow.id, Number(ms)).catch(e=>({error:e.message}));
-            if (r.error) alert('失敗: ' + r.error);
-            else alert(`${r.created}ヶ月分の入金予定を追加しました`);
-          }}
-          style={{ fontSize:'0.72rem', padding:'5px 10px', borderRadius:6, border:'1px solid #fde68a', background:'#fffbeb', color:'#92400e', fontWeight:700, cursor:'pointer' }}>
-          ↻ 月額を延長
-        </button>
-      </div>
 
       {/* 入金履歴（会社単位） */}
       <div style={{ marginTop:4, padding:'10px 12px', background:C.surface2, borderRadius:8, border:`1px solid ${C.border}` }}>

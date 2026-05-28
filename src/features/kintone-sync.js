@@ -22,6 +22,8 @@ const APPS = {
 const APP_103_TOKEN = process.env.KINTONE_APP_103_TOKEN || 'cekSgk3whWbQU6KFOGhr7wnnFOiSp2hzRHQP0Zhz';
 // App225専用トークン（媒体マスタ）
 const APP_225_TOKEN = process.env.KINTONE_APP_225_TOKEN || 'N3ztvAhgRFJu0yzCYz5FhFLn8Hi4IzTqTrLamCzC';
+// App221専用トークン（AN調査管理表）
+const APP_221_TOKEN = process.env.KINTONE_APP_221_TOKEN || 'LXmG25yThDbXYsWTDu2HEEu8sEGlXuNooQ23lkbt';
 
 // App225用: 業種/職種カテゴリ判定（フィールド名がそのままカテゴリ名）
 const APP225_INDUSTRIES = [
@@ -355,4 +357,129 @@ async function syncMediaMaster() {
   return upserted;
 }
 
-module.exports = { syncKintoneApp, syncKintonePayments, syncKintoneActivities, syncMediaMaster, APPS };
+// App221（AN調査管理表）→ an_studies + an_study_media へ正規化同期
+async function syncAnStudies() {
+  const { dbQuery } = require('../db/index');
+  if (!APP_221_TOKEN) {
+    console.warn('[kintone] APP_221 token not set, skipping an_studies sync');
+    return 0;
+  }
+  let offset = 0, upserted = 0;
+  const seenIds = new Set();
+  const num = (v) => (v == null || v === '') ? null : Number(v);
+  const txt = (v) => {
+    if (v == null) return null;
+    if (Array.isArray(v)) return v.map(x => x.name || x.code || x).join(', ');
+    return String(v);
+  };
+  const arr = (v) => Array.isArray(v) ? v.filter(Boolean) : [];
+
+  while (true) {
+    const data = await kintoneGet(221, APP_221_TOKEN, [], offset);
+    if (data.code) throw new Error(`kintone error [app221]: ${data.code} - ${data.message}`);
+    if (!data.records || data.records.length === 0) break;
+
+    for (const rec of data.records) {
+      const get = (k) => rec[k]?.value ?? null;
+      const recordId = String(rec['$id']?.value || '');
+      if (!recordId) continue;
+      seenIds.add(recordId);
+
+      // 全フィールドを data に保持
+      const rawData = {};
+      for (const [k, fv] of Object.entries(rec)) {
+        if (k.startsWith('$')) continue;
+        rawData[k] = fv?.value ?? null;
+      }
+
+      await dbQuery(`
+        INSERT INTO an_studies
+          (record_id, team_id, company_name, case_link, slack_link, status, priority,
+           request_date, requester, must_condition, other_notes,
+           work_locations, max_salary, min_salary, annual_holidays,
+           employment_type, job_type, target_classification,
+           jobform_url, total_effective_apps, data, kintone_updated_at, synced_at)
+        VALUES ($1,'T086C06L5V0',$2,$3,$4,$5,$6, NULLIF($7,'')::date, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, NULLIF($21,'')::timestamptz, now())
+        ON CONFLICT (record_id) DO UPDATE SET
+          company_name=$2, case_link=$3, slack_link=$4, status=$5, priority=$6,
+          request_date=NULLIF($7,'')::date, requester=$8, must_condition=$9, other_notes=$10,
+          work_locations=$11, max_salary=$12, min_salary=$13, annual_holidays=$14,
+          employment_type=$15, job_type=$16, target_classification=$17,
+          jobform_url=$18, total_effective_apps=$19, data=$20::jsonb,
+          kintone_updated_at=NULLIF($21,'')::timestamptz, synced_at=now()
+      `, [
+        recordId,
+        txt(get('企業名')),
+        txt(get('案件情報リンク')),
+        txt(get('Slack')),
+        txt(get('完了チェック')),
+        txt(get('優先度')),
+        txt(get('依頼発生日')) || '',
+        txt(get('依頼者')),
+        txt(get('MUTS条件')),
+        txt(get('その他特記事項')),
+        arr(get('勤務地')),
+        num(txt(get('上限年収'))),
+        num(txt(get('下限年収'))),
+        num(txt(get('年間休日'))),
+        txt(get('雇用形態')),
+        txt(get('職種')),
+        arr(get('対象区分')),
+        txt(get('求人票リンク')),
+        num(txt(get('有効応募数'))),
+        JSON.stringify(rawData),
+        txt(get('更新日時')) || '',
+      ]).catch(e => console.error('[an_studies] upsert err:', e.message));
+
+      // media slots 1-6: 既存削除→挿入
+      await dbQuery(`DELETE FROM an_study_media WHERE study_record_id=$1`, [recordId]).catch(() => {});
+      for (let i = 1; i <= 6; i++) {
+        const mediaName  = txt(get(`媒体名${i}`));
+        const fee        = num(txt(get(`料金${i}`)));
+        const expected   = num(txt(get(`応募想定${i}`)));
+        // 媒体名もfeeも応募想定も空ならスロット未使用 → スキップ
+        if (!mediaName && !fee && !expected) continue;
+        await dbQuery(`
+          INSERT INTO an_study_media
+            (team_id, study_record_id, slot, media_name, cost_category, fee, duration, weekly_calc,
+             responses, active_count, expected_apps, reply_rate,
+             effective_apps, effective_rate, status_tags, note, an_assignee)
+          VALUES ('T086C06L5V0',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        `, [
+          recordId, i, mediaName,
+          txt(get(`費用区分${i}`)),
+          fee,
+          num(txt(get(`掲載期間${i}`))),
+          num(txt(get(`週計算${i}`))),
+          arr(get(`対応${i}`)),
+          txt(get(`アクティブ数${i}`)),
+          expected,
+          num(txt(get(`返信率${i}`))),
+          num(txt(get(`有効応募数_${i}`))),
+          num(txt(get(`有効応募率_${i}`))),
+          arr(get(`ステータス${i}`)),
+          txt(get(`備考${i}`)),
+          txt(get(`AN担当者${i}`)),
+        ]).catch(e => console.error('[an_study_media] insert err:', e.message));
+      }
+      upserted++;
+    }
+    if (data.records.length < 500) break;
+    offset += 500;
+  }
+
+  // 削除されたものを除去
+  if (seenIds.size > 0) {
+    const ids = Array.from(seenIds);
+    const del = await dbQuery(
+      `DELETE FROM an_studies WHERE record_id NOT IN (${ids.map((_,i)=>`$${i+1}`).join(',')})`,
+      ids
+    );
+    if (del.rowCount > 0) console.log(`[an_studies] removed ${del.rowCount} stale records`);
+  }
+  console.log(`[kintone] an_studies upserted: ${upserted}`);
+  return upserted;
+}
+
+module.exports = { syncKintoneApp, syncKintonePayments, syncKintoneActivities, syncMediaMaster, syncAnStudies, APPS };

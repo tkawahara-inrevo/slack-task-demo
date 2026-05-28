@@ -1,6 +1,6 @@
-// AN依頼管理 API + Slackリスナー + 媒体マスタ
+// AN依頼管理 API + Slackリスナー + 媒体マスタ + AN調査
 const { dbQuery } = require('../db/index');
-const { syncMediaMaster } = require('./kintone-sync');
+const { syncMediaMaster, syncAnStudies } = require('./kintone-sync');
 
 const AN_CHANNEL_ID = process.env.AN_CHANNEL_ID || 'C09EFPSSAF2';
 
@@ -536,6 +536,100 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
   expressApp.post('/api/dashboard/media-master/sync', authWithRole, async (req, res) => {
     try {
       const n = await syncMediaMaster();
+      res.json({ ok: true, upserted: n });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── AN調査管理表（App221） ─────────────────────────────
+  // 過去調査一覧（会社名でフィルタ可。media展開も同時に返す）
+  expressApp.get('/api/dashboard/an/studies', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const company = (req.query.company || '').trim();
+      const params = [teamId];
+      let where = `s.team_id=$1`;
+      if (company) { params.push(`%${company}%`); where += ` AND s.company_name ILIKE $${params.length}`; }
+      const { rows } = await dbQuery(`
+        SELECT s.*,
+          COALESCE(json_agg(json_build_object(
+            'slot', m.slot, 'media_name', m.media_name, 'cost_category', m.cost_category,
+            'fee', m.fee, 'duration', m.duration, 'responses', m.responses,
+            'active_count', m.active_count, 'expected_apps', m.expected_apps,
+            'reply_rate', m.reply_rate, 'effective_apps', m.effective_apps,
+            'effective_rate', m.effective_rate, 'status_tags', m.status_tags,
+            'note', m.note, 'an_assignee', m.an_assignee
+          ) ORDER BY m.slot) FILTER (WHERE m.id IS NOT NULL), '[]'::json) AS media_slots
+        FROM an_studies s
+        LEFT JOIN an_study_media m ON m.study_record_id = s.record_id
+        WHERE ${where}
+        GROUP BY s.record_id
+        ORDER BY s.request_date DESC NULLS LAST, s.synced_at DESC
+        LIMIT 200
+      `, params);
+      res.json({ studies: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 媒体ROI 集計（媒体名でグルーピングして応募予測精度／費用効率を集計）
+  expressApp.get('/api/dashboard/an/media-roi', authWithRole, async (req, res) => {
+    try {
+      const { rows } = await dbQuery(`
+        SELECT m.media_name,
+          COUNT(*)::int                                AS cases,
+          ROUND(AVG(NULLIF(m.fee,0)))::bigint          AS avg_fee,
+          ROUND(SUM(COALESCE(m.fee,0)))::bigint        AS total_fee,
+          ROUND(AVG(NULLIF(m.expected_apps,0)),1)      AS avg_expected,
+          ROUND(AVG(NULLIF(m.effective_apps,0)),1)     AS avg_effective,
+          ROUND(AVG(NULLIF(m.reply_rate,0)),2)         AS avg_reply_rate,
+          ROUND(AVG(NULLIF(m.effective_rate,0)),2)     AS avg_effective_rate,
+          -- 応募予測精度: 実応募 / 予測応募
+          ROUND(CASE WHEN AVG(NULLIF(m.expected_apps,0)) > 0
+                THEN AVG(NULLIF(m.effective_apps,0))/AVG(NULLIF(m.expected_apps,0))*100
+                ELSE NULL END, 1) AS forecast_accuracy_pct
+        FROM an_study_media m
+        WHERE m.media_name IS NOT NULL AND m.media_name <> ''
+        GROUP BY m.media_name
+        HAVING COUNT(*) >= 1
+        ORDER BY cases DESC, avg_effective DESC NULLS LAST
+      `);
+      res.json({ rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 推奨媒体サジェスト（媒体マスタから候補スコア順、業種・職種・エリアで絞り込み可）
+  expressApp.get('/api/dashboard/media-suggest', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const params = [teamId];
+      const where = ['mm.team_id=$1'];
+      if (req.query.industry)  { params.push(req.query.industry);  where.push(`$${params.length} = ANY(mm.industries)`); }
+      if (req.query.job_type)  { params.push(req.query.job_type);  where.push(`$${params.length} = ANY(mm.job_types)`); }
+      if (req.query.area)      { params.push(req.query.area);      where.push(`$${params.length} = ANY(mm.areas)`); }
+      const { rows } = await dbQuery(`
+        SELECT mm.record_id, mm.name, mm.recommend_score, mm.areas,
+               COALESCE(rs.cases,0) AS past_cases,
+               rs.avg_effective, rs.forecast_accuracy_pct
+        FROM media_master mm
+        LEFT JOIN (
+          SELECT media_name,
+                 COUNT(*)::int AS cases,
+                 ROUND(AVG(NULLIF(effective_apps,0)),1) AS avg_effective,
+                 ROUND(CASE WHEN AVG(NULLIF(expected_apps,0))>0
+                       THEN AVG(NULLIF(effective_apps,0))/AVG(NULLIF(expected_apps,0))*100
+                       ELSE NULL END, 1) AS forecast_accuracy_pct
+          FROM an_study_media GROUP BY media_name
+        ) rs ON rs.media_name = mm.name
+        WHERE ${where.join(' AND ')}
+        ORDER BY mm.recommend_score DESC NULLS LAST, COALESCE(rs.cases,0) DESC
+        LIMIT 30
+      `, params);
+      res.json({ suggestions: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post('/api/dashboard/an/studies/sync', authWithRole, async (req, res) => {
+    try {
+      const n = await syncAnStudies();
       res.json({ ok: true, upserted: n });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

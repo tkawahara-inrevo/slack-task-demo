@@ -647,6 +647,42 @@ async function dbEnsureSettingsSchema() {
       synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `).catch(() => {});
+
+  // kintone App221 AN調査管理表（正規化）
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS an_studies (
+      record_id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL DEFAULT 'T086C06L5V0',
+      company_name TEXT,
+      case_link TEXT, slack_link TEXT, status TEXT, priority TEXT,
+      request_date DATE, requester TEXT,
+      must_condition TEXT, other_notes TEXT,
+      work_locations TEXT[], max_salary BIGINT, min_salary BIGINT,
+      annual_holidays NUMERIC,
+      employment_type TEXT, job_type TEXT, target_classification TEXT[],
+      jobform_url TEXT, total_effective_apps NUMERIC,
+      data JSONB NOT NULL DEFAULT '{}',
+      kintone_updated_at TIMESTAMPTZ,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_an_studies_company ON an_studies(company_name)`).catch(() => {});
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS an_study_media (
+      id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      team_id TEXT NOT NULL DEFAULT 'T086C06L5V0',
+      study_record_id TEXT NOT NULL REFERENCES an_studies(record_id) ON DELETE CASCADE,
+      slot INTEGER NOT NULL,
+      media_name TEXT,
+      cost_category TEXT, fee BIGINT, duration NUMERIC, weekly_calc NUMERIC,
+      responses TEXT[], active_count TEXT,
+      expected_apps NUMERIC, reply_rate NUMERIC,
+      effective_apps NUMERIC, effective_rate NUMERIC,
+      status_tags TEXT[], note TEXT, an_assignee TEXT
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_an_study_media_study ON an_study_media(study_record_id)`).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_an_study_media_name ON an_study_media(media_name)`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

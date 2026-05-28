@@ -90,7 +90,8 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); r=d['records'][0]; print\\('\\\\n'.join\\(sorted\\(r.keys\\(\\)\\)\\)\\)\")",
       "Bash(curl -s -H \"X-Cybozu-API-Token: N3ztvAhgRFJu0yzCYz5FhFLn8Hi4IzTqTrLamCzC\" \"https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=225&query=order%20by%20\\\\$id%20desc%20limit%201\" > /tmp/_app225.json 2>&1; cat /tmp/_app225.json | tr ',' '\\\\n' | grep -E '\"[^\"]+\":' | sed 's/^\"//; s/\":.*$//' | sort -u | head -60)",
       "Read(//tmp/**)",
-      "Bash(node --check src/features/kintone-sync.js)"
+      "Bash(node --check src/features/kintone-sync.js)",
+      "Bash(curl -s -H 'X-Cybozu-API-Token: LXmG25yThDbXYsWTDu2HEEu8sEGlXuNooQ23lkbt' 'https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=221&query=order%20by%20$id%20desc%20limit%201')"
     ]
   }
 }

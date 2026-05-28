@@ -616,6 +616,13 @@ export const api = {
   },
   mediaMasterDetail:  (id) => apiFetch(`/media-master/${id}`),
   mediaMasterSync:    ()   => apiFetch(`/media-master/sync`, { method: 'POST' }),
+  anStudies:          (company) => apiFetch(`/an/studies${company ? `?company=${encodeURIComponent(company)}` : ''}`),
+  anStudiesSync:      ()   => apiFetch(`/an/studies/sync`, { method: 'POST' }),
+  anMediaRoi:         ()   => apiFetch(`/an/media-roi`),
+  mediaSuggest:       (filters = {}) => {
+    const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
+    return apiFetch(`/media-suggest${qs ? `?${qs}` : ''}`);
+  },
   anMediaStats:  (filters = {}) => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
     return apiFetch(`/an/media-stats${qs ? `?${qs}` : ''}`);

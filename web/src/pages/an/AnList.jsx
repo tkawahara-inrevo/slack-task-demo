@@ -18,11 +18,13 @@ export default function AnList() {
   const [posting, setPosting]   = useState(false);
   const [view, setView]         = useState('list'); // 'list' | 'media'
   const [rpoResults, setRpoResults] = useState(null);
+  const [pastStudies, setPastStudies] = useState(null);
   const [mediaStats, setMediaStats] = useState([]);
   const [mediaFacets, setMediaFacets] = useState({ industries: [], prefectures: [], hire_types: [], size_buckets: [] });
   const [mediaFilters, setMediaFilters] = useState({ industry: '', hire_type: '', prefecture: '', size_bucket: '' });
   const [mediaLoading, setMediaLoading] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState({});
+  const [mediaRoi, setMediaRoi] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -47,6 +49,10 @@ export default function AnList() {
     });
     setRpoResults(null);
     api.anRpoResults(req.id).then(r => setRpoResults(r.results)).catch(() => {});
+    setPastStudies(null);
+    if (req.company_name) {
+      api.anStudies(req.company_name).then(r => setPastStudies(r.studies || [])).catch(() => setPastStudies([]));
+    } else { setPastStudies([]); }
   };
 
   const loadMediaStats = (filters = mediaFilters) => {
@@ -58,8 +64,11 @@ export default function AnList() {
   };
 
   useEffect(() => {
-    if (view === 'media') loadMediaStats(mediaFilters);
-  }, [mediaFilters, view]);
+    if (view === 'media') {
+      loadMediaStats(mediaFilters);
+      if (mediaRoi === null) api.anMediaRoi().then(r => setMediaRoi(r.rows || [])).catch(() => setMediaRoi([]));
+    }
+  }, [mediaFilters, view]); // eslint-disable-line
 
   const saveAnswer = async () => {
     if (!selected) return;
@@ -135,6 +144,44 @@ export default function AnList() {
           {/* 媒体実績DBビュー */}
           {view === 'media' && (
             <div style={{ padding: 12 }}>
+              {/* 媒体ROI（kintone App221 のAN調査から集計） */}
+              {mediaRoi && mediaRoi.length > 0 && (
+                <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
+                    📈 媒体ROI（AN調査ベース・応募予測精度）
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse' }}>
+                      <thead><tr style={{ color: 'var(--gray-500)', textAlign: 'left' }}>
+                        <th style={{ padding: '4px 6px' }}>媒体</th>
+                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>調査件数</th>
+                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>平均料金</th>
+                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>予測/実応募(平均)</th>
+                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>予測精度</th>
+                      </tr></thead>
+                      <tbody>
+                        {mediaRoi.slice(0, 20).map((r, i) => (
+                          <tr key={i} style={{ borderTop: '1px solid var(--gray-100)' }}>
+                            <td style={{ padding: '4px 6px', fontWeight: 600 }}>{r.media_name}</td>
+                            <td style={{ padding: '4px 6px', textAlign: 'right' }}>{r.cases}</td>
+                            <td style={{ padding: '4px 6px', textAlign: 'right' }}>{r.avg_fee ? fmtYen(r.avg_fee) : '—'}</td>
+                            <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                              {r.avg_expected ?? '—'} / <b style={{ color: '#059669' }}>{r.avg_effective ?? '—'}</b>
+                            </td>
+                            <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: r.forecast_accuracy_pct >= 80 ? '#059669' : r.forecast_accuracy_pct >= 50 ? '#d97706' : '#dc2626' }}>
+                              {r.forecast_accuracy_pct != null ? `${r.forecast_accuracy_pct}%` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--gray-400)', marginTop: 4 }}>
+                    予測精度 = 実応募の平均 ÷ 予測応募の平均 × 100%
+                  </div>
+                </div>
+              )}
+
               {/* フィルタバー */}
               <div style={{ marginBottom: 10, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 6 }}>
                 {[
@@ -356,6 +403,50 @@ export default function AnList() {
               </div>
             )}
 
+            {/* 過去のAN調査（App221より） */}
+            {pastStudies && pastStudies.length > 0 && (
+              <div style={{ background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.78rem', color: '#92400e', marginBottom: 8 }}>
+                  📚 過去のAN調査（{pastStudies.length}件）
+                </div>
+                {pastStudies.map(s => (
+                  <details key={s.record_id} style={{ marginBottom: 6, background: 'var(--surface)', borderRadius: 6, padding: '6px 10px' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}>
+                      {s.request_date ? String(s.request_date).slice(0,10) : '日付なし'}
+                      {s.requester && <span style={{ color: 'var(--gray-500)', marginLeft: 6, fontWeight: 400 }}>依頼: {s.requester}</span>}
+                      {s.status && <span style={{ marginLeft: 8, fontSize: '0.66rem', padding: '1px 7px', borderRadius: 99, background: '#fff7ed', color: '#9a3412', fontWeight: 600 }}>{s.status}</span>}
+                      <span style={{ marginLeft: 8, fontSize: '0.7rem', color: 'var(--gray-500)' }}>媒体 {s.media_slots?.length || 0}件</span>
+                    </summary>
+                    <div style={{ marginTop: 8, fontSize: '0.78rem' }}>
+                      {s.must_condition && <div style={{ marginBottom: 6 }}><b>MUST条件:</b> <pre style={{ display: 'inline', whiteSpace: 'pre-wrap', margin: 0 }}>{s.must_condition}</pre></div>}
+                      {s.media_slots?.length > 0 && (
+                        <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', marginTop: 6 }}>
+                          <thead><tr style={{ color: 'var(--gray-500)', textAlign: 'left' }}>
+                            <th style={{ padding: '3px 4px' }}>媒体</th>
+                            <th style={{ padding: '3px 4px', textAlign: 'right' }}>料金</th>
+                            <th style={{ padding: '3px 4px', textAlign: 'right' }}>予想/実応募</th>
+                            <th style={{ padding: '3px 4px' }}>担当</th>
+                          </tr></thead>
+                          <tbody>
+                            {s.media_slots.map((m, i) => (
+                              <tr key={i} style={{ borderTop: '1px solid var(--gray-100)' }}>
+                                <td style={{ padding: '3px 4px', fontWeight: 600 }}>{m.media_name || '—'}</td>
+                                <td style={{ padding: '3px 4px', textAlign: 'right' }}>{m.fee ? fmtYen(m.fee) : '—'}</td>
+                                <td style={{ padding: '3px 4px', textAlign: 'right', color: 'var(--gray-700)' }}>
+                                  {m.expected_apps ?? '—'} / <b style={{ color: m.effective_apps > 0 ? '#059669' : 'var(--gray-400)' }}>{m.effective_apps ?? '—'}</b>
+                                </td>
+                                <td style={{ padding: '3px 4px', color: 'var(--gray-500)' }}>{m.an_assignee || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            )}
+
             {/* 見積もり（構造化） */}
             <div>
               <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査結果（見積もり）</div>
@@ -373,7 +464,10 @@ export default function AnList() {
                   </div>
                 ))}
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>推奨媒体</label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <label style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>推奨媒体</label>
+                    <MediaSuggestButton onPick={(name) => setEst(p => ({ ...p, recommended_media: p.recommended_media ? `${p.recommended_media} + ${name}` : name }))} />
+                  </div>
                   <input type="text" value={est.recommended_media} onChange={e => setEst(p => ({ ...p, recommended_media: e.target.value }))}
                     placeholder="例: Indeed + OfferBox"
                     style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem', boxSizing: 'border-box', background: 'var(--surface)' }} />
@@ -548,6 +642,57 @@ function MediaMasterView() {
               )}
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// 推奨媒体サジェスト（媒体マスタ＋過去AN調査）
+function MediaSuggestButton({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState(null);
+  const fmtYen = (n) => n != null ? '¥' + Math.round(n).toLocaleString() : '—';
+
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && list === null) {
+      try {
+        const r = await api.mediaSuggest({});
+        setList(r.suggestions || []);
+      } catch { setList([]); }
+    }
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={toggle}
+        style={{ fontSize: '0.68rem', padding: '2px 8px', border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4f46e5', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}>
+        🔍 候補から選ぶ
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 24, right: 0, width: 320, maxHeight: 400, overflowY: 'auto', background: '#fff', border: '1px solid var(--gray-200)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, padding: 8 }}>
+          {list === null ? (
+            <div style={{ padding: 12, textAlign: 'center', color: 'var(--gray-400)', fontSize: '0.76rem' }}>読み込み中…</div>
+          ) : list.length === 0 ? (
+            <div style={{ padding: 12, textAlign: 'center', color: 'var(--gray-400)', fontSize: '0.76rem' }}>候補なし</div>
+          ) : list.map(m => (
+            <div key={m.record_id} onClick={() => { onPick(m.name); setOpen(false); }}
+              style={{ padding: '6px 8px', borderBottom: '1px solid var(--gray-100)', cursor: 'pointer', borderRadius: 4 }}
+              onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600, fontSize: '0.78rem', flex: 1 }}>{m.name}</span>
+                {m.recommend_score > 0 && <span style={{ fontSize: '0.66rem', color: '#d97706', fontWeight: 700 }}>{'★'.repeat(m.recommend_score)}</span>}
+              </div>
+              <div style={{ fontSize: '0.66rem', color: 'var(--gray-500)', marginTop: 2, display: 'flex', gap: 8 }}>
+                {m.past_cases > 0 && <span>過去{m.past_cases}件</span>}
+                {m.avg_effective != null && <span>平均応募 {m.avg_effective}</span>}
+                {m.forecast_accuracy_pct != null && <span>精度 {m.forecast_accuracy_pct}%</span>}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

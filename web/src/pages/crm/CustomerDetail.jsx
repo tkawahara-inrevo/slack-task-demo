@@ -301,6 +301,96 @@ function DealActivitySection({ deal, activitySettings }) {
 }
 
 // ISO日付文字列 → YYYY-MM-DD（date inputの value 用）
+// 案件詳細: この案件に紐づくAN依頼パネル（媒体費・単価の調査はAN担当）
+function DealAnPanel({ deal }) {
+  const [reqs, setReqs] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const yen = (n) => n != null && n !== '' ? `¥${Number(n).toLocaleString()}` : '—';
+
+  const load = () => api.anByDeal(deal.id).then(r => setReqs(r.requests || [])).catch(() => setReqs([]));
+  useEffect(() => { load(); }, [deal.id]); // eslint-disable-line
+
+  const createReq = async () => {
+    if (!window.confirm('この案件のAN依頼を起票しますか？')) return;
+    setCreating(true);
+    try {
+      await api.anCreateFromDeal({
+        crm_deal_id: deal.id,
+        company_name: deal.customer_name || deal.name,
+        sales_person: deal.sales_person || null,
+      });
+      await load();
+    } catch (e) { alert('起票失敗: ' + e.message); }
+    finally { setCreating(false); }
+  };
+
+  const STATUS_LABEL = { pending: '未回答', answered: '回答済み', closed: 'クローズ' };
+  const STATUS_COLOR = { pending: '#dc2626', answered: '#2563eb', closed: '#6b7280' };
+
+  return (
+    <div style={{ background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
+      <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', alignItems:'center', gap:10 }}>
+        <span style={{ width:28, height:28, borderRadius:8, background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#0891b2' }}>04</span>
+        <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>AN依頼（媒体費・単価調査）</span>
+        <button onClick={createReq} disabled={creating}
+          style={{ marginLeft:'auto', fontSize:'0.72rem', fontWeight:700, padding:'4px 10px', borderRadius:6, border:'1px solid #93c5fd', background:'#eff6ff', color:'#2563eb', cursor:'pointer' }}>
+          {creating ? '起票中…' : '＋ AN依頼を起票'}
+        </button>
+      </div>
+      <div style={{ padding:'14px 18px' }}>
+        {reqs === null ? (
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-400)', textAlign:'center', padding:8 }}>読み込み中…</div>
+        ) : reqs.length === 0 ? (
+          <div style={{ fontSize:'0.8rem', color:'var(--gray-400)', textAlign:'center', padding:8 }}>
+            この案件に紐づくAN依頼はまだありません。<br/>Slackの依頼チャンネル投稿か、上の「起票」から作成できます。
+          </div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {reqs.map(r => (
+              <div key={r.id} style={{ border:'1px solid var(--gray-200)', borderRadius:8, padding:'10px 12px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                  <span style={{ fontSize:'0.72rem', fontWeight:700, padding:'1px 7px', borderRadius:4, color:STATUS_COLOR[r.status]||'#888', background:'var(--surface-2)' }}>
+                    {STATUS_LABEL[r.status]||r.status}
+                  </span>
+                  {r.request_type && <span style={{ fontSize:'0.74rem', color:'var(--gray-600)' }}>{r.request_type}</span>}
+                  {r.priority && <span style={{ fontSize:'0.7rem', color:'#dc2626', fontWeight:700 }}>優先:{r.priority}</span>}
+                </div>
+                {/* 見積もり（ANが入力した構造化値） */}
+                {(r.est_media_cost || r.est_unit_price || r.est_budget || r.est_hire_count || r.recommended_media) && (
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:6, marginBottom:6 }}>
+                    {[
+                      ['媒体費', yen(r.est_media_cost)],
+                      ['採用単価', yen(r.est_unit_price)],
+                      ['推奨予算', yen(r.est_budget)],
+                      ['想定人数', r.est_hire_count != null ? `${r.est_hire_count}人` : '—'],
+                    ].map(([l,v]) => (
+                      <div key={l} style={{ background:'var(--surface-2)', borderRadius:5, padding:'4px 8px' }}>
+                        <div style={{ fontSize:'0.66rem', color:'var(--gray-500)' }}>{l}</div>
+                        <div style={{ fontSize:'0.82rem', fontWeight:600 }}>{v}</div>
+                      </div>
+                    ))}
+                    {r.recommended_media && (
+                      <div style={{ gridColumn:'1 / -1', background:'var(--surface-2)', borderRadius:5, padding:'4px 8px' }}>
+                        <div style={{ fontSize:'0.66rem', color:'var(--gray-500)' }}>推奨媒体</div>
+                        <div style={{ fontSize:'0.82rem', fontWeight:600 }}>{r.recommended_media}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {r.answer && <div style={{ fontSize:'0.8rem', color:'var(--gray-700)', whiteSpace:'pre-wrap', lineHeight:1.6, background:'var(--surface-2)', borderRadius:6, padding:'8px 10px' }}>{r.answer}</div>}
+                {!r.answer && r.status==='pending' && <div style={{ fontSize:'0.74rem', color:'var(--gray-400)' }}>AN調査待ち</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop:10, textAlign:'right' }}>
+          <Link to="/an" style={{ fontSize:'0.72rem', color:'#2563eb', textDecoration:'none' }}>AN一覧で開く →</Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function toDateInput(v) {
   if (!v) return '';
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
@@ -816,25 +906,9 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
             </div>
           </div>
 
-          {/* 04 サブテーブル */}
-          <div style={{ margin:'12px 20px 0', background:'var(--surface)', borderRadius:12, border:'1px solid var(--gray-200)', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--gray-200)', display:'flex', alignItems:'center', gap:10 }}>
-              <span style={{ width:28, height:28, borderRadius:8, background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:800, color:'#0891b2' }}>04</span>
-              <span style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--gray-900)' }}>費用テーブル</span>
-            </div>
-            <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:16 }}>
-              {[
-                { title:'RPO費用', path:'rpo-costs', cols:[{key:'initial_cost',label:'初期費用',type:'number'},{key:'monthly_cost',label:'月額費用',type:'number'},{key:'months',label:'利用月数',type:'number'},{key:'total_cost',label:'合計費用',type:'number'}] },
-                { title:'採用費用', path:'hiring-costs', cols:[{key:'hire_count',label:'採用人数',type:'number'},{key:'unit_price',label:'採用単価',type:'number'},{key:'media_cost',label:'媒体費用',type:'number'},{key:'rpo_cost',label:'RPO費用',type:'number'},{key:'total_cost',label:'合計費用',type:'number'}] },
-                { title:'人件費', path:'labor-costs', cols:[{key:'labor_cost',label:'人件費/月',type:'number'},{key:'months',label:'利用月数',type:'number'},{key:'total_cost',label:'合計人件費',type:'number'}] },
-                { title:'応募予測', path:'app-forecasts', cols:[{key:'position_name',label:'ポジション',type:'text'},{key:'media_name',label:'媒体',type:'text'},{key:'scout_count',label:'スカウト',type:'number'},{key:'application_count',label:'応募',type:'number'},{key:'offer_count',label:'内定',type:'number'}] },
-              ].map(({title,path,cols}) => (
-                <div key={path}>
-                  <div style={{ fontSize:'0.78rem', fontWeight:700, color:'var(--gray-700)', marginBottom:6 }}>{title}</div>
-                  <SubTableEditor dealId={deal.id} path={path} columns={cols} />
-                </div>
-              ))}
-            </div>
+          {/* 04 AN依頼（媒体費・単価などの調査はANが担当） */}
+          <div style={{ margin:'12px 20px 0' }}>
+            <DealAnPanel deal={deal} />
           </div>
 
           {/* 05 メモ */}

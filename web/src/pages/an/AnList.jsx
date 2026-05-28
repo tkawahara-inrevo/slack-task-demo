@@ -13,6 +13,7 @@ export default function AnList() {
   const [selected, setSelected] = useState(null);
   const [filterStatus, setFilterStatus] = useState('pending');
   const [answer, setAnswer]     = useState('');
+  const [est, setEst]           = useState({ est_media_cost:'', est_unit_price:'', est_budget:'', est_hire_count:'', recommended_media:'' });
   const [saving, setSaving]     = useState(false);
   const [posting, setPosting]   = useState(false);
   const [view, setView]         = useState('list'); // 'list' | 'media'
@@ -37,6 +38,13 @@ export default function AnList() {
   const openDetail = (req) => {
     setSelected(req);
     setAnswer(req.answer || '');
+    setEst({
+      est_media_cost: req.est_media_cost ?? '',
+      est_unit_price: req.est_unit_price ?? '',
+      est_budget: req.est_budget ?? '',
+      est_hire_count: req.est_hire_count ?? '',
+      recommended_media: req.recommended_media ?? '',
+    });
     setRpoResults(null);
     api.anRpoResults(req.id).then(r => setRpoResults(r.results)).catch(() => {});
   };
@@ -57,7 +65,7 @@ export default function AnList() {
     if (!selected) return;
     setSaving(true);
     try {
-      const r = await api.anUpdate(selected.id, { answer, status: answer.trim() ? 'answered' : selected.status });
+      const r = await api.anUpdate(selected.id, { answer, status: answer.trim() ? 'answered' : selected.status, ...est });
       setRequests(prev => prev.map(x => x.id === selected.id ? r.request : x));
       setSelected(r.request);
     } catch { alert('保存に失敗しました'); }
@@ -319,11 +327,36 @@ export default function AnList() {
               </div>
             )}
 
-            {/* 回答入力 */}
+            {/* 見積もり（構造化） */}
             <div>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査結果・回答</div>
-              <textarea value={answer} onChange={e => setAnswer(e.target.value)} rows={10}
-                placeholder="調査結果を入力してください..."
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査結果（見積もり）</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
+                {[
+                  ['est_media_cost', '媒体費（円）', 'number'],
+                  ['est_unit_price', '採用単価（円）', 'number'],
+                  ['est_budget', '推奨予算（円）', 'number'],
+                  ['est_hire_count', '想定採用人数', 'number'],
+                ].map(([key, label, type]) => (
+                  <div key={key}>
+                    <label style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>{label}</label>
+                    <input type={type} value={est[key]} onChange={e => setEst(p => ({ ...p, [key]: e.target.value }))}
+                      style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem', boxSizing: 'border-box', textAlign: 'right', background: 'var(--surface)' }} />
+                  </div>
+                ))}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>推奨媒体</label>
+                  <input type="text" value={est.recommended_media} onChange={e => setEst(p => ({ ...p, recommended_media: e.target.value }))}
+                    placeholder="例: Indeed + OfferBox"
+                    style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem', boxSizing: 'border-box', background: 'var(--surface)' }} />
+                </div>
+              </div>
+            </div>
+
+            {/* 回答入力（自由文） */}
+            <div>
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>調査結果・回答（詳細）</div>
+              <textarea value={answer} onChange={e => setAnswer(e.target.value)} rows={8}
+                placeholder="調査結果の詳細・補足を入力してください..."
                 style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--gray-300)', borderRadius: 8, fontSize: '0.84rem', resize: 'vertical', boxSizing: 'border-box', background: 'var(--surface)' }} />
             </div>
           </div>

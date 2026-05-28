@@ -175,11 +175,17 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
   expressApp.patch('/api/dashboard/an/requests/:id', authWithRole, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
-      const { answer, status } = req.body;
+      const { answer, status, est_media_cost, est_unit_price, est_budget, est_hire_count, recommended_media } = req.body;
       const fields = [], vals = [];
       let i = 1;
       if (answer  !== undefined) { fields.push(`answer=$${i++}`);    vals.push(answer); }
       if (status  !== undefined) { fields.push(`status=$${i++}`);    vals.push(status); }
+      const numOrNull = (v) => (v === '' || v == null) ? null : Number(v);
+      if (est_media_cost    !== undefined) { fields.push(`est_media_cost=$${i++}`);    vals.push(numOrNull(est_media_cost)); }
+      if (est_unit_price    !== undefined) { fields.push(`est_unit_price=$${i++}`);    vals.push(numOrNull(est_unit_price)); }
+      if (est_budget        !== undefined) { fields.push(`est_budget=$${i++}`);        vals.push(numOrNull(est_budget)); }
+      if (est_hire_count    !== undefined) { fields.push(`est_hire_count=$${i++}`);    vals.push(numOrNull(est_hire_count)); }
+      if (recommended_media !== undefined) { fields.push(`recommended_media=$${i++}`); vals.push(recommended_media || null); }
       if (answer  !== undefined) {
         fields.push(`answer_by=$${i++}`); vals.push(userId);
         fields.push(`answer_at=now()`);
@@ -191,6 +197,31 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
         vals
       );
       res.json({ request: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 案件に紐づくAN依頼を取得（案件詳細パネル用）
+  expressApp.get('/api/dashboard/an/by-deal/:dealId', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows } = await dbQuery(
+        `SELECT * FROM an_requests WHERE team_id=$1 AND crm_deal_id=$2 ORDER BY created_at DESC`,
+        [teamId, req.params.dealId]
+      );
+      res.json({ requests: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 案件詳細からAN依頼を直接起票
+  expressApp.post('/api/dashboard/an/from-deal', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { crm_deal_id, company_name, sales_person, request_type, priority, detail } = req.body || {};
+      const { rows: [row] } = await dbQuery(`
+        INSERT INTO an_requests (team_id, company_name, crm_deal_id, sales_person, request_type, priority, detail, status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING *
+      `, [teamId, company_name||null, crm_deal_id||null, sales_person||null, request_type||null, priority||null, detail||null]);
+      res.status(201).json({ request: row });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 

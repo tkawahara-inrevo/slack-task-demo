@@ -592,6 +592,13 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_kintone_activities_deal ON kintone_activities(deal_record_id)`).catch(() => {});
+
+  // AN依頼: ANが返す構造化見積もり項目（04費用テーブルの代替）
+  await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS est_media_cost BIGINT`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS est_unit_price BIGINT`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS est_budget BIGINT`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS est_hire_count INTEGER`).catch(() => {});
+  await dbQuery(`ALTER TABLE an_requests ADD COLUMN IF NOT EXISTS recommended_media TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_gas_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_sheet_url TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_settings ADD COLUMN IF NOT EXISTS personality_email_subject TEXT`).catch(() => {});

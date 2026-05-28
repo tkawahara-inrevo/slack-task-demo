@@ -4,33 +4,67 @@ const { dbQuery } = require('../db/index');
 const AN_CHANNEL_ID = process.env.AN_CHANNEL_ID || 'C09EFPSSAF2';
 
 // WFメッセージからAN依頼情報をパース
+// Slack側で *【…】* / 【*…*】 のような bold装飾が入っても拾えるよう、まず正規化してから抽出
 function parseAnRequest(text) {
+  // 【】周辺の * を除去（bold装飾を吸収）
+  const t = String(text || '')
+    .replace(/\*+【/g, '【').replace(/】\*+/g, '】')
+    .replace(/【\*+/g, '【').replace(/\*+】/g, '】');
+  // ラベルから値（次の【まで or 行末まで）を取り出す
   const get = (label) => {
-    const re = new RegExp(`【${label}】\\s*\\n([^【]*)`, 's');
-    const m = text.match(re);
+    const re = new RegExp(`【${label}[^】]*】\\s*\\n([^【]*)`, 's');
+    const m = t.match(re);
     return m ? m[1].trim() : '';
   };
   const getMention = (label) => {
-    const re = new RegExp(`【${label}】\\s*\\n<@([A-Z0-9]+)>`, 's');
-    const m = text.match(re);
+    const re = new RegExp(`【${label}[^】]*】\\s*\\n\\s*<@([A-Z0-9]+)>`, 's');
+    const m = t.match(re);
     if (m) return m[1];
-    // display name fallback
-    const re2 = new RegExp(`【${label}】\\s*\\n@?([^\\n<【]+)`, 's');
-    const m2 = text.match(re2);
+    const re2 = new RegExp(`【${label}[^】]*】\\s*\\n\\s*@?([^\\n<【]+)`, 's');
+    const m2 = t.match(re2);
+    return m2 ? m2[1].trim() : '';
+  };
+  const getUrl = (label) => {
+    const re = new RegExp(`【${label}[^】]*】\\s*\\n\\s*<(https?://[^|>]+)`, 's');
+    const m = t.match(re);
+    if (m) return m[1];
+    const re2 = new RegExp(`【${label}[^】]*】\\s*\\n\\s*(https?://[^\\s<【]+)`, 's');
+    const m2 = t.match(re2);
     return m2 ? m2[1].trim() : '';
   };
 
   return {
     sales_person:  getMention('担当営業'),
+    mentor:        getMention('メンター'),
     company_name:  get('会社名'),
-    kintone_url:   get('kintone'),
+    kintone_url:   getUrl('kintone'),
     hire_type:     get('新卒or中途'),
     request_type:  get('依頼粒度'),
     detail:        get('アナリティクスチームに依頼したい内容'),
     priority:      get('優先度'),
-    hearing:       get('ヒアリング項目（テンプレの21項目）'),
-    budget:        get('人数に対しての媒体予算'),
+    hearing:       get('ヒアリング項目'),
+    budget:        get('媒体予算') || get('人数に対しての媒体予算'),
   };
+}
+
+// Slack user_id → 表示名（キャッシュ）
+const _userNameCache = new Map();
+async function resolveUserName(teamId, idOrName) {
+  if (!idOrName) return '';
+  // 既に名前っぽい（U..ではない）ならそのまま
+  if (!/^[A-Z0-9]+$/.test(idOrName)) return idOrName;
+  const key = `${teamId}:${idOrName}`;
+  if (_userNameCache.has(key)) return _userNameCache.get(key);
+  try {
+    const { rows: [r] } = await dbQuery(
+      `SELECT COALESCE(display_name, real_name) AS name
+       FROM dashboard_user_directory WHERE team_id=$1 AND user_id=$2 LIMIT 1`,
+      [teamId, idOrName]
+    );
+    const name = (r?.name || '').split('/')[0].trim() || idOrName;
+    _userNameCache.set(key, name);
+    return name;
+  } catch { return idOrName; }
 }
 
 // kintone URLからrecord_idを抽出してcrm_deal_idを探す
@@ -168,7 +202,27 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
          ORDER BY a.created_at DESC`,
         status ? [teamId, status] : [teamId]
       );
-      res.json({ requests: rows });
+      // raw_text から構造化フィールドを再パース＋ユーザー名解決
+      const enriched = await Promise.all(rows.map(async (r) => {
+        const parsed = r.raw_text ? parseAnRequest(r.raw_text) : {};
+        const sales_person_name  = await resolveUserName(teamId, parsed.sales_person || r.sales_person);
+        const mentor_name        = await resolveUserName(teamId, parsed.mentor);
+        return {
+          ...r,
+          // 優先順位: DB → 再パース。空なら再パース値で埋める
+          company_name: r.company_name || parsed.company_name || null,
+          sales_person: sales_person_name || r.sales_person || null,
+          mentor_name: mentor_name || null,
+          kintone_url: r.kintone_url || parsed.kintone_url || null,
+          hire_type: parsed.hire_type || null,
+          request_type: r.request_type || parsed.request_type || null,
+          priority: r.priority || parsed.priority || null,
+          hearing: parsed.hearing || null,
+          budget: parsed.budget || null,
+          detail_parsed: parsed.detail || null,
+        };
+      }));
+      res.json({ requests: enriched });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 

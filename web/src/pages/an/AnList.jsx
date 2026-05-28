@@ -259,28 +259,55 @@ export default function AnList() {
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* メタ情報 */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {[
-                ['担当営業', selected.sales_person],
-                ['依頼種別', selected.request_type],
-                ['優先度', selected.priority],
-                ['受付日時', fmtDate(selected.created_at)],
-                ['CRM案件', selected.deal_name || selected.customer_name],
-              ].map(([label, val]) => val ? (
-                <div key={label}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--gray-500)', marginBottom: 2 }}>{label}</div>
-                  <div style={{ fontSize: '0.84rem', fontWeight: 500, color: 'var(--gray-800)' }}>{val}</div>
-                </div>
-              ) : null)}
+            {/* 依頼者情報（メタ） */}
+            <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 8 }}>依頼者情報</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.82rem' }}>
+                {[
+                  ['会社名', selected.company_name || '—'],
+                  ['担当営業', selected.sales_person || '—'],
+                  selected.mentor_name ? ['メンター', selected.mentor_name] : null,
+                  selected.hire_type ? ['新卒/中途', selected.hire_type] : null,
+                  selected.request_type ? ['依頼粒度', selected.request_type] : null,
+                  selected.priority ? ['優先度', selected.priority] : null,
+                  selected.kintone_url ? ['kintone', <a key="kk" href={selected.kintone_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }}>{selected.kintone_url}</a>] : null,
+                  ['受付日時', fmtDate(selected.created_at)],
+                  selected.deal_name || selected.customer_name ? ['CRM案件', selected.deal_name || selected.customer_name] : null,
+                ].filter(Boolean).map(([label, val]) => (
+                  <div key={label} style={{ display: 'flex', gap: 10 }}>
+                    <div style={{ color: 'var(--gray-500)', fontSize: '0.72rem', width: 90, flexShrink: 0 }}>{label}</div>
+                    <div style={{ color: 'var(--gray-900)', fontWeight: 500, wordBreak: 'break-all', flex: 1 }}>{val}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {/* 依頼詳細 */}
-            {selected.detail && (
+            {/* ヒアリング21項目 */}
+            {selected.hearing && (
               <div>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 6 }}>依頼内容</div>
-                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
-                  {selected.detail}
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>ヒアリング項目（21項目）</div>
+                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.6 }}>
+                  {selected.hearing}
+                </pre>
+              </div>
+            )}
+
+            {/* 媒体予算 */}
+            {selected.budget && (
+              <div>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>媒体予算</div>
+                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
+                  {selected.budget}
+                </pre>
+              </div>
+            )}
+
+            {/* 依頼詳細（自由文） */}
+            {selected.detail_parsed && (
+              <div>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 6 }}>依頼内容（自由文）</div>
+                <pre style={{ fontSize: '0.8rem', color: 'var(--gray-700)', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
+                  {selected.detail_parsed}
                 </pre>
               </div>
             )}

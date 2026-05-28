@@ -32,6 +32,8 @@ export default function AnList() {
   const [unified, setUnified] = useState([]);
   const [unifiedCounts, setUnifiedCounts] = useState({ total: 0, slack_total: 0, kintone_total: 0 });
   const [searchQ, setSearchQ] = useState('');
+  const [filterRequester, setFilterRequester] = useState('');
+  const [requesters, setRequesters] = useState([]);
   const [studyDetail, setStudyDetail] = useState(null);
 
   const load = async () => {
@@ -39,13 +41,16 @@ export default function AnList() {
     try {
       const apiStatus = filterStatus === 'pending' ? 'pending' : filterStatus === 'answered' ? 'done' : '';
       const r = await api.anUnified({ status: apiStatus, q: searchQ });
-      setUnified(r.rows || []);
-      setUnifiedCounts(r.counts || { total: 0, slack_total: 0, kintone_total: 0 });
+      let rows = r.rows || [];
+      if (filterRequester) rows = rows.filter(x => x.requester === filterRequester);
+      setUnified(rows);
+      setUnifiedCounts(r.counts || { total: 0 });
+      if (r.facets?.requesters) setRequesters(r.facets.requesters);
     } catch { setUnified([]); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [filterStatus]); // eslint-disable-line
+  useEffect(() => { load(); }, [filterStatus, filterRequester]); // eslint-disable-line
   // 検索は debounce
   useEffect(() => { const t = setTimeout(() => load(), 300); return () => clearTimeout(t); }, [searchQ]); // eslint-disable-line
 
@@ -119,20 +124,6 @@ export default function AnList() {
               </button>
             ))}
           </div>
-          <button onClick={async () => {
-              const daysStr = window.prompt('過去何日分を取り込みますか？（1〜365）', '90');
-              if (!daysStr) return;
-              const days = Math.max(1, Math.min(365, Number(daysStr) || 30));
-              try {
-                const r = await api.anBackfill(days);
-                alert(`取り込み完了\nスキャン: ${r.scanned}件\n新規登録: ${r.inserted}件`);
-                load();
-              } catch (e) { alert('取り込み失敗: ' + e.message); }
-            }}
-            title="Slackチャンネルの過去メッセージから依頼を取り込む"
-            style={{ padding: '3px 10px', fontSize: '0.74rem', fontWeight: 600, borderRadius: 5, border: '1px solid var(--gray-300)', background: 'var(--surface)', color: 'var(--gray-600)', cursor: 'pointer' }}>
-            📥 Slackから取り込み
-          </button>
           <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
             {[['', '全件'], ['pending', '未回答'], ['answered', '回答済み']].map(([v, l]) => (
               <button key={v} onClick={() => setFilterStatus(v)}
@@ -316,11 +307,16 @@ export default function AnList() {
           {/* AN依頼一覧ビュー（Slack依頼 + App221調査の統合） */}
           {view === 'list' && (
             <>
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', background: 'var(--surface-2)' }}>
-                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="会社名・担当で検索…"
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-200)', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="会社名で検索…"
                   style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '0.82rem', border: '1px solid var(--gray-300)', borderRadius: 6 }} />
-                <div style={{ marginTop: 4, fontSize: '0.66rem', color: 'var(--gray-500)' }}>
-                  全{unifiedCounts.total}件（Slack {unifiedCounts.slack_total} / kintone調査 {unifiedCounts.kintone_total}）
+                <select value={filterRequester} onChange={e => setFilterRequester(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '0.78rem', border: '1px solid var(--gray-300)', borderRadius: 6, background: 'var(--surface)' }}>
+                  <option value="">担当者: 全員</option>
+                  {requesters.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <div style={{ fontSize: '0.66rem', color: 'var(--gray-500)' }}>
+                  全{unifiedCounts.total}件
                 </div>
               </div>
               {loading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中...</div>
@@ -338,18 +334,22 @@ export default function AnList() {
                     const sameCount = row.company_name ? companyCount[row.company_name] : 0;
                     return (
                       <div key={key} onClick={() => openDetail(row)}
-                        style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', cursor: 'pointer',
-                          background: isSelectedRow ? '#eff6ff' : 'var(--surface)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.82rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--gray-900)' }}>
+                        style={{ padding: '12px 14px', borderBottom: '1px solid var(--gray-200)', cursor: 'pointer',
+                          background: isSelectedRow ? '#eff6ff' : 'var(--surface)',
+                          borderLeft: isSelectedRow ? '3px solid #2563eb' : '3px solid transparent',
+                          transition: 'background 0.1s' }}
+                        onMouseEnter={e => { if (!isSelectedRow) e.currentTarget.style.background = '#f8fafc'; }}
+                        onMouseLeave={e => { if (!isSelectedRow) e.currentTarget.style.background = 'var(--surface)'; }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 5 }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.84rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--gray-900)' }}>
                             {row.company_name || '(会社名なし)'}
-                            {sameCount > 1 && <span style={{ marginLeft: 5, fontSize: '0.66rem', color: 'var(--gray-500)', fontWeight: 600 }}>({sameCount}件)</span>}
+                            {sameCount > 1 && <span title={`同会社の他案件: ${sameCount}件`} style={{ marginLeft: 6, fontSize: '0.66rem', color: '#0284c7', fontWeight: 600, background: '#e0f2fe', padding: '1px 6px', borderRadius: 99 }}>+{sameCount-1}案件</span>}
                           </span>
-                          <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: statusBg, color: statusColor }}>
+                          <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: statusBg, color: statusColor, flexShrink: 0 }}>
                             {isDone ? '回答済' : (row.status || '未回答')}
                           </span>
                         </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--gray-500)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           {row.requester && <span>👤 {row.requester}</span>}
                           {row.request_type && <span style={{ color: 'var(--gray-600)' }}>{row.request_type}</span>}
                           {row.priority && <span style={{ color: '#dc2626', fontWeight: 700 }}>優先:{row.priority}</span>}
@@ -421,6 +421,18 @@ function MediaMasterView() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input value={filters.q} onChange={e => setF('q', e.target.value)} placeholder="媒体名・備考で検索…"
             style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--gray-300)', borderRadius: 6, fontSize: '0.82rem' }} />
+          <button onClick={async () => {
+              const name = window.prompt('媒体名を入力してください');
+              if (!name?.trim()) return;
+              try {
+                const r = await api.mediaMasterCreate({ name: name.trim() });
+                setSelected(r.media);
+                load(filters);
+              } catch (e) { alert('追加失敗: ' + e.message); }
+            }}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: '1px solid #67e8f9', background: '#ecfeff', color: '#0e7490', cursor: 'pointer' }}>
+            ＋ 新規追加
+          </button>
           <button onClick={doSync} disabled={syncing}
             style={{ padding: '5px 10px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6, border: '1px solid var(--gray-300)', background: 'var(--surface)', cursor: 'pointer' }}>
             {syncing ? '同期中…' : '🔄 kintone同期'}
@@ -479,6 +491,15 @@ function MediaMasterView() {
       )}
 
       {selected && (
+        <MediaMasterDetail
+          media={selected}
+          onClose={() => setSelected(null)}
+          onUpdate={(updated) => { setSelected(updated); load(filters); }}
+          onDelete={() => { setSelected(null); load(filters); }}
+        />
+      )}
+      {/* 旧表示（非表示） */}
+      {false && selected && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 1100, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setSelected(null)}>
           <div style={{ width: 'min(520px,94vw)', height: '100%', background: 'var(--surface)', boxShadow: '-8px 0 32px rgba(0,0,0,0.2)', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -583,10 +604,7 @@ function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtY
   const study = studyDetail?.study;
   const media = studyDetail?.media || [];
   const [savingStatus, setSavingStatus] = useState(false);
-  const [mustOpen, setMustOpen] = useState(false);
-  const [mustVal, setMustVal] = useState('');
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [notesVal, setNotesVal] = useState('');
+  // (mustOpen/notesOpen は InlineTextarea に置き換え、削除)
   const [editingMedia, setEditingMedia] = useState(null); // media row being edited
 
   if (!study) {
@@ -614,8 +632,6 @@ function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtY
     setSavingStatus(false);
   };
 
-  const saveMust = async () => { await updateStudy({ must_condition: mustVal }); setMustOpen(false); };
-  const saveNotes = async () => { await updateStudy({ other_notes: notesVal }); setNotesOpen(false); };
 
   const addMedia = async () => {
     const name = window.prompt('媒体名を入力（後で編集可）') || '';
@@ -663,41 +679,38 @@ function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtY
           </div>
           {(study.case_link || study.slack_link || study.jobform_url) && (
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0', display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.74rem' }}>
-              {study.case_link && <a href={study.case_link} target="_blank" rel="noreferrer" style={S_panel.link}>📂 案件リンク</a>}
+              {/* case_link は URL の場合のみリンク表示、テキストならそのまま */}
+              {study.case_link && /^https?:\/\//.test(study.case_link) ? (
+                <a href={study.case_link} target="_blank" rel="noreferrer" style={S_panel.link}>📂 案件リンク</a>
+              ) : study.case_link ? (
+                <span style={{ color: '#64748b' }}>📂 {study.case_link}</span>
+              ) : null}
               {study.slack_link && <a href={study.slack_link} target="_blank" rel="noreferrer" style={S_panel.link}>💬 Slack</a>}
-              {study.jobform_url && <a href={study.jobform_url} target="_blank" rel="noreferrer" style={S_panel.link}>📄 求人票</a>}
+              {study.jobform_url && /^https?:\/\//.test(study.jobform_url) ? (
+                <a href={study.jobform_url} target="_blank" rel="noreferrer" style={S_panel.link}>📄 求人票</a>
+              ) : null}
             </div>
           )}
         </Card>
 
-        {/* MUST条件 */}
-        <Card title="MUST条件" accent="#dc2626"
-          action={!mustOpen ? <button onClick={() => { setMustVal(study.must_condition || ''); setMustOpen(true); }} style={S_panel.editBtn}>編集</button>
-                            : <button onClick={() => setMustOpen(false)} style={S_panel.cancelBtn}>キャンセル</button>}>
-          {mustOpen ? (
-            <>
-              <textarea value={mustVal} onChange={e => setMustVal(e.target.value)} rows={5}
-                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid #fca5a5', borderRadius: 6, fontSize: '0.82rem', resize: 'vertical', lineHeight: 1.5 }} />
-              <button onClick={saveMust} style={S_panel.saveBtn}>保存</button>
-            </>
-          ) : (
-            <pre style={S_panel.preBox}>{study.must_condition || '（未入力）'}</pre>
-          )}
+        {/* MUST条件 - 直接編集 */}
+        <Card title="MUST条件" accent="#dc2626">
+          <InlineTextarea
+            value={study.must_condition || ''}
+            placeholder="MUST条件を入力（フォーカス外しで保存）"
+            border="#fca5a5"
+            onSave={async (v) => updateStudy({ must_condition: v })}
+          />
         </Card>
 
-        {/* その他特記事項 */}
-        <Card title="特記事項" accent="#7c3aed"
-          action={!notesOpen ? <button onClick={() => { setNotesVal(study.other_notes || ''); setNotesOpen(true); }} style={S_panel.editBtn}>編集</button>
-                             : <button onClick={() => setNotesOpen(false)} style={S_panel.cancelBtn}>キャンセル</button>}>
-          {notesOpen ? (
-            <>
-              <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} rows={5}
-                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid #c4b5fd', borderRadius: 6, fontSize: '0.82rem', resize: 'vertical', lineHeight: 1.5 }} />
-              <button onClick={saveNotes} style={S_panel.saveBtn}>保存</button>
-            </>
-          ) : (
-            <pre style={S_panel.preBox}>{study.other_notes || '（未入力）'}</pre>
-          )}
+        {/* その他特記事項 - 直接編集 */}
+        <Card title="特記事項" accent="#7c3aed">
+          <InlineTextarea
+            value={study.other_notes || ''}
+            placeholder="特記事項を入力（フォーカス外しで保存）"
+            border="#c4b5fd"
+            onSave={async (v) => updateStudy({ other_notes: v })}
+          />
         </Card>
 
         {/* 調査媒体 */}
@@ -853,6 +866,38 @@ function MediaSlotRow({ m, fmtYen, isEditing, onEdit, onCancel, onSaved, onDelet
   );
 }
 
+// 直接編集可能なtextarea（フォーカス外しで自動保存）
+function InlineTextarea({ value, placeholder, border, onSave }) {
+  const [local, setLocal] = useState(value || '');
+  const [focused, setFocused] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setLocal(value || ''); }, [value]);
+  const save = async () => {
+    if (local === (value || '')) { setFocused(false); return; }
+    setSaving(true);
+    await onSave(local);
+    setSaving(false);
+    setFocused(false);
+  };
+  return (
+    <div>
+      <textarea value={local} onChange={e => setLocal(e.target.value)}
+        onFocus={() => setFocused(true)} onBlur={save}
+        placeholder={placeholder}
+        rows={focused ? 5 : Math.max(2, Math.min(6, (local.split('\n').length || 1)))}
+        style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px',
+          border: `1.5px solid ${focused ? border : '#e2e8f0'}`,
+          borderRadius: 6, fontSize: '0.82rem', resize: 'vertical', lineHeight: 1.6,
+          background: focused ? '#fff' : '#fafbfc', transition: 'border-color 0.15s' }} />
+      {focused && (
+        <div style={{ fontSize: '0.62rem', color: '#94a3b8', marginTop: 2 }}>
+          {saving ? '保存中…' : 'フォーカスを外すと自動保存'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const S_panel = {
   root: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f8fafc' },
   header: { padding: '14px 20px', color: '#fff', display: 'flex', alignItems: 'center', gap: 12 },
@@ -867,3 +912,145 @@ const S_panel = {
   saveBtn: { fontSize: '0.74rem', fontWeight: 700, padding: '5px 14px', borderRadius: 6, border: 'none', background: '#1e40af', color: '#fff', cursor: 'pointer', marginTop: 6 },
   addBtn: { fontSize: '0.7rem', padding: '3px 10px', borderRadius: 5, border: '1px solid #67e8f9', background: '#ecfeff', color: '#0e7490', cursor: 'pointer', fontWeight: 700 },
 };
+
+
+// ── 媒体マスタ 詳細＋編集 ─────────────────────────
+function MediaMasterDetail({ media, onClose, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: media.name || '',
+    vendor_url: media.vendor_url || '',
+    recommend_score: media.recommend_score || '',
+    service_type: media.service_type || '',
+    hire_methods: (media.hire_methods || []).join(', '),
+    areas: (media.areas || []).join(', '),
+    employment_types: (media.employment_types || []).join(', '),
+    age_targets: (media.age_targets || []).join(', '),
+    industries: (media.industries || []).join(', '),
+    job_types: (media.job_types || []).join(', '),
+    basic_billing: media.basic_billing || '',
+    norma: media.norma || '',
+    notes: media.notes || '',
+    caution: media.caution || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await api.mediaMasterUpdate(media.record_id, {
+        ...form,
+        recommend_score: form.recommend_score === '' ? null : Number(form.recommend_score),
+      });
+      onUpdate && onUpdate(r.media);
+      setEditing(false);
+    } catch (e) { alert('保存失敗: ' + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const del = async () => {
+    if (!window.confirm(`媒体「${media.name}」を削除しますか？`)) return;
+    try { await api.mediaMasterDelete(media.record_id); onDelete && onDelete(); }
+    catch (e) { alert('削除失敗: ' + e.message); }
+  };
+
+  const FieldRow = ({ label, k, type = 'text' }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+      <label style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>{label}</label>
+      <input type={type} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+        style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }} />
+    </div>
+  );
+  const AreaField = ({ label, k }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+      <label style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>{label}<span style={{ color: '#94a3b8', fontWeight: 400, marginLeft: 4 }}>(カンマ区切り)</span></label>
+      <input value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+        style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }} />
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 1100, display: 'flex', justifyContent: 'flex-end' }} onClick={onClose}>
+      <div style={{ width: 'min(560px,94vw)', height: '100%', background: '#fff', boxShadow: '-8px 0 32px rgba(0,0,0,0.2)', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafbfc' }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0f172a' }}>{media.name}</div>
+            {media.recommend_score > 0 && <div style={{ fontSize: '0.8rem', color: '#d97706', fontWeight: 700 }}>{'★'.repeat(media.recommend_score)}</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {!editing && <button onClick={() => setEditing(true)} style={{ fontSize: '0.72rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #93c5fd', background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, cursor: 'pointer' }}>編集</button>}
+            {!editing && <button onClick={del} style={{ fontSize: '0.72rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', fontWeight: 700, cursor: 'pointer' }}>削除</button>}
+            <button onClick={onClose} style={{ background: '#f1f5f9', border: 'none', width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 16 }}>×</button>
+          </div>
+        </div>
+
+        <div style={{ padding: '14px 20px' }}>
+          {editing ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <FieldRow label="媒体名" k="name" />
+                <FieldRow label="公式HP" k="vendor_url" />
+                <FieldRow label="種別" k="service_type" />
+                <FieldRow label="オススメ度 (1-5)" k="recommend_score" type="number" />
+                <FieldRow label="基本請求先" k="basic_billing" />
+                <FieldRow label="ノルマ" k="norma" />
+              </div>
+              <AreaField label="採用手法" k="hire_methods" />
+              <AreaField label="エリア" k="areas" />
+              <AreaField label="対象区分" k="employment_types" />
+              <AreaField label="利用者年齢層" k="age_targets" />
+              <AreaField label="業種" k="industries" />
+              <AreaField label="職種" k="job_types" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+                <label style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>媒体備考</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3}
+                  style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem', resize: 'vertical' }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+                <label style={{ fontSize: '0.66rem', color: '#dc2626', fontWeight: 600 }}>注意事項</label>
+                <textarea value={form.caution} onChange={e => setForm(f => ({ ...f, caution: e.target.value }))} rows={3}
+                  style={{ padding: '6px 10px', border: '1px solid #fca5a5', borderRadius: 6, fontSize: '0.82rem', resize: 'vertical' }} />
+              </div>
+              <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => setEditing(false)} style={{ padding: '6px 14px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>キャンセル</button>
+                <button onClick={save} disabled={saving} style={{ padding: '6px 18px', fontSize: '0.78rem', fontWeight: 700, borderRadius: 6, border: 'none', background: '#1e40af', color: '#fff', cursor: 'pointer' }}>{saving ? '保存中…' : '保存'}</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: '0.82rem' }}>
+              {media.vendor_url && <div><a href={media.vendor_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>{media.vendor_url}</a></div>}
+              {[
+                ['種別', media.service_type],
+                ['採用手法', (media.hire_methods||[]).join(', ')],
+                ['エリア', (media.areas||[]).join(', ')],
+                ['対象区分', (media.employment_types||[]).join(', ')],
+                ['利用者年齢層', (media.age_targets||[]).join(', ')],
+                ['業種', (media.industries||[]).join(', ')],
+                ['職種', (media.job_types||[]).join(', ')],
+                ['基本請求先', media.basic_billing],
+                ['ノルマ', media.norma],
+              ].filter(([,v]) => v).map(([k,v]) => (
+                <div key={k} style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ width: 100, color: '#64748b', fontSize: '0.72rem' }}>{k}</div>
+                  <div style={{ flex: 1, color: '#0f172a', wordBreak: 'break-all' }}>{v}</div>
+                </div>
+              ))}
+              {media.notes && (
+                <div>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>媒体備考</div>
+                  <pre style={{ fontSize: '0.78rem', whiteSpace: 'pre-wrap', background: '#f8fafc', padding: '8px 10px', borderRadius: 6, margin: 0 }}>{media.notes}</pre>
+                </div>
+              )}
+              {media.caution && (
+                <div>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>注意事項</div>
+                  <pre style={{ fontSize: '0.78rem', whiteSpace: 'pre-wrap', background: '#fef2f2', padding: '8px 10px', borderRadius: 6, margin: 0, color: '#7f1d1d' }}>{media.caution}</pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

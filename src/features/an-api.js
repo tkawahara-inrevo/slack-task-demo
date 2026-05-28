@@ -553,6 +553,70 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // 媒体マスタ 更新（手動編集）
+  expressApp.patch('/api/dashboard/media-master/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const allowed = ['name','vendor_url','recommend_score','service_type',
+        'hire_methods','areas','age_targets','industries','job_types','employment_types',
+        'basic_billing','norma','notes','caution'];
+      const arrFields = new Set(['hire_methods','areas','age_targets','industries','job_types','employment_types']);
+      const numFields = new Set(['recommend_score']);
+      const sets = [], vals = [];
+      let i = 1;
+      for (const k of allowed) {
+        if (k in req.body) {
+          let v = req.body[k];
+          if (numFields.has(k)) v = (v==='' || v==null) ? null : Number(v);
+          if (arrFields.has(k)) v = Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? v.split(',').map(s=>s.trim()).filter(Boolean) : []);
+          sets.push(`${k}=$${i++}`); vals.push(v);
+        }
+      }
+      if (sets.length === 0) return res.json({ ok: true });
+      sets.push(`synced_at=now()`);
+      vals.push(req.params.id, teamId);
+      const { rows: [row] } = await dbQuery(
+        `UPDATE media_master SET ${sets.join(',')} WHERE record_id=$${i++} AND team_id=$${i++} RETURNING *`, vals
+      );
+      res.json({ media: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 媒体マスタ 新規作成
+  expressApp.post('/api/dashboard/media-master', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const recordId = `local-${Date.now()}`;
+      const { rows: [row] } = await dbQuery(`
+        INSERT INTO media_master (record_id, team_id, name, vendor_url, recommend_score, service_type,
+                                   hire_methods, areas, employment_types, industries, job_types, notes, data)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'{}'::jsonb) RETURNING *
+      `, [
+        recordId, teamId,
+        req.body?.name || '新規媒体',
+        req.body?.vendor_url || null,
+        req.body?.recommend_score || null,
+        req.body?.service_type || null,
+        req.body?.hire_methods || [],
+        req.body?.areas || [],
+        req.body?.employment_types || [],
+        req.body?.industries || [],
+        req.body?.job_types || [],
+        req.body?.notes || null,
+      ]);
+      res.json({ media: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  // 媒体マスタ 削除
+  expressApp.delete('/api/dashboard/media-master/:id', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      await dbQuery(`DELETE FROM media_master WHERE record_id=$1 AND team_id=$2`, [req.params.id, teamId]);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // 手動再同期
   expressApp.post('/api/dashboard/media-master/sync', authWithRole, async (req, res) => {
     try {
@@ -582,7 +646,16 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
         FROM an_studies s WHERE ${where}
         ORDER BY s.request_date DESC NULLS LAST, s.synced_at DESC
       `, params);
-      res.json({ rows, counts: { total: rows.length } });
+      // ファセット（フィルタ選択肢用）
+      const { rows: facetRows } = await dbQuery(
+        `SELECT DISTINCT requester FROM an_studies WHERE team_id=$1 AND requester IS NOT NULL AND requester <> '' ORDER BY requester`,
+        [teamId]
+      );
+      res.json({
+        rows,
+        counts: { total: rows.length },
+        facets: { requesters: facetRows.map(r => r.requester) },
+      });
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
   });
 

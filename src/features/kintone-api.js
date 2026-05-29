@@ -7,7 +7,7 @@ const { dbQuery } = require('../db/index');
 const KINTONE_DEAL_FIELD_MAP = {
   '受注日':                             'order_date',
   '結論日':                             'conclusion_date',
-  'ヨミ_2':                             'contract_type',      // 採用保証/月額の契約形態
+  'ヨミ_2':                             'contract_type',      // 一括払い/月額の契約形態（旧称: 採用保証）
   '担当営業_0':                         'sales_user_id',
   'IS用最終対応日付':                    'inflow_date',        // 流入日（商談獲得日）
   '見込売り上げ_税抜き':                 'initial_fee',
@@ -62,7 +62,7 @@ async function syncDealsFromKintoneCache() {
         NULLIF(COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム'),'')::date,
         NULLIF(kc.data->>'流入経路',''),
         NULLIF(kc.data->>'見込売り上げ_税抜き','')::numeric,
-        NULLIF(kc.data->>'ヨミ_2',''),
+        NULLIF(REPLACE(COALESCE(kc.data->>'ヨミ_2',''),'採用保証','一括払い'),''),
         NULLIF(kc.data->>'失注理由',''),
         NULLIF(kc.data->>'担当営業_0',''),
         jsonb_build_object('kintone_record_id', kc.record_id)
@@ -83,7 +83,7 @@ async function syncDealsFromKintoneCache() {
         inflow_date        = COALESCE(NULLIF(COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム'),'')::date, d.inflow_date),
         inflow_source      = COALESCE(NULLIF(kc.data->>'流入経路',''), d.inflow_source),
         initial_fee        = COALESCE(NULLIF(kc.data->>'見込売り上げ_税抜き','')::numeric, d.initial_fee),
-        contract_type      = COALESCE(NULLIF(kc.data->>'ヨミ_2',''), d.contract_type),
+        contract_type      = COALESCE(NULLIF(REPLACE(COALESCE(kc.data->>'ヨミ_2',''),'採用保証','一括払い'),''), d.contract_type),
         lost_reason        = COALESCE(NULLIF(kc.data->>'失注理由',''), d.lost_reason),
         sales_person       = COALESCE(NULLIF(kc.data->>'担当営業_0',''), d.sales_person),
         updated_at = now()
@@ -99,7 +99,7 @@ async function syncDealsFromKintoneCache() {
           OR d.inflow_date   IS DISTINCT FROM COALESCE(NULLIF(COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム'),'')::date, d.inflow_date)
           OR d.inflow_source IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'流入経路',''), d.inflow_source)
           OR d.initial_fee   IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'見込売り上げ_税抜き','')::numeric, d.initial_fee)
-          OR d.contract_type IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'ヨミ_2',''), d.contract_type)
+          OR d.contract_type IS DISTINCT FROM COALESCE(NULLIF(REPLACE(COALESCE(kc.data->>'ヨミ_2',''),'採用保証','一括払い'),''), d.contract_type)
           OR d.lost_reason   IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'失注理由',''), d.lost_reason)
           OR d.sales_person  IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'担当営業_0',''), d.sales_person)
         )

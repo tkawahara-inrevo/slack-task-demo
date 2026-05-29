@@ -18,7 +18,7 @@ const YOMI_CFG = {
   'D 15％':{ color:'var(--gray-500)',bg:'var(--surface-2)' },'E 5％':{ color:'var(--gray-400)',bg:'var(--surface-2)' },
 };
 const STAGES = ['リード獲得','初回商談待ち','商談中','受注済','失注','見送り'];
-const PLANS  = ['月額：コンサルのみ','月額：実務のみ','月額：フルコミット','後払い：媒体費弊社','後払い：媒体費クライアント','採用保証：分析付き','採用保証：人材紹介案件'];
+const PLANS  = ['月額：コンサルのみ','月額：実務のみ','月額：フルコミット','後払い：媒体費弊社','後払い：媒体費クライアント','一括払い：分析付き','一括払い：人材紹介案件'];
 const QUICK_FILTERS = [
   { key:'all',           label:'全て' },
   { key:'self',          label:'自分の担当' },
@@ -398,7 +398,7 @@ export default function CustomerList({ scope = 'all' }) {
                     {/* 金額 */}
                     <div style={{ flex:'0 0 72px', textAlign:'right' }}>
                       <div style={{ fontSize:'0.8rem', fontWeight:700, color:'#1e40af' }}>{fmtM(d.initial_fee||d.monthly_fee)}</div>
-                      {d.contract_type && <div style={{ fontSize:'0.62rem', color:'var(--gray-400)' }}>{d.contract_type.replace('採用保証','保証').replace('月額','月額')}</div>}
+                      {d.contract_type && <div style={{ fontSize:'0.62rem', color:'var(--gray-400)' }}>{d.contract_type.replace('一括払い','一括').replace('採用保証','一括')}</div>}
                     </div>
 
                     {/* 最終更新 */}

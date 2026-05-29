@@ -110,12 +110,12 @@ const YOMI_OPTIONS = [
 const CONTRACT_TYPES = [
   '月額：コンサルのみ', '月額：実務のみ', '月額：フルコミット',
   '後払い：媒体費弊社', '後払い：媒体費クライアント',
-  '採用保証：分析付き', '採用保証：人材紹介案件',
+  '一括払い：分析付き', '一括払い：人材紹介案件',
 ];
 
 const PAYMENT_TYPES = [
   '月額', '月額（1st upsell）',
-  '採用保証', '採用保証（1st upsell）', '採用保証（2st upsell）',
+  '一括払い', '一括払い（1st upsell）', '一括払い（2st upsell）',
   '後払い（媒体費用INREVO持ち）', '後払い（媒体費用クライアント持ち）',
   '変動プラン',
 ];
@@ -1394,7 +1394,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       for (let i = 1; i <= m; i++) {
         inserts.push({ date: addMonths(baseDate, i - 1), amount: monthly, kind: 'monthly', seq: i });
       }
-    } else if (ct.includes('採用保証')) {
+    } else if (ct.includes('一括払い') || ct.includes('採用保証')) {
       const amount = initial > 0 ? initial : (unit * Math.max(1, gcount));
       inserts.push({ date: addMonths(baseDate, 1), amount, kind: 'guarantee', seq: null });
     } else if (ct.includes('後払い')) {
@@ -1758,7 +1758,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const calcKpi = (deal) => {
         const plan = String(deal.contract_type || '');
         const TAX = 1.1;
-        if (plan.includes('採用保証')) {
+        if (plan.includes('一括払い') || plan.includes('採用保証')) {
           const amt = Number(deal.monthly_fee || deal.initial_fee || 0) * TAX;
           return Math.round(amt * 0.6);
         }
@@ -1851,7 +1851,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const classify = (plan) => {
         const p = (plan || '').trim();
         if (!p) return { cat: 'unknown' };
-        if (p.includes('採用保証')) {
+        if (p.includes('一括払い') || p.includes('採用保証')) {
           if (/2(st|nd)|３|3/.test(p)) return { cat: 'hosho', seq: 3 };
           if (/1(st)|upsell|２|2/.test(p)) return { cat: 'hosho', seq: 2 };
           return { cat: 'hosho', seq: 1 };
@@ -1868,7 +1868,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         return { cat: 'unknown' };
       };
 
-      // 会社ごとの状態（月額連番・採用保証の有無）
+      // 会社ごとの状態（月額連番・一括払いの有無）
       const state = {};
       const out = [];
       for (const r of rows) {
@@ -1881,7 +1881,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         if (cl.cat === 'hosho') {
           st.hadHosho = true;
           rate = cl.seq === 1 ? 0.6 : cl.seq === 2 ? 0.3 : 0.2;
-          label = `採用保証${cl.seq === 1 ? '初回' : cl.seq === 2 ? '2回目' : '3回目以降'}`;
+          label = `一括払い${cl.seq === 1 ? '初回' : cl.seq === 2 ? '2回目' : '3回目以降'}`;
         } else if (cl.cat === 'getsugaku') {
           st.monthlyCount += 1;
           const n = st.monthlyCount;

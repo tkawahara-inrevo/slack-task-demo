@@ -261,7 +261,7 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
   const yen = (n) => n != null && n !== '' ? `¥${Number(n).toLocaleString()}` : '—';
   const ct = String(form.contract_type || '');
   const isMonthly  = ct.includes('月額');
-  const isWarranty = ct.includes('採用保証');
+  const isWarranty = ct.includes('一括払い') || ct.includes('採用保証');
   return (
     <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:11 }}>
       <button onClick={onBack} style={{ alignSelf:'flex-start', background:'none', border:'none', color:'#2563eb', cursor:'pointer', fontSize:'0.78rem', padding:0 }}>← 一覧に戻る</button>

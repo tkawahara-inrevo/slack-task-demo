@@ -1760,7 +1760,7 @@ function InfoField({ label, value, onChange, type = 'text', multiline = false })
 }
 
 function planLabel(plan) {
-  return { monthly: '月額', guarantee: '採用保証' }[plan] || plan;
+  return { monthly: '月額', guarantee: '一括払い' }[plan] || plan;
 }
 
 function formatYen(n) {

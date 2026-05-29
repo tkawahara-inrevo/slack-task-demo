@@ -21,11 +21,11 @@ const YOMI_OPTIONS = [
 const CONTRACT_TYPES = [
   '月額コンサルのみ', '月額実務のみ', '月額フルコミット',
   '後払い媒体費INREVO', '後払い媒体費クライアント',
-  '採用保証分析付き', '採用保証人材紹介',
+  '一括払い分析付き', '一括払い人材紹介',
 ];
 
-const PAYMENT_METHODS = ['月額', '後払い', '採用保証', '変動プラン'];
-const APPT_TYPES = ['月額', '後払い', '採用保証', '不明'];
+const PAYMENT_METHODS = ['月額', '後払い', '一括払い', '変動プラン'];
+const APPT_TYPES = ['月額', '後払い', '一括払い', '不明'];
 const HIRE_TYPES = ['新卒', '中途', '業務委託', 'アルバイト'];
 const LOSS_REASONS = [
   'ニーズなし', '金額NG', '競合負け', '採用予定なし', '多忙',

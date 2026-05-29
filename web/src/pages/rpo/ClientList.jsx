@@ -645,7 +645,7 @@ export default function ClientList() {
 }
 
 function planLabel(plan) {
-  return { monthly: '月額', guarantee: '採用保証' }[plan] || plan;
+  return { monthly: '月額', guarantee: '一括払い' }[plan] || plan;
 }
 
 function formatDate(iso) {

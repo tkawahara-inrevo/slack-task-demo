@@ -506,7 +506,7 @@ const SYSTEM_FIELDS = [
   ] },
   { name:'contract_type', label:'契約形態（kintone:支払方式）', defaults:[
     '月額','月額（1st upsell）',
-    '採用保証','採用保証（1st upsell）','採用保証（2st upsell）',
+    '一括払い','一括払い（1st upsell）','一括払い（2st upsell）',
     '後払い（媒体費用INREVO持ち)）','後払い（媒体費用クライアント持ち）',
     '変動プラン',
   ] },
@@ -1159,7 +1159,7 @@ function PaymentsManager() {
   const totalAct = (rows||[]).reduce((s,r) => s + Number(r.actual_amount||0), 0);
   const matchedCount = (rows||[]).filter(r => r.actual_record_id).length;
 
-  const KIND_LABEL = { initial:'初期', monthly:'月額', guarantee:'採用保証', other:'その他' };
+  const KIND_LABEL = { initial:'初期', monthly:'月額', guarantee:'一括払い', other:'その他' };
   const KIND_COLOR = { initial:'#6366f1', monthly:'#0ea5e9', guarantee:'#059669', other:'#94a3b8' };
 
   return (

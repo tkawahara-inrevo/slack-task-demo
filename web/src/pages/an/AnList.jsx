@@ -165,53 +165,74 @@ export default function AnList() {
               </div>
               {loading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中...</div>
               : unified.length === 0 ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>該当なし</div>
-              : (() => {
-                  // 同会社のカウント
-                  const companyCount = {};
-                  unified.forEach(r => { if (r.company_name) companyCount[r.company_name] = (companyCount[r.company_name]||0)+1; });
-                  return (
-                    <div style={{ padding: '8px 8px', background: '#f1f5f9', minHeight: '100%' }}>
-                      {unified.map(row => {
-                        const key = `study:${row.source_id}`;
-                        const isSelectedRow = selected && selected.source_id===row.source_id;
-                        const isDone = ['完了','対応済','クローズ'].includes(row.status);
-                        const statusColor = isDone ? '#059669' : '#d97706';
-                        const statusBg    = isDone ? '#f0fdf4' : '#fffbeb';
-                        const sameCount = row.company_name ? companyCount[row.company_name] : 0;
-                        // 優先度に応じてaccentバー色
-                        const accent = row.priority === '至急' ? '#dc2626' : row.priority === '高' ? '#f59e0b' : '#3b82f6';
-                        return (
-                          <div key={key} onClick={() => openDetail(row)}
-                            style={{ marginBottom: 8, padding: '11px 12px 11px 14px', borderRadius: 10, cursor: 'pointer',
-                              background: isSelectedRow ? '#eff6ff' : '#fff',
-                              border: isSelectedRow ? '1.5px solid #2563eb' : '1px solid #e2e8f0',
-                              borderLeft: `4px solid ${isSelectedRow ? '#2563eb' : accent}`,
-                              boxShadow: isSelectedRow ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 2px rgba(15,23,42,0.04)',
-                              transition: 'all 0.12s ease' }}
-                            onMouseEnter={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 2px 6px rgba(15,23,42,0.1)'; e.currentTarget.style.borderColor = '#94a3b8'; } }}
-                            onMouseLeave={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 1px 2px rgba(15,23,42,0.04)'; e.currentTarget.style.borderColor = '#e2e8f0'; } }}>
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 5 }}>
-                              <span style={{ fontWeight: 700, fontSize: '0.84rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0f172a' }}>
-                                {row.company_name || '(会社名なし)'}
-                                {sameCount > 1 && <span title={`同会社の他案件: ${sameCount}件`} style={{ marginLeft: 6, fontSize: '0.66rem', color: '#0284c7', fontWeight: 600, background: '#e0f2fe', padding: '1px 6px', borderRadius: 99 }}>+{sameCount-1}案件</span>}
-                              </span>
-                              <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: statusBg, color: statusColor, flexShrink: 0 }}>
-                                {isDone ? '回答済' : (row.status || '未回答')}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '0.72rem', color: '#64748b', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                              {row.requester && <span>👤 {row.requester}</span>}
-                              {row.request_type && <span style={{ color: '#475569' }}>{row.request_type}</span>}
-                              {row.priority && <span style={{ color: accent, fontWeight: 700, background: row.priority === '至急' ? '#fef2f2' : '#fff7ed', padding: '1px 6px', borderRadius: 4 }}>優先:{row.priority}</span>}
-                              {row.media_count > 0 && <span style={{ color: '#0284c7', background: '#f0f9ff', padding: '1px 6px', borderRadius: 4 }}>📊 媒体{row.media_count}</span>}
-                              <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>{row.requested_at ? fmtDate(row.requested_at) : '—'}</span>
-                            </div>
+              : (
+                  <div style={{ padding: '8px 8px', background: '#f1f5f9', minHeight: '100%' }}>
+                    {unified.map(row => {
+                      const key = `study:${row.source_id}`;
+                      const isSelectedRow = selected && selected.source_id===row.source_id;
+                      const isDone = ['完了','対応済','クローズ'].includes(row.status);
+                      const statusColor = isDone ? '#059669' : '#d97706';
+                      const statusBg    = isDone ? '#f0fdf4' : '#fffbeb';
+                      // 優先度色
+                      const isUrgent = row.priority === '至急';
+                      const accent = isUrgent ? '#dc2626' : row.priority === '高' ? '#f59e0b' : '#3b82f6';
+                      return (
+                        <div key={key} onClick={() => openDetail(row)}
+                          style={{ marginBottom: 8, padding: '11px 12px 11px 14px', borderRadius: 10, cursor: 'pointer',
+                            background: isSelectedRow ? '#eff6ff' : '#fff',
+                            border: isSelectedRow ? '1.5px solid #2563eb' : '1px solid #e2e8f0',
+                            borderLeft: `4px solid ${isSelectedRow ? '#2563eb' : accent}`,
+                            boxShadow: isSelectedRow ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 2px rgba(15,23,42,0.04)',
+                            transition: 'all 0.12s ease' }}
+                          onMouseEnter={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 2px 6px rgba(15,23,42,0.1)'; e.currentTarget.style.borderColor = '#94a3b8'; } }}
+                          onMouseLeave={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 1px 2px rgba(15,23,42,0.04)'; e.currentTarget.style.borderColor = '#e2e8f0'; } }}>
+                          {/* 1行目: 会社名 + 優先度 + ステータス */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.86rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0f172a' }}>
+                              {row.company_name || '(会社名なし)'}
+                            </span>
+                            {row.priority && (
+                              isUrgent ? (
+                                <span style={{ fontSize: '0.64rem', fontWeight: 800, padding: '2px 8px', borderRadius: 99, background: '#dc2626', color: '#fff', letterSpacing: '0.04em', boxShadow: '0 1px 2px rgba(220,38,38,0.4)', flexShrink: 0 }}>
+                                  🔥 至急
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '0.64rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: row.priority === '高' ? '#fff7ed' : '#eff6ff', color: accent, border: `1px solid ${accent}40`, flexShrink: 0 }}>
+                                  {row.priority}
+                                </span>
+                              )
+                            )}
+                            <span style={{ fontSize: '0.64rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: statusBg, color: statusColor, flexShrink: 0 }}>
+                              {isDone ? '回答済' : (row.status || '未回答')}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
+                          {/* 2行目: 雇用形態 / 職種（メインメタ情報） */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, flexWrap: 'wrap' }}>
+                            {row.employment_type && (
+                              <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 5, background: '#ede9fe', color: '#6d28d9' }}>
+                                {row.employment_type}
+                              </span>
+                            )}
+                            {row.job_type && (
+                              <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 5, background: '#e0f2fe', color: '#0369a1' }}>
+                                {row.job_type}
+                              </span>
+                            )}
+                            {!row.employment_type && !row.job_type && (
+                              <span style={{ fontSize: '0.7rem', color: '#cbd5e1' }}>—</span>
+                            )}
+                          </div>
+                          {/* 3行目: 担当・媒体数・日付 */}
+                          <div style={{ fontSize: '0.7rem', color: '#64748b', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            {row.requester && <span>👤 {row.requester}</span>}
+                            {row.media_count > 0 && <span style={{ color: '#0284c7', background: '#f0f9ff', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>📊 媒体{row.media_count}</span>}
+                            <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>{row.requested_at ? fmtDate(row.requested_at) : '—'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
             </>
           )}
         </div>
@@ -385,24 +406,41 @@ function MediaPerformanceView({ mediaStats, mediaFacets, mediaFilters, setMediaF
                     <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.78rem' }}>—</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {/* ヘッダー行 */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 90px 60px 60px 60px', gap: 8, padding: '4px 10px', fontSize: '0.62rem', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em' }}>
+                        <div>案件 / 雇用形態・職種</div>
+                        <div>依頼者</div>
+                        <div style={{ textAlign: 'right' }}>料金</div>
+                        <div style={{ textAlign: 'right' }}>予測</div>
+                        <div style={{ textAlign: 'right' }}>実応募</div>
+                        <div style={{ textAlign: 'center' }}>効果率</div>
+                      </div>
                       {cases.map((c, i) => (
-                        <div key={c.record_id + '_' + i} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr auto auto auto', gap: 8, alignItems: 'center', padding: '7px 10px', background: i % 2 === 0 ? '#f8fafc' : '#fff', borderRadius: 6, fontSize: '0.76rem' }}>
-                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{c.company_name || '—'}</div>
-                            <div style={{ fontSize: '0.66rem', color: '#94a3b8' }}>{[c.employment_type, c.job_type].filter(Boolean).join(' / ') || '—'}</div>
+                        <div key={c.record_id + '_' + i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 90px 60px 60px 60px', gap: 8, alignItems: 'center', padding: '8px 10px', background: i % 2 === 0 ? '#f8fafc' : '#fff', borderRadius: 6, fontSize: '0.76rem', border: '1px solid #f1f5f9' }}>
+                          <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.company_name || '—'}</div>
+                            <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                              {c.employment_type && <span style={{ fontSize: '0.62rem', fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9' }}>{c.employment_type}</span>}
+                              {c.job_type && <span style={{ fontSize: '0.62rem', fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#e0f2fe', color: '#0369a1' }}>{c.job_type}</span>}
+                              {!c.employment_type && !c.job_type && <span style={{ fontSize: '0.66rem', color: '#cbd5e1' }}>—</span>}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: '#475569' }}>
-                            {c.requester && <span>👤 {c.requester}</span>}
+                          <div style={{ fontSize: '0.7rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.requester ? `👤 ${c.requester}` : <span style={{ color: '#cbd5e1' }}>—</span>}
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '0.6rem', color: '#94a3b8' }}>予測</div>
-                            <div style={{ fontWeight: 700, color: '#64748b' }}>{c.expected_apps ?? '—'}</div>
+                            <div style={{ fontWeight: 700, color: c.fee ? '#0f172a' : '#cbd5e1', fontSize: '0.78rem' }}>
+                              {c.fee ? `¥${Math.round(c.fee/10000).toLocaleString()}万` : '—'}
+                            </div>
+                            {c.cost_category && <div style={{ fontSize: '0.58rem', color: '#94a3b8' }}>{c.cost_category}</div>}
                           </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '0.6rem', color: '#94a3b8' }}>実績</div>
-                            <div style={{ fontWeight: 800, color: '#059669' }}>{c.effective_apps ?? '—'}</div>
+                          <div style={{ textAlign: 'right', fontWeight: 700, color: c.expected_apps != null ? '#64748b' : '#cbd5e1' }}>
+                            {c.expected_apps ?? '—'}
                           </div>
-                          <div style={{ background: accuracyBg(c.accuracy_pct), color: accuracyColor(c.accuracy_pct), padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: '0.74rem', minWidth: 46, textAlign: 'center' }}>
+                          <div style={{ textAlign: 'right', fontWeight: 800, color: c.effective_apps != null ? '#059669' : '#cbd5e1' }}>
+                            {c.effective_apps ?? '—'}
+                          </div>
+                          <div style={{ background: accuracyBg(c.accuracy_pct), color: accuracyColor(c.accuracy_pct), padding: '4px 6px', borderRadius: 6, fontWeight: 700, fontSize: '0.74rem', textAlign: 'center', border: c.accuracy_pct != null ? `1px solid ${accuracyColor(c.accuracy_pct)}30` : 'none' }}>
                             {c.accuracy_pct != null ? `${c.accuracy_pct}%` : '—'}
                           </div>
                         </div>

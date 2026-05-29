@@ -725,7 +725,9 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
       const { rows } = await dbQuery(`
         SELECT s.record_id AS source_id, s.company_name,
                s.request_date::timestamptz AS requested_at,
-               s.status, s.priority, s.requester, s.job_type AS request_type,
+               s.status, s.priority, s.requester,
+               s.job_type, s.employment_type,
+               s.job_type AS request_type,
                s.source,
                (SELECT COUNT(*)::int FROM an_study_media m WHERE m.study_record_id=s.record_id) AS media_count
         FROM an_studies s WHERE ${where}

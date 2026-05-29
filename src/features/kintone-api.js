@@ -89,6 +89,20 @@ async function syncDealsFromKintoneCache() {
         updated_at = now()
       FROM kintone_cache kc
       WHERE kc.app_id='102' AND d.team_id=$1 AND d.data->>'kintone_record_id'=kc.record_id
+        -- 差分のある行だけUPDATE（bloat抑制）
+        AND (
+          d.yomi          IS DISTINCT FROM COALESCE(NULLIF(${YOMI},''), d.yomi)
+          OR d.status     IS DISTINCT FROM (${STATUS})
+          OR d.order_date IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'受注日','')::date, d.order_date)
+          OR d.conclusion_date    IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'結論日','')::date, d.conclusion_date)
+          OR d.first_meeting_date IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'初回商談日_コンサルチーム','')::date, d.first_meeting_date)
+          OR d.inflow_date   IS DISTINCT FROM COALESCE(NULLIF(COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム'),'')::date, d.inflow_date)
+          OR d.inflow_source IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'流入経路',''), d.inflow_source)
+          OR d.initial_fee   IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'見込売り上げ_税抜き','')::numeric, d.initial_fee)
+          OR d.contract_type IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'ヨミ_2',''), d.contract_type)
+          OR d.lost_reason   IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'失注理由',''), d.lost_reason)
+          OR d.sales_person  IS DISTINCT FROM COALESCE(NULLIF(kc.data->>'担当営業_0',''), d.sales_person)
+        )
     `, [teamId]);
 
     console.log(`[kintone] deals upsert(bulk): customers+${custIns.rowCount} deals_new+${dealIns.rowCount} deals_upd=${dealUpd.rowCount}`);

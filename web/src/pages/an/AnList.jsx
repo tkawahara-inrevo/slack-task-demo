@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 const STATUS_LABEL = { pending: '未回答', answered: '回答済み', closed: 'クローズ' };
 const STATUS_COLOR = { pending: '#dc2626', answered: '#2563eb', closed: '#6b7280' };
@@ -27,7 +26,6 @@ export default function AnList() {
   const [mediaFilters, setMediaFilters] = useState({ employment_type: '', job_type: '', priority: '', requester: '' });
   const [mediaLoading, setMediaLoading] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState({});
-  const [mediaRoi, setMediaRoi] = useState(null);
   const [mediaDash, setMediaDash] = useState(null);
   const [unified, setUnified] = useState([]);
   const [unifiedCounts, setUnifiedCounts] = useState({ total: 0, slack_total: 0, kintone_total: 0 });
@@ -74,7 +72,6 @@ export default function AnList() {
   useEffect(() => {
     if (view === 'media') {
       loadMediaStats(mediaFilters);
-      if (mediaRoi === null) api.anMediaRoi().then(r => setMediaRoi(r.rows || [])).catch(() => setMediaRoi([]));
       if (mediaDash === null) api.anDashboardSummary().then(setMediaDash).catch(() => setMediaDash({}));
     }
   }, [mediaFilters, view]); // eslint-disable-line
@@ -138,169 +135,16 @@ export default function AnList() {
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {/* 媒体実績DBビュー */}
           {view === 'media' && (
-            <div style={{ padding: '16px 20px', background: '#f8fafc', minHeight: '100%' }}>
-              {/* KPIカード */}
-              {mediaDash?.kpi && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, marginBottom: 14 }}>
-                  {[
-                    { label: '総調査件数', value: mediaDash.kpi.total_studies?.toLocaleString() || 0, sub: `うち完了 ${mediaDash.kpi.done_studies || 0}`, color: '#3b82f6', icon: '📚' },
-                    { label: '利用媒体数', value: mediaDash.kpi.unique_media?.toLocaleString() || 0, sub: `延べ ${mediaDash.kpi.total_slots || 0}件`, color: '#0891b2', icon: '📡' },
-                    { label: '平均料金', value: mediaDash.kpi.avg_fee ? `¥${Math.round(mediaDash.kpi.avg_fee/10000).toLocaleString()}万` : '—', sub: '媒体スロット平均', color: '#059669', icon: '💰' },
-                    { label: '予測精度', value: mediaDash.kpi.forecast_accuracy_pct != null ? `${mediaDash.kpi.forecast_accuracy_pct}%` : '—', sub: '実応募 / 予測応募', color: mediaDash.kpi.forecast_accuracy_pct >= 80 ? '#059669' : mediaDash.kpi.forecast_accuracy_pct >= 50 ? '#d97706' : '#dc2626', icon: '🎯' },
-                  ].map(k => (
-                    <div key={k.label} style={{ background: '#fff', borderRadius: 10, padding: '12px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{ position: 'absolute', top: 8, right: 10, fontSize: '1rem', opacity: 0.4 }}>{k.icon}</div>
-                      <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>{k.label}</div>
-                      <div style={{ fontSize: '1.4rem', fontWeight: 800, color: k.color, marginTop: 2 }}>{k.value}</div>
-                      <div style={{ fontSize: '0.62rem', color: '#94a3b8', marginTop: 1 }}>{k.sub}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* 採用数 TOP10 媒体（バーチャート） */}
-              {mediaDash?.top_media?.length > 0 && (
-                <div style={{ background: '#fff', borderRadius: 10, padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                    <span style={{ width: 4, height: 16, background: '#3b82f6', borderRadius: 2 }} />
-                    <span style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a' }}>媒体別 累計実応募 TOP10</span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={mediaDash.top_media} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                      <XAxis dataKey="media_name" tick={{ fontSize: 10, fill: '#64748b' }} interval={0} angle={-20} textAnchor="end" height={50} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={44} />
-                      <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11 }} />
-                      <Bar dataKey="total_effective" radius={[6, 6, 0, 0]} name="実応募合計">
-                        <LabelList dataKey="total_effective" position="top" style={{ fontSize: 9, fill: '#64748b' }} />
-                        {mediaDash.top_media.map((_, i) => <Cell key={i} fill={i===0?'#1d4ed8':i<3?'#3b82f6':'#93c5fd'} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* 媒体ROI（kintone App221 のAN調査から集計） */}
-              {mediaRoi && mediaRoi.length > 0 && (
-                <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
-                    📈 媒体ROI（AN調査ベース・応募予測精度）
-                  </div>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ color: 'var(--gray-500)', textAlign: 'left' }}>
-                        <th style={{ padding: '4px 6px' }}>媒体</th>
-                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>調査件数</th>
-                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>平均料金</th>
-                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>予測/実応募(平均)</th>
-                        <th style={{ padding: '4px 6px', textAlign: 'right' }}>予測精度</th>
-                      </tr></thead>
-                      <tbody>
-                        {mediaRoi.slice(0, 20).map((r, i) => (
-                          <tr key={i} style={{ borderTop: '1px solid var(--gray-100)' }}>
-                            <td style={{ padding: '4px 6px', fontWeight: 600 }}>{r.media_name}</td>
-                            <td style={{ padding: '4px 6px', textAlign: 'right' }}>{r.cases}</td>
-                            <td style={{ padding: '4px 6px', textAlign: 'right' }}>{r.avg_fee ? fmtYen(r.avg_fee) : '—'}</td>
-                            <td style={{ padding: '4px 6px', textAlign: 'right' }}>
-                              {r.avg_expected ?? '—'} / <b style={{ color: '#059669' }}>{r.avg_effective ?? '—'}</b>
-                            </td>
-                            <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: r.forecast_accuracy_pct >= 80 ? '#059669' : r.forecast_accuracy_pct >= 50 ? '#d97706' : '#dc2626' }}>
-                              {r.forecast_accuracy_pct != null ? `${r.forecast_accuracy_pct}%` : '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div style={{ fontSize: '0.66rem', color: 'var(--gray-400)', marginTop: 4 }}>
-                    予測精度 = 実応募の平均 ÷ 予測応募の平均 × 100%
-                  </div>
-                </div>
-              )}
-
-              {/* フィルタバー */}
-              <div style={{ marginBottom: 10, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 6 }}>
-                {[
-                  ['employment_type', '雇用形態', mediaFacets.employment_types || []],
-                  ['job_type',        '職種',     mediaFacets.job_types || []],
-                  ['priority',        '優先度',   mediaFacets.priorities || []],
-                  ['requester',       '依頼者',   mediaFacets.requesters || []],
-                ].map(([key, label, opts]) => (
-                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <label style={{ fontSize: '0.66rem', color: 'var(--gray-500)', fontWeight: 600 }}>{label}</label>
-                    <select value={mediaFilters[key]} onChange={e => setMediaFilters(f => ({ ...f, [key]: e.target.value }))}
-                      style={{ padding: '4px 6px', fontSize: '0.76rem', border: '1px solid var(--gray-300)', borderRadius: 5, background: 'var(--surface)' }}>
-                      <option value="">すべて</option>
-                      {opts.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </div>
-                ))}
-                {Object.values(mediaFilters).some(Boolean) && (
-                  <button onClick={() => setMediaFilters({ employment_type:'', job_type:'', priority:'', requester:'' })}
-                    style={{ gridColumn: '1 / -1', padding: '4px', fontSize: '0.72rem', background: 'transparent', border: '1px dashed var(--gray-300)', borderRadius: 5, color: 'var(--gray-500)', cursor: 'pointer' }}>
-                    フィルタをクリア
-                  </button>
-                )}
-              </div>
-
-              {mediaLoading && <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>読み込み中...</div>}
-              {!mediaLoading && mediaStats.length === 0 && <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: 24 }}>該当なし</div>}
-              {mediaStats.map(s => {
-                const expanded = expandedMedia[s.media_name];
-                return (
-                <div key={s.media_name} style={{ marginBottom: 8, background: 'var(--surface)', border: '1px solid var(--gray-200)', borderRadius: 8, padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.88rem', flex: 1 }}>{s.media_name}</span>
-                    <button onClick={() => setExpandedMedia(m => ({ ...m, [s.media_name]: !m[s.media_name] }))}
-                      style={{ fontSize: '0.7rem', color: '#2563eb', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-                      {expanded ? '▼ 内訳を閉じる' : '▶ 内訳を見る'}
-                    </button>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
-                    {[
-                      ['調査件数', `${s.cases}件`],
-                      ['総料金', fmtYen(s.total_fee)],
-                      ['平均料金', s.avg_fee ? fmtYen(s.avg_fee) : '—'],
-                      ['予測応募(平均)', s.avg_expected != null ? `${s.avg_expected}件` : '—'],
-                      ['実応募(平均)', s.avg_effective != null ? `${s.avg_effective}件` : '—'],
-                      ['予測精度', s.forecast_accuracy_pct != null ? `${s.forecast_accuracy_pct}%` : '—'],
-                    ].map(([label, val]) => (
-                      <div key={label} style={{ background: 'var(--surface-2)', borderRadius: 6, padding: '5px 8px' }}>
-                        <div style={{ fontSize: '0.68rem', color: 'var(--gray-500)' }}>{label}</div>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--gray-800)' }}>{val}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {expanded && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--gray-200)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>雇用形態別</div>
-                        {(s.by_employment_type || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
-                        {(s.by_employment_type || []).map((b, i) => (
-                          <div key={i} style={{ display: 'flex', fontSize: '0.74rem', padding: '2px 0', borderBottom: '1px solid var(--gray-100)' }}>
-                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.employment_type || '—'}</span>
-                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.cases}件</span>
-                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.total_fee)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>職種別</div>
-                        {(s.by_job_type || []).length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--gray-400)' }}>—</div>}
-                        {(s.by_job_type || []).map((b, i) => (
-                          <div key={i} style={{ display: 'flex', fontSize: '0.74rem', padding: '2px 0', borderBottom: '1px solid var(--gray-100)' }}>
-                            <span style={{ flex: 1, color: 'var(--gray-700)' }}>{b.job_type || '—'}</span>
-                            <span style={{ color: '#15803d', fontWeight: 600, minWidth: 36, textAlign: 'right' }}>{b.cases}件</span>
-                            <span style={{ color: 'var(--gray-500)', minWidth: 60, textAlign: 'right' }}>{fmtYen(b.total_fee)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );})}
-            </div>
+            <MediaPerformanceView
+              mediaStats={mediaStats}
+              mediaFacets={mediaFacets}
+              mediaFilters={mediaFilters}
+              setMediaFilters={setMediaFilters}
+              mediaLoading={mediaLoading}
+              mediaDash={mediaDash}
+              expandedMedia={expandedMedia}
+              setExpandedMedia={setExpandedMedia}
+            />
           )}
           {/* 媒体マスタビュー */}
           {view === 'master' && <MediaMasterView />}
@@ -325,40 +169,48 @@ export default function AnList() {
                   // 同会社のカウント
                   const companyCount = {};
                   unified.forEach(r => { if (r.company_name) companyCount[r.company_name] = (companyCount[r.company_name]||0)+1; });
-                  return unified.map(row => {
-                    const key = `study:${row.source_id}`;
-                    const isSelectedRow = selected && selected.source_id===row.source_id;
-                    const isDone = ['完了','対応済','クローズ'].includes(row.status);
-                    const statusColor = isDone ? '#059669' : '#d97706';
-                    const statusBg    = isDone ? '#f0fdf4' : '#fffbeb';
-                    const sameCount = row.company_name ? companyCount[row.company_name] : 0;
-                    return (
-                      <div key={key} onClick={() => openDetail(row)}
-                        style={{ padding: '12px 14px', borderBottom: '1px solid var(--gray-200)', cursor: 'pointer',
-                          background: isSelectedRow ? '#eff6ff' : 'var(--surface)',
-                          borderLeft: isSelectedRow ? '3px solid #2563eb' : '3px solid transparent',
-                          transition: 'background 0.1s' }}
-                        onMouseEnter={e => { if (!isSelectedRow) e.currentTarget.style.background = '#f8fafc'; }}
-                        onMouseLeave={e => { if (!isSelectedRow) e.currentTarget.style.background = 'var(--surface)'; }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 5 }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.84rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--gray-900)' }}>
-                            {row.company_name || '(会社名なし)'}
-                            {sameCount > 1 && <span title={`同会社の他案件: ${sameCount}件`} style={{ marginLeft: 6, fontSize: '0.66rem', color: '#0284c7', fontWeight: 600, background: '#e0f2fe', padding: '1px 6px', borderRadius: 99 }}>+{sameCount-1}案件</span>}
-                          </span>
-                          <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: statusBg, color: statusColor, flexShrink: 0 }}>
-                            {isDone ? '回答済' : (row.status || '未回答')}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          {row.requester && <span>👤 {row.requester}</span>}
-                          {row.request_type && <span style={{ color: 'var(--gray-600)' }}>{row.request_type}</span>}
-                          {row.priority && <span style={{ color: '#dc2626', fontWeight: 700 }}>優先:{row.priority}</span>}
-                          {row.media_count > 0 && <span style={{ color: '#0284c7' }}>📊 媒体{row.media_count}</span>}
-                          <span style={{ marginLeft: 'auto', color: 'var(--gray-400)' }}>{row.requested_at ? fmtDate(row.requested_at) : '—'}</span>
-                        </div>
-                      </div>
-                    );
-                  });
+                  return (
+                    <div style={{ padding: '8px 8px', background: '#f1f5f9', minHeight: '100%' }}>
+                      {unified.map(row => {
+                        const key = `study:${row.source_id}`;
+                        const isSelectedRow = selected && selected.source_id===row.source_id;
+                        const isDone = ['完了','対応済','クローズ'].includes(row.status);
+                        const statusColor = isDone ? '#059669' : '#d97706';
+                        const statusBg    = isDone ? '#f0fdf4' : '#fffbeb';
+                        const sameCount = row.company_name ? companyCount[row.company_name] : 0;
+                        // 優先度に応じてaccentバー色
+                        const accent = row.priority === '至急' ? '#dc2626' : row.priority === '高' ? '#f59e0b' : '#3b82f6';
+                        return (
+                          <div key={key} onClick={() => openDetail(row)}
+                            style={{ marginBottom: 8, padding: '11px 12px 11px 14px', borderRadius: 10, cursor: 'pointer',
+                              background: isSelectedRow ? '#eff6ff' : '#fff',
+                              border: isSelectedRow ? '1.5px solid #2563eb' : '1px solid #e2e8f0',
+                              borderLeft: `4px solid ${isSelectedRow ? '#2563eb' : accent}`,
+                              boxShadow: isSelectedRow ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 2px rgba(15,23,42,0.04)',
+                              transition: 'all 0.12s ease' }}
+                            onMouseEnter={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 2px 6px rgba(15,23,42,0.1)'; e.currentTarget.style.borderColor = '#94a3b8'; } }}
+                            onMouseLeave={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 1px 2px rgba(15,23,42,0.04)'; e.currentTarget.style.borderColor = '#e2e8f0'; } }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 5 }}>
+                              <span style={{ fontWeight: 700, fontSize: '0.84rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0f172a' }}>
+                                {row.company_name || '(会社名なし)'}
+                                {sameCount > 1 && <span title={`同会社の他案件: ${sameCount}件`} style={{ marginLeft: 6, fontSize: '0.66rem', color: '#0284c7', fontWeight: 600, background: '#e0f2fe', padding: '1px 6px', borderRadius: 99 }}>+{sameCount-1}案件</span>}
+                              </span>
+                              <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: statusBg, color: statusColor, flexShrink: 0 }}>
+                                {isDone ? '回答済' : (row.status || '未回答')}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              {row.requester && <span>👤 {row.requester}</span>}
+                              {row.request_type && <span style={{ color: '#475569' }}>{row.request_type}</span>}
+                              {row.priority && <span style={{ color: accent, fontWeight: 700, background: row.priority === '至急' ? '#fef2f2' : '#fff7ed', padding: '1px 6px', borderRadius: 4 }}>優先:{row.priority}</span>}
+                              {row.media_count > 0 && <span style={{ color: '#0284c7', background: '#f0f9ff', padding: '1px 6px', borderRadius: 4 }}>📊 媒体{row.media_count}</span>}
+                              <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>{row.requested_at ? fmtDate(row.requested_at) : '—'}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
                 })()}
             </>
           )}
@@ -377,6 +229,192 @@ export default function AnList() {
         />
       )}
 
+    </div>
+  );
+}
+
+// ── 媒体実績DB（媒体ごとのROI＋紐づく案件）─────────────────────────
+function MediaPerformanceView({ mediaStats, mediaFacets, mediaFilters, setMediaFilters, mediaLoading, mediaDash, expandedMedia, setExpandedMedia }) {
+  const [casesCache, setCasesCache] = useState({}); // media_name -> cases[]
+  const [casesLoading, setCasesLoading] = useState({});
+
+  const loadCases = async (mediaName) => {
+    if (casesCache[mediaName] || casesLoading[mediaName]) return;
+    setCasesLoading(s => ({ ...s, [mediaName]: true }));
+    try {
+      const r = await api.anMediaCases({ media_name: mediaName, ...mediaFilters });
+      setCasesCache(c => ({ ...c, [mediaName]: r.cases || [] }));
+    } catch { setCasesCache(c => ({ ...c, [mediaName]: [] })); }
+    finally { setCasesLoading(s => ({ ...s, [mediaName]: false })); }
+  };
+
+  // フィルタ変更でキャッシュクリア
+  useEffect(() => { setCasesCache({}); }, [mediaFilters]);
+
+  const toggleExpand = (name) => {
+    setExpandedMedia(m => {
+      const next = { ...m, [name]: !m[name] };
+      if (next[name]) loadCases(name);
+      return next;
+    });
+  };
+
+  const accuracyColor = (p) => p == null ? '#94a3b8' : p >= 80 ? '#059669' : p >= 50 ? '#d97706' : '#dc2626';
+  const accuracyBg    = (p) => p == null ? '#f1f5f9' : p >= 80 ? '#ecfdf5' : p >= 50 ? '#fffbeb' : '#fef2f2';
+
+  const sorted = [...mediaStats].sort((a,b) => (b.cases || 0) - (a.cases || 0));
+
+  return (
+    <div style={{ padding: '14px 14px 24px', background: 'linear-gradient(180deg, #eef2ff 0%, #f8fafc 200px)', minHeight: '100%' }}>
+      {/* KPI ヘッダー */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+        {[
+          {
+            label: '総調査件数',
+            value: mediaDash?.kpi?.total_studies?.toLocaleString() || 0,
+            sub: `延べ媒体スロット ${mediaDash?.kpi?.total_slots || 0}件`,
+            grad: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            icon: '📚',
+          },
+          {
+            label: '利用媒体数',
+            value: mediaDash?.kpi?.unique_media?.toLocaleString() || 0,
+            sub: 'ユニーク媒体数',
+            grad: 'linear-gradient(135deg, #0ea5e9, #06b6d4)',
+            icon: '📡',
+          },
+          {
+            label: '平均予測精度',
+            value: mediaDash?.kpi?.forecast_accuracy_pct != null ? `${mediaDash.kpi.forecast_accuracy_pct}%` : '—',
+            sub: '実応募 / 予測応募',
+            grad: mediaDash?.kpi?.forecast_accuracy_pct >= 80 ? 'linear-gradient(135deg, #10b981, #059669)'
+                : mediaDash?.kpi?.forecast_accuracy_pct >= 50 ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                : 'linear-gradient(135deg, #ef4444, #dc2626)',
+            icon: '🎯',
+          },
+        ].map(k => (
+          <div key={k.label} style={{ background: k.grad, borderRadius: 12, padding: '12px 14px', color: '#fff', boxShadow: '0 4px 12px rgba(99,102,241,0.15)', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 4, right: 8, fontSize: '1.6rem', opacity: 0.25 }}>{k.icon}</div>
+            <div style={{ fontSize: '0.66rem', opacity: 0.9, fontWeight: 600 }}>{k.label}</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: 2 }}>{k.value}</div>
+            <div style={{ fontSize: '0.62rem', opacity: 0.85, marginTop: 1 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* フィルタバー */}
+      <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fff', border: '1px solid #e0e7ff', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+        {[
+          ['employment_type', '雇用形態', mediaFacets.employment_types || [], '#6366f1'],
+          ['job_type',        '職種',     mediaFacets.job_types || [],        '#0ea5e9'],
+          ['priority',        '優先度',   mediaFacets.priorities || [],       '#f59e0b'],
+          ['requester',       '依頼者',   mediaFacets.requesters || [],       '#10b981'],
+        ].map(([key, label, opts, color]) => (
+          <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: '0.66rem', color, fontWeight: 700, letterSpacing: '0.02em' }}>{label}</label>
+            <select value={mediaFilters[key]} onChange={e => setMediaFilters(f => ({ ...f, [key]: e.target.value }))}
+              style={{ padding: '5px 8px', fontSize: '0.78rem', border: `1px solid ${mediaFilters[key] ? color : '#e2e8f0'}`, borderRadius: 6, background: mediaFilters[key] ? `${color}10` : '#fff', color: '#0f172a', fontWeight: mediaFilters[key] ? 600 : 400 }}>
+              <option value="">すべて</option>
+              {opts.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        ))}
+        {Object.values(mediaFilters).some(Boolean) && (
+          <button onClick={() => setMediaFilters({ employment_type:'', job_type:'', priority:'', requester:'' })}
+            style={{ gridColumn: '1 / -1', padding: '5px', fontSize: '0.72rem', background: '#f1f5f9', border: 'none', borderRadius: 6, color: '#64748b', cursor: 'pointer', fontWeight: 600 }}>
+            ✕ フィルタをクリア
+          </button>
+        )}
+      </div>
+
+      {/* 媒体カードリスト */}
+      {mediaLoading && <div style={{ textAlign: 'center', color: '#94a3b8', padding: 30 }}>読み込み中…</div>}
+      {!mediaLoading && sorted.length === 0 && <div style={{ textAlign: 'center', color: '#94a3b8', padding: 30 }}>該当する媒体がありません</div>}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {sorted.map(s => {
+          const expanded = !!expandedMedia[s.media_name];
+          const cases = casesCache[s.media_name];
+          const loadingCases = casesLoading[s.media_name];
+          const accColor = accuracyColor(s.forecast_accuracy_pct);
+          const accBg = accuracyBg(s.forecast_accuracy_pct);
+          return (
+            <div key={s.media_name} style={{ background: '#fff', borderRadius: 12, boxShadow: expanded ? '0 4px 16px rgba(15,23,42,0.08)' : '0 1px 3px rgba(15,23,42,0.05)', border: '1px solid #e2e8f0', overflow: 'hidden', transition: 'box-shadow 0.15s' }}>
+              {/* カードヘッダー（クリックで展開） */}
+              <div onClick={() => toggleExpand(s.media_name)}
+                style={{ padding: '12px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, background: expanded ? 'linear-gradient(90deg, #f8fafc, #fff)' : '#fff', borderBottom: expanded ? '1px solid #e2e8f0' : 'none' }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0 }}>
+                  {s.media_name.slice(0, 2)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.media_name}</div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>
+                    <span style={{ color: '#6366f1', fontWeight: 700 }}>{s.cases}件</span> の調査実績
+                  </div>
+                </div>
+                {/* 予測 vs 実績 ミニグラフ */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.74rem', color: '#475569' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.62rem', color: '#94a3b8' }}>予測</div>
+                    <div style={{ fontWeight: 700, color: '#64748b' }}>{s.avg_expected ?? '—'}</div>
+                  </div>
+                  <span style={{ color: '#cbd5e1', fontSize: '1rem' }}>→</span>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.62rem', color: '#94a3b8' }}>実績</div>
+                    <div style={{ fontWeight: 800, color: '#059669' }}>{s.avg_effective ?? '—'}</div>
+                  </div>
+                </div>
+                {/* 精度バッジ */}
+                <div style={{ background: accBg, color: accColor, padding: '6px 10px', borderRadius: 8, fontWeight: 800, fontSize: '0.86rem', minWidth: 56, textAlign: 'center', border: `1px solid ${accColor}30` }}>
+                  {s.forecast_accuracy_pct != null ? `${s.forecast_accuracy_pct}%` : '—'}
+                </div>
+                <span style={{ color: '#94a3b8', fontSize: '0.8rem', marginLeft: 4 }}>{expanded ? '▼' : '▶'}</span>
+              </div>
+
+              {/* 展開: 紐づく案件リスト */}
+              {expanded && (
+                <div style={{ padding: '10px 14px 14px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 3, height: 12, background: '#6366f1', borderRadius: 2 }}></span>
+                    紐づく案件
+                    {cases && <span style={{ color: '#94a3b8', fontWeight: 500 }}>（{cases.length}件）</span>}
+                  </div>
+                  {loadingCases || !cases ? (
+                    <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.78rem' }}>読み込み中…</div>
+                  ) : cases.length === 0 ? (
+                    <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.78rem' }}>—</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {cases.map((c, i) => (
+                        <div key={c.record_id + '_' + i} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr auto auto auto', gap: 8, alignItems: 'center', padding: '7px 10px', background: i % 2 === 0 ? '#f8fafc' : '#fff', borderRadius: 6, fontSize: '0.76rem' }}>
+                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{c.company_name || '—'}</div>
+                            <div style={{ fontSize: '0.66rem', color: '#94a3b8' }}>{[c.employment_type, c.job_type].filter(Boolean).join(' / ') || '—'}</div>
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#475569' }}>
+                            {c.requester && <span>👤 {c.requester}</span>}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.6rem', color: '#94a3b8' }}>予測</div>
+                            <div style={{ fontWeight: 700, color: '#64748b' }}>{c.expected_apps ?? '—'}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.6rem', color: '#94a3b8' }}>実績</div>
+                            <div style={{ fontWeight: 800, color: '#059669' }}>{c.effective_apps ?? '—'}</div>
+                          </div>
+                          <div style={{ background: accuracyBg(c.accuracy_pct), color: accuracyColor(c.accuracy_pct), padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: '0.74rem', minWidth: 46, textAlign: 'center' }}>
+                            {c.accuracy_pct != null ? `${c.accuracy_pct}%` : '—'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -625,6 +625,10 @@ export const api = {
   anStudyMediaAdd:    (studyId, body = {}) => apiFetch(`/an/studies/${studyId}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   anStudyMediaUpdate: (id, body) => apiFetch(`/an/study-media/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   anStudyMediaDelete: (id) => apiFetch(`/an/study-media/${id}`, { method: 'DELETE' }),
+  anMediaCases:       (filters = {}) => {
+    const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
+    return apiFetch(`/an/media-cases${qs ? `?${qs}` : ''}`);
+  },
   anStudySlackThread: (id) => apiFetch(`/an/studies/${id}/slack-thread`),
   anStudySlackReply: (id, text) => apiFetch(`/an/studies/${id}/slack-reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
   anUnified:          (filters = {}) => {

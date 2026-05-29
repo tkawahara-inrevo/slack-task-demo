@@ -481,6 +481,46 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
+  // 媒体ごとの紐づき案件リスト（予測 vs 実績）
+  expressApp.get('/api/dashboard/an/media-cases', authWithRole, async (req, res) => {
+    try {
+      const { media_name, employment_type, job_type, priority, requester } = req.query;
+      if (!media_name) return res.json({ cases: [] });
+      const params = [media_name];
+      const where = [`m.media_name = $1`];
+      const add = (col, v) => { params.push(v); where.push(`${col} = $${params.length}`); };
+      if (employment_type) add('s.employment_type', employment_type);
+      if (job_type)        add('s.job_type', job_type);
+      if (priority)        add('s.priority', priority);
+      if (requester)       add('s.requester', requester);
+
+      const { rows } = await dbQuery(`
+        SELECT s.record_id, s.company_name, s.requester, s.priority,
+               s.employment_type, s.job_type, s.request_date, s.status,
+               m.expected_apps, m.effective_apps, m.reply_rate, m.fee,
+               m.cost_category, m.an_assignee,
+               CASE WHEN COALESCE(m.expected_apps,0) > 0
+                    THEN ROUND(COALESCE(m.effective_apps,0)::numeric / m.expected_apps * 100, 1)
+                    ELSE NULL END AS accuracy_pct
+        FROM an_study_media m
+        JOIN an_studies s ON s.record_id = m.study_record_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY s.request_date DESC NULLS LAST
+        LIMIT 200
+      `, params);
+
+      res.json({
+        cases: rows.map(r => ({
+          ...r,
+          expected_apps: r.expected_apps != null ? Number(r.expected_apps) : null,
+          effective_apps: r.effective_apps != null ? Number(r.effective_apps) : null,
+          fee: r.fee != null ? Number(r.fee) : null,
+          accuracy_pct: r.accuracy_pct != null ? Number(r.accuracy_pct) : null,
+        })),
+      });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
   // ─── 媒体マスタ（App225） ─────────────────────────────
   expressApp.get('/api/dashboard/media-master', authWithRole, async (req, res) => {
     try {

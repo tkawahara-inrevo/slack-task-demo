@@ -135,7 +135,7 @@ async function syncKintonePayments() {
     const amount       = d['数値']   != null && d['数値']   !== '' ? Number(d['数値'])   : null;
     const incentive    = d['数値_0'] != null && d['数値_0'] !== '' ? Number(d['数値_0']) : null;
     const paymentDate  = d.date      || null;
-    const plan         = d.plan      || null;
+    const plan         = d.plan ? String(d.plan).replace(/採用保証/g, '一括払い') : null;
     const staff        = d.Staff || d.staff || null;
     const inflowSource = company ? (inflowMap[company] || null) : null;
 

@@ -91,7 +91,13 @@
       "Bash(curl -s -H \"X-Cybozu-API-Token: N3ztvAhgRFJu0yzCYz5FhFLn8Hi4IzTqTrLamCzC\" \"https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=225&query=order%20by%20\\\\$id%20desc%20limit%201\" > /tmp/_app225.json 2>&1; cat /tmp/_app225.json | tr ',' '\\\\n' | grep -E '\"[^\"]+\":' | sed 's/^\"//; s/\":.*$//' | sort -u | head -60)",
       "Read(//tmp/**)",
       "Bash(node --check src/features/kintone-sync.js)",
-      "Bash(curl -s -H 'X-Cybozu-API-Token: LXmG25yThDbXYsWTDu2HEEu8sEGlXuNooQ23lkbt' 'https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=221&query=order%20by%20$id%20desc%20limit%201')"
+      "Bash(curl -s -H 'X-Cybozu-API-Token: LXmG25yThDbXYsWTDu2HEEu8sEGlXuNooQ23lkbt' 'https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=221&query=order%20by%20$id%20desc%20limit%201')",
+      "Bash(curl -s -H \"X-Cybozu-API-Token: Yeeyud4zlzonWqp1D8LEyIFeY9mzWCqQJVihQbCP\" \"https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=94&query=limit%203\")",
+      "Bash(curl -s -H \"X-Cybozu-API-Token: Yeeyud4zlzonWqp1D8LEyIFeY9mzWCqQJVihQbCP\" \"https://ca7n5wh2hfvv.cybozu.com/k/v1/records.json?app=94&query=order%20by%20%24id%20desc%20limit%201&totalCount=true\")",
+      "Bash(rm -f /e/dev/slack-task-demo/_app94.json)",
+      "Bash(node -c src/features/kintone-api.js)",
+      "Bash(node -c src/features/kintone-sync.js)",
+      "Bash(node -c src/features/crm-api.js)"
     ]
   }
 }

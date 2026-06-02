@@ -127,7 +127,11 @@ export default function CustomerList({ scope = 'all' }) {
   const [showDormant, setShowDormant] = useState(false);
   const [dormantTarget, setDormantTarget] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ name:'', industry:'', prefecture:'' });
+  const [createForm, setCreateForm] = useState({
+    name:'', nameShort:'', industry:'', prefecture:'', employeeCount:'',
+    website:'', postalCode:'', address:'', inflowDate:'', inflowSource:'',
+    inrevoPerson:'', businessDescription:'', serviceLpUrl1:'', serviceLpUrl2:'', memo:'',
+  });
   const [creating, setCreating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
@@ -200,7 +204,23 @@ export default function CustomerList({ scope = 'all' }) {
     if (!createForm.name.trim()) return;
     setCreating(true);
     try {
-      const r = await api.crmCreateCustomer(createForm);
+      const r = await api.crmCreateCustomer({
+        name: createForm.name.trim(),
+        nameShort: createForm.nameShort || null,
+        industry: createForm.industry || null,
+        prefecture: createForm.prefecture || null,
+        employeeCount: createForm.employeeCount || null,
+        website: createForm.website || null,
+        postalCode: createForm.postalCode || null,
+        address: createForm.address || null,
+        inflowDate: createForm.inflowDate || null,
+        inflowSource: createForm.inflowSource || null,
+        inrevoPerson: createForm.inrevoPerson || null,
+        businessDescription: createForm.businessDescription || null,
+        serviceLpUrl1: createForm.serviceLpUrl1 || null,
+        serviceLpUrl2: createForm.serviceLpUrl2 || null,
+        memo: createForm.memo || null,
+      });
       setShowCreateModal(false);
       navigate(`/crm/customers/${r.customer.id}`);
     } catch { alert('作成に失敗しました'); }
@@ -447,30 +467,129 @@ export default function CustomerList({ scope = 'all' }) {
 
       {/* 顧客追加モーダル */}
       {showCreateModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={()=>setShowCreateModal(false)}>
-          <div style={{ background:'var(--surface)', borderRadius:14, width:'min(440px,92vw)', overflow:'hidden', boxShadow:'0 20px 50px rgba(0,0,0,0.2)' }}
-            onClick={e=>e.stopPropagation()}>
-            <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--gray-200)', fontWeight:800, color:'var(--gray-900)' }}>顧客を追加</div>
-            <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:12 }}>
-              {[{key:'name',label:'会社名',req:true,ph:'例: 株式会社○○'},{key:'industry',label:'業界',ph:'例: 製造業'},{key:'prefecture',label:'都道府県',ph:'例: 東京都'}].map(f=>(
-                <div key={f.key}>
-                  <label style={{ display:'block', fontSize:'0.75rem', fontWeight:700, color:'var(--gray-700)', marginBottom:4 }}>{f.label}{f.req&&<span style={{color:'#ef4444',marginLeft:3}}>*</span>}</label>
-                  <input value={createForm[f.key]} onChange={e=>setCreateForm(p=>({...p,[f.key]:e.target.value}))} placeholder={f.ph}
-                    style={{ width:'100%', boxSizing:'border-box', padding:'8px 10px', border:'1.5px solid var(--gray-200)', borderRadius:8, fontSize:'0.82rem', outline:'none' }} />
-                </div>
-              ))}
+        <CustomerCreateModal
+          form={createForm}
+          setForm={setCreateForm}
+          onClose={()=>setShowCreateModal(false)}
+          onSubmit={handleCreate}
+          creating={creating}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── 顧客追加モーダル（kintone①と同等の項目） ─────────────────────────
+const INDUSTRIES = ['農業・林業','漁業','鉱業・採石業・砂利採取業','建設業','製造業','電気・ガス・熱供給・水道業','情報通信業','運輸業・郵便業','卸売業・小売業','金融業・保険業','不動産業・物品賃貸業','学術研究・専門・技術サービス業','宿泊業・飲食サービス業','生活関連サービス業・娯楽業','教育・学習支援業','医療・福祉','複合サービス事業','サービス業','公務','その他'];
+const PREFECTURES = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
+const EMP_COUNTS = ['1-10','11-50','51-100','101-300','301-500','501-1000','1000-'];
+
+function CustomerCreateModal({ form, setForm, onClose, onSubmit, creating }) {
+  const F = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
+  const inputSx = { width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1.5px solid var(--gray-200)', borderRadius:8, fontSize:'0.82rem', outline:'none' };
+  const labelSx = { display:'block', fontSize:'0.7rem', fontWeight:700, color:'var(--gray-700)', marginBottom:3 };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.5)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
+      <div style={{ background:'var(--surface)', borderRadius:14, width:'min(640px,94vw)', maxHeight:'90vh', overflow:'hidden', boxShadow:'0 20px 50px rgba(0,0,0,0.2)', display:'flex', flexDirection:'column' }} onClick={e=>e.stopPropagation()}>
+        <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--gray-200)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ fontWeight:800, color:'var(--gray-900)' }}>顧客を追加</div>
+          <div style={{ fontSize:'0.66rem', color:'var(--gray-400)' }}>kintone顧客情報 と同期項目</div>
+        </div>
+        <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:10, overflowY:'auto' }}>
+          {/* 基本 */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div style={{ gridColumn:'1 / -1' }}>
+              <label style={labelSx}>会社名 <span style={{ color:'#ef4444' }}>*</span></label>
+              <input value={form.name} onChange={F('name')} placeholder="例: 株式会社○○" style={inputSx} />
             </div>
-            <div style={{ padding:'12px 20px', borderTop:'1px solid var(--gray-200)', display:'flex', justifyContent:'flex-end', gap:8 }}>
-              <button onClick={()=>setShowCreateModal(false)} style={{ padding:'7px 16px', border:'1px solid var(--gray-200)', borderRadius:8, fontSize:'0.82rem', color:'var(--gray-500)', background:'var(--surface)', cursor:'pointer' }}>キャンセル</button>
-              <button onClick={handleCreate} disabled={!createForm.name.trim()||creating}
-                style={{ padding:'7px 20px', border:'none', borderRadius:8, background:'#1e40af', color:'#fff', fontSize:'0.82rem', fontWeight:700, cursor:'pointer', opacity:!createForm.name.trim()||creating?0.6:1 }}>
-                {creating?'作成中…':'✓ 作成'}
-              </button>
+            <div>
+              <label style={labelSx}>会社名（略称・株式会社抜き）</label>
+              <input value={form.nameShort} onChange={F('nameShort')} placeholder="例: ○○" style={inputSx} />
+            </div>
+            <div>
+              <label style={labelSx}>INREVO担当者</label>
+              <input value={form.inrevoPerson} onChange={F('inrevoPerson')} placeholder="例: 外山 雄大" style={inputSx} />
+            </div>
+            <div>
+              <label style={labelSx}>業種</label>
+              <select value={form.industry} onChange={F('industry')} style={inputSx}>
+                <option value="">—</option>
+                {INDUSTRIES.map(v=><option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSx}>都道府県</label>
+              <select value={form.prefecture} onChange={F('prefecture')} style={inputSx}>
+                <option value="">—</option>
+                {PREFECTURES.map(v=><option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSx}>従業員規模</label>
+              <select value={form.employeeCount} onChange={F('employeeCount')} style={inputSx}>
+                <option value="">—</option>
+                {EMP_COUNTS.map(v=><option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSx}>会社HP</label>
+              <input value={form.website} onChange={F('website')} placeholder="https://" style={inputSx} />
             </div>
           </div>
+          {/* 住所 */}
+          <div style={{ display:'grid', gridTemplateColumns:'150px 1fr', gap:10 }}>
+            <div>
+              <label style={labelSx}>郵便番号</label>
+              <input value={form.postalCode} onChange={F('postalCode')} placeholder="000-0000" style={inputSx} />
+            </div>
+            <div>
+              <label style={labelSx}>会社住所</label>
+              <input value={form.address} onChange={F('address')} placeholder="例: 東京都中央区..." style={inputSx} />
+            </div>
+          </div>
+          {/* 流入 */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div>
+              <label style={labelSx}>流入日</label>
+              <input type="date" value={form.inflowDate} onChange={F('inflowDate')} style={inputSx} />
+            </div>
+            <div>
+              <label style={labelSx}>流入経路</label>
+              <input value={form.inflowSource} onChange={F('inflowSource')} placeholder="例: レディクル / リファラル" style={inputSx} />
+            </div>
+          </div>
+          {/* サービスLP */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div>
+              <label style={labelSx}>サービスLP URL ①</label>
+              <input value={form.serviceLpUrl1} onChange={F('serviceLpUrl1')} placeholder="https://" style={inputSx} />
+            </div>
+            <div>
+              <label style={labelSx}>サービスLP URL ②</label>
+              <input value={form.serviceLpUrl2} onChange={F('serviceLpUrl2')} placeholder="https://" style={inputSx} />
+            </div>
+          </div>
+          {/* 事業内容・メモ */}
+          <div>
+            <label style={labelSx}>事業内容</label>
+            <textarea value={form.businessDescription} onChange={F('businessDescription')} rows={2}
+              style={{ ...inputSx, fontFamily:'inherit', resize:'vertical' }} />
+          </div>
+          <div>
+            <label style={labelSx}>メモ</label>
+            <textarea value={form.memo} onChange={F('memo')} rows={2}
+              style={{ ...inputSx, fontFamily:'inherit', resize:'vertical' }} />
+          </div>
         </div>
-      )}
+        <div style={{ padding:'12px 20px', borderTop:'1px solid var(--gray-200)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button onClick={onClose} style={{ padding:'7px 16px', border:'1px solid var(--gray-200)', borderRadius:8, fontSize:'0.82rem', color:'var(--gray-500)', background:'var(--surface)', cursor:'pointer' }}>キャンセル</button>
+          <button onClick={onSubmit} disabled={!form.name.trim()||creating}
+            style={{ padding:'7px 20px', border:'none', borderRadius:8, background:'#1e40af', color:'#fff', fontSize:'0.82rem', fontWeight:700, cursor:'pointer', opacity:!form.name.trim()||creating?0.6:1 }}>
+            {creating?'作成中…':'✓ 作成'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -198,16 +198,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const {
         name, industry, prefecture, employeeCount, website, memo,
         inflowDate, inflowSource, nameShort, competitors, businessDescription,
-        postalCode, address, serviceLpUrl1, serviceLpUrl2,
+        postalCode, address, serviceLpUrl1, serviceLpUrl2, inrevoPerson,
       } = req.body || {};
       if (!name?.trim()) return res.status(400).json({ error: 'name required' });
       const { rows: [row] } = await dbQuery(`
         INSERT INTO customers (id, team_id, name, industry, prefecture, employee_count, website, memo, created_by,
-          inflow_date, inflow_source, name_short, competitors, business_description, postal_code, address, service_lp_url1, service_lp_url2)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *
+          inflow_date, inflow_source, name_short, competitors, business_description, postal_code, address, service_lp_url1, service_lp_url2, inrevo_person)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *
       `, [randomUUID(), teamId, name.trim(), industry||null, prefecture||null, employeeCount||null, website||null, memo||null, userId,
           inflowDate||null, inflowSource||null, nameShort||null, JSON.stringify(competitors||[]),
-          businessDescription||null, postalCode||null, address||null, serviceLpUrl1||null, serviceLpUrl2||null]);
+          businessDescription||null, postalCode||null, address||null, serviceLpUrl1||null, serviceLpUrl2||null, inrevoPerson||null]);
       res.status(201).json({ customer: row });
     } catch (e) {
       console.error('[CRM] create customer error:', e);
@@ -221,7 +221,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const {
         name, industry, prefecture, employeeCount, website, memo,
         inflowDate, inflowSource, nameShort, competitors, businessDescription,
-        postalCode, address, serviceLpUrl1, serviceLpUrl2,
+        postalCode, address, serviceLpUrl1, serviceLpUrl2, inrevoPerson,
         updatedAt, force, data,
       } = req.body || {};
 
@@ -238,12 +238,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
           name=$3, industry=$4, prefecture=$5, employee_count=$6, website=$7, memo=$8,
           inflow_date=$9, inflow_source=$10, name_short=$11, competitors=$12,
           business_description=$13, postal_code=$14, address=$15, service_lp_url1=$16, service_lp_url2=$17,
-          data=COALESCE($18::jsonb, data),
+          inrevo_person=$18,
+          data=COALESCE($19::jsonb, data),
           updated_at=now()
         WHERE id=$1 AND team_id=$2 RETURNING *
       `, [req.params.id, teamId, name, industry||null, prefecture||null, employeeCount||null, website||null, memo||null,
           inflowDate||null, inflowSource||null, nameShort||null, JSON.stringify(competitors||[]),
           businessDescription||null, postalCode||null, address||null, serviceLpUrl1||null, serviceLpUrl2||null,
+          inrevoPerson||null,
           data ? JSON.stringify(data) : null]);
       if (!row) return res.status(404).json({ error: 'not_found' });
       res.json({ customer: row });

@@ -16,6 +16,11 @@ const APPS = {
     companyField: 'company',
     fields: ['$id', 'company', '数値', '数値_0', 'date', 'plan', 'Staff'],
   },
+  94: {
+    token: process.env.KINTONE_APP_94_TOKEN || 'Yeeyud4zlzonWqp1D8LEyIFeY9mzWCqQJVihQbCP',
+    companyField: '会社名',
+    fields: [], // 全フィールド取得（サブテーブル含む）
+  },
 };
 
 // App103専用トークン（活動履歴）
@@ -69,11 +74,25 @@ function kintoneGet(appId, token, fields, offset) {
 }
 
 // フィールド値を文字列に正規化（USER_SELECT等の配列型に対応）
+// SUBTABLEは構造を保持してJSON文字列化
 function extractValue(fieldValue) {
   if (!fieldValue) return null;
   const v = fieldValue.value;
   if (Array.isArray(v)) {
-    return v.map(u => u.name || u.code || String(u)).filter(Boolean).join(', ') || null;
+    // SUBTABLE: [{id, value:{fieldName:{type,value},...}}, ...]
+    if (v.length > 0 && v[0] && typeof v[0] === 'object' && 'value' in v[0] && typeof v[0].value === 'object') {
+      const rows = v.map(row => {
+        const o = {};
+        for (const [k, fv] of Object.entries(row.value || {})) {
+          o[k] = extractValue(fv);
+        }
+        if (row.id != null) o.__id = row.id;
+        return o;
+      });
+      return JSON.stringify(rows);
+    }
+    // USER_SELECT / MULTI_SELECT / CHECK_BOX
+    return v.map(u => (u && (u.name || u.code)) || String(u)).filter(Boolean).join(', ') || null;
   }
   return v != null && v !== '' ? String(v) : null;
 }

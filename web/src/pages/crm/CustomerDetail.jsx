@@ -1095,6 +1095,7 @@ export default function CustomerDetail() {
         businessDescription: custForm.business_description || null,
         postalCode: custForm.postal_code || null, address: custForm.address || null,
         serviceLpUrl1: custForm.service_lp_url1 || null, serviceLpUrl2: custForm.service_lp_url2 || null,
+        inrevoPerson: custForm.inrevo_person || null,
         data: custForm.data || {},
         updatedAt: forceOverwrite ? undefined : custBaseUpdatedAt.current,
         force: forceOverwrite,
@@ -1147,6 +1148,7 @@ export default function CustomerDetail() {
               <div>
                 <h1 style={{ margin:'0 0 8px', fontSize:'1.55rem', fontWeight:800, color:'var(--gray-900)', letterSpacing:'-0.02em' }}>{customer.name}</h1>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+                  {customer.inrevo_person && <span style={{ background:'#ede9fe', color:'#6d28d9', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', fontWeight:700 }}>👤 {customer.inrevo_person}</span>}
                   {customer.industry && <span style={{ background:'var(--surface-2)', color:'var(--gray-700)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', fontWeight:600 }}>{customer.industry}</span>}
                   {customer.prefecture && <span style={{ background:'var(--surface-2)', color:'var(--gray-500)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid var(--gray-200)' }}>{customer.prefecture}</span>}
                   {customer.employee_count && <span style={{ background:'var(--surface-2)', color:'var(--gray-500)', padding:'3px 10px', borderRadius:99, fontSize:'0.78rem', border:'1px solid var(--gray-200)' }}>{customer.employee_count}名</span>}
@@ -1319,6 +1321,7 @@ export default function CustomerDetail() {
                     ? <SelectF value={custForm.inflow_source||''} onChange={e=>setCustForm(p=>({...p,inflow_source:e.target.value}))} options={fieldOptions.inflow_source} />
                     : <InputF value={custForm.inflow_source||''} onChange={e=>setCustForm(p=>({...p,inflow_source:e.target.value}))} placeholder="例: 問い合わせ・紹介" />}
                 </Field>
+                <Field label="INREVO担当者"><InputF value={custForm.inrevo_person||''} onChange={e=>setCustForm(p=>({...p,inrevo_person:e.target.value}))} placeholder="例: 外山 雄大" /></Field>
                 <Field label="Webサイト"><InputF value={custForm.website||''} onChange={e=>setCustForm(p=>({...p,website:e.target.value}))} placeholder="https://" /></Field>
                 <Field label="サービスLP URL①"><InputF value={custForm.service_lp_url1||''} onChange={e=>setCustForm(p=>({...p,service_lp_url1:e.target.value}))} placeholder="https://" /></Field>
               </div>

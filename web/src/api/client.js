@@ -241,6 +241,9 @@ export const api = {
     return crmFetch(`/monthly-summary${qs ? '?'+qs : ''}`);
   },
   crmYomiKanri: (opts = {}) => crmFetch(`/yomi-kanri${opts.includeAll ? '?includeAll=1' : ''}`),
+  viewAsUsers: () => apiFetch('/view-as/users'),
+  viewAsSet:   (body) => apiFetch('/view-as', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  viewAsClear: () => apiFetch('/view-as/clear', { method: 'POST' }),
   crmRoleTargets: () => crmFetch('/role-targets'),
   crmRoleTargetsSave: (targets) => crmFetch('/role-targets', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets}) }),
   crmPeriodSettings: () => crmFetch('/period-settings'),

@@ -228,10 +228,13 @@ export default function Layout({ children }) {
             {isDark ? '☀' : '🌙'}
           </button>
 
+          {user && (user.realRole === 'admin' || user.role === 'admin') && (
+            <ViewAsWidget user={user} onChange={() => api.me().then(setUser)} />
+          )}
           {user && (
             <div className="global-nav-user">
               {user.displayName}
-              {user.role === 'admin' && <span className="nav-role-badge">admin</span>}
+              {user.role === 'admin' && !user.viewingAs && <span className="nav-role-badge">admin</span>}
             </div>
           )}
 
@@ -278,6 +281,28 @@ export default function Layout({ children }) {
           </div>
         )}
       </nav>
+      {/* View As バナー */}
+      {user?.viewingAs && (
+        <div style={{
+          background: 'linear-gradient(90deg, #f59e0b, #ea580c)',
+          color: '#fff', padding: '6px 16px', display: 'flex', alignItems: 'center', gap: 10,
+          fontSize: '0.78rem', fontWeight: 600, boxShadow: '0 2px 6px rgba(234,88,12,0.3)',
+        }}>
+          <span style={{ fontSize: '0.92rem' }}>👁️</span>
+          <span>
+            <b>View As 中</b>:
+            {user.viewingAs.userName && ` 👤 ${user.viewingAs.userName.split('/')[0].trim()}`}
+            {user.viewingAs.role    && ` 🎭 ${user.viewingAs.role}`}
+            <span style={{ marginLeft: 8, opacity: 0.85, fontWeight: 500, fontSize: '0.7rem' }}>
+              （実: {user.realName?.split('/')[0].trim() || 'admin'} / {user.realRole}）
+            </span>
+          </span>
+          <button onClick={async () => { await api.viewAsClear(); window.location.reload(); }}
+            style={{ marginLeft: 'auto', background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', padding: '3px 12px', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}>
+            ✕ 元のadminに戻す
+          </button>
+        </div>
+      )}
       <div className="global-content">
         {children}
       </div>
@@ -286,6 +311,112 @@ export default function Layout({ children }) {
         <div style={{ position:'fixed', bottom:20, right:16, zIndex:500 }}>
           <BrowserTransferButton floating />
         </div>
+      )}
+    </div>
+  );
+}
+
+// 👁️ View As widget（adminのみ）
+function ViewAsWidget({ user, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState(null);
+  const [role, setRole] = useState(user?.viewingAs?.role || '');
+  const [asUserId, setAsUserId] = useState(user?.viewingAs?.userId || '');
+  const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const loadUsers = () => {
+    if (users !== null) return;
+    api.viewAsUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]));
+  };
+
+  const apply = async () => {
+    if (!role && !asUserId) return;
+    setBusy(true);
+    try {
+      const u = users?.find(x => x.user_id === asUserId);
+      await api.viewAsSet({ role: role || null, asUserId: asUserId || null, asUserName: u?.real_name || u?.display_name || null });
+      onChange && onChange();
+      setOpen(false);
+      setTimeout(() => window.location.reload(), 200);
+    } catch (e) { alert('失敗: ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const clear = async () => {
+    setBusy(true);
+    try {
+      await api.viewAsClear();
+      setRole(''); setAsUserId('');
+      onChange && onChange();
+      setTimeout(() => window.location.reload(), 200);
+    } catch (e) { alert('失敗: ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const filteredUsers = (users || []).filter(u => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return (u.real_name || '').toLowerCase().includes(s) || (u.display_name || '').toLowerCase().includes(s);
+  });
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => { setOpen(v => !v); loadUsers(); }}
+        title="View As（管理者向けテスト機能）"
+        style={{ background: user?.viewingAs ? '#f59e0b' : 'rgba(99,102,241,0.1)', border: `1px solid ${user?.viewingAs ? '#f59e0b' : '#c7d2fe'}`, color: user?.viewingAs ? '#fff' : '#4f46e5', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+        👁️ {user?.viewingAs ? 'View As中' : 'View As'}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+          <div style={{ position: 'absolute', top: 36, right: 0, width: 320, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, boxShadow: '0 10px 32px rgba(0,0,0,0.15)', padding: 12, zIndex: 1001 }}>
+            <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a', marginBottom: 6 }}>👁️ View As（テスト用）</div>
+            <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginBottom: 10 }}>ロール・特定ユーザーになりきって画面を確認できます</div>
+
+            <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700, display: 'block', marginBottom: 3 }}>ロール</label>
+            <select value={role} onChange={e => setRole(e.target.value)}
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem', marginBottom: 10 }}>
+              <option value="">変更しない（自分のadminのまま）</option>
+              <option value="admin">admin</option>
+              <option value="corp">corp（コーポレート）</option>
+              <option value="personnel">personnel（人事）</option>
+              <option value="bc_manager">bc_manager（BCマネージャー）</option>
+              <option value="member">member（一般メンバー）</option>
+            </select>
+
+            <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700, display: 'block', marginBottom: 3 }}>ユーザー（なりきり対象）</label>
+            <input type="search" placeholder="検索…" value={search} onChange={e => setSearch(e.target.value)}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem', marginBottom: 4 }} />
+            <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: 6, marginBottom: 10 }}>
+              <label style={{ display: 'block', padding: '5px 8px', fontSize: '0.74rem', cursor: 'pointer', background: !asUserId ? '#eef2ff' : 'transparent' }}>
+                <input type="radio" name="asuser" checked={!asUserId} onChange={() => setAsUserId('')} style={{ marginRight: 6 }} />
+                自分のまま
+              </label>
+              {filteredUsers.slice(0, 30).map(u => (
+                <label key={u.user_id} style={{ display: 'block', padding: '5px 8px', fontSize: '0.74rem', cursor: 'pointer', background: asUserId === u.user_id ? '#eef2ff' : 'transparent', borderTop: '1px solid #f8fafc' }}>
+                  <input type="radio" name="asuser" checked={asUserId === u.user_id} onChange={() => setAsUserId(u.user_id)} style={{ marginRight: 6 }} />
+                  {(u.real_name || u.display_name || u.user_id).split('/')[0].trim()}
+                </label>
+              ))}
+              {users === null && <div style={{ padding: 10, textAlign: 'center', color: '#94a3b8', fontSize: '0.72rem' }}>読み込み中…</div>}
+              {users?.length === 0 && <div style={{ padding: 10, textAlign: 'center', color: '#94a3b8', fontSize: '0.72rem' }}>ユーザーなし</div>}
+            </div>
+
+            <div style={{ display: 'flex', gap: 6 }}>
+              {user?.viewingAs && (
+                <button onClick={clear} disabled={busy}
+                  style={{ padding: '6px 12px', border: '1px solid #cbd5e1', background: '#fff', color: '#64748b', borderRadius: 6, cursor: 'pointer', fontSize: '0.74rem' }}>
+                  解除
+                </button>
+              )}
+              <button onClick={apply} disabled={busy || (!role && !asUserId)}
+                style={{ marginLeft: 'auto', padding: '6px 16px', border: 'none', background: '#4f46e5', color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: '0.74rem', fontWeight: 700, opacity: busy || (!role && !asUserId) ? 0.5 : 1 }}>
+                {busy ? '...' : '適用'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

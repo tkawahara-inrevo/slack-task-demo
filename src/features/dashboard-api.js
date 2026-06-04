@@ -294,6 +294,33 @@ function registerDashboardApi(deps) {
   // ロール判定ミドルウェア。優先順位: admin(DB明示) > corp(DB明示) > IT > Personnel > Corporate > Slackタイトル推定
   // ロールはキャッシュ(5分)で保持。ロール変更後は最大5分で反映される。
   // IT・Personnel・Corporate はチーム所属名で判定しているため、チーム名変更時は要確認。
+  // Cookie値の安全なパース（"view_as"）
+  // { role?: string, asUserId?: string, asUserName?: string }
+  function parseViewAs(req) {
+    try {
+      const raw = req.cookies?.view_as;
+      if (!raw) return null;
+      const obj = JSON.parse(decodeURIComponent(raw));
+      if (!obj || typeof obj !== 'object') return null;
+      const VALID = ['admin','corp','personnel','bc_manager','member'];
+      if (obj.role && !VALID.includes(obj.role)) return null;
+      return obj;
+    } catch { return null; }
+  }
+  function applyViewAs(req, baseRole) {
+    // adminの場合のみ view_as cookieを適用
+    if (baseRole !== 'admin') return null;
+    const va = parseViewAs(req);
+    if (!va || (!va.role && !va.asUserId)) return null;
+    const result = { viewingAs: { role: va.role || null, userId: va.asUserId || null, userName: va.asUserName || null } };
+    if (va.role === 'bc_manager') {
+      result.role = 'member'; result.isBcManager = true;
+    } else if (va.role) {
+      result.role = va.role; result.isBcManager = false;
+    }
+    return result;
+  }
+
   async function authWithRole(req, res, next) {
     authMiddleware(req, res, async () => {
       try {
@@ -301,8 +328,16 @@ function registerDashboardApi(deps) {
         const cacheKey = `${teamId}:${userId}`;
         const cached = roleCache.get(cacheKey);
         if (cached && Date.now() < cached.expiresAt) {
-          req.dashboardUser.role = cached.role;
-          req.dashboardUser.isBcManager = cached.isBcManager || false;
+          // キャッシュは「実ロール」のみ。view-asは毎回判定する
+          const va = applyViewAs(req, cached.role);
+          req.dashboardUser.realRole    = cached.role;
+          req.dashboardUser.realUserId  = userId;
+          req.dashboardUser.role        = va?.role !== undefined        ? va.role        : cached.role;
+          req.dashboardUser.isBcManager = va?.isBcManager !== undefined ? va.isBcManager : (cached.isBcManager || false);
+          if (va?.viewingAs?.userId) {
+            req.dashboardUser.userId = va.viewingAs.userId;
+          }
+          req.dashboardUser.viewingAs = va?.viewingAs || null;
           return next();
         }
         const dbRole = await dbGetDashboardRole(teamId, userId);
@@ -360,8 +395,15 @@ function registerDashboardApi(deps) {
         const isBcManager = bcRows.length > 0;
 
         roleCache.set(cacheKey, { role, isBcManager, expiresAt: Date.now() + 5 * 60 * 1000 });
-        req.dashboardUser.role = role;
-        req.dashboardUser.isBcManager = isBcManager;
+        const va = applyViewAs(req, role);
+        req.dashboardUser.realRole    = role;
+        req.dashboardUser.realUserId  = userId;
+        req.dashboardUser.role        = va?.role !== undefined        ? va.role        : role;
+        req.dashboardUser.isBcManager = va?.isBcManager !== undefined ? va.isBcManager : isBcManager;
+        if (va?.viewingAs?.userId) {
+          req.dashboardUser.userId = va.viewingAs.userId;
+        }
+        req.dashboardUser.viewingAs = va?.viewingAs || null;
         next();
       } catch (e) {
         console.error("authWithRole error:", e);
@@ -542,16 +584,71 @@ function registerDashboardApi(deps) {
   });
 
   // ================================
+  // View As（adminのみ）
+  // ================================
+  // 切替対象ユーザー候補一覧
+  expressApp.get("/api/dashboard/view-as/users", authWithRole, async (req, res) => {
+    try {
+      if (req.dashboardUser.realRole !== 'admin') return res.status(403).json({ error: 'admin_only' });
+      const { teamId } = req.dashboardUser;
+      const { rows } = await dbQuery(
+        `SELECT user_id, real_name, display_name
+         FROM dashboard_user_directory
+         WHERE team_id=$1 AND COALESCE(real_name, display_name) IS NOT NULL
+         ORDER BY real_name`,
+        [teamId]
+      );
+      res.json({ users: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // View As セット
+  expressApp.post("/api/dashboard/view-as", authWithRole, async (req, res) => {
+    try {
+      if (req.dashboardUser.realRole !== 'admin') return res.status(403).json({ error: 'admin_only' });
+      const VALID = ['admin','corp','personnel','bc_manager','member'];
+      const role = req.body?.role || null;
+      const asUserId = req.body?.asUserId || null;
+      const asUserName = req.body?.asUserName || null;
+      if (role && !VALID.includes(role)) return res.status(400).json({ error: 'invalid_role' });
+      if (!role && !asUserId) return res.status(400).json({ error: 'role_or_user_required' });
+      const payload = JSON.stringify({ role, asUserId, asUserName });
+      res.cookie('view_as', encodeURIComponent(payload), {
+        httpOnly: false, sameSite: 'lax',
+        maxAge: 24 * 60 * 60 * 1000, // 24h
+        secure: process.env.NODE_ENV === 'production',
+      });
+      // role cacheをクリアして即時反映
+      roleCache.delete(`${req.dashboardUser.teamId}:${req.dashboardUser.realUserId}`);
+      res.json({ ok: true, role, asUserId, asUserName });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // View As クリア
+  expressApp.post("/api/dashboard/view-as/clear", authWithRole, async (req, res) => {
+    res.clearCookie('view_as');
+    roleCache.delete(`${req.dashboardUser.teamId}:${req.dashboardUser.realUserId}`);
+    res.json({ ok: true });
+  });
+
+  // ================================
   // General APIs (role-aware)
   // ================================
 
   // --- /me (with role) ---
   expressApp.get("/api/dashboard/me", authWithRole, async (req, res) => {
     try {
-      const { teamId, userId, role, isBcManager } = req.dashboardUser;
+      const { teamId, userId, role, isBcManager, realRole, realUserId, viewingAs } = req.dashboardUser;
       const name = await getUserDisplayName(teamId, userId);
+      const realName = realUserId && realUserId !== userId ? await getUserDisplayName(teamId, realUserId) : null;
       const teams = await dbGetUserDashTeams(teamId, userId);
-      res.json({ teamId, userId, displayName: name, role, isBcManager: !!isBcManager, dashTeams: teams });
+      res.json({
+        teamId, userId, displayName: name,
+        role, isBcManager: !!isBcManager,
+        realRole, realUserId, realName,
+        viewingAs: viewingAs || null,
+        dashTeams: teams,
+      });
     } catch (e) {
       console.error("dashboard /me error:", e);
       res.status(500).json({ error: "internal" });

@@ -115,16 +115,21 @@ function YomiPanel({ full = false }) {
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [memoCache, setMemoCache] = useState({});
   const [filterStaff, setFilterStaff] = useState('');
+  const [filterYomi, setFilterYomi] = useState(new Set());
+
+  // 個人モード判定（特定担当者選択時）→ D/E含む全件取得
+  const isIndividualMode = !!filterStaff;
 
   useEffect(() => {
-    api.crmYomiKanri()
+    setLoading(true);
+    api.crmYomiKanri({ includeAll: isIndividualMode })
       .then(r => {
         setYomiKanri(r);
         const init = {};
         Object.values(r.byStaff).flat().forEach(d => { init[d.id] = d.sales_memo || ''; });
         setMemoCache(init);
       }).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [isIndividualMode]);
 
   if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;
   if (!yomiKanri) return null;
@@ -134,8 +139,22 @@ function YomiPanel({ full = false }) {
     .sort((a,b) => b[1].length - a[1].length);
 
   const staffOptions = allEntries.map(([name]) => name);
-  const entries = filterStaff ? allEntries.filter(([name]) => name === filterStaff) : allEntries;
+  // 担当者フィルタ
+  let entries = filterStaff ? allEntries.filter(([name]) => name === filterStaff) : allEntries;
+  // ヨミチップフィルタ（個人モード時のみ）
+  if (isIndividualMode && filterYomi.size > 0) {
+    entries = entries.map(([name, deals]) => [name, deals.filter(d => filterYomi.has(d.yomi))])
+                     .filter(([, deals]) => deals.length > 0);
+  }
   const totalFiltered = entries.reduce((s,[,d]) => s + d.length, 0);
+  // 個人モード時のヨミ別カウント（filterYomi適用前のもの）
+  const yomiCounts = {};
+  if (isIndividualMode) {
+    const baseDeals = (filterStaff ? allEntries.filter(([n]) => n === filterStaff) : allEntries)
+                        .flatMap(([, d]) => d);
+    for (const d of baseDeals) yomiCounts[d.yomi] = (yomiCounts[d.yomi] || 0) + 1;
+  }
+  const YOMI_ORDER = ['S 90％','A 70％','B 50％','C 30％','D 15％','E 5％'];
 
   const DealCard = ({ d, compact = false }) => {
     const cfg = YOMI_CFG_PANEL[d.yomi] || { color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' };
@@ -259,18 +278,58 @@ function YomiPanel({ full = false }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#f8fafc' }}>
-      <div style={{ padding:'10px 20px', background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0, display:'flex', alignItems:'center', gap:12 }}>
-        <div>
-          <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>ヨミ管理</div>
-          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>C以上 進行中 {totalFiltered}件</div>
+      <div style={{ background:'#fff', borderBottom:'1px solid #e2e8f0', flexShrink:0 }}>
+        <div style={{ padding:'10px 20px', display:'flex', alignItems:'center', gap:12 }}>
+          <div>
+            <div style={{ fontWeight:700, fontSize:'0.92rem', color:'#0f172a' }}>
+              ヨミ管理 {isIndividualMode && <span style={{ fontSize:'0.7rem', color:'#6366f1', background:'#eef2ff', padding:'1px 8px', borderRadius:99, marginLeft:6, fontWeight:700 }}>個人モード</span>}
+            </div>
+            <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:1 }}>
+              {isIndividualMode ? '全ヨミ' : 'C以上'} 進行中 {totalFiltered}件
+              {isIndividualMode && filterYomi.size > 0 && <span style={{ marginLeft:4 }}>（{filterYomi.size}ヨミで絞り込み）</span>}
+            </div>
+          </div>
+          <select value={filterStaff} onChange={e => { setFilterStaff(e.target.value); setFilterYomi(new Set()); }}
+            style={{ marginLeft:'auto', padding:'5px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', background:'#fff', color:'#374151', outline:'none', cursor:'pointer' }}>
+            <option value="">全員</option>
+            {staffOptions.map(name => (
+              <option key={name} value={name}>{name.split('/')[0].trim()}</option>
+            ))}
+          </select>
         </div>
-        <select value={filterStaff} onChange={e => setFilterStaff(e.target.value)}
-          style={{ marginLeft:'auto', padding:'5px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', background:'#fff', color:'#374151', outline:'none', cursor:'pointer' }}>
-          <option value="">全員</option>
-          {staffOptions.map(name => (
-            <option key={name} value={name}>{name.split('/')[0].trim()}</option>
-          ))}
-        </select>
+        {/* 個人モード時のヨミチップフィルタ */}
+        {isIndividualMode && (
+          <div style={{ padding:'8px 20px 10px', display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', borderTop:'1px solid #f1f5f9' }}>
+            <span style={{ fontSize:'0.7rem', color:'#64748b', fontWeight:700 }}>ヨミで絞り込み:</span>
+            {YOMI_ORDER.map(y => {
+              const cfg = YOMI_CFG_PANEL[y] || { color:'#64748b', bg:'#f8fafc', border:'#e2e8f0' };
+              const active = filterYomi.has(y);
+              const cnt = yomiCounts[y] || 0;
+              return (
+                <button key={y} onClick={() => setFilterYomi(prev => {
+                  const next = new Set(prev);
+                  if (next.has(y)) next.delete(y); else next.add(y);
+                  return next;
+                })}
+                  style={{
+                    padding:'3px 10px', borderRadius:99, fontSize:'0.72rem', fontWeight:700, cursor:'pointer',
+                    background: active ? cfg.color : cfg.bg,
+                    color: active ? '#fff' : cfg.color,
+                    border: `1px solid ${active ? cfg.color : cfg.border}`,
+                    opacity: cnt === 0 ? 0.35 : 1,
+                  }}>
+                  {y} <span style={{ opacity:0.7, marginLeft:2 }}>({cnt})</span>
+                </button>
+              );
+            })}
+            {filterYomi.size > 0 && (
+              <button onClick={() => setFilterYomi(new Set())}
+                style={{ fontSize:'0.7rem', color:'#64748b', background:'transparent', border:'1px dashed #cbd5e1', borderRadius:6, padding:'2px 8px', cursor:'pointer', marginLeft:4 }}>
+                ✕ クリア
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <div style={{ flex:1, overflowY:'auto', padding:'12px 20px' }}>
         {full ? (

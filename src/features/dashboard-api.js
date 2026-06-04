@@ -302,6 +302,7 @@ function registerDashboardApi(deps) {
         const cached = roleCache.get(cacheKey);
         if (cached && Date.now() < cached.expiresAt) {
           req.dashboardUser.role = cached.role;
+          req.dashboardUser.isBcManager = cached.isBcManager || false;
           return next();
         }
         const dbRole = await dbGetDashboardRole(teamId, userId);
@@ -351,8 +352,16 @@ function registerDashboardApi(deps) {
             }
           }
         }
-        roleCache.set(cacheKey, { role, expiresAt: Date.now() + 5 * 60 * 1000 });
+        // BCマネージャー判定（admin/role とは独立）
+        const { rows: bcRows } = await dbQuery(
+          `SELECT 1 FROM crm_bc_managers WHERE team_id=$1 AND user_id=$2 LIMIT 1`,
+          [teamId, userId]
+        ).catch(() => ({ rows: [] }));
+        const isBcManager = bcRows.length > 0;
+
+        roleCache.set(cacheKey, { role, isBcManager, expiresAt: Date.now() + 5 * 60 * 1000 });
         req.dashboardUser.role = role;
+        req.dashboardUser.isBcManager = isBcManager;
         next();
       } catch (e) {
         console.error("authWithRole error:", e);
@@ -539,10 +548,10 @@ function registerDashboardApi(deps) {
   // --- /me (with role) ---
   expressApp.get("/api/dashboard/me", authWithRole, async (req, res) => {
     try {
-      const { teamId, userId, role } = req.dashboardUser;
+      const { teamId, userId, role, isBcManager } = req.dashboardUser;
       const name = await getUserDisplayName(teamId, userId);
       const teams = await dbGetUserDashTeams(teamId, userId);
-      res.json({ teamId, userId, displayName: name, role, dashTeams: teams });
+      res.json({ teamId, userId, displayName: name, role, isBcManager: !!isBcManager, dashTeams: teams });
     } catch (e) {
       console.error("dashboard /me error:", e);
       res.status(500).json({ error: "internal" });

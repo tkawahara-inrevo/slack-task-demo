@@ -240,7 +240,7 @@ export const api = {
     const qs = p.toString();
     return crmFetch(`/monthly-summary${qs ? '?'+qs : ''}`);
   },
-  crmYomiKanri: () => crmFetch('/yomi-kanri'),
+  crmYomiKanri: (opts = {}) => crmFetch(`/yomi-kanri${opts.includeAll ? '?includeAll=1' : ''}`),
   crmRoleTargets: () => crmFetch('/role-targets'),
   crmRoleTargetsSave: (targets) => crmFetch('/role-targets', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets}) }),
   crmPeriodSettings: () => crmFetch('/period-settings'),

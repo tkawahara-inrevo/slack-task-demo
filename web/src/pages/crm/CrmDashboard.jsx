@@ -487,6 +487,10 @@ export default function CrmDashboard() {
   const [syncDone, setSyncDone]   = useState(false);
   const [lastSync, setLastSync]   = useState(null);
   const [kpiDrill, setKpiDrill]   = useState(null); // { type: 'payment'|'won'|'meeting', rows: [] }
+  const [me, setMe] = useState(null);
+
+  useEffect(() => { api.me().then(setMe).catch(() => setMe({})); }, []);
+  const canSeeRepTable = me?.role === 'admin' || me?.isBcManager;
 
   // 最終同期時刻取得
   useEffect(() => {
@@ -763,12 +767,14 @@ export default function CrmDashboard() {
         {/* 左カラム */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
 
-          {/* 担当者別実績 */}
+          {/* 担当者別実績（admin or BCマネージャーのみ） */}
+          {canSeeRepTable && (
           <div style={{ ...cardStyle, padding:0, overflow:'hidden' }}>
             <div style={{ padding:'10px 16px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                 <span style={{ width:8, height:8, borderRadius:'50%', background:'#6366f1', display:'inline-block' }} />
                 <span style={{ fontWeight:700, fontSize:'0.85rem', color:C.text }}>担当者別実績</span>
+                <span style={{ fontSize:'0.6rem', color:'#94a3b8', marginLeft:4 }}>🔒 管理者/BCマネージャーのみ</span>
               </div>
               <span style={{ fontSize:'0.68rem', color:C.textSub }}>{reps.length}名　クリックでドリルダウン</span>
             </div>
@@ -851,6 +857,16 @@ export default function CrmDashboard() {
               </table>
             </div>
           </div>
+          )}
+          {!canSeeRepTable && (
+            <div style={{ ...cardStyle, padding:'14px 18px', borderColor:'#e0e7ff', background:'#fafbff' }}>
+              <div style={{ fontSize:'0.78rem', color:'#6366f1', fontWeight:700, marginBottom:4 }}>👤 個人ダッシュボード</div>
+              <div style={{ fontSize:'0.72rem', color:'#64748b' }}>
+                自分の担当案件は「ヨミ管理」タブから確認・編集できます。<br/>
+                担当者別の比較は管理者・BCマネージャーのみ閲覧できます。
+              </div>
+            </div>
+          )}
 
           {/* アラート — 常に表示 */}
           <div style={{ background:C.surface, borderRadius:12, border:`1px solid ${alertCount > 0 ? '#fca5a5' : '#e2e8f0'}`, overflow:'hidden' }}>

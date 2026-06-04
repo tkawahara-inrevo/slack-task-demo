@@ -41,6 +41,7 @@ const ACTIVITY_TYPES = [
   { value: 'call', label: '電話', icon: '📞' },
   { value: 'email', label: 'メール', icon: '✉️' },
   { value: 'stage_change', label: 'ステージ変更', icon: '🔄' },
+  { value: 'yomi_change', label: 'ヨミ変更', icon: '📊' },
   { value: 'document', label: '書類', icon: '📄' },
   { value: 'other', label: 'その他', icon: '💬' },
 ];
@@ -74,6 +75,75 @@ function evalCalc(expression, deal) {
   } catch {
     return null;
   }
+}
+
+// ヨミ推移タイムライン
+function YomiTimeline({ activities }) {
+  const yomiChanges = (activities || [])
+    .filter(a => a.activity_type === 'yomi_change')
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  if (yomiChanges.length === 0) return null;
+
+  const yomiColor = (y) => {
+    if (!y) return '#94a3b8';
+    if (y.includes('S')) return '#dc2626';
+    if (y.includes('A')) return '#f59e0b';
+    if (y.includes('B')) return '#3b82f6';
+    if (y.includes('C')) return '#6366f1';
+    if (y.includes('D')) return '#64748b';
+    if (y.includes('E')) return '#9ca3af';
+    if (y === '受注') return '#059669';
+    if (y === '失注') return '#dc2626';
+    if (y === '見送り') return '#6b7280';
+    return '#64748b';
+  };
+  const yomiBg = (y) => `${yomiColor(y)}15`;
+
+  const direction = (from, to) => {
+    const order = ['E', 'D', 'C', 'B', 'A', 'S'];
+    const f = order.findIndex(c => from?.includes(c));
+    const t = order.findIndex(c => to?.includes(c));
+    if (to === '受注') return 'won';
+    if (to === '失注') return 'lost';
+    if (f === -1 || t === -1) return 'neutral';
+    if (t > f) return 'up';
+    if (t < f) return 'down';
+    return 'neutral';
+  };
+
+  return (
+    <div style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderRadius: 10, padding: '12px 16px', marginBottom: 14, border: '1px solid #fde68a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+        <span style={{ fontSize: '0.95rem' }}>📊</span>
+        <span style={{ fontWeight: 800, fontSize: 14, color: '#92400e' }}>ヨミ推移タイムライン</span>
+        <span style={{ fontSize: 11, color: '#a16207', marginLeft: 'auto' }}>{yomiChanges.length}回の変更</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {yomiChanges.map((a, i) => {
+          const dir = direction(a.metadata?.from, a.metadata?.to);
+          const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : dir === 'won' ? '✅' : dir === 'lost' ? '❌' : '→';
+          const arrowColor = dir === 'up' || dir === 'won' ? '#059669' : (dir === 'down' || dir === 'lost') ? '#dc2626' : '#94a3b8';
+          return (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fff', borderRadius: 6, fontSize: 12 }}>
+              <span style={{ fontSize: 10, color: '#a16207', minWidth: 80 }}>{fmtDate(a.created_at)}</span>
+              {a.metadata?.from && (
+                <span style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(a.metadata.from), color: yomiColor(a.metadata.from), fontSize: 11, fontWeight: 700 }}>
+                  {a.metadata.from}
+                </span>
+              )}
+              <span style={{ color: arrowColor, fontWeight: 800, fontSize: 13 }}>{arrow}</span>
+              <span style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(a.metadata?.to), color: yomiColor(a.metadata?.to), fontSize: 11, fontWeight: 700 }}>
+                {a.metadata?.to || '?'}
+              </span>
+              <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>
+                {a.metadata?.trigger === 'kintone-sync' ? '🔄 kintone' : (a.displayName || a.user_id || '')}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function SectionHeader({ title }) {
@@ -463,6 +533,9 @@ export default function DealDetail() {
           {/* 活動タブ */}
           {tab === 'activity' && (
             <div>
+              {/* ヨミ推移タイムライン（yomi_changeアクティビティだけ抜粋） */}
+              <YomiTimeline activities={activities} />
+
               <form onSubmit={handleAddActivity} style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
                   {ACTIVITY_TYPES.filter(a => a.value !== 'stage_change').map(a => (
@@ -505,9 +578,12 @@ export default function DealDetail() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {activities.map(a => (
                     <div key={a.id} style={{
-                      background: 'var(--surface)', borderRadius: 8, padding: '12px 16px',
+                      borderRadius: 8, padding: '12px 16px',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                      borderLeft: a.activity_type === 'stage_change' ? '3px solid #1976d2' : '3px solid #eee',
+                      borderLeft: a.activity_type === 'yomi_change' ? '3px solid #d97706'
+                                : a.activity_type === 'stage_change' ? '3px solid #1976d2'
+                                : '3px solid #eee',
+                      background: a.activity_type === 'yomi_change' ? '#fffbeb' : 'var(--surface)',
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>

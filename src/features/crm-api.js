@@ -1577,6 +1577,23 @@ function registerCrmApi({ expressApp, authWithRole }) {
           guaranteeCount!==undefined ? (guaranteeCount===''||guaranteeCount==null?null:Number(guaranteeCount)) : existing.guarantee_count,
           unitPrice!==undefined      ? (unitPrice===''||unitPrice==null?null:Number(unitPrice))                : existing.unit_price]);
 
+      // ヨミ変更ログ（deal_activities へ自動記録）
+      if (newYomi !== existing.yomi && newYomi) {
+        try {
+          await dbQuery(`
+            INSERT INTO deal_activities
+              (id, deal_id, team_id, user_id, activity_type, content, metadata, yomi_at_time, activity_date)
+            VALUES
+              (gen_random_uuid()::text, $1, $2, $3, 'yomi_change', $4, $5::jsonb, $6, CURRENT_DATE)
+          `, [
+            row.id, teamId, req.dashboardUser.userId || 'system',
+            `${existing.yomi || '(未設定)'} → ${newYomi}`,
+            JSON.stringify({ from: existing.yomi || null, to: newYomi, trigger: 'manual' }),
+            newYomi,
+          ]);
+        } catch (e) { console.error('[CRM] yomi log error:', e.message); }
+      }
+
       // 受注になった場合、入金予定を自動生成
       if (newYomi === '受注' && existing.yomi !== '受注') {
         try { await generateExpectedPayments(teamId, row.id); }
@@ -2105,6 +2122,11 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.get('/api/crm/yomi-kanri', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
+      // includeAll=1: D/E/アポ化前など 全active案件を返す（個人モード用）
+      const includeAll = req.query.includeAll === '1' || req.query.includeAll === 'true';
+      const yomiClause = includeAll
+        ? ''
+        : `AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％')`;
       const { rows } = await dbQuery(`
         SELECT d.id, d.customer_id, d.name, d.yomi, d.contract_type,
                d.initial_fee, d.monthly_fee, d.unit_price,
@@ -2115,12 +2137,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
                c.name AS customer_name
         FROM deals d JOIN customers c ON c.id = d.customer_id
         WHERE d.team_id=$1
-          AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％')
+          ${yomiClause}
           AND d.status = 'active'
         ORDER BY
           CASE d.yomi
             WHEN 'S 90％' THEN 1 WHEN 'A 70％' THEN 2
-            WHEN 'B 50％' THEN 3 WHEN 'C 30％' THEN 4 ELSE 5
+            WHEN 'B 50％' THEN 3 WHEN 'C 30％' THEN 4
+            WHEN 'D 15％' THEN 5 WHEN 'E 5％' THEN 6 ELSE 7
           END, d.updated_at DESC
       `, [teamId]);
 

@@ -97,7 +97,8 @@
       "Bash(rm -f /e/dev/slack-task-demo/_app94.json)",
       "Bash(node -c src/features/kintone-api.js)",
       "Bash(node -c src/features/kintone-sync.js)",
-      "Bash(node -c src/features/crm-api.js)"
+      "Bash(node -c src/features/crm-api.js)",
+      "Bash(node -c src/features/an-api.js)"
     ]
   }
 }

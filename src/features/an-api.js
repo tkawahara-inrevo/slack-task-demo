@@ -107,6 +107,124 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     return text.includes('【会社名】') && text.includes('【kintone】');
   }
 
+  // ─── 自動応答エンジン: 過去AN調査ベースの推奨媒体スコアリング ───
+  // input: { employment_type, job_type, work_locations[]?, min_salary?, max_salary? }
+  // output: { recommended: [{media_name, cases, accuracy_pct, ...}], match_level, summary }
+  async function computeAutoSuggest(input) {
+    const { employment_type, job_type } = input || {};
+    if (!employment_type && !job_type) {
+      return { recommended: [], match_level: 'none', summary: '雇用形態・職種が不明のため推奨できません' };
+    }
+
+    // 段階的マッチング: ①雇用形態×職種 ②雇用形態のみ ③職種のみ
+    const tryQuery = async (where, params) => {
+      const sql = `
+        SELECT m.media_name,
+          COUNT(*)::int AS cases,
+          ROUND(AVG(NULLIF(m.expected_apps,0))::numeric, 1)  AS avg_expected,
+          ROUND(AVG(NULLIF(m.effective_apps,0))::numeric, 1) AS avg_effective,
+          COUNT(m.effective_apps) FILTER (WHERE m.effective_apps IS NOT NULL)::int AS effective_count,
+          ROUND(AVG(NULLIF(m.fee,0)))::bigint AS avg_fee,
+          ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY NULLIF(m.fee,0)))::bigint AS median_fee,
+          ROUND(CASE WHEN AVG(NULLIF(m.expected_apps,0))>0
+                THEN AVG(NULLIF(m.effective_apps,0))/AVG(NULLIF(m.expected_apps,0))*100
+                ELSE NULL END, 1) AS accuracy_pct
+        FROM an_study_media m
+        JOIN an_studies s ON s.record_id = m.study_record_id
+        WHERE m.media_name IS NOT NULL AND m.media_name <> ''
+          AND ${where}
+        GROUP BY m.media_name
+        HAVING COUNT(*) >= 1
+        ORDER BY cases DESC, avg_effective DESC NULLS LAST
+        LIMIT 20
+      `;
+      const r = await dbQuery(sql, params).catch(() => ({ rows: [] }));
+      return r.rows;
+    };
+
+    let rows = [], matchLevel = 'none';
+    if (employment_type && job_type) {
+      rows = await tryQuery(`s.employment_type=$1 AND s.job_type=$2`, [employment_type, job_type]);
+      if (rows.length > 0) matchLevel = '雇用形態×職種';
+    }
+    if (rows.length === 0 && employment_type) {
+      rows = await tryQuery(`s.employment_type=$1`, [employment_type]);
+      if (rows.length > 0) matchLevel = '雇用形態のみ';
+    }
+    if (rows.length === 0 && job_type) {
+      rows = await tryQuery(`s.job_type=$1`, [job_type]);
+      if (rows.length > 0) matchLevel = '職種のみ';
+    }
+
+    if (rows.length === 0) return { recommended: [], match_level: 'none', summary: '過去事例なし' };
+
+    // スコアリング: case数(0.35) + 効果率(0.40) + 実応募充実度(0.25)
+    const maxCases    = Math.max(...rows.map(r => r.cases || 0), 1);
+    const maxAccuracy = Math.max(...rows.map(r => Number(r.accuracy_pct) || 0), 1);
+    const maxEffCnt   = Math.max(...rows.map(r => r.effective_count || 0), 1);
+    const scored = rows.map(r => {
+      const caseScore = (r.cases || 0) / maxCases;
+      const accScore  = (Number(r.accuracy_pct) || 0) / maxAccuracy;
+      const reliabScore = (r.effective_count || 0) / maxEffCnt;
+      const score = (caseScore * 0.35 + accScore * 0.40 + reliabScore * 0.25) * 100;
+      return {
+        media_name: r.media_name,
+        cases: r.cases,
+        avg_expected:  r.avg_expected != null ? Number(r.avg_expected)  : null,
+        avg_effective: r.avg_effective != null ? Number(r.avg_effective) : null,
+        accuracy_pct:  r.accuracy_pct != null ? Number(r.accuracy_pct) : null,
+        avg_fee:    r.avg_fee    ? Number(r.avg_fee)    : null,
+        median_fee: r.median_fee ? Number(r.median_fee) : null,
+        effective_count: r.effective_count,
+        score: Math.round(score * 10) / 10,
+        reliability: r.effective_count >= 5 ? '高' : r.effective_count >= 2 ? '中' : '低',
+      };
+    }).sort((a,b) => b.score - a.score).slice(0, 5);
+
+    // 媒体マスタから備考・注意事項を付与
+    const names = scored.map(s => s.media_name);
+    if (names.length > 0) {
+      const { rows: meta } = await dbQuery(
+        `SELECT name, notes, caution, recommend_score FROM media_master WHERE name = ANY($1::text[])`,
+        [names]
+      ).catch(() => ({ rows: [] }));
+      const metaMap = Object.fromEntries(meta.map(m => [m.name, m]));
+      for (const s of scored) {
+        const m = metaMap[s.media_name];
+        if (m) { s.notes = m.notes; s.caution = m.caution; s.recommend_score = m.recommend_score; }
+      }
+    }
+
+    return { recommended: scored, match_level: matchLevel, total_candidates: rows.length };
+  }
+
+  // Slack投稿用のテキストにフォーマット
+  function formatAutoSuggestForSlack(suggest, study) {
+    if (!suggest?.recommended?.length) {
+      return `🤖 *1次調査結果（自動生成）*\n過去AN調査データに類似条件の事例が見つかりませんでした。`;
+    }
+    const fmtY = (n) => n ? `¥${Math.round(n/10000).toLocaleString()}万` : '—';
+    const lines = [
+      `🤖 *1次調査結果（自動生成・要確認）*`,
+      `_過去AN調査ベース／マッチ精度: ${suggest.match_level}（${suggest.total_candidates}媒体候補から上位${suggest.recommended.length}件）_`,
+      ``,
+      `*推奨媒体トップ${suggest.recommended.length}*`,
+    ];
+    suggest.recommended.forEach((m, i) => {
+      const acc = m.accuracy_pct != null ? `${m.accuracy_pct}%` : '—';
+      const fee = m.median_fee ? fmtY(m.median_fee) : (m.avg_fee ? fmtY(m.avg_fee) : '—');
+      const expectVsActual = `予測${m.avg_expected ?? '—'} → 実応募${m.avg_effective ?? '—'}`;
+      const cautionMark = m.caution ? ' ⚠️' : '';
+      lines.push(`*${i+1}. ${m.media_name}*${cautionMark}`);
+      lines.push(`   • 過去${m.cases}件 / 効果率 ${acc} / 信頼度 ${m.reliability}（実績データ${m.effective_count}件）`);
+      lines.push(`   • ${expectVsActual} / 想定費用中央値 ${fee}`);
+      if (m.caution) lines.push(`   ⚠️ ${String(m.caution).split('\n')[0].slice(0,80)}`);
+    });
+    lines.push(``);
+    lines.push(`_※ AN担当者の判断で正式回答してください。実応募データが少ない媒体は信頼度「低」と表示しています。_`);
+    return lines.join('\n');
+  }
+
   // 1件取り込み（リスナー & backfill 共通）→ an_studies に新規作成
   async function ingestAnRequest({ teamId, channelId, messageTs, text }) {
     const parsed = parseAnRequest(text);
@@ -158,6 +276,80 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
     return { inserted: r.rowCount > 0, parsed, recordId };
   }
 
+  // 新規依頼後のSlack自動応答（フラグで制御）
+  const AUTO_REPLY_ENABLED = process.env.AN_AUTO_REPLY === '1';
+  async function postAutoSuggestReply({ teamId, channelId, messageTs, study, parsed }) {
+    if (!slackApp || !channelId || !messageTs) return;
+    try {
+      // 推奨に必要な構造化情報を抽出（ヒアリング項目からemployment_type/job_typeをベストエフォートで）
+      const text = `${parsed?.hearing || ''}\n${parsed?.detail || ''}`;
+      const emp = study.employment_type ||
+                  (text.match(/雇用形態[：:\s]*([^\n]+)/)?.[1] || '').trim() || null;
+      const job = study.job_type ||
+                  (text.match(/(?:依頼を希望する)?職種[：:\s]*([^\n]+)/)?.[1] || '').trim() || null;
+      // 雇用形態の正規化（よくある記法に対応）
+      const empNorm = emp ? emp.replace(/[（(].*$/,'').trim() : null;
+
+      const suggest = await computeAutoSuggest({ employment_type: empNorm, job_type: job });
+      const replyText = formatAutoSuggestForSlack(suggest, study);
+      await slackApp.client.chat.postMessage({
+        channel: channelId, thread_ts: messageTs, text: replyText, mrkdwn: true,
+      });
+      console.log(`[AN] auto-suggest posted to ${channelId}/${messageTs}: ${suggest.recommended.length} media`);
+    } catch (e) { console.error('[AN] auto-suggest reply error:', e.message); }
+  }
+
+  // 既存案件用: study_record_id から自動推奨を返す
+  expressApp.get('/api/dashboard/an/studies/:id/auto-suggest', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [s] } = await dbQuery(
+        `SELECT record_id, company_name, employment_type, job_type, work_locations,
+                min_salary, max_salary, priority
+         FROM an_studies WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!s) return res.status(404).json({ error: 'not_found' });
+      const suggest = await computeAutoSuggest({
+        employment_type: s.employment_type,
+        job_type: s.job_type,
+        work_locations: s.work_locations,
+        min_salary: s.min_salary, max_salary: s.max_salary,
+      });
+      res.json({ study: s, ...suggest });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 任意条件で推奨（汎用）
+  expressApp.post('/api/dashboard/an/auto-suggest', authWithRole, async (req, res) => {
+    try {
+      const suggest = await computeAutoSuggest(req.body || {});
+      res.json(suggest);
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // study_record_id を Slack スレッドへ自動応答投稿（手動トリガ）
+  expressApp.post('/api/dashboard/an/studies/:id/post-auto-suggest', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [s] } = await dbQuery(
+        `SELECT record_id, company_name, employment_type, job_type, work_locations,
+                min_salary, max_salary, priority, slack_message_ts, slack_channel_id, data
+         FROM an_studies WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!s) return res.status(404).json({ error: 'not_found' });
+      if (!s.slack_message_ts || !s.slack_channel_id) {
+        return res.status(400).json({ error: 'no_slack_thread', message: 'この案件はSlack由来ではありません' });
+      }
+      const parsed = s.data?.parsed || {};
+      await postAutoSuggestReply({
+        teamId, channelId: s.slack_channel_id, messageTs: s.slack_message_ts, study: s, parsed,
+      });
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
   // ── Slackリスナー：AN依頼チャンネルを監視 ──────────────
   if (slackApp && AN_CHANNEL_ID) {
     slackApp.message(async ({ message }) => {
@@ -166,10 +358,25 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
       if (message.subtype && message.subtype !== 'bot_message') return;
       if (!isAnRequestMessage(message.text)) return;
       try {
-        const { inserted, parsed } = await ingestAnRequest({
+        const { inserted, parsed, recordId } = await ingestAnRequest({
           teamId: defaultTeamId, channelId: message.channel, messageTs: message.ts, text: message.text,
         });
-        if (inserted) console.log(`[AN] 新規依頼登録: ${parsed.company_name}`);
+        if (inserted) {
+          console.log(`[AN] 新規依頼登録: ${parsed.company_name}`);
+          if (AUTO_REPLY_ENABLED) {
+            // ingestAnRequest直後に study を取得して自動応答
+            const { rows: [s] } = await dbQuery(
+              `SELECT record_id, company_name, employment_type, job_type FROM an_studies WHERE record_id=$1`,
+              [recordId]
+            );
+            if (s) {
+              postAutoSuggestReply({
+                teamId: defaultTeamId, channelId: message.channel, messageTs: message.ts,
+                study: s, parsed,
+              }).catch(e => console.error('[AN] auto-reply async error:', e.message));
+            }
+          }
+        }
       } catch (e) {
         console.error('[AN] 登録エラー:', e.message);
       }

@@ -630,6 +630,8 @@ export const api = {
     return apiFetch(`/an/media-cases${qs ? `?${qs}` : ''}`);
   },
   anStudyCrmSummary:  (id) => apiFetch(`/an/studies/${id}/crm-summary`),
+  anStudyAutoSuggest: (id) => apiFetch(`/an/studies/${id}/auto-suggest`),
+  anStudyPostAutoSuggest: (id) => apiFetch(`/an/studies/${id}/post-auto-suggest`, { method: 'POST' }),
   anStudySlackThread: (id) => apiFetch(`/an/studies/${id}/slack-thread`),
   anStudySlackReply: (id, text) => apiFetch(`/an/studies/${id}/slack-reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
   anUnified:          (filters = {}) => {

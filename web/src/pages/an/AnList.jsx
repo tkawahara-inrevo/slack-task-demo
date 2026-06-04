@@ -834,13 +834,16 @@ function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtY
           />
         </Card>
 
+        {/* 🤖 1次調査（自動推奨） */}
+        <AutoSuggestCard study={study} />
+
         {/* Slackスレッド */}
         {study.slack_message_ts && study.slack_channel_id && (
           <SlackThreadCard studyId={study.record_id} slackLink={study.slack_link} />
         )}
 
         {/* 調査媒体 */}
-        <Card title={`調査媒体（${media.length}件）`} accent="#0891b2"
+        <Card title={`調査媒体（${media.length}件）${media.filter(m => m.expected_apps != null && m.effective_apps == null).length > 0 ? ` ／ 📝結果未入力 ${media.filter(m => m.expected_apps != null && m.effective_apps == null).length}` : ''}`} accent="#0891b2"
           action={<button onClick={addMedia} style={S_panel.addBtn}>＋ 媒体追加</button>}>
           {media.length === 0 ? (
             <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>媒体未登録</div>
@@ -963,12 +966,16 @@ function MediaSlotRow({ m, fmtYen, isEditing, onEdit, onCancel, onSaved, onDelet
     );
   }
 
+  // 実応募が未入力で予測が入っているとき、クイック入力UIを表示
+  const needsResult = (m.expected_apps != null) && (m.effective_apps == null);
+
   return (
-    <div style={{ background: '#f8fafc', borderRadius: 10, padding: '10px 12px', border: '1px solid #e2e8f0' }}>
+    <div style={{ background: needsResult ? '#fefce8' : '#f8fafc', borderRadius: 10, padding: '10px 12px', border: `1px solid ${needsResult ? '#fde68a' : '#e2e8f0'}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0f172a' }}>{m.media_name || `スロット${m.slot}`}</span>
         {m.an_assignee && <span style={{ fontSize: '0.66rem', color: '#475569' }}>AN: {m.an_assignee}</span>}
         {m.status_tags?.length > 0 && m.status_tags.map(t => <span key={t} style={{ fontSize: '0.62rem', padding: '1px 6px', borderRadius: 99, background: '#eef2ff', color: '#4f46e5', fontWeight: 600 }}>{t}</span>)}
+        {needsResult && <span style={{ fontSize: '0.62rem', padding: '1px 7px', borderRadius: 99, background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>📝 結果未入力</span>}
         <button onClick={onEdit} style={{ ...S_panel.editBtn, marginLeft: 'auto' }}>編集</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, fontSize: '0.74rem' }}>
@@ -986,8 +993,45 @@ function MediaSlotRow({ m, fmtYen, isEditing, onEdit, onCancel, onSaved, onDelet
           </div>
         ))}
       </div>
+
+      {/* クイック実応募入力 */}
+      {needsResult && (
+        <QuickResultInput slot={m} onSaved={onSaved} />
+      )}
+
       {m.responses?.length > 0 && <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#475569' }}>対応: {m.responses.join(', ')}</div>}
       {m.note && <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#475569' }}>備考: {m.note}</div>}
+    </div>
+  );
+}
+
+// クイック実応募入力（実応募・採用数だけサクッと埋めるUI）
+function QuickResultInput({ slot, onSaved }) {
+  const [val, setVal] = useState('');
+  const [saving, setSaving] = useState(false);
+  const save = async (v) => {
+    const n = v.trim();
+    if (n === '') return;
+    setSaving(true);
+    try {
+      const r = await api.anStudyMediaUpdate(slot.id, { effective_apps: Number(n) });
+      onSaved(r.slot);
+      setVal('');
+    } catch (e) { alert('保存失敗: ' + e.message); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div style={{ marginTop: 8, padding: '8px 10px', background: '#fff', border: '1px dashed #fde68a', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: '0.7rem', color: '#92400e', fontWeight: 700 }}>📝 実応募数を入力:</span>
+      <input type="number" min="0" value={val} onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') save(val); }}
+        placeholder={`予測 ${slot.expected_apps}`}
+        style={{ width: 80, padding: '4px 8px', border: '1px solid #cbd5e1', borderRadius: 4, fontSize: '0.8rem' }} />
+      <button onClick={() => save(val)} disabled={saving || !val}
+        style={{ fontSize: '0.7rem', fontWeight: 700, padding: '4px 12px', borderRadius: 4, border: 'none', background: '#f59e0b', color: '#fff', cursor: !saving && val ? 'pointer' : 'not-allowed', opacity: saving || !val ? 0.5 : 1 }}>
+        {saving ? '...' : '保存'}
+      </button>
+      <span style={{ fontSize: '0.62rem', color: '#94a3b8', marginLeft: 'auto' }}>Enter でも保存</span>
     </div>
   );
 }
@@ -1154,6 +1198,113 @@ function CrmSummaryCard({ studyId }) {
           ) : (
             <div style={{ fontSize:'0.72rem', color:'#94a3b8', padding:8 }}>関連案件なし</div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 🤖 1次調査自動推奨カード
+function AutoSuggestCard({ study }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const hasSlack = !!(study.slack_message_ts && study.slack_channel_id);
+  const canSuggest = !!(study.employment_type || study.job_type);
+
+  const generate = async () => {
+    setLoading(true);
+    try {
+      const r = await api.anStudyAutoSuggest(study.record_id);
+      setData(r);
+    } catch (e) { alert('生成失敗: ' + e.message); }
+    finally { setLoading(false); }
+  };
+  const postToSlack = async () => {
+    if (!hasSlack) return;
+    if (!window.confirm('この内容をSlackスレッドへ投稿しますか？')) return;
+    setPosting(true);
+    try {
+      await api.anStudyPostAutoSuggest(study.record_id);
+      alert('Slackスレッドに投稿しました');
+    } catch (e) { alert('投稿失敗: ' + e.message); }
+    finally { setPosting(false); }
+  };
+
+  const fmtY = (n) => n ? `¥${Math.round(n/10000).toLocaleString()}万` : '—';
+  const reliabColor = (r) => r === '高' ? '#059669' : r === '中' ? '#d97706' : '#94a3b8';
+
+  return (
+    <div style={{ background:'#fff', borderRadius:12, marginBottom:12, boxShadow:'0 1px 3px rgba(0,0,0,0.04)', border:'1px solid #e2e8f0', overflow:'hidden' }}>
+      <div style={{ padding:'10px 14px', display:'flex', alignItems:'center', gap:8, background:'linear-gradient(90deg, #fef3c7, #fff)', borderBottom: data ? '1px solid #fde68a' : 'none' }}>
+        <span style={{ fontSize:'1rem' }}>🤖</span>
+        <span style={{ fontWeight:800, fontSize:'0.86rem', color:'#92400e' }}>1次調査（自動推奨）</span>
+        {data?.match_level && data.match_level !== 'none' && (
+          <span style={{ fontSize:'0.66rem', padding:'2px 8px', borderRadius:99, background:'#fef3c7', color:'#92400e', fontWeight:700 }}>
+            マッチ: {data.match_level}
+          </span>
+        )}
+        <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
+          <button onClick={generate} disabled={loading || !canSuggest}
+            style={{ fontSize:'0.72rem', fontWeight:700, padding:'4px 12px', borderRadius:6, border:'1px solid #f59e0b', background: canSuggest ? '#fef3c7' : '#f1f5f9', color:'#92400e', cursor: canSuggest && !loading ? 'pointer' : 'not-allowed', opacity: canSuggest ? 1 : 0.5 }}
+            title={!canSuggest ? '雇用形態または職種が必要' : ''}>
+            {loading ? '生成中…' : (data ? '🔄 再生成' : '✨ 推奨を生成')}
+          </button>
+          {data?.recommended?.length > 0 && hasSlack && (
+            <button onClick={postToSlack} disabled={posting}
+              style={{ fontSize:'0.72rem', fontWeight:700, padding:'4px 12px', borderRadius:6, border:'none', background:'#4a154b', color:'#fff', cursor:'pointer' }}>
+              {posting ? '送信中…' : '💬 Slackへ投稿'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!data && !loading && (
+        <div style={{ padding:'10px 14px', fontSize:'0.74rem', color:'#94a3b8' }}>
+          {canSuggest
+            ? '「推奨を生成」をクリックすると、過去AN調査データから最適な媒体を提案します。'
+            : '⚠️ 雇用形態または職種を入力すると、自動推奨が利用可能になります。'}
+        </div>
+      )}
+
+      {data && data.recommended && data.recommended.length === 0 && (
+        <div style={{ padding:'12px 14px', fontSize:'0.78rem', color:'#dc2626' }}>
+          過去AN調査に類似条件の事例がありませんでした。
+        </div>
+      )}
+
+      {data?.recommended?.length > 0 && (
+        <div style={{ padding:'10px 14px' }}>
+          <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginBottom:6 }}>
+            上位{data.recommended.length}件（候補{data.total_candidates}媒体から）/ 効果率＝実応募÷予測×100
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            {data.recommended.map((m, i) => (
+              <div key={m.media_name} style={{ background:'#fafbfc', border:'1px solid #f1f5f9', borderRadius:8, padding:'8px 10px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+                  <span style={{ width:22, height:22, borderRadius:6, background: i===0 ? '#dc2626' : i<3 ? '#f59e0b' : '#94a3b8', color:'#fff', fontSize:'0.7rem', fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>{i+1}</span>
+                  <span style={{ fontWeight:800, fontSize:'0.82rem', color:'#0f172a', flex:1 }}>{m.media_name}</span>
+                  {m.recommend_score > 0 && <span style={{ fontSize:'0.62rem', color:'#d97706' }}>{'★'.repeat(m.recommend_score)}</span>}
+                  <span style={{ fontSize:'0.62rem', padding:'1px 6px', borderRadius:99, background:`${reliabColor(m.reliability)}15`, color:reliabColor(m.reliability), fontWeight:700 }}>信頼度{m.reliability}</span>
+                  <span style={{ fontSize:'0.74rem', fontWeight:800, color:'#92400e' }}>{m.score}点</span>
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, fontSize:'0.7rem' }}>
+                  <div><span style={{ color:'#94a3b8' }}>過去</span> <b>{m.cases}件</b></div>
+                  <div><span style={{ color:'#94a3b8' }}>効果率</span> <b style={{ color: m.accuracy_pct>=80?'#059669':m.accuracy_pct>=50?'#d97706':'#dc2626' }}>{m.accuracy_pct != null ? `${m.accuracy_pct}%` : '—'}</b></div>
+                  <div><span style={{ color:'#94a3b8' }}>応募</span> <b>{m.avg_expected ?? '—'}→{m.avg_effective ?? '—'}</b></div>
+                  <div><span style={{ color:'#94a3b8' }}>費用</span> <b>{m.median_fee ? fmtY(m.median_fee) : (m.avg_fee ? fmtY(m.avg_fee) : '—')}</b></div>
+                </div>
+                {m.caution && (
+                  <div style={{ marginTop:4, padding:'4px 8px', background:'#fef2f2', borderRadius:4, fontSize:'0.66rem', color:'#7f1d1d' }}>
+                    ⚠️ {String(m.caution).split('\n')[0].slice(0,100)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop:8, fontSize:'0.64rem', color:'#94a3b8' }}>
+            ※ AN担当者の判断で正式回答してください。「信頼度低」は実応募データが少ない媒体です。
+          </div>
         </div>
       )}
     </div>

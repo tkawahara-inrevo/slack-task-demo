@@ -639,6 +639,51 @@ function registerAnApi({ expressApp, authWithRole, slackApp, teamId: defaultTeam
   });
 
   // Slack スレッド取得（slack_message_ts/channel_id が紐付いた案件）
+  // 案件詳細のCRMサマリー（顧客情報＋直近案件）
+  expressApp.get('/api/dashboard/an/studies/:id/crm-summary', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      // study 取得
+      const { rows: [study] } = await dbQuery(
+        `SELECT company_name FROM an_studies WHERE record_id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!study?.company_name) return res.json({ customer: null, deals: [] });
+
+      // customer 取得（kintone同期分含む）
+      const { rows: [customer] } = await dbQuery(
+        `SELECT id, name, name_short, industry, prefecture, employee_count, address,
+                business_description, inrevo_person, inflow_source, inflow_date, website,
+                memo, kintone_record_id
+         FROM customers WHERE team_id=$1 AND name=$2 LIMIT 1`,
+        [teamId, study.company_name]
+      );
+      if (!customer) return res.json({ customer: null, deals: [] });
+
+      // 案件一覧（顧客に紐づく案件、新しい順、最大10件）
+      const { rows: deals } = await dbQuery(
+        `SELECT id, name, yomi, status, contract_type, sales_person,
+                initial_fee, monthly_fee, order_date, conclusion_date,
+                first_meeting_date, next_action_date,
+                bant_budget, bant_authority, bant_needs, bant_timeframe
+         FROM deals
+         WHERE team_id=$1 AND customer_id=$2
+         ORDER BY COALESCE(conclusion_date, order_date, first_meeting_date) DESC NULLS LAST, updated_at DESC
+         LIMIT 10`,
+        [teamId, customer.id]
+      );
+
+      // 担当者
+      const { rows: contacts } = await dbQuery(
+        `SELECT last_name, first_name, position_title, department, email, phone
+         FROM customer_contacts WHERE customer_id=$1 AND team_id=$2 ORDER BY sort_order, created_at LIMIT 5`,
+        [customer.id, teamId]
+      );
+
+      res.json({ customer, deals, contacts });
+    } catch (e) { console.error('[AN crm-summary]', e); res.status(500).json({ error: 'internal' }); }
+  });
+
   expressApp.get('/api/dashboard/an/studies/:id/slack-thread', authWithRole, async (req, res) => {
     try {
       if (!slackApp) return res.status(500).json({ error: 'slack_not_configured' });

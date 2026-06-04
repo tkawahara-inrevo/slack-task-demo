@@ -629,6 +629,7 @@ export const api = {
     const qs = new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null && v !== '')).toString();
     return apiFetch(`/an/media-cases${qs ? `?${qs}` : ''}`);
   },
+  anStudyCrmSummary:  (id) => apiFetch(`/an/studies/${id}/crm-summary`),
   anStudySlackThread: (id) => apiFetch(`/an/studies/${id}/slack-thread`),
   anStudySlackReply: (id, text) => apiFetch(`/an/studies/${id}/slack-reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
   anUnified:          (filters = {}) => {

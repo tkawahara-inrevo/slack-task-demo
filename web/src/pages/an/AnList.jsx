@@ -31,7 +31,9 @@ export default function AnList() {
   const [unifiedCounts, setUnifiedCounts] = useState({ total: 0, slack_total: 0, kintone_total: 0 });
   const [searchQ, setSearchQ] = useState('');
   const [filterRequester, setFilterRequester] = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
   const [requesters, setRequesters] = useState([]);
+  const [priorities, setPriorities] = useState([]);
   const [studyDetail, setStudyDetail] = useState(null);
 
   const load = async () => {
@@ -41,6 +43,15 @@ export default function AnList() {
       const r = await api.anUnified({ status: apiStatus, q: searchQ });
       let rows = r.rows || [];
       if (filterRequester) rows = rows.filter(x => x.requester === filterRequester);
+      if (filterPriority)  rows = rows.filter(x => x.priority === filterPriority);
+      // 全体から優先度の選択肢を抽出（filterPriority適用前のものを使う）
+      const allRows = r.rows || [];
+      const prios = [...new Set(allRows.map(x => x.priority).filter(Boolean))]
+        .sort((a, b) => {
+          const order = { '至急': 0, '高': 1, '中': 2, '低': 3 };
+          return (order[a] ?? 99) - (order[b] ?? 99);
+        });
+      setPriorities(prios);
       setUnified(rows);
       setUnifiedCounts(r.counts || { total: 0 });
       if (r.facets?.requesters) setRequesters(r.facets.requesters);
@@ -48,7 +59,7 @@ export default function AnList() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [filterStatus, filterRequester]); // eslint-disable-line
+  useEffect(() => { load(); }, [filterStatus, filterRequester, filterPriority]); // eslint-disable-line
   // 検索は debounce
   useEffect(() => { const t = setTimeout(() => load(), 300); return () => clearTimeout(t); }, [searchQ]); // eslint-disable-line
 
@@ -154,13 +165,30 @@ export default function AnList() {
               <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-200)', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="会社名で検索…"
                   style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '0.82rem', border: '1px solid var(--gray-300)', borderRadius: 6 }} />
-                <select value={filterRequester} onChange={e => setFilterRequester(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '0.78rem', border: '1px solid var(--gray-300)', borderRadius: 6, background: 'var(--surface)' }}>
-                  <option value="">担当者: 全員</option>
-                  {requesters.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <div style={{ fontSize: '0.66rem', color: 'var(--gray-500)' }}>
-                  全{unifiedCounts.total}件
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <select value={filterRequester} onChange={e => setFilterRequester(e.target.value)}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '0.78rem', border: '1px solid var(--gray-300)', borderRadius: 6, background: 'var(--surface)' }}>
+                    <option value="">担当者: 全員</option>
+                    {requesters.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '0.78rem', borderRadius: 6,
+                      border: `1px solid ${filterPriority === '至急' ? '#dc2626' : filterPriority === '高' ? '#f59e0b' : 'var(--gray-300)'}`,
+                      background: filterPriority === '至急' ? '#fef2f2' : filterPriority === '高' ? '#fff7ed' : 'var(--surface)',
+                      color: filterPriority === '至急' ? '#dc2626' : filterPriority === '高' ? '#d97706' : 'var(--gray-700)',
+                      fontWeight: filterPriority ? 700 : 400 }}>
+                    <option value="">優先度: すべて</option>
+                    {priorities.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.66rem', color: 'var(--gray-500)' }}>
+                  <span>全{unifiedCounts.total}件</span>
+                  {(filterRequester || filterPriority) && (
+                    <button onClick={() => { setFilterRequester(''); setFilterPriority(''); }}
+                      style={{ marginLeft: 'auto', fontSize: '0.66rem', padding: '2px 8px', borderRadius: 4, border: '1px dashed var(--gray-300)', background: 'transparent', color: 'var(--gray-500)', cursor: 'pointer' }}>
+                      ✕ フィルタクリア
+                    </button>
+                  )}
                 </div>
               </div>
               {loading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中...</div>
@@ -184,8 +212,22 @@ export default function AnList() {
                             borderLeft: `4px solid ${isSelectedRow ? '#2563eb' : accent}`,
                             boxShadow: isSelectedRow ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 2px rgba(15,23,42,0.04)',
                             transition: 'all 0.12s ease' }}
-                          onMouseEnter={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 2px 6px rgba(15,23,42,0.1)'; e.currentTarget.style.borderColor = '#94a3b8'; } }}
-                          onMouseLeave={e => { if (!isSelectedRow) { e.currentTarget.style.boxShadow = '0 1px 2px rgba(15,23,42,0.04)'; e.currentTarget.style.borderColor = '#e2e8f0'; } }}>
+                          onMouseEnter={e => {
+                            if (!isSelectedRow) {
+                              e.currentTarget.style.boxShadow = '0 2px 6px rgba(15,23,42,0.1)';
+                              e.currentTarget.style.borderTopColor    = '#94a3b8';
+                              e.currentTarget.style.borderRightColor  = '#94a3b8';
+                              e.currentTarget.style.borderBottomColor = '#94a3b8';
+                            }
+                          }}
+                          onMouseLeave={e => {
+                            if (!isSelectedRow) {
+                              e.currentTarget.style.boxShadow = '0 1px 2px rgba(15,23,42,0.04)';
+                              e.currentTarget.style.borderTopColor    = '#e2e8f0';
+                              e.currentTarget.style.borderRightColor  = '#e2e8f0';
+                              e.currentTarget.style.borderBottomColor = '#e2e8f0';
+                            }
+                          }}>
                           {/* 1行目: 会社名 + 優先度 + ステータス */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                             <span style={{ fontWeight: 700, fontSize: '0.86rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0f172a' }}>
@@ -733,6 +775,9 @@ function StudyDetailPanel({ selected, studyDetail, setStudyDetail, onClose, fmtY
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', background: '#f8fafc' }}>
+        {/* CRMサマリー（顧客＋過去案件） */}
+        <CrmSummaryCard studyId={study.record_id} />
+
         {/* 案件情報グリッド */}
         <Card title="案件情報" accent="#3b82f6">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
@@ -947,6 +992,174 @@ function MediaSlotRow({ m, fmtYen, isEditing, onEdit, onCancel, onSaved, onDelet
   );
 }
 
+// CRMサマリーカード（顧客情報＋関連案件、折りたたみ）
+function CrmSummaryCard({ studyId }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.anStudyCrmSummary(studyId)
+      .then(r => { if (!cancelled) setData(r); })
+      .catch(() => { if (!cancelled) setData({ customer: null, deals: [] }); });
+    return () => { cancelled = true; };
+  }, [studyId]);
+
+  const fmtY = (n) => n ? `¥${Math.round(Number(n)/10000).toLocaleString()}万` : '—';
+  const yomiColor = (y) => {
+    if (!y) return '#94a3b8';
+    if (y.startsWith('S')) return '#dc2626';
+    if (y.startsWith('A')) return '#f59e0b';
+    if (y.startsWith('B')) return '#3b82f6';
+    if (y.startsWith('C')) return '#6366f1';
+    return '#64748b';
+  };
+  const statusBg = (s) => ({ won:'#ecfdf5', lost:'#fef2f2', dormant:'#f3f4f6' }[s] || '#eff6ff');
+  const statusColor = (s) => ({ won:'#059669', lost:'#dc2626', dormant:'#6b7280' }[s] || '#1d4ed8');
+  const statusLabel = (s) => ({ won:'受注', lost:'失注', dormant:'見送り', active:'進行中' }[s] || s);
+
+  if (data === null) {
+    return (
+      <div style={{ background:'#fff', borderRadius:12, marginBottom:12, border:'1px solid #e2e8f0', padding:'10px 14px', fontSize:'0.78rem', color:'#94a3b8' }}>
+        CRM情報を読み込み中…
+      </div>
+    );
+  }
+  if (!data.customer) {
+    return (
+      <div style={{ background:'#fffbeb', borderRadius:12, marginBottom:12, border:'1px solid #fde68a', padding:'10px 14px', fontSize:'0.78rem', color:'#92400e' }}>
+        ⚠️ CRM上に「{data.company_name || 'この会社'}」の顧客レコードが見つかりません
+      </div>
+    );
+  }
+
+  const c = data.customer;
+  const dealsLatest = data.deals?.[0];
+
+  return (
+    <div style={{ background:'#fff', borderRadius:12, marginBottom:12, boxShadow:'0 1px 3px rgba(0,0,0,0.04)', border:'1px solid #e2e8f0', overflow:'hidden' }}>
+      {/* ヘッダー（クリックで展開） */}
+      <div onClick={() => setOpen(!open)}
+        style={{ padding:'10px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:10, background:open?'linear-gradient(90deg,#eef2ff,#fff)':'#fafbfc', borderBottom: open?'1px solid #e2e8f0':'none' }}>
+        <span style={{ width:4, height:16, background:'#6366f1', borderRadius:2 }} />
+        <span style={{ fontWeight:800, fontSize:'0.86rem', color:'#0f172a' }}>📇 CRM情報</span>
+        {c.inrevo_person && <span style={{ fontSize:'0.66rem', padding:'2px 8px', borderRadius:99, background:'#ede9fe', color:'#6d28d9', fontWeight:700 }}>👤 {c.inrevo_person}</span>}
+        {c.industry && <span style={{ fontSize:'0.66rem', padding:'2px 8px', borderRadius:99, background:'#f1f5f9', color:'#475569' }}>{c.industry}</span>}
+        {c.prefecture && <span style={{ fontSize:'0.66rem', padding:'2px 8px', borderRadius:99, background:'#f1f5f9', color:'#475569' }}>{c.prefecture}</span>}
+        {c.employee_count && <span style={{ fontSize:'0.66rem', padding:'2px 8px', borderRadius:99, background:'#f1f5f9', color:'#475569' }}>{c.employee_count}名</span>}
+        <span style={{ marginLeft:'auto', fontSize:'0.7rem', color:'#64748b' }}>案件 {data.deals.length}件</span>
+        <span style={{ color:'#94a3b8', fontSize:'0.8rem' }}>{open ? '▼' : '▶'}</span>
+      </div>
+
+      {/* 直近案件（ヘッダー直下に常時表示で1件） */}
+      {!open && dealsLatest && (
+        <div style={{ padding:'8px 14px', borderTop:'1px dashed #f1f5f9', display:'flex', alignItems:'center', gap:8, fontSize:'0.76rem' }}>
+          <span style={{ color:'#94a3b8', fontSize:'0.66rem' }}>最新案件:</span>
+          <span style={{ fontWeight:700, color:'#0f172a', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{dealsLatest.name}</span>
+          {dealsLatest.yomi && <span style={{ fontSize:'0.64rem', fontWeight:700, padding:'1px 6px', borderRadius:4, color:yomiColor(dealsLatest.yomi), background:`${yomiColor(dealsLatest.yomi)}15` }}>{dealsLatest.yomi}</span>}
+          <span style={{ fontSize:'0.64rem', fontWeight:700, padding:'1px 6px', borderRadius:4, background:statusBg(dealsLatest.status), color:statusColor(dealsLatest.status) }}>{statusLabel(dealsLatest.status)}</span>
+          {dealsLatest.contract_type && <span style={{ fontSize:'0.64rem', color:'#64748b' }}>{dealsLatest.contract_type}</span>}
+          {(dealsLatest.initial_fee || dealsLatest.monthly_fee) && <span style={{ fontWeight:700, color:'#059669', fontSize:'0.76rem' }}>{fmtY(dealsLatest.initial_fee || dealsLatest.monthly_fee)}</span>}
+        </div>
+      )}
+
+      {/* 展開: 詳細 */}
+      {open && (
+        <div style={{ padding:'12px 14px' }}>
+          {/* 顧客の基本情報 */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:8, marginBottom:12 }}>
+            {c.business_description && (
+              <div style={{ gridColumn:'1 / -1', padding:'8px 10px', background:'#f8fafc', borderRadius:6, fontSize:'0.74rem', color:'#475569', whiteSpace:'pre-wrap', maxHeight:90, overflowY:'auto' }}>
+                <div style={{ fontSize:'0.62rem', color:'#94a3b8', fontWeight:700, marginBottom:2 }}>事業内容</div>
+                {c.business_description}
+              </div>
+            )}
+            {c.address && (
+              <div style={{ padding:'6px 10px', background:'#f8fafc', borderRadius:6, fontSize:'0.72rem' }}>
+                <div style={{ fontSize:'0.62rem', color:'#94a3b8', fontWeight:700 }}>住所</div>
+                <div style={{ color:'#0f172a' }}>{c.address}</div>
+              </div>
+            )}
+            {c.inflow_source && (
+              <div style={{ padding:'6px 10px', background:'#f8fafc', borderRadius:6, fontSize:'0.72rem' }}>
+                <div style={{ fontSize:'0.62rem', color:'#94a3b8', fontWeight:700 }}>流入経路</div>
+                <div style={{ color:'#0f172a' }}>{c.inflow_source}{c.inflow_date ? ` (${String(c.inflow_date).slice(0,10)})` : ''}</div>
+              </div>
+            )}
+            {c.website && (
+              <div style={{ padding:'6px 10px', background:'#f8fafc', borderRadius:6, fontSize:'0.72rem' }}>
+                <div style={{ fontSize:'0.62rem', color:'#94a3b8', fontWeight:700 }}>HP</div>
+                <a href={c.website} target="_blank" rel="noreferrer" style={{ color:'#2563eb', textDecoration:'none' }}>{c.website}</a>
+              </div>
+            )}
+          </div>
+
+          {/* CRMリンク */}
+          <div style={{ marginBottom:12 }}>
+            <a href={`/dashboard/crm/customers/${c.id}`} target="_blank" rel="noreferrer"
+              style={{ display:'inline-block', fontSize:'0.74rem', padding:'4px 10px', background:'#eef2ff', color:'#4338ca', textDecoration:'none', borderRadius:6, fontWeight:700 }}>
+              ↗ CRMで開く
+            </a>
+          </div>
+
+          {/* 担当者 */}
+          {data.contacts?.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:'0.7rem', fontWeight:700, color:'#475569', marginBottom:4 }}>担当者</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                {data.contacts.map((p, i) => (
+                  <div key={i} style={{ padding:'4px 8px', background:'#fafbfc', borderRadius:5, fontSize:'0.72rem', display:'flex', gap:8, alignItems:'center' }}>
+                    <span style={{ fontWeight:700, color:'#0f172a' }}>{[p.last_name, p.first_name].filter(Boolean).join(' ') || '—'}</span>
+                    {p.position_title && <span style={{ color:'#64748b' }}>{p.position_title}</span>}
+                    {p.department && <span style={{ color:'#94a3b8' }}>{p.department}</span>}
+                    {p.email && <span style={{ color:'#2563eb', marginLeft:'auto', fontSize:'0.66rem' }}>{p.email}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 案件履歴 */}
+          {data.deals?.length > 0 ? (
+            <div>
+              <div style={{ fontSize:'0.7rem', fontWeight:700, color:'#475569', marginBottom:4 }}>案件履歴（最新{data.deals.length}件）</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                {data.deals.map(d => (
+                  <div key={d.id} style={{ padding:'6px 10px', background:'#fafbfc', borderRadius:6, border:'1px solid #f1f5f9' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontWeight:700, fontSize:'0.78rem', color:'#0f172a', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.name}</span>
+                      {d.yomi && <span style={{ fontSize:'0.62rem', fontWeight:700, padding:'1px 6px', borderRadius:4, color:yomiColor(d.yomi), background:`${yomiColor(d.yomi)}15` }}>{d.yomi}</span>}
+                      <span style={{ fontSize:'0.62rem', fontWeight:700, padding:'1px 6px', borderRadius:4, background:statusBg(d.status), color:statusColor(d.status) }}>{statusLabel(d.status)}</span>
+                    </div>
+                    <div style={{ fontSize:'0.68rem', color:'#64748b', marginTop:2, display:'flex', gap:8, flexWrap:'wrap' }}>
+                      {d.contract_type && <span>📋 {d.contract_type}</span>}
+                      {d.sales_person && <span>👤 {d.sales_person}</span>}
+                      {(d.initial_fee || d.monthly_fee) && <span style={{ color:'#059669', fontWeight:700 }}>{fmtY(d.initial_fee || d.monthly_fee)}</span>}
+                      {d.order_date && <span style={{ color:'#94a3b8' }}>受注 {String(d.order_date).slice(0,10)}</span>}
+                      {d.first_meeting_date && !d.order_date && <span style={{ color:'#94a3b8' }}>初回 {String(d.first_meeting_date).slice(0,10)}</span>}
+                    </div>
+                    {/* BANT サマリー */}
+                    {(d.bant_budget || d.bant_authority || d.bant_needs || d.bant_timeframe) && (
+                      <div style={{ marginTop:4, display:'flex', gap:4, flexWrap:'wrap' }}>
+                        {d.bant_budget    && <span style={{ fontSize:'0.6rem', padding:'1px 5px', borderRadius:3, background:'#f0f9ff', color:'#0369a1' }}>B:{d.bant_budget}</span>}
+                        {d.bant_authority && <span style={{ fontSize:'0.6rem', padding:'1px 5px', borderRadius:3, background:'#f0fdf4', color:'#15803d' }}>A:{d.bant_authority}</span>}
+                        {d.bant_needs     && <span style={{ fontSize:'0.6rem', padding:'1px 5px', borderRadius:3, background:'#fef3c7', color:'#92400e' }}>N:{d.bant_needs}</span>}
+                        {d.bant_timeframe && <span style={{ fontSize:'0.6rem', padding:'1px 5px', borderRadius:3, background:'#fae8ff', color:'#7e22ce' }}>T:{d.bant_timeframe}</span>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize:'0.72rem', color:'#94a3b8', padding:8 }}>関連案件なし</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Slackスレッドカード（読み込み＋返信）
 function SlackThreadCard({ studyId, slackLink }) {
   const [messages, setMessages] = useState(null);
@@ -1032,7 +1245,7 @@ function InlineTextarea({ value, placeholder, border, onSave }) {
       <textarea value={local} onChange={e => setLocal(e.target.value)}
         onFocus={() => setFocused(true)} onBlur={save}
         placeholder={placeholder}
-        rows={focused ? 5 : Math.max(2, Math.min(6, (local.split('\n').length || 1)))}
+        rows={focused ? 8 : Math.max(5, Math.min(10, (local.split('\n').length || 1) + 1))}
         style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px',
           border: `1.5px solid ${focused ? border : '#e2e8f0'}`,
           borderRadius: 6, fontSize: '0.82rem', resize: 'vertical', lineHeight: 1.6,

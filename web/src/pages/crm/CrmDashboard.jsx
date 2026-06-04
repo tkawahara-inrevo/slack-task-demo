@@ -969,6 +969,47 @@ export default function CrmDashboard() {
             </div>
           )}
 
+          {/* 指定月KPI達成状況（指定月モードのみ・今期パネルと同等） */}
+          {period !== 'term' && kpiDenom > 0 && (
+            <div style={{ ...cardStyle, padding:'18px 16px' }}>
+              {sectionHead('当月 KPI達成状況', salesUser ? `${salesUser}の個人目標` : 'チーム合計')}
+              <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:'0.65rem', color:C.textSub, marginBottom:2 }}>当月インセン合計</div>
+                  <div style={{ fontSize:'1.5rem', fontWeight:800, color:C.text, lineHeight:1.1 }}>
+                    {fmtM(curr.incentiveAmount || 0)}
+                    <span style={{ fontSize:'0.78rem', color:C.textSub, marginLeft:4 }}>/ {fmtM(kpiDenom)}</span>
+                  </div>
+                  <div style={{ fontSize:'0.65rem', color:C.textSub, marginTop:2 }}>
+                    入金額 {fmtM(curr.paymentAmount)}
+                  </div>
+                </div>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:'2rem', fontWeight:900, lineHeight:1,
+                    color: kpiAchieve == null ? '#94a3b8' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#d97706' : '#dc2626' }}>
+                    {kpiAchieve != null ? `${kpiAchieve}%` : '—'}
+                  </div>
+                  <div style={{ fontSize:'0.68rem', color:C.textSub, marginTop:2 }}>達成率</div>
+                </div>
+              </div>
+              <div style={{ height:12, background:C.surface2, borderRadius:6, overflow:'hidden', marginBottom:10 }}>
+                <div style={{ height:'100%', width:`${Math.min(100, kpiAchieve || 0)}%`, borderRadius:6, transition:'width 0.6s ease',
+                  background: kpiAchieve == null ? '#e2e8f0' : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#f59e0b' : '#ef4444' }} />
+              </div>
+              {prev?.paymentAmount > 0 && (
+                <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:C.surface2, borderRadius:8 }}>
+                  <span style={{ fontSize:'0.72rem', color:C.textSub }}>前月入金</span>
+                  <span style={{ fontSize:'0.82rem', fontWeight:700, color:C.textMid }}>{fmtM(prev.paymentAmount)}</span>
+                  <span style={{ fontSize:'0.72rem', fontWeight:700, marginLeft:4,
+                    color: curr.paymentAmount >= prev.paymentAmount ? '#059669' : '#dc2626' }}>
+                    {curr.paymentAmount >= prev.paymentAmount ? '▲' : '▼'}
+                    {Math.abs(Math.round((curr.paymentAmount - prev.paymentAmount) / prev.paymentAmount * 100))}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 収支見込み（指定月モードのみ） */}
           {period !== 'term' && forecast && (
             <div style={{ ...cardStyle, padding:'14px 16px' }}>

@@ -332,8 +332,6 @@ export default function Layout({ children }) {
 function ViewAsWidget({ user, onChange }) {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState(null);
-  const [role, setRole] = useState(user?.viewingAs?.role || '');
-  const [asUserId, setAsUserId] = useState(user?.viewingAs?.userId || '');
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -342,15 +340,13 @@ function ViewAsWidget({ user, onChange }) {
     api.viewAsUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]));
   };
 
-  const apply = async () => {
-    if (!role && !asUserId) return;
+  const apply = async (u) => {
     setBusy(true);
     try {
-      const u = users?.find(x => x.user_id === asUserId);
-      await api.viewAsSet({ role: role || null, asUserId: asUserId || null, asUserName: u?.real_name || u?.display_name || null });
+      await api.viewAsSet({ asUserId: u.user_id, asUserName: u.real_name || u.display_name || null });
       onChange && onChange();
       setOpen(false);
-      setTimeout(() => window.location.reload(), 200);
+      setTimeout(() => window.location.reload(), 150);
     } catch (e) { alert('失敗: ' + e.message); }
     finally { setBusy(false); }
   };
@@ -359,9 +355,8 @@ function ViewAsWidget({ user, onChange }) {
     setBusy(true);
     try {
       await api.viewAsClear();
-      setRole(''); setAsUserId('');
       onChange && onChange();
-      setTimeout(() => window.location.reload(), 200);
+      setTimeout(() => window.location.reload(), 150);
     } catch (e) { alert('失敗: ' + e.message); }
     finally { setBusy(false); }
   };
@@ -382,51 +377,35 @@ function ViewAsWidget({ user, onChange }) {
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
-          <div style={{ position: 'absolute', top: 36, right: 0, width: 320, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, boxShadow: '0 10px 32px rgba(0,0,0,0.15)', padding: 12, zIndex: 1001 }}>
-            <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a', marginBottom: 6 }}>👁️ View As（テスト用）</div>
-            <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginBottom: 10 }}>ロール・特定ユーザーになりきって画面を確認できます</div>
+          <div style={{ position: 'absolute', top: 36, right: 0, width: 280, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, boxShadow: '0 10px 32px rgba(0,0,0,0.15)', padding: 12, zIndex: 1001 }}>
+            <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a', marginBottom: 4 }}>👁️ View As</div>
+            <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginBottom: 10 }}>選んだユーザーの権限・データで画面を確認</div>
 
-            <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700, display: 'block', marginBottom: 3 }}>ロール</label>
-            <select value={role} onChange={e => setRole(e.target.value)}
-              style={{ width: '100%', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem', marginBottom: 10 }}>
-              <option value="">変更しない（自分のadminのまま）</option>
-              <option value="admin">admin</option>
-              <option value="corp">corp（コーポレート）</option>
-              <option value="personnel">personnel（人事）</option>
-              <option value="bc_manager">bc_manager（BCマネージャー）</option>
-              <option value="member">member（一般メンバー）</option>
-            </select>
-
-            <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700, display: 'block', marginBottom: 3 }}>ユーザー（なりきり対象）</label>
-            <input type="search" placeholder="検索…" value={search} onChange={e => setSearch(e.target.value)}
-              style={{ width: '100%', boxSizing: 'border-box', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem', marginBottom: 4 }} />
-            <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: 6, marginBottom: 10 }}>
-              <label style={{ display: 'block', padding: '5px 8px', fontSize: '0.74rem', cursor: 'pointer', background: !asUserId ? '#eef2ff' : 'transparent' }}>
-                <input type="radio" name="asuser" checked={!asUserId} onChange={() => setAsUserId('')} style={{ marginRight: 6 }} />
-                自分のまま
-              </label>
-              {filteredUsers.slice(0, 30).map(u => (
-                <label key={u.user_id} style={{ display: 'block', padding: '5px 8px', fontSize: '0.74rem', cursor: 'pointer', background: asUserId === u.user_id ? '#eef2ff' : 'transparent', borderTop: '1px solid #f8fafc' }}>
-                  <input type="radio" name="asuser" checked={asUserId === u.user_id} onChange={() => setAsUserId(u.user_id)} style={{ marginRight: 6 }} />
-                  {(u.real_name || u.display_name || u.user_id).split('/')[0].trim()}
-                </label>
-              ))}
-              {users === null && <div style={{ padding: 10, textAlign: 'center', color: '#94a3b8', fontSize: '0.72rem' }}>読み込み中…</div>}
-              {users?.length === 0 && <div style={{ padding: 10, textAlign: 'center', color: '#94a3b8', fontSize: '0.72rem' }}>ユーザーなし</div>}
+            <input type="search" placeholder="名前で検索…" value={search} onChange={e => setSearch(e.target.value)} autoFocus
+              style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem', marginBottom: 8 }} />
+            <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: 6 }}>
+              {users === null && <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.72rem' }}>読み込み中…</div>}
+              {users?.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.72rem' }}>ユーザーなし</div>}
+              {filteredUsers.slice(0, 60).map(u => {
+                const isCurrent = user?.viewingAs?.userId === u.user_id;
+                return (
+                  <button key={u.user_id} onClick={() => !isCurrent && apply(u)} disabled={busy || isCurrent}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', fontSize: '0.78rem', cursor: isCurrent ? 'default' : 'pointer', background: isCurrent ? '#fef3c7' : '#fff', border: 'none', borderBottom: '1px solid #f8fafc', color: '#0f172a' }}
+                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background = '#f1f5f9'; }}
+                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background = '#fff'; }}>
+                    {(u.real_name || u.display_name || u.user_id).split('/')[0].trim()}
+                    {isCurrent && <span style={{ marginLeft: 6, fontSize: '0.66rem', color: '#92400e', fontWeight: 700 }}>← 選択中</span>}
+                  </button>
+                );
+              })}
             </div>
 
-            <div style={{ display: 'flex', gap: 6 }}>
-              {user?.viewingAs && (
-                <button onClick={clear} disabled={busy}
-                  style={{ padding: '6px 12px', border: '1px solid #cbd5e1', background: '#fff', color: '#64748b', borderRadius: 6, cursor: 'pointer', fontSize: '0.74rem' }}>
-                  解除
-                </button>
-              )}
-              <button onClick={apply} disabled={busy || (!role && !asUserId)}
-                style={{ marginLeft: 'auto', padding: '6px 16px', border: 'none', background: '#4f46e5', color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: '0.74rem', fontWeight: 700, opacity: busy || (!role && !asUserId) ? 0.5 : 1 }}>
-                {busy ? '...' : '適用'}
+            {user?.viewingAs && (
+              <button onClick={clear} disabled={busy}
+                style={{ marginTop: 10, width: '100%', padding: '6px 12px', border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', borderRadius: 6, cursor: 'pointer', fontSize: '0.74rem', fontWeight: 700 }}>
+                ✕ 元のadminに戻す
               </button>
-            </div>
+            )}
           </div>
         </>
       )}

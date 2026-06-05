@@ -895,27 +895,32 @@ function registerDashboardApi(deps) {
       ws2.columns = [
         { header: '担当者',     key: 'name',  width: 20 },
         { header: 'タスク',     key: 'title', width: 50 },
-        { header: '期限日',     key: 'due',   width: 12, style: { numFmt: 'yyyy/mm/dd' } },
+        { header: '期限日',     key: 'due',   width: 12 },
         { header: '超過日数',   key: 'over',  width: 10 },
         { header: '依頼者',     key: 'req',   width: 18 },
         { header: 'Slackリンク', key: 'link', width: 50 },
       ];
+      const toYmd = (v) => {
+        if (!v) return '';
+        const d = v instanceof Date ? v : new Date(v);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+      };
       tasks.forEach(t => {
-        // 期限日は Date 型で渡し、列の numFmt 'yyyy/mm/dd' で書式統一
-        const d = t.due_date ? new Date(`${String(t.due_date).slice(0,10)}T00:00:00`) : null;
         ws2.addRow({
           name: t.assignee_name,
           title: (t.title || '').replace(/\n/g, ' '),
-          due: d,
+          due: toYmd(t.due_date),
           over: `${t.days_overdue}日`,
           req: t.requester_name,
           link: t.permalink ? { text: '元メッセージ', hyperlink: t.permalink } : '',
         });
       });
+      // 期限日列はテキストとして表示（Excel/Sheets の自動Date変換を抑止）
+      ws2.getColumn('due').numFmt = '@';
+      ws2.getColumn('due').alignment = { horizontal: 'center' };
       ws2.getRow(1).font = { bold: true };
       ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
-      // ヘッダーセルの書式は既定（文字）に戻す
-      ws2.getRow(1).getCell('due').numFmt = '@';
 
       const buf = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

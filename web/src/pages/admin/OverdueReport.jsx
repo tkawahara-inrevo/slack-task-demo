@@ -63,7 +63,6 @@ export default function OverdueReport() {
                     <tr style={{ background: '#fef3c7' }}>
                       <th style={th}>担当者</th>
                       <th style={{ ...th, textAlign: 'right' }}>件数</th>
-                      <th style={{ ...th, textAlign: 'center' }}>最古の期限</th>
                       <th style={{ ...th, textAlign: 'right' }}>最大超過</th>
                     </tr>
                   </thead>
@@ -72,7 +71,6 @@ export default function OverdueReport() {
                       <tr key={s.assignee_user_id || s.assignee_name + i} style={{ borderTop: '1px solid #f1f5f9' }}>
                         <td style={td}>{s.assignee_name}</td>
                         <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: s.count >= 5 ? '#dc2626' : s.count >= 3 ? '#d97706' : '#0f172a' }}>{s.count}件</td>
-                        <td style={{ ...td, textAlign: 'center', color: '#64748b' }}>{String(s.oldest_due).slice(0,10)}</td>
                         <td style={{ ...td, textAlign: 'right', color: s.max_days_overdue >= 14 ? '#dc2626' : s.max_days_overdue >= 7 ? '#d97706' : '#475569' }}>{s.max_days_overdue}日</td>
                       </tr>
                     ))}
@@ -105,7 +103,7 @@ export default function OverdueReport() {
                       <tr key={t.task_id + '_' + t.assignee_user_id + i} style={{ borderTop: '1px solid #f1f5f9' }}>
                         <td style={td}>{t.assignee_name}</td>
                         <td style={td}>{(t.title || '').slice(0, 60)}{(t.title || '').length > 60 ? '…' : ''}</td>
-                        <td style={{ ...td, textAlign: 'center', color: '#64748b' }}>{String(t.due_date).slice(0,10)}</td>
+                        <td style={{ ...td, textAlign: 'center', color: '#64748b' }}>{String(t.due_date).slice(0,10).replace(/-/g, '/')}</td>
                         <td style={{ ...td, textAlign: 'right', color: t.days_overdue >= 14 ? '#dc2626' : t.days_overdue >= 7 ? '#d97706' : '#475569', fontWeight: 600 }}>{t.days_overdue}日</td>
                         <td style={td}>{t.requester_name}</td>
                         <td style={{ ...td, textAlign: 'center' }}>

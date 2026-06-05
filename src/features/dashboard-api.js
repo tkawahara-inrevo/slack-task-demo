@@ -853,7 +853,7 @@ function registerDashboardApi(deps) {
       for (const t of tasks) {
         lines.push([
           esc(t.assignee_name), esc(t.title),
-          esc(String(t.due_date).slice(0,10)),
+          esc(String(t.due_date).slice(0,10).replace(/-/g, '/')),
           esc(`${t.days_overdue}日`),
           esc(t.requester_name), esc(t.permalink),
         ].join(','));
@@ -880,13 +880,11 @@ function registerDashboardApi(deps) {
       ws1.columns = [
         { header: '担当者',         key: 'name',  width: 24 },
         { header: '期限切れ件数',    key: 'count', width: 12 },
-        { header: '最古の期限',      key: 'oldest', width: 14 },
         { header: '最大超過日数',    key: 'max',   width: 14 },
       ];
       summary.forEach(s => ws1.addRow({
         name: s.assignee_name,
         count: s.count,
-        oldest: String(s.oldest_due).slice(0,10),
         max: `${s.max_days_overdue}日`,
       }));
       ws1.getRow(1).font = { bold: true };
@@ -905,7 +903,7 @@ function registerDashboardApi(deps) {
       tasks.forEach(t => ws2.addRow({
         name: t.assignee_name,
         title: (t.title || '').replace(/\n/g, ' '),
-        due: String(t.due_date).slice(0,10),
+        due: String(t.due_date).slice(0,10).replace(/-/g, '/'),
         over: `${t.days_overdue}日`,
         req: t.requester_name,
         link: t.permalink ? { text: '元メッセージ', hyperlink: t.permalink } : '',

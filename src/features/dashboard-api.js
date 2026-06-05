@@ -763,6 +763,16 @@ function registerDashboardApi(deps) {
         [teamId, [...allUserIds]]
       );
       for (const x of u) nameMap.set(x.user_id, x.name);
+      // DBに無いユーザーは Slack API経由で解決（getUserDisplayName が users.info → DB upsert を行う）
+      const missing = [...allUserIds].filter(uid => !nameMap.has(uid));
+      if (missing.length > 0) {
+        await Promise.all(missing.map(async uid => {
+          try {
+            const name = await getUserDisplayName(teamId, uid);
+            if (name && name !== uid) nameMap.set(uid, name);
+          } catch {}
+        }));
+      }
     }
 
     for (const r of rows) {
@@ -771,15 +781,20 @@ function registerDashboardApi(deps) {
           if (doneMap.get(`${r.id}:${uid}`)) continue;
           tasks.push({
             task_id: r.id, title: r.title, due_date: r.due_date, days_overdue: r.days_overdue,
-            assignee_user_id: uid, assignee_name: nameMap.get(uid) || uid,
+            assignee_user_id: uid, assignee_name: nameMap.get(uid) || `(社外/${uid})`,
             requester_name: r.requester_name || r.requester_user_id || '',
             permalink: r.source_permalink || '', task_type: 'broadcast',
           });
         }
       } else {
+        const resolvedName =
+          (r.assignee_id && nameMap.get(r.assignee_id))
+          || r.assignee_name
+          || r.assignee_label
+          || (r.assignee_id ? `(社外/${r.assignee_id})` : '(担当者未設定)');
         tasks.push({
           task_id: r.id, title: r.title, due_date: r.due_date, days_overdue: r.days_overdue,
-          assignee_user_id: r.assignee_id || '', assignee_name: r.assignee_name || r.assignee_label || '(不明)',
+          assignee_user_id: r.assignee_id || '', assignee_name: resolvedName,
           requester_name: r.requester_name || r.requester_user_id || '',
           permalink: r.source_permalink || '', task_type: r.task_type,
         });

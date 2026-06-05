@@ -9,6 +9,7 @@ function registerReactionFeature(deps) {
     dbGetTaskBySource,
     dbGetThreadCard,
     dbInsertTaskTargets = async () => {},
+    dbQuery = async () => ({ rows: [] }),
     getSubteamIdMap = async () => new Map(),
     getTeamIdFromBody,
     getUsergroupMembers = async () => [],
@@ -506,17 +507,36 @@ app.event("message", async ({ event, client, body }) => {
     if (event?.subtype) return;
 
     const rawText = event?.text || "";
-    const matched = TASK_KEYWORD_PATTERNS.some((re) => re.test(rawText));
-    if (!matched) return;
-
     const teamId = body?.team_id || body?.team?.id || event?.team;
     if (!teamId) return;
-    if (!(await isReactionTaskifyEnabled(teamId))) return;
 
     const channelId = event?.channel;
     const msgTs = event?.ts;
     const actorUserId = event?.user;
     if (!channelId || !msgTs || !actorUserId) return;
+
+    // グローバルキーワード（＜タスク化＞等）
+    let matched = TASK_KEYWORD_PATTERNS.some((re) => re.test(rawText));
+    // ユーザー固有キーワード（送信者自身が登録したものだけ発火）
+    let userKeywordHit = null;
+    if (!matched) {
+      try {
+        const { rows } = await dbQuery(
+          `SELECT keyword FROM user_task_triggers WHERE team_id=$1 AND user_id=$2 AND enabled=true`,
+          [teamId, actorUserId]
+        );
+        for (const r of rows) {
+          if (r.keyword && rawText.includes(r.keyword)) {
+            matched = true;
+            userKeywordHit = r.keyword;
+            break;
+          }
+        }
+      } catch (e) { console.error('[task-trigger] user keyword fetch error:', e.message); }
+    }
+    if (!matched) return;
+
+    if (!(await isReactionTaskifyEnabled(teamId))) return;
 
     // すでにタスク化済みなら無視
     const existingTask = await dbGetTaskBySource(teamId, channelId, msgTs);
@@ -526,6 +546,9 @@ app.event("message", async ({ event, client, body }) => {
     let cleanText = rawText;
     for (const re of TASK_KEYWORD_PATTERNS) {
       cleanText = cleanText.replace(re, "");
+    }
+    if (userKeywordHit) {
+      cleanText = cleanText.split(userKeywordHit).join("");
     }
     cleanText = cleanText.trim();
 

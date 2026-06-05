@@ -232,6 +232,18 @@ export default function Layout({ children }) {
             <ViewAsWidget user={user} onChange={() => api.me().then(setUser)} />
           )}
           {user && (
+            <NavLink to="/my-settings" title="個人設定"
+              style={({ isActive }) => ({
+                background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+                border: '1px solid var(--gray-200)', borderRadius: 8, width: 32, height: 32,
+                color: isActive ? '#4f46e5' : 'var(--gray-500)',
+                fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                textDecoration: 'none', flexShrink: 0,
+              })}>
+              ⚙
+            </NavLink>
+          )}
+          {user && (
             <div className="global-nav-user">
               {user.displayName}
               {user.role === 'admin' && !user.viewingAs && <span className="nav-role-badge">admin</span>}

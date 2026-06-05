@@ -632,6 +632,65 @@ function registerDashboardApi(deps) {
   });
 
   // ================================
+  // 個人設定: 自動タスク化キーワード（user_task_triggers）
+  // 実ユーザーで操作する（View Asのなりきり中も実ユーザー側のキーワードを操作）
+  // ================================
+  expressApp.get("/api/dashboard/me/task-triggers", authWithRole, async (req, res) => {
+    try {
+      const { teamId, realUserId } = req.dashboardUser;
+      const { rows } = await dbQuery(
+        `SELECT id, keyword, enabled, created_at FROM user_task_triggers
+         WHERE team_id=$1 AND user_id=$2 ORDER BY created_at`,
+        [teamId, realUserId]
+      );
+      res.json({ triggers: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.post("/api/dashboard/me/task-triggers", authWithRole, async (req, res) => {
+    try {
+      const { teamId, realUserId } = req.dashboardUser;
+      const keyword = String(req.body?.keyword || '').trim();
+      if (!keyword) return res.status(400).json({ error: 'keyword_required' });
+      if (keyword.length > 50) return res.status(400).json({ error: 'too_long' });
+      const { rows: [row] } = await dbQuery(
+        `INSERT INTO user_task_triggers (team_id, user_id, keyword)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (team_id, user_id, keyword) DO UPDATE SET enabled=true
+         RETURNING id, keyword, enabled, created_at`,
+        [teamId, realUserId, keyword]
+      );
+      res.json({ trigger: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.patch("/api/dashboard/me/task-triggers/:id", authWithRole, async (req, res) => {
+    try {
+      const { teamId, realUserId } = req.dashboardUser;
+      const enabled = !!req.body?.enabled;
+      const { rows: [row] } = await dbQuery(
+        `UPDATE user_task_triggers SET enabled=$3
+         WHERE id=$1 AND team_id=$2 AND user_id=$4
+         RETURNING id, keyword, enabled`,
+        [req.params.id, teamId, enabled, realUserId]
+      );
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      res.json({ trigger: row });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.delete("/api/dashboard/me/task-triggers/:id", authWithRole, async (req, res) => {
+    try {
+      const { teamId, realUserId } = req.dashboardUser;
+      await dbQuery(
+        `DELETE FROM user_task_triggers WHERE id=$1 AND team_id=$2 AND user_id=$3`,
+        [req.params.id, teamId, realUserId]
+      );
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ================================
   // General APIs (role-aware)
   // ================================
 

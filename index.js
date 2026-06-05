@@ -332,6 +332,7 @@ const {
   dbGetTaskBySource,
   dbGetThreadCard,
   dbInsertTaskTargets,
+  dbQuery,
   getSubteamIdMap: (...args) => getSubteamIdMap(...args),
   getTeamIdFromBody,
   getUsergroupMembers: (...args) => getUsergroupMembers(...args),

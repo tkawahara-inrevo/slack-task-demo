@@ -895,21 +895,27 @@ function registerDashboardApi(deps) {
       ws2.columns = [
         { header: '担当者',     key: 'name',  width: 20 },
         { header: 'タスク',     key: 'title', width: 50 },
-        { header: '期限日',     key: 'due',   width: 12 },
+        { header: '期限日',     key: 'due',   width: 12, style: { numFmt: 'yyyy/mm/dd' } },
         { header: '超過日数',   key: 'over',  width: 10 },
         { header: '依頼者',     key: 'req',   width: 18 },
         { header: 'Slackリンク', key: 'link', width: 50 },
       ];
-      tasks.forEach(t => ws2.addRow({
-        name: t.assignee_name,
-        title: (t.title || '').replace(/\n/g, ' '),
-        due: String(t.due_date).slice(0,10).replace(/-/g, '/'),
-        over: `${t.days_overdue}日`,
-        req: t.requester_name,
-        link: t.permalink ? { text: '元メッセージ', hyperlink: t.permalink } : '',
-      }));
+      tasks.forEach(t => {
+        // 期限日は Date 型で渡し、列の numFmt 'yyyy/mm/dd' で書式統一
+        const d = t.due_date ? new Date(`${String(t.due_date).slice(0,10)}T00:00:00`) : null;
+        ws2.addRow({
+          name: t.assignee_name,
+          title: (t.title || '').replace(/\n/g, ' '),
+          due: d,
+          over: `${t.days_overdue}日`,
+          req: t.requester_name,
+          link: t.permalink ? { text: '元メッセージ', hyperlink: t.permalink } : '',
+        });
+      });
       ws2.getRow(1).font = { bold: true };
       ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+      // ヘッダーセルの書式は既定（文字）に戻す
+      ws2.getRow(1).getCell('due').numFmt = '@';
 
       const buf = await wb.xlsx.writeBuffer();
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

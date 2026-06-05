@@ -709,6 +709,192 @@ function registerDashboardApi(deps) {
   });
 
   // ================================
+  // 期限切れタスクレポート（admin限定）
+  // ================================
+  // 担当者ごと集約 + 明細を返す
+  async function fetchOverdueTaskData(teamId) {
+    const { rows } = await dbQuery(`
+      SELECT
+        t.id, t.title, t.due_date, t.requester_user_id, t.assignee_id, t.assignee_label,
+        t.channel_id, t.message_ts, t.source_permalink, t.task_type,
+        (CURRENT_DATE - t.due_date)::int AS days_overdue,
+        COALESCE(d_assignee.real_name, d_assignee.display_name, t.assignee_label) AS assignee_name,
+        COALESCE(d_requester.real_name, d_requester.display_name) AS requester_name,
+        -- broadcastタスクの自分完了状況も拾うため targets を後段で処理
+        ARRAY(
+          SELECT user_id FROM task_targets tt WHERE tt.task_id = t.id::uuid AND tt.team_id = t.team_id
+        ) AS target_user_ids
+      FROM tasks t
+      LEFT JOIN dashboard_user_directory d_assignee
+        ON d_assignee.team_id = t.team_id AND d_assignee.user_id = t.assignee_id
+      LEFT JOIN dashboard_user_directory d_requester
+        ON d_requester.team_id = t.team_id AND d_requester.user_id = t.requester_user_id
+      WHERE t.team_id = $1
+        AND t.due_date IS NOT NULL
+        AND t.due_date < CURRENT_DATE
+        AND t.status != 'done'
+        AND t.cancelled_at IS NULL
+      ORDER BY t.due_date ASC, t.created_at ASC
+    `, [teamId]);
+
+    // broadcastタスクは task_targets × まだ完了していない人 に展開
+    const tasks = [];
+    // broadcast完了済みの (task_id, user_id) を集める
+    const broadcastIds = rows.filter(r => r.task_type === 'broadcast').map(r => r.id);
+    let doneMap = new Map();
+    if (broadcastIds.length > 0) {
+      const { rows: compRows } = await dbQuery(
+        `SELECT task_id::text AS task_id, user_id FROM task_completions WHERE team_id=$1 AND task_id::text = ANY($2)`,
+        [teamId, broadcastIds]
+      );
+      for (const c of compRows) doneMap.set(`${c.task_id}:${c.user_id}`, true);
+    }
+    // ユーザー名キャッシュ
+    const allUserIds = new Set();
+    rows.forEach(r => {
+      if (r.task_type === 'broadcast') r.target_user_ids?.forEach(u => allUserIds.add(u));
+      else if (r.assignee_id) allUserIds.add(r.assignee_id);
+    });
+    let nameMap = new Map();
+    if (allUserIds.size > 0) {
+      const { rows: u } = await dbQuery(
+        `SELECT user_id, COALESCE(real_name, display_name) AS name FROM dashboard_user_directory
+         WHERE team_id=$1 AND user_id = ANY($2::text[])`,
+        [teamId, [...allUserIds]]
+      );
+      for (const x of u) nameMap.set(x.user_id, x.name);
+    }
+
+    for (const r of rows) {
+      if (r.task_type === 'broadcast') {
+        for (const uid of (r.target_user_ids || [])) {
+          if (doneMap.get(`${r.id}:${uid}`)) continue;
+          tasks.push({
+            task_id: r.id, title: r.title, due_date: r.due_date, days_overdue: r.days_overdue,
+            assignee_user_id: uid, assignee_name: nameMap.get(uid) || uid,
+            requester_name: r.requester_name || r.requester_user_id || '',
+            permalink: r.source_permalink || '', task_type: 'broadcast',
+          });
+        }
+      } else {
+        tasks.push({
+          task_id: r.id, title: r.title, due_date: r.due_date, days_overdue: r.days_overdue,
+          assignee_user_id: r.assignee_id || '', assignee_name: r.assignee_name || r.assignee_label || '(不明)',
+          requester_name: r.requester_name || r.requester_user_id || '',
+          permalink: r.source_permalink || '', task_type: r.task_type,
+        });
+      }
+    }
+
+    // 担当者ごと集約
+    const summaryMap = new Map();
+    for (const t of tasks) {
+      const key = t.assignee_user_id || `__label:${t.assignee_name}`;
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          assignee_user_id: t.assignee_user_id, assignee_name: t.assignee_name,
+          count: 0, oldest_due: t.due_date, max_days_overdue: t.days_overdue,
+        });
+      }
+      const s = summaryMap.get(key);
+      s.count++;
+      if (t.due_date < s.oldest_due) s.oldest_due = t.due_date;
+      if (t.days_overdue > s.max_days_overdue) s.max_days_overdue = t.days_overdue;
+    }
+    const summary = [...summaryMap.values()].sort((a,b) => b.count - a.count);
+    return { summary, tasks };
+  }
+
+  // プレビューJSON
+  expressApp.get("/api/dashboard/admin/overdue-report", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const data = await fetchOverdueTaskData(req.dashboardUser.teamId);
+      res.json({ ...data, generatedAt: new Date().toISOString() });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // CSV ダウンロード
+  expressApp.get("/api/dashboard/admin/overdue-report.csv", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const { tasks } = await fetchOverdueTaskData(req.dashboardUser.teamId);
+      const today = new Date().toISOString().slice(0, 10);
+      const headers = ['担当者', 'タスク', '期限日', '超過日数', '依頼者', 'リンク'];
+      const esc = (v) => {
+        const s = String(v == null ? '' : v).replace(/"/g, '""');
+        return /[",\n]/.test(s) ? `"${s}"` : s;
+      };
+      const lines = [headers.join(',')];
+      for (const t of tasks) {
+        lines.push([
+          esc(t.assignee_name), esc(t.title),
+          esc(String(t.due_date).slice(0,10)),
+          esc(`${t.days_overdue}日`),
+          esc(t.requester_name), esc(t.permalink),
+        ].join(','));
+      }
+      const csv = '﻿' + lines.join('\r\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="overdue-tasks-${today}.csv"`);
+      res.send(csv);
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // XLSX ダウンロード（サマリー + 明細の2シート）
+  expressApp.get("/api/dashboard/admin/overdue-report.xlsx", authWithRole, adminOnly, async (req, res) => {
+    try {
+      const ExcelJS = require('exceljs');
+      const { summary, tasks } = await fetchOverdueTaskData(req.dashboardUser.teamId);
+      const today = new Date().toISOString().slice(0, 10);
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Pochi'; wb.created = new Date();
+
+      // シート1: サマリー
+      const ws1 = wb.addWorksheet('担当者サマリー', { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws1.columns = [
+        { header: '担当者',         key: 'name',  width: 24 },
+        { header: '期限切れ件数',    key: 'count', width: 12 },
+        { header: '最古の期限',      key: 'oldest', width: 14 },
+        { header: '最大超過日数',    key: 'max',   width: 14 },
+      ];
+      summary.forEach(s => ws1.addRow({
+        name: s.assignee_name,
+        count: s.count,
+        oldest: String(s.oldest_due).slice(0,10),
+        max: `${s.max_days_overdue}日`,
+      }));
+      ws1.getRow(1).font = { bold: true };
+      ws1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+
+      // シート2: 明細
+      const ws2 = wb.addWorksheet('タスク明細', { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws2.columns = [
+        { header: '担当者',     key: 'name',  width: 20 },
+        { header: 'タスク',     key: 'title', width: 50 },
+        { header: '期限日',     key: 'due',   width: 12 },
+        { header: '超過日数',   key: 'over',  width: 10 },
+        { header: '依頼者',     key: 'req',   width: 18 },
+        { header: 'Slackリンク', key: 'link', width: 50 },
+      ];
+      tasks.forEach(t => ws2.addRow({
+        name: t.assignee_name,
+        title: (t.title || '').replace(/\n/g, ' '),
+        due: String(t.due_date).slice(0,10),
+        over: `${t.days_overdue}日`,
+        req: t.requester_name,
+        link: t.permalink ? { text: '元メッセージ', hyperlink: t.permalink } : '',
+      }));
+      ws2.getRow(1).font = { bold: true };
+      ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="overdue-tasks-${today}.xlsx"`);
+      res.send(Buffer.from(buf));
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ================================
   // General APIs (role-aware)
   // ================================
 

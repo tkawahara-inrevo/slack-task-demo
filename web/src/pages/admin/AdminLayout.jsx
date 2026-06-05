@@ -52,6 +52,11 @@ export default function AdminLayout() {
             {collapsed ? '🔐' : 'CRM権限管理'}
           </NavLink>
         )}
+        {isAdmin && (
+          <NavLink to="/admin/overdue-report" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '📊' : '期限切れタスク'}
+          </NavLink>
+        )}
 
         {/* IT 所属のみ */}
         {isIT && (

@@ -248,6 +248,7 @@ export const api = {
   myTaskTriggerAdd:      (keyword) => apiFetch('/me/task-triggers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keyword }) }),
   myTaskTriggerToggle:   (id, enabled) => apiFetch(`/me/task-triggers/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }),
   myTaskTriggerDelete:   (id) => apiFetch(`/me/task-triggers/${id}`, { method: 'DELETE' }),
+  overdueReport:         () => apiFetch('/admin/overdue-report'),
   crmRoleTargets: () => crmFetch('/role-targets'),
   crmRoleTargetsSave: (targets) => crmFetch('/role-targets', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets}) }),
   crmPeriodSettings: () => crmFetch('/period-settings'),

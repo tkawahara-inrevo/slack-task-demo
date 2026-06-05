@@ -712,6 +712,7 @@ function registerDashboardApi(deps) {
   // 期限切れタスクレポート（admin限定）
   // ================================
   // 担当者ごと集約 + 明細を返す
+  // 社員（@inrevo.jp）のみ対象
   async function fetchOverdueTaskData(teamId) {
     const { rows } = await dbQuery(`
       SELECT
@@ -719,10 +720,14 @@ function registerDashboardApi(deps) {
         t.channel_id, t.message_ts, t.source_permalink, t.task_type,
         (CURRENT_DATE - t.due_date)::int AS days_overdue,
         COALESCE(d_assignee.real_name, d_assignee.display_name, t.assignee_label) AS assignee_name,
+        d_assignee.profile_json->>'email' AS assignee_email,
         COALESCE(d_requester.real_name, d_requester.display_name) AS requester_name,
         -- broadcastタスクの自分完了状況も拾うため targets を後段で処理
         ARRAY(
-          SELECT user_id FROM task_targets tt WHERE tt.task_id = t.id::uuid AND tt.team_id = t.team_id
+          SELECT tt.user_id FROM task_targets tt
+          JOIN dashboard_user_directory d ON d.team_id = tt.team_id AND d.user_id = tt.user_id
+          WHERE tt.task_id = t.id::uuid AND tt.team_id = t.team_id
+            AND d.profile_json->>'email' ILIKE '%@inrevo.jp'
         ) AS target_user_ids
       FROM tasks t
       LEFT JOIN dashboard_user_directory d_assignee
@@ -734,6 +739,12 @@ function registerDashboardApi(deps) {
         AND t.due_date < CURRENT_DATE
         AND t.status != 'done'
         AND t.cancelled_at IS NULL
+        AND (
+          -- personal/個人タスク: 担当者が inrevo.jp なら拾う
+          (t.task_type != 'broadcast' AND d_assignee.profile_json->>'email' ILIKE '%@inrevo.jp')
+          -- broadcastタスク: 後段で target_user_ids が空でない場合だけ採用
+          OR t.task_type = 'broadcast'
+        )
       ORDER BY t.due_date ASC, t.created_at ASC
     `, [teamId]);
 

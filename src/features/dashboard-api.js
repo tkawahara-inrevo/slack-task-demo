@@ -321,6 +321,69 @@ function registerDashboardApi(deps) {
     return result;
   }
 
+  // teamId + userId からロール+BCマネージャーを解決
+  async function resolveRoleFor(teamId, userId) {
+    const dbRole = await dbGetDashboardRole(teamId, userId);
+    let role;
+    if (dbRole === 'admin') role = 'admin';
+    else if (dbRole === 'corp') role = 'corp';
+    else {
+      const { rows: itRows } = await dbQuery(`
+        SELECT 1 FROM dash_team_members dtm
+        JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
+        WHERE dtm.team_id=$1 AND dtm.user_id=$2 AND (dt.name ILIKE '%IT%' OR dt.name ILIKE '%情シス%') LIMIT 1
+      `, [teamId, userId]);
+      if (itRows.length > 0) role = 'it';
+      else {
+        const { rows: persRows } = await dbQuery(`
+          SELECT 1 FROM dash_team_members dtm
+          JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
+          WHERE dtm.team_id=$1 AND dtm.user_id=$2 AND (dt.name ILIKE '%personnel%' OR dt.name ILIKE '%人事%' OR dt.name ILIKE '%HR%') LIMIT 1
+        `, [teamId, userId]);
+        if (persRows.length > 0) role = 'personnel';
+        else {
+          const { rows: corpRows } = await dbQuery(`
+            SELECT 1 FROM dash_team_members dtm
+            JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
+            JOIN dash_teams parent ON parent.id = dt.parent_id AND parent.team_id = dt.team_id
+            WHERE dtm.team_id=$1 AND dtm.user_id=$2 AND parent.name ILIKE '%corporate%' LIMIT 1
+          `, [teamId, userId]);
+          if (corpRows.length > 0) role = 'corp';
+          else {
+            const title = await dbGetUserSlackTitle(teamId, userId);
+            role = roleTitleFromSlack(title);
+          }
+        }
+      }
+    }
+    const { rows: bcRows } = await dbQuery(
+      `SELECT 1 FROM crm_bc_managers WHERE team_id=$1 AND user_id=$2 LIMIT 1`,
+      [teamId, userId]
+    ).catch(() => ({ rows: [] }));
+    return { role, isBcManager: bcRows.length > 0 };
+  }
+
+  // view-as 適用後の最終的なrole/isBcManagerを決定
+  // 優先順位: ① cookieの明示role > ② asUserIdの実ロール（自動取得） > ③ 元admin
+  async function resolveViewAsEffective(req, baseRole, baseIsBcManager) {
+    if (baseRole !== 'admin') {
+      return { role: baseRole, isBcManager: baseIsBcManager, viewingAs: null };
+    }
+    const va = parseViewAs(req);
+    if (!va || (!va.role && !va.asUserId)) {
+      return { role: baseRole, isBcManager: baseIsBcManager, viewingAs: null };
+    }
+    let role = baseRole, isBcManager = baseIsBcManager;
+    if (va.role === 'bc_manager') { role = 'member'; isBcManager = true; }
+    else if (va.role)             { role = va.role; isBcManager = false; }
+    else if (va.asUserId) {
+      // ロール未指定 + ユーザー指定 → そのユーザーの実ロールを採用
+      const resolved = await resolveRoleFor(req.dashboardUser.teamId, va.asUserId);
+      role = resolved.role; isBcManager = resolved.isBcManager;
+    }
+    return { role, isBcManager, viewingAs: { role: va.role || null, userId: va.asUserId || null, userName: va.asUserName || null } };
+  }
+
   async function authWithRole(req, res, next) {
     authMiddleware(req, res, async () => {
       try {
@@ -329,64 +392,19 @@ function registerDashboardApi(deps) {
         const cached = roleCache.get(cacheKey);
         if (cached && Date.now() < cached.expiresAt) {
           // キャッシュは「実ロール」のみ。view-asは毎回判定する
-          const va = applyViewAs(req, cached.role);
+          const eff = await resolveViewAsEffective(req, cached.role, cached.isBcManager || false);
           req.dashboardUser.realRole    = cached.role;
           req.dashboardUser.realUserId  = userId;
-          req.dashboardUser.role        = va?.role !== undefined        ? va.role        : cached.role;
-          req.dashboardUser.isBcManager = va?.isBcManager !== undefined ? va.isBcManager : (cached.isBcManager || false);
-          if (va?.viewingAs?.userId) {
-            req.dashboardUser.userId = va.viewingAs.userId;
+          req.dashboardUser.role        = eff.role;
+          req.dashboardUser.isBcManager = eff.isBcManager;
+          if (eff.viewingAs?.userId) {
+            req.dashboardUser.userId = eff.viewingAs.userId;
           }
-          req.dashboardUser.viewingAs = va?.viewingAs || null;
+          req.dashboardUser.viewingAs = eff.viewingAs;
           return next();
         }
-        const dbRole = await dbGetDashboardRole(teamId, userId);
-        let role;
-        if (dbRole === 'admin') {
-          role = 'admin';
-        } else if (dbRole === 'corp') {
-          role = 'corp';
-        } else {
-          // IT チーム所属チェック（Corporateより先に判定）
-          const { rows: itRows } = await dbQuery(`
-            SELECT 1 FROM dash_team_members dtm
-            JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-            WHERE dtm.team_id = $1 AND dtm.user_id = $2
-              AND (dt.name ILIKE '%IT%' OR dt.name ILIKE '%情シス%')
-            LIMIT 1
-          `, [teamId, userId]);
-          if (itRows.length > 0) {
-            role = 'it';
-          } else {
-            // Personnel（人事）チーム所属チェック
-            const { rows: persRows } = await dbQuery(`
-              SELECT 1 FROM dash_team_members dtm
-              JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-              WHERE dtm.team_id = $1 AND dtm.user_id = $2
-                AND (dt.name ILIKE '%personnel%' OR dt.name ILIKE '%人事%' OR dt.name ILIKE '%HR%')
-              LIMIT 1
-            `, [teamId, userId]);
-            if (persRows.length > 0) {
-              role = 'personnel';
-            } else {
-              // Corporateチームに所属していれば corp 扱い（IT/Personnel より後に判定）
-              const { rows: corpRows } = await dbQuery(`
-                SELECT 1 FROM dash_team_members dtm
-                JOIN dash_teams dt ON dt.id = dtm.dash_team_id AND dt.team_id = dtm.team_id
-                JOIN dash_teams parent ON parent.id = dt.parent_id AND parent.team_id = dt.team_id
-                WHERE dtm.team_id = $1 AND dtm.user_id = $2
-                  AND parent.name ILIKE '%corporate%'
-                LIMIT 1
-              `, [teamId, userId]);
-              if (corpRows.length > 0) {
-                role = 'corp';
-              } else {
-                const title = await dbGetUserSlackTitle(teamId, userId);
-                role = roleTitleFromSlack(title);
-              }
-            }
-          }
-        }
+        const { role: baseRole } = await resolveRoleFor(teamId, userId);
+        let role = baseRole;
         // BCマネージャー判定（admin/role とは独立）
         const { rows: bcRows } = await dbQuery(
           `SELECT 1 FROM crm_bc_managers WHERE team_id=$1 AND user_id=$2 LIMIT 1`,
@@ -395,15 +413,15 @@ function registerDashboardApi(deps) {
         const isBcManager = bcRows.length > 0;
 
         roleCache.set(cacheKey, { role, isBcManager, expiresAt: Date.now() + 5 * 60 * 1000 });
-        const va = applyViewAs(req, role);
+        const eff = await resolveViewAsEffective(req, role, isBcManager);
         req.dashboardUser.realRole    = role;
         req.dashboardUser.realUserId  = userId;
-        req.dashboardUser.role        = va?.role !== undefined        ? va.role        : role;
-        req.dashboardUser.isBcManager = va?.isBcManager !== undefined ? va.isBcManager : isBcManager;
-        if (va?.viewingAs?.userId) {
-          req.dashboardUser.userId = va.viewingAs.userId;
+        req.dashboardUser.role        = eff.role;
+        req.dashboardUser.isBcManager = eff.isBcManager;
+        if (eff.viewingAs?.userId) {
+          req.dashboardUser.userId = eff.viewingAs.userId;
         }
-        req.dashboardUser.viewingAs = va?.viewingAs || null;
+        req.dashboardUser.viewingAs = eff.viewingAs;
         next();
       } catch (e) {
         console.error("authWithRole error:", e);

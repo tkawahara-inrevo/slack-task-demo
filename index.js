@@ -256,6 +256,7 @@ const settingsFeature = registerSettingsFeature({
   dbUpsertUserSettings,
   dbListProjects,
   dbListDashTeams,
+  dbQuery,
   getTeamIdFromBody,
   getUserIdFromBody,
   publishHome,

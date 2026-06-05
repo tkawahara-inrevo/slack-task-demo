@@ -7,6 +7,7 @@ function registerSettingsFeature(deps) {
     dbUpsertUserSettings,
     dbListProjects = async () => [],
     dbListDashTeams: _dbListDashTeams = async () => [],
+    dbQuery = async () => ({ rows: [] }),
     getTeamIdFromBody,
     getUserIdFromBody,
     publishHome,
@@ -257,7 +258,8 @@ function registerSettingsFeature(deps) {
   }
 
   function buildUserSettingsModalView(teamId, userId, settings, opts = {}) {
-    const { projects = [] } = opts;
+    const { projects = [], taskTriggers = [] } = opts;
+    const triggerInitial = taskTriggers.filter(t => t.enabled).map(t => t.keyword).join('\n');
     const dueScheduleOptions = [
       { text: { type: "plain_text", text: "朝 9:00 のみ" }, value: "morning_only" },
       { text: { type: "plain_text", text: "朝 9:00 + 16:00" }, value: "morning_and_afternoon" },
@@ -350,6 +352,27 @@ function registerSettingsFeature(deps) {
                     ? "true"
                     : settings.commentDmNotificationsEnabled),
               ) || dmOnOffOptions[0],
+          },
+        },
+        { type: "divider" },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "*🐶 自動タスク化キーワード*\nここに登録した単語が *あなた自身の発言* に含まれると自動でタスク化されます。1行に1つ書いてください。全社共通の `<タスク化>` `＜タスク化＞` は常に有効です。",
+          },
+        },
+        {
+          type: "input",
+          block_id: "task_trigger_keywords",
+          optional: true,
+          label: { type: "plain_text", text: "自分用キーワード（1行に1つ）" },
+          element: {
+            type: "plain_text_input",
+            action_id: "value",
+            multiline: true,
+            initial_value: triggerInitial,
+            placeholder: { type: "plain_text", text: "例:\nTODO:\nメモ\n📝" },
           },
         },
         ...(projects.length > 0
@@ -574,15 +597,52 @@ function registerSettingsFeature(deps) {
     };
   }
 
+  // 自動タスク化キーワード（user_task_triggers）読み書き
+  async function fetchTaskTriggers(teamId, userId) {
+    try {
+      const r = await dbQuery(
+        `SELECT id, keyword, enabled FROM user_task_triggers WHERE team_id=$1 AND user_id=$2 ORDER BY created_at`,
+        [teamId, userId]
+      );
+      return r.rows || [];
+    } catch (e) { console.error('[settings] fetchTaskTriggers:', e.message); return []; }
+  }
+  async function saveTaskTriggers(teamId, userId, newKeywords) {
+    try {
+      const existing = await fetchTaskTriggers(teamId, userId);
+      const existingMap = new Map(existing.map(t => [t.keyword, t]));
+      const newSet = new Set(newKeywords);
+      // 削除（既存にあるが新リストにないもの）
+      const toDelete = existing.filter(t => !newSet.has(t.keyword)).map(t => t.id);
+      if (toDelete.length > 0) {
+        await dbQuery(`DELETE FROM user_task_triggers WHERE id = ANY($1::text[])`, [toDelete]);
+      }
+      // 追加（新リストにあるが既存にないもの）or 再有効化
+      for (const kw of newKeywords) {
+        const ex = existingMap.get(kw);
+        if (!ex) {
+          await dbQuery(
+            `INSERT INTO user_task_triggers (team_id, user_id, keyword) VALUES ($1,$2,$3)
+             ON CONFLICT (team_id, user_id, keyword) DO UPDATE SET enabled=true`,
+            [teamId, userId, kw]
+          );
+        } else if (!ex.enabled) {
+          await dbQuery(`UPDATE user_task_triggers SET enabled=true WHERE id=$1`, [ex.id]);
+        }
+      }
+    } catch (e) { console.error('[settings] saveTaskTriggers:', e.message); }
+  }
+
   async function openUserSettingsModal({ client, triggerId, teamId, userId }) {
     if (!client || !triggerId || !teamId || !userId) return;
-    const [settings, projects] = await Promise.all([
+    const [settings, projects, taskTriggers] = await Promise.all([
       getUserSettings(teamId, userId),
       dbListProjects(teamId),
+      fetchTaskTriggers(teamId, userId),
     ]);
     await client.views.open({
       trigger_id: triggerId,
-      view: buildUserSettingsModalView(teamId, userId, settings, { projects }),
+      view: buildUserSettingsModalView(teamId, userId, settings, { projects, taskTriggers }),
     });
   }
 
@@ -606,13 +666,14 @@ function registerSettingsFeature(deps) {
     const userId = getUserIdFromBody(body);
     if (!teamId || !userId) return;
 
-    const [settings, projects] = await Promise.all([
+    const [settings, projects, taskTriggers] = await Promise.all([
       getUserSettings(teamId, userId),
       dbListProjects(teamId),
+      fetchTaskTriggers(teamId, userId),
     ]);
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: buildUserSettingsModalView(teamId, userId, settings, { projects }),
+      view: buildUserSettingsModalView(teamId, userId, settings, { projects, taskTriggers }),
     });
   });
 
@@ -678,6 +739,17 @@ function registerSettingsFeature(deps) {
 
     await dbUpsertUserSettings(teamId, userId, nextSettings);
     invalidateSettingsCache(teamId, userId);
+
+    // 自動タスク化キーワードを差分更新
+    try {
+      const raw = view.state.values.task_trigger_keywords?.value?.value || '';
+      const keywords = raw.split(/\r?\n/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && s.length <= 50);
+      // 重複除去
+      const unique = [...new Set(keywords)];
+      await saveTaskTriggers(teamId, userId, unique);
+    } catch (e) { console.error('[settings] task trigger save error:', e.message); }
 
     const resolved = await resolveHomeDefaults(teamId, userId);
     setHomeState(teamId, userId, {

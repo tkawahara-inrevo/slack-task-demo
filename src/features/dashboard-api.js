@@ -712,7 +712,7 @@ function registerDashboardApi(deps) {
   // 期限切れタスクレポート（admin限定）
   // ================================
   // 担当者ごと集約 + 明細を返す
-  // 社員（@inrevo.jp）のみ対象
+  // 社員（@inrevo.jp）のみ対象。broadcastで自分完了済の人は除外。
   async function fetchOverdueTaskData(teamId) {
     const { rows } = await dbQuery(`
       SELECT
@@ -722,12 +722,16 @@ function registerDashboardApi(deps) {
         COALESCE(d_assignee.real_name, d_assignee.display_name, t.assignee_label) AS assignee_name,
         d_assignee.profile_json->>'email' AS assignee_email,
         COALESCE(d_requester.real_name, d_requester.display_name) AS requester_name,
-        -- broadcastタスクの自分完了状況も拾うため targets を後段で処理
+        -- broadcast: 自分のターゲット完了をSQL段階で除外
         ARRAY(
           SELECT tt.user_id FROM task_targets tt
           JOIN dashboard_user_directory d ON d.team_id = tt.team_id AND d.user_id = tt.user_id
           WHERE tt.task_id = t.id::uuid AND tt.team_id = t.team_id
             AND d.profile_json->>'email' ILIKE '%@inrevo.jp'
+            AND NOT EXISTS (
+              SELECT 1 FROM task_completions tc
+              WHERE tc.task_id = tt.task_id AND tc.user_id = tt.user_id
+            )
         ) AS target_user_ids
       FROM tasks t
       LEFT JOIN dashboard_user_directory d_assignee
@@ -742,24 +746,22 @@ function registerDashboardApi(deps) {
         AND (
           -- personal/個人タスク: 担当者が inrevo.jp なら拾う
           (t.task_type != 'broadcast' AND d_assignee.profile_json->>'email' ILIKE '%@inrevo.jp')
-          -- broadcastタスク: 後段で target_user_ids が空でない場合だけ採用
-          OR t.task_type = 'broadcast'
+          -- broadcastタスク: 未完了ターゲットが1人でもいる場合のみ採用
+          OR (t.task_type = 'broadcast' AND EXISTS (
+            SELECT 1 FROM task_targets tt2
+            JOIN dashboard_user_directory d2 ON d2.team_id=tt2.team_id AND d2.user_id=tt2.user_id
+            WHERE tt2.task_id = t.id::uuid AND tt2.team_id = t.team_id
+              AND d2.profile_json->>'email' ILIKE '%@inrevo.jp'
+              AND NOT EXISTS (
+                SELECT 1 FROM task_completions tc2
+                WHERE tc2.task_id = tt2.task_id AND tc2.user_id = tt2.user_id
+              )
+          ))
         )
       ORDER BY t.due_date ASC, t.created_at ASC
     `, [teamId]);
 
-    // broadcastタスクは task_targets × まだ完了していない人 に展開
     const tasks = [];
-    // broadcast完了済みの (task_id, user_id) を集める
-    const broadcastIds = rows.filter(r => r.task_type === 'broadcast').map(r => r.id);
-    let doneMap = new Map();
-    if (broadcastIds.length > 0) {
-      const { rows: compRows } = await dbQuery(
-        `SELECT task_id::text AS task_id, user_id FROM task_completions WHERE team_id=$1 AND task_id::text = ANY($2)`,
-        [teamId, broadcastIds]
-      );
-      for (const c of compRows) doneMap.set(`${c.task_id}:${c.user_id}`, true);
-    }
     // ユーザー名キャッシュ
     const allUserIds = new Set();
     rows.forEach(r => {
@@ -789,7 +791,7 @@ function registerDashboardApi(deps) {
     for (const r of rows) {
       if (r.task_type === 'broadcast') {
         for (const uid of (r.target_user_ids || [])) {
-          if (doneMap.get(`${r.id}:${uid}`)) continue;
+          // target_user_ids は SQL段階で「未完了 かつ inrevo.jp」のみに絞り込み済
           tasks.push({
             task_id: r.id, title: r.title, due_date: r.due_date, days_overdue: r.days_overdue,
             assignee_user_id: uid, assignee_name: nameMap.get(uid) || `(社外/${uid})`,

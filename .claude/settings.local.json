@@ -100,7 +100,9 @@
       "Bash(node -c src/features/crm-api.js)",
       "Bash(node -c src/features/an-api.js)",
       "Bash(node -c src/features/dashboard-api.js)",
-      "Bash(node -c src/features/settings.js)"
+      "Bash(node -c src/features/settings.js)",
+      "Bash(grep -n \"ANY\\(\\\\$\" e:/dev/slack-task-demo/src/features/dashboard-api.js)",
+      "Bash(grep -n \"ANY\\(\\\\\\\\\\\\$2\" e:/dev/slack-task-demo/src/features/dashboard-api.js)"
     ]
   }
 }

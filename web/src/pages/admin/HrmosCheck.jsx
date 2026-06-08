@@ -16,12 +16,33 @@ export default function HrmosCheck() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [copied, setCopied] = useState(null);
+  const [showExcluded, setShowExcluded] = useState(false);
+  const [excludedList, setExcludedList] = useState([]);
 
   const load = (m, opts) => {
     setLoading(true); setErr('');
     api.hrmosMonthlyCheck(m, opts).then(setData).catch(e => setErr(e.message || '取得失敗')).finally(() => setLoading(false));
   };
-  useEffect(() => { load(month); }, [month]);
+  const loadExcluded = () => api.hrmosExcludedList().then(r => setExcludedList(r.excluded || [])).catch(() => {});
+  useEffect(() => { load(month); loadExcluded(); }, [month]);
+
+  const excludeUser = async (u, reason) => {
+    if (!window.confirm(`「${u.full_name}」をチェック対象から除外しますか？（後で解除可能）`)) return;
+    try {
+      await api.hrmosExcludeUser({
+        hrmos_user_id: u.user_id, full_name: u.full_name, number: u.number, reason: reason || null,
+      });
+      load(month, { refresh: true });
+      loadExcluded();
+    } catch (e) { alert('失敗: ' + e.message); }
+  };
+  const unexcludeUser = async (id) => {
+    try {
+      await api.hrmosUnexcludeUser(id);
+      load(month, { refresh: true });
+      loadExcluded();
+    } catch (e) { alert('失敗: ' + e.message); }
+  };
 
   const summary = useMemo(() => {
     if (!data?.users) return { totalIssueDays: 0, byIssue: {} };
@@ -69,6 +90,10 @@ export default function HrmosCheck() {
           style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: '0.8rem' }}>
           ⟳ 再取得
         </button>
+        <button onClick={() => setShowExcluded(true)}
+          style={{ marginLeft: data?.users?.length > 0 ? 0 : 'auto', padding: '6px 12px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: '0.78rem' }}>
+          🚫 除外済み{data?.excluded_count ? ` (${data.excluded_count})` : ''}
+        </button>
         {data?.users?.length > 0 && (
           <button onClick={copySlack}
             style={{ marginLeft: 'auto', padding: '7px 18px', borderRadius: 8, border: 'none', background: copied ? '#059669' : '#4a154b', color: '#fff', fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer' }}>
@@ -110,11 +135,54 @@ export default function HrmosCheck() {
       )}
 
       {/* ユーザー別リスト */}
+      {/* 除外済み モーダル */}
+      {showExcluded && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowExcluded(false)}>
+          <div style={{ background: '#fff', borderRadius: 14, width: 'min(560px, 94vw)', maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 800, color: '#0f172a' }}>🚫 チェック対象から除外しているユーザー（{excludedList.length}名）</div>
+              <button onClick={() => setShowExcluded(false)}
+                style={{ background: 'none', border: 'none', fontSize: 18, color: '#94a3b8', cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ padding: '12px 20px', overflowY: 'auto' }}>
+              {excludedList.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8', padding: 20, fontSize: '0.82rem' }}>
+                  除外中のユーザーはいません
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {excludedList.map(e => (
+                    <div key={e.hrmos_user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#fafbfc', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                      <span style={{ fontWeight: 700, color: '#0f172a' }}>{e.full_name || `user_id=${e.hrmos_user_id}`}</span>
+                      {e.number && <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>#{e.number}</span>}
+                      <span style={{ fontSize: '0.66rem', color: '#94a3b8', marginLeft: 'auto' }}>
+                        {String(e.excluded_at).slice(0,10).replace(/-/g, '/')}
+                      </span>
+                      <button onClick={() => unexcludeUser(e.hrmos_user_id)}
+                        style={{ padding: '3px 10px', fontSize: '0.7rem', borderRadius: 6, border: '1px solid #93c5fd', background: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600 }}>
+                        除外解除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {data?.users?.map(u => (
         <section key={u.user_id} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '14px 18px', marginBottom: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
             <span style={{ fontWeight: 800, fontSize: '0.95rem', color: '#0f172a' }}>{u.full_name}</span>
             {u.number && <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>#{u.number}</span>}
+            <button onClick={() => excludeUser(u)}
+              title="この人をチェック対象から除外（退社済み等）"
+              style={{ padding: '2px 10px', fontSize: '0.7rem', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fafbfc', color: '#64748b', cursor: 'pointer', fontWeight: 600 }}>
+              🚫 除外
+            </button>
             <span style={{ marginLeft: 'auto', padding: '2px 10px', background: u.days.length >= 3 ? '#fef2f2' : '#fffbeb', color: u.days.length >= 3 ? '#dc2626' : '#d97706', borderRadius: 99, fontSize: '0.78rem', fontWeight: 700 }}>
               {u.days.length}日
             </span>

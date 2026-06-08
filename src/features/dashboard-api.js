@@ -718,7 +718,8 @@ function registerDashboardApi(deps) {
     const endStamp = row.stamping_end_at;
     const startCalc = row.start_at;
     const totalBreakStr = row.total_break_time || '';
-    const totalWorkingStr = row.total_working_hours || '';
+    // 実働時間（休憩を除く）。actual_working_hours が無い場合は total を fallback
+    const actualWorkingStr = row.actual_working_hours || row.total_working_hours || '';
 
     const toMin = (hhmm) => {
       if (!hhmm || typeof hhmm !== 'string') return 0;
@@ -727,7 +728,7 @@ function registerDashboardApi(deps) {
       return Number(m[1]) * 60 + Number(m[2]);
     };
     const breakMin = toMin(totalBreakStr);
-    const workMin  = toMin(totalWorkingStr);
+    const workMin  = toMin(actualWorkingStr);
 
     // 休日・公休系は対象外（segment_title が含むキーワードで判定）
     const isOffDay = /公休|休日|有給|有休|欠勤|特別休/.test(seg);
@@ -738,24 +739,30 @@ function registerDashboardApi(deps) {
     if (startStamp && !endStamp) issues.push('退勤打刻漏れ');
     // 退勤打刻はあるが出勤打刻なし
     if (!startStamp && endStamp) issues.push('出勤打刻漏れ');
-    // 勤務日に両方なし＋勤怠申請も未申請（休暇申請等が出ていれば status>=2）
-    //   → うちのルールでは「打刻修正/休暇」のときだけ申請するため、
-    //     打刻なし＆未申請 = 休暇申請も打刻修正も出ていない不備状態
+    // 勤務日に両方なし＋勤怠申請も未申請
     if (!startStamp && !endStamp && isWorkDay && row.status === 1) {
       issues.push('打刻なし＆勤怠申請なし');
     }
-    // 休憩登録漏れ: 実働6時間超で休憩0
-    if (workMin > 6 * 60 && breakMin === 0 && (startStamp || startCalc)) {
+    // 休憩登録漏れ: 実働 6:00超 で休憩 0
+    //   → 5:59以下なら休憩なしも適法。6時間ちょうども検知しない。
+    if (workMin > 360 && breakMin === 0 && (startStamp || startCalc)) {
       issues.push('休憩登録漏れ');
     }
     return issues;
   }
 
-  async function fetchHrmosMonthlyCheck(month) {
+  async function fetchHrmosMonthlyCheck(month, teamId) {
     const { getMonthlyWorkOutputs } = require('./ieyasu');
     const rows = await getMonthlyWorkOutputs(month);
     const today = new Date();
     const todayYmd = today.toISOString().slice(0, 10);
+
+    // 除外リスト取得
+    const { rows: excludedRows } = await dbQuery(
+      `SELECT hrmos_user_id FROM hrmos_excluded_users WHERE team_id=$1`,
+      [teamId]
+    ).catch(() => ({ rows: [] }));
+    const excludedIds = new Set(excludedRows.map(r => r.hrmos_user_id));
 
     // ユーザーごとに違反日をまとめる
     const byUser = new Map();
@@ -763,6 +770,7 @@ function registerDashboardApi(deps) {
       if (!r.day) continue;
       // 当日と未来日は除外（まだ打刻余地がある）
       if (r.day >= todayYmd) continue;
+      if (excludedIds.has(r.user_id)) continue;
       const issues = detectAttendanceIssues(r);
       if (issues.length === 0) continue;
       const key = r.user_id;
@@ -794,7 +802,7 @@ function registerDashboardApi(deps) {
       const nb = b.number || '￿';
       return String(na).localeCompare(String(nb));
     });
-    return { month, generated_at: new Date().toISOString(), users: list, total_users: list.length };
+    return { month, generated_at: new Date().toISOString(), users: list, total_users: list.length, excluded_count: excludedIds.size };
   }
 
   // 人事 or admin
@@ -810,17 +818,52 @@ function registerDashboardApi(deps) {
     try {
       const month = (req.query.month || '').match(/^\d{4}-\d{2}$/)?.[0]
         || new Date().toISOString().slice(0, 7);
-      // ?refresh=1 でキャッシュをスキップ
       if (req.query.refresh === '1') {
         const { invalidateMonthlyCache } = require('./ieyasu');
         invalidateMonthlyCache(month);
       }
-      const data = await fetchHrmosMonthlyCheck(month);
+      const data = await fetchHrmosMonthlyCheck(month, req.dashboardUser.teamId);
       res.json(data);
     } catch (e) {
       console.error('[hrmos-check]', e);
       res.status(500).json({ error: 'internal', message: e.message });
     }
+  });
+
+  // 除外リスト管理
+  expressApp.get("/api/dashboard/admin/hrmos-excluded", authWithRole, personnelOrAdmin, async (req, res) => {
+    try {
+      const { rows } = await dbQuery(
+        `SELECT hrmos_user_id, full_name, number, reason, excluded_at, excluded_by
+         FROM hrmos_excluded_users WHERE team_id=$1 ORDER BY excluded_at DESC`,
+        [req.dashboardUser.teamId]
+      );
+      res.json({ excluded: rows });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.post("/api/dashboard/admin/hrmos-excluded", authWithRole, personnelOrAdmin, async (req, res) => {
+    try {
+      const { hrmos_user_id, full_name, number, reason } = req.body || {};
+      if (!hrmos_user_id) return res.status(400).json({ error: 'hrmos_user_id_required' });
+      await dbQuery(
+        `INSERT INTO hrmos_excluded_users (team_id, hrmos_user_id, full_name, number, reason, excluded_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (team_id, hrmos_user_id) DO UPDATE SET reason=EXCLUDED.reason, excluded_by=EXCLUDED.excluded_by`,
+        [req.dashboardUser.teamId, hrmos_user_id, full_name || null, number || null, reason || null, req.dashboardUser.realUserId || req.dashboardUser.userId]
+      );
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  expressApp.delete("/api/dashboard/admin/hrmos-excluded/:id", authWithRole, personnelOrAdmin, async (req, res) => {
+    try {
+      await dbQuery(
+        `DELETE FROM hrmos_excluded_users WHERE team_id=$1 AND hrmos_user_id=$2`,
+        [req.dashboardUser.teamId, Number(req.params.id)]
+      );
+      res.json({ ok: true });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 
   // ================================

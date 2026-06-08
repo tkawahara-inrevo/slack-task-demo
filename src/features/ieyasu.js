@@ -144,24 +144,47 @@ function invalidateUsersCache() {
 // ── 月次の日次勤怠データ取得（全社員）──────────────────────────
 // month: 'YYYY-MM' 形式
 // 戻り値: WorkOutput[] (全社員 × 全日)
-async function getMonthlyWorkOutputs(month) {
+// キャッシュ: 同月のリクエストは10分間メモリキャッシュ
+const _monthlyCache = new Map(); // key=month -> { at, data }
+const MONTHLY_TTL = 10 * 60 * 1000;
+
+async function getMonthlyWorkOutputs(month, { forceRefresh = false } = {}) {
   if (!SECRET_KEY) throw new Error('IEYASU_API_TOKEN not set');
-  const token = await getToken();
-  const all = [];
-  let page = 1;
-  while (true) {
-    const res = await ieyasuRequest({
-      path: `/api/${COMPANY}/v1/work_outputs/monthly/${month}?page=${page}&limit=100`,
-      auth: `Token ${token}`,
-    });
-    if (res.status !== 200) throw new Error(`HRMOS work_outputs error: ${res.status} ${JSON.stringify(res.body).slice(0,200)}`);
-    if (!Array.isArray(res.body) || res.body.length === 0) break;
-    all.push(...res.body);
-    if (res.body.length < 100) break;
-    page++;
-    if (page > 100) break; // 安全ガード
+  if (!forceRefresh) {
+    const c = _monthlyCache.get(month);
+    if (c && Date.now() - c.at < MONTHLY_TTL) return c.data;
   }
+  const token = await getToken();
+  const LIMIT = 500;
+
+  // 1ページ目を取得して総量推定（500未満なら1回で終わり）
+  const fetchPage = (page) => ieyasuRequest({
+    path: `/api/${COMPANY}/v1/work_outputs/monthly/${month}?page=${page}&limit=${LIMIT}`,
+    auth: `Token ${token}`,
+  });
+
+  const first = await fetchPage(1);
+  if (first.status !== 200) throw new Error(`HRMOS work_outputs error: ${first.status} ${JSON.stringify(first.body).slice(0,200)}`);
+  if (!Array.isArray(first.body)) return [];
+  const all = [...first.body];
+
+  if (first.body.length === LIMIT) {
+    // 残ページを並列取得（最大20ページ）
+    const pages = Array.from({ length: 19 }, (_, i) => i + 2);
+    const results = await Promise.all(pages.map(p => fetchPage(p).catch(e => ({ status: 0, body: null, err: e.message }))));
+    for (const r of results) {
+      if (r.status === 200 && Array.isArray(r.body) && r.body.length > 0) all.push(...r.body);
+      if (r.status !== 200 || !r.body || r.body.length < LIMIT) break;
+    }
+  }
+
+  _monthlyCache.set(month, { at: Date.now(), data: all });
   return all;
 }
 
-module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs };
+function invalidateMonthlyCache(month) {
+  if (month) _monthlyCache.delete(month);
+  else _monthlyCache.clear();
+}
+
+module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache };

@@ -230,6 +230,7 @@ function YomiPanel({ full = false }) {
         <span style={{ fontSize: compact?'0.68rem':'0.73rem', fontWeight:700, padding: compact?'1px 7px':'2px 9px', borderRadius:99, background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>{d.yomi}</span>
         {d.contract_type && <span style={{ fontSize:'0.68rem', color:'#6366f1', background:'#eef2ff', borderRadius:4, padding:'1px 6px', fontWeight:600 }}>{d.contract_type}</span>}
         {stale && <span style={{ fontSize:'0.65rem', color:'#dc2626', fontWeight:700 }}>{daysSince}日未更新</span>}
+        {d.yomi_flow && <span title={d.yomi_flow} style={{ fontSize:'0.62rem', color:'#7c3aed', background:'#f5f3ff', borderRadius:4, padding:'1px 6px', fontWeight:600, maxWidth:240, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>📊 {d.yomi_flow.split(',').slice(-2).join(' → ').trim()}</span>}
       </div>
     );
 

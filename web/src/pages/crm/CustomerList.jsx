@@ -140,16 +140,26 @@ export default function CustomerList({ scope = 'all' }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const sidebarRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [naToday, setNaToday] = useState(false);
+  const todayYmdStr = new Date().toISOString().slice(0, 10);
 
-  const buildQuery = (params = {}) => ({
-    scope,
-    q: params.q ?? q,
-    quickFilter: (params.quickFilter ?? quickFilter) === 'self' ? undefined : (params.quickFilter ?? quickFilter) === 'all' ? undefined : (params.quickFilter ?? quickFilter),
-    salesUser: (params.quickFilter ?? quickFilter) === 'self' ? 'self_token' : (params.filterSales ?? filterSales),
-    stage: [...(params.filterStages ?? filterStages)].join(','),
-    yomi: [...(params.filterYomis ?? filterYomis)].join(','),
-    showDormant: (params.showDormant ?? showDormant) ? '1' : undefined,
-  });
+  const buildQuery = (params = {}) => {
+    const fs = (params.filterSales ?? filterSales);
+    const isSelf = (params.quickFilter ?? quickFilter) === 'self';
+    const naOnlyToday = params.naToday ?? naToday;
+    return {
+      scope,
+      q: params.q ?? q,
+      quickFilter: isSelf ? undefined : (params.quickFilter ?? quickFilter) === 'all' ? undefined : (params.quickFilter ?? quickFilter),
+      salesUser: isSelf ? 'self_token' : fs,
+      stage: [...(params.filterStages ?? filterStages)].join(','),
+      yomi: [...(params.filterYomis ?? filterYomis)].join(','),
+      showDormant: (params.showDormant ?? showDormant) ? '1' : undefined,
+      // 担当者で絞ったときは NA順をデフォルトに
+      sort: (fs || isSelf) ? 'na' : undefined,
+      naToday: naOnlyToday ? '1' : undefined,
+    };
+  };
 
   const load = useCallback(async (params = {}) => {
     setLoading(true);
@@ -162,7 +172,7 @@ export default function CustomerList({ scope = 'all' }) {
       setSalesUsers(r.salesUsers || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [q, quickFilter, filterStages, filterYomis, filterSales, showDormant, scope]);
+  }, [q, quickFilter, filterStages, filterYomis, filterSales, showDormant, scope, naToday]);
 
   const loadMore = async () => {
     setLoadingMore(true);
@@ -337,6 +347,16 @@ export default function CustomerList({ scope = 'all' }) {
                     <option value="">全員</option>
                     {salesUsers.map(u=><option key={u} value={u}>{u}</option>)}
                   </select>
+                  {filterSales && (
+                    <button onClick={() => setNaToday(v => !v)}
+                      title="NextActionが今日の案件のみ表示"
+                      style={{ marginTop:6, width:'100%', padding:'5px 8px', borderRadius:7, fontSize:'0.74rem', fontWeight:700, cursor:'pointer',
+                        border:`1px solid ${naToday?'#f59e0b':'var(--gray-200)'}`,
+                        background: naToday?'#fef3c7':'var(--surface)',
+                        color: naToday?'#92400e':'var(--gray-600)' }}>
+                      📌 今日やることのみ {naToday ? 'ON' : 'OFF'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -365,16 +385,20 @@ export default function CustomerList({ scope = 'all' }) {
                 const yomiCfg  = YOMI_CFG[d.yomi]  || {};
                 const days = daysSince(d.updated_at);
                 const stale = days >= 14 && d.status === 'active';
-                const overdue = d.next_action_date && new Date(d.next_action_date) < new Date();
+                const naDate = d.next_action_date ? String(d.next_action_date).slice(0,10) : '';
+                const naIsToday = naDate === todayYmdStr;
+                const overdue = naDate && naDate < todayYmdStr;
                 const isDormant = d.status === 'dormant';
+                const borderColor = naIsToday ? '#fcd34d' : overdue ? '#fca5a5' : stale ? '#fcd34d' : 'var(--gray-200)';
+                const rowBg = naIsToday ? '#fffbeb' : 'var(--surface)';
 
                 return (
                   <div key={d.id}
-                    style={{ background:'var(--surface)', borderRadius:10, border:`1px solid ${overdue?'#fca5a5':stale?'#fcd34d':'var(--gray-200)'}`,
+                    style={{ background:rowBg, borderRadius:10, border:`1px solid ${borderColor}`,
                       padding:'10px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:12,
                       opacity:isDormant?0.6:1, transition:'all 0.1s', boxShadow:'0 1px 2px rgba(0,0,0,0.03)' }}
                     onMouseEnter={e=>{e.currentTarget.style.borderColor='#c7d2fe';e.currentTarget.style.boxShadow='0 2px 8px rgba(99,102,241,0.08)';}}
-                    onMouseLeave={e=>{e.currentTarget.style.borderColor=overdue?'#fca5a5':stale?'#fcd34d':'var(--gray-200)';e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor=borderColor;e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';}}
                     onClick={() => navigate(`/crm/customers/${d.customer_id}`)}>
 
                     <Initial name={d.customer_name} />
@@ -421,12 +445,29 @@ export default function CustomerList({ scope = 'all' }) {
                       {d.contract_type && <div style={{ fontSize:'0.62rem', color:'var(--gray-400)' }}>{d.contract_type.replace('一括払い','一括').replace('採用保証','一括')}</div>}
                     </div>
 
+                    {/* NA表示 */}
+                    <div style={{ flex:'0 0 160px', minWidth:0 }}>
+                      {naDate ? (
+                        <>
+                          <div style={{ fontSize:'0.7rem', fontWeight:700, color: naIsToday?'#92400e':overdue?'#dc2626':'#0f172a' }}>
+                            {naIsToday ? '📌 今日' : overdue ? `⏰ ${naDate.slice(5).replace('-','/')}` : naDate.slice(5).replace('-','/')}
+                          </div>
+                          {d.next_action_content && (
+                            <div style={{ fontSize:'0.66rem', color:'#64748b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={d.next_action_content}>
+                              {d.next_action_content.slice(0, 25)}{d.next_action_content.length > 25 ? '…' : ''}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ fontSize:'0.66rem', color:'var(--gray-300)' }}>NA未設定</span>
+                      )}
+                    </div>
+
                     {/* 最終更新 */}
-                    <div style={{ flex:'0 0 60px', textAlign:'right' }}>
-                      <span style={{ fontSize:'0.68rem', color:stale?'#ef4444':'var(--gray-400)', fontWeight:stale?700:400 }}>
-                        {days===0?'今日':`${days}日前`}
+                    <div style={{ flex:'0 0 50px', textAlign:'right' }}>
+                      <span style={{ fontSize:'0.66rem', color:stale?'#ef4444':'var(--gray-400)', fontWeight:stale?700:400 }}>
+                        {days===0?'今日':`${days}d`}
                       </span>
-                      {overdue && <div style={{ fontSize:'0.62rem', color:'#ef4444', fontWeight:700 }}>アクション遅延</div>}
                     </div>
 
                     {/* 見送りボタン */}

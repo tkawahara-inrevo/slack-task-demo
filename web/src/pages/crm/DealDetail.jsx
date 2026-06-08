@@ -78,11 +78,12 @@ function evalCalc(expression, deal) {
 }
 
 // ヨミ推移タイムライン
-function YomiTimeline({ activities }) {
+function YomiTimeline({ activities, yomiFlow }) {
   const yomiChanges = (activities || [])
     .filter(a => a.activity_type === 'yomi_change')
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  if (yomiChanges.length === 0) return null;
+  const flowSteps = (yomiFlow || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (yomiChanges.length === 0 && flowSteps.length === 0) return null;
 
   const yomiColor = (y) => {
     if (!y) return '#94a3b8';
@@ -116,8 +117,32 @@ function YomiTimeline({ activities }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
         <span style={{ fontSize: '0.95rem' }}>📊</span>
         <span style={{ fontWeight: 800, fontSize: 14, color: '#92400e' }}>ヨミ推移タイムライン</span>
-        <span style={{ fontSize: 11, color: '#a16207', marginLeft: 'auto' }}>{yomiChanges.length}回の変更</span>
+        <span style={{ fontSize: 11, color: '#a16207', marginLeft: 'auto' }}>
+          {flowSteps.length > 0 ? `kintone履歴 ${flowSteps.length}段階 / ` : ''}{yomiChanges.length}回の変更
+        </span>
       </div>
+
+      {/* kintone ヨミ_経過フロー: 全体の経過を chip 連鎖で */}
+      {flowSteps.length > 0 && (
+        <div style={{ marginBottom: 10, padding: '8px 10px', background: '#fff', borderRadius: 6, border: '1px dashed #fcd34d' }}>
+          <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, marginBottom: 4 }}>📜 kintone ヨミ経過フロー</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+            {flowSteps.map((step, i) => {
+              // 短縮ラベル: "D 15% (担当者前向き)" → "D 15%"
+              const short = step.replace(/\s*\(.*$/, '').trim();
+              return (
+                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span title={step} style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(short), color: yomiColor(short), fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    {short || step.slice(0, 12)}
+                  </span>
+                  {i < flowSteps.length - 1 && <span style={{ color: '#fcd34d', fontWeight: 700 }}>→</span>}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {yomiChanges.map((a, i) => {
           const dir = direction(a.metadata?.from, a.metadata?.to);
@@ -534,7 +559,7 @@ export default function DealDetail() {
           {tab === 'activity' && (
             <div>
               {/* ヨミ推移タイムライン（yomi_changeアクティビティだけ抜粋） */}
-              <YomiTimeline activities={activities} />
+              <YomiTimeline activities={activities} yomiFlow={deal?.yomi_flow} />
 
               <form onSubmit={handleAddActivity} style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>

@@ -495,6 +495,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
       if (quickFilter === 'high_priority') where += ` AND d.yomi IN ('A 70％','S 90％') AND d.status='active'`;
       if (quickFilter === 'watch')         where += ` AND d.updated_at < now() - interval '14 days' AND d.status='active' AND d.yomi NOT IN ('アポ化前','受注','失注')`;
       if (quickFilter === 'yomi_mgmt')     where += ` AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％') AND d.status='active'`;
+      // 今日NA フィルター
+      if (req.query.naToday === '1') where += ` AND d.next_action_date::date = CURRENT_DATE`;
+
+      // 並び順: NA順 / 更新日順
+      const sortOrder = req.query.sort === 'na'
+        ? `d.next_action_date ASC NULLS LAST, d.updated_at DESC`
+        : `d.updated_at DESC`;
 
       // 総件数（フィルター適用後）
       const countRes = await dbQuery(
@@ -518,7 +525,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
         FROM deals d
         JOIN customers c ON c.id=d.customer_id
         WHERE ${where}
-        ORDER BY d.updated_at DESC
+        ORDER BY ${sortOrder}
         LIMIT ${limit} OFFSET ${offset}
       `, params);
 
@@ -2142,12 +2149,10 @@ function registerCrmApi({ expressApp, authWithRole }) {
                d.conclusion_date, d.updated_at, d.sales_memo, d.memo,
                d.next_action_date, d.next_action_content,
                d.settlement_forecast, d.forecast_confidence,
-               kc.data->>'ヨミ_経過フロー' AS yomi_flow,
+               d.yomi_flow,
                c.name AS customer_name
         FROM deals d
         JOIN customers c ON c.id = d.customer_id
-        LEFT JOIN kintone_cache kc
-          ON kc.app_id='102' AND kc.record_id = d.data->>'kintone_record_id'
         WHERE d.team_id=$1
           ${yomiClause}
           AND d.status = 'active'

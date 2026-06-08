@@ -12,6 +12,7 @@ const { registerReactionFeature } = require("./src/features/reaction-task");
 const { registerTaskUiFeature } = require("./src/features/task-ui");
 const { generateToken, registerDashboardApi } = require("./src/features/dashboard-api");
 const { stampAttendance } = require("./src/features/ieyasu");
+const { registerPochiAiSlack } = require("./src/features/pochi-ai-slack");
 const { INQUIRY_CHANNEL_ID, handleInquiryMessage } = require("./src/features/crm-inquiry");
 const {
   __cacheGet,
@@ -277,6 +278,13 @@ const {
 } = settingsFeature;
 resolveHomeDefaultsForHome = resolveHomeDefaults;
 getUserSettingsForHome = getUserSettingsFromSettings;
+
+// Pochi AI 機能（要約リアクション + /pochi-ask）
+registerPochiAiSlack({
+  app,
+  getUserDisplayName,
+  getTeamIdFromBody,
+});
 
 registerAdminFeature({
   app,

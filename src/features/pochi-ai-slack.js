@@ -12,8 +12,11 @@ function getAnthropic() {
   return _client;
 }
 
-// 要約発火リアクション（複数指定可）
+// 要約発火リアクション
+// scroll = 自分にだけ見える（ephemeral）
+// memo   = スレッド全員に見える（通常投稿）
 const SUMMARIZE_REACTIONS = new Set(['scroll', 'memo']);
+const PUBLIC_REACTIONS = new Set(['memo']);
 
 function registerPochiAiSlack({ app, getUserDisplayName, getTeamIdFromBody }) {
 
@@ -114,24 +117,39 @@ Slackスレッドの会話を読み取り、忙しい人が30秒で把握でき�
         .filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
         || '（要約生成に失敗しました）';
 
-      // 結果は ephemeral でリアクションした本人にだけ返す
       const targetTs = (messages[0]?.thread_ts || ts);
-      try {
-        await client.chat.postEphemeral({
-          channel: channelId,
-          user: actorUserId,
-          thread_ts: targetTs,
-          text: `🐶 *Pochi要約*\n${summary}`,
-        });
-      } catch (e) {
-        // ephemeral 失敗時はDMフォールバック
+      const isPublic = PUBLIC_REACTIONS.has(event.reaction);
+
+      if (isPublic) {
+        // :memo: → スレッドへ通常投稿（全員に見える）
         try {
-          const dm = await client.conversations.open({ users: actorUserId });
           await client.chat.postMessage({
-            channel: dm.channel.id,
-            text: `🐶 *Pochi要約*（スレッド: <https://slack.com/archives/${channelId}/p${String(targetTs).replace('.','')}|元メッセージ>）\n\n${summary}`,
+            channel: channelId,
+            thread_ts: targetTs,
+            text: `🐶 *Pochi要約*（<@${actorUserId}> がリクエスト）\n${summary}`,
+            unfurl_links: false,
+            unfurl_media: false,
           });
-        } catch (e2) { console.error('[pochi-ai] notify fail:', e2.message); }
+        } catch (e) { console.error('[pochi-ai] public post fail:', e.message); }
+      } else {
+        // :scroll: → ephemeral でリアクションした本人にだけ
+        try {
+          await client.chat.postEphemeral({
+            channel: channelId,
+            user: actorUserId,
+            thread_ts: targetTs,
+            text: `🐶 *Pochi要約*\n${summary}`,
+          });
+        } catch (e) {
+          // ephemeral失敗時はDMフォールバック
+          try {
+            const dm = await client.conversations.open({ users: actorUserId });
+            await client.chat.postMessage({
+              channel: dm.channel.id,
+              text: `🐶 *Pochi要約*（<https://slack.com/archives/${channelId}/p${String(targetTs).replace('.','')}|元メッセージ>）\n\n${summary}`,
+            });
+          } catch (e2) { console.error('[pochi-ai] notify fail:', e2.message); }
+        }
       }
     } catch (e) { console.error('[pochi-ai] reaction summarize error:', e.message); }
   });

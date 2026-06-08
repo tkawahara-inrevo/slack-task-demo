@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 
 const ISSUE_COLORS = {
-  '退勤打刻漏れ':       { bg: '#fef3c7', fg: '#92400e' },
-  '出勤打刻漏れ':       { bg: '#fee2e2', fg: '#991b1b' },
-  '出退勤打刻なし':     { bg: '#fee2e2', fg: '#991b1b' },
-  '休憩登録漏れ':       { bg: '#dbeafe', fg: '#1e40af' },
-  '勤怠申請が未申請':   { bg: '#ede9fe', fg: '#5b21b6' },
+  '退勤打刻漏れ':           { bg: '#fef3c7', fg: '#92400e' },
+  '出勤打刻漏れ':           { bg: '#fee2e2', fg: '#991b1b' },
+  '打刻なし＆勤怠申請なし': { bg: '#fee2e2', fg: '#991b1b' },
+  '休憩登録漏れ':           { bg: '#dbeafe', fg: '#1e40af' },
 };
 
 const todayYm = () => new Date().toISOString().slice(0, 7);

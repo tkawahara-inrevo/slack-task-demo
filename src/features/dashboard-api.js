@@ -717,7 +717,6 @@ function registerDashboardApi(deps) {
     const startStamp = row.stamping_start_at;
     const endStamp = row.stamping_end_at;
     const startCalc = row.start_at;
-    const endCalc = row.end_at;
     const totalBreakStr = row.total_break_time || '';
     const totalWorkingStr = row.total_working_hours || '';
 
@@ -732,25 +731,22 @@ function registerDashboardApi(deps) {
 
     // 休日・公休系は対象外（segment_title が含むキーワードで判定）
     const isOffDay = /公休|休日|有給|有休|欠勤|特別休/.test(seg);
-    // 何の打刻もない＆休日ならスキップ
-    if (isOffDay && !startStamp && !endStamp) return [];
+    if (isOffDay) return [];
 
+    const isWorkDay = /勤務|出勤|フレックス/.test(seg);
     // 出勤打刻はあるが退勤打刻なし
-    if (startStamp && !endStamp && !isOffDay) issues.push('退勤打刻漏れ');
+    if (startStamp && !endStamp) issues.push('退勤打刻漏れ');
     // 退勤打刻はあるが出勤打刻なし
-    if (!startStamp && endStamp && !isOffDay) issues.push('出勤打刻漏れ');
-    // 両方なし＆勤務予定（segmentが勤務系）なら
-    if (!startStamp && !endStamp && !isOffDay && /勤務|出勤|フレックス/.test(seg)) {
-      // 当日や未来日は除外（呼び出し側で判定）
-      issues.push('出退勤打刻なし');
+    if (!startStamp && endStamp) issues.push('出勤打刻漏れ');
+    // 勤務日に両方なし＋勤怠申請も未申請（休暇申請等が出ていれば status>=2）
+    //   → うちのルールでは「打刻修正/休暇」のときだけ申請するため、
+    //     打刻なし＆未申請 = 休暇申請も打刻修正も出ていない不備状態
+    if (!startStamp && !endStamp && isWorkDay && row.status === 1) {
+      issues.push('打刻なし＆勤怠申請なし');
     }
     // 休憩登録漏れ: 実働6時間超で休憩0
     if (workMin > 6 * 60 && breakMin === 0 && (startStamp || startCalc)) {
       issues.push('休憩登録漏れ');
-    }
-    // 申請ステータス（1=未申請）で何らかの打刻あり
-    if (row.status === 1 && (startStamp || endStamp)) {
-      issues.push('勤怠申請が未申請');
     }
     return issues;
   }
@@ -792,7 +788,12 @@ function registerDashboardApi(deps) {
         status: r.status,
       });
     }
-    const list = [...byUser.values()].sort((a, b) => b.days.length - a.days.length);
+    // 並び順: 社員番号順（昇順）。番号がない人は最後尾
+    const list = [...byUser.values()].sort((a, b) => {
+      const na = a.number || '￿';
+      const nb = b.number || '￿';
+      return String(na).localeCompare(String(nb));
+    });
     return { month, generated_at: new Date().toISOString(), users: list, total_users: list.length };
   }
 

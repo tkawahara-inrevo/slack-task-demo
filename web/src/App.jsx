@@ -41,6 +41,7 @@ import LegalHub from './pages/legal/LegalHub'
 import AnList from './pages/an/AnList'
 import MySettings from './pages/MySettings'
 import OverdueReport from './pages/admin/OverdueReport'
+import HrmosCheck from './pages/admin/HrmosCheck'
 import './App.css'
 
 function App() {
@@ -79,6 +80,7 @@ function App() {
           <Route path="hrmos-recruitment" element={<HrmosRecruitment />} />
           <Route path="ranking" element={<Ranking />} />
           <Route path="overdue-report" element={<OverdueReport />} />
+          <Route path="hrmos-check" element={<HrmosCheck />} />
         </Route>
         <Route path="/crm/leads" element={<LeadsDashboard />} />
         <Route path="/crm" element={<CRM />} />

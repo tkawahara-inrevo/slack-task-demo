@@ -102,7 +102,13 @@
       "Bash(node -c src/features/dashboard-api.js)",
       "Bash(node -c src/features/settings.js)",
       "Bash(grep -n \"ANY\\(\\\\$\" e:/dev/slack-task-demo/src/features/dashboard-api.js)",
-      "Bash(grep -n \"ANY\\(\\\\\\\\\\\\$2\" e:/dev/slack-task-demo/src/features/dashboard-api.js)"
+      "Bash(grep -n \"ANY\\(\\\\\\\\\\\\$2\" e:/dev/slack-task-demo/src/features/dashboard-api.js)",
+      "WebFetch(domain:ieyasu.co)",
+      "Bash(curl -s \"https://ieyasu.co/docs/api_definition.json\" -o /tmp/hrmos-api.json)",
+      "Bash(curl -s \"https://ieyasu.co/docs/api.html\")",
+      "Bash(curl -s \"https://ieyasu.co/docs/openapi.json\" -o /tmp/hrmos-openapi.json)",
+      "Bash(curl -s \"https://ieyasu.co/docs/openapi.json\" -o /e/dev/slack-task-demo/_hrmos.json)",
+      "Bash(node -c src/features/ieyasu.js)"
     ]
   }
 }

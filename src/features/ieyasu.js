@@ -141,4 +141,27 @@ function invalidateUsersCache() {
   _usersCache = null;
 }
 
-module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache };
+// ── 月次の日次勤怠データ取得（全社員）──────────────────────────
+// month: 'YYYY-MM' 形式
+// 戻り値: WorkOutput[] (全社員 × 全日)
+async function getMonthlyWorkOutputs(month) {
+  if (!SECRET_KEY) throw new Error('IEYASU_API_TOKEN not set');
+  const token = await getToken();
+  const all = [];
+  let page = 1;
+  while (true) {
+    const res = await ieyasuRequest({
+      path: `/api/${COMPANY}/v1/work_outputs/monthly/${month}?page=${page}&limit=100`,
+      auth: `Token ${token}`,
+    });
+    if (res.status !== 200) throw new Error(`HRMOS work_outputs error: ${res.status} ${JSON.stringify(res.body).slice(0,200)}`);
+    if (!Array.isArray(res.body) || res.body.length === 0) break;
+    all.push(...res.body);
+    if (res.body.length < 100) break;
+    page++;
+    if (page > 100) break; // 安全ガード
+  }
+  return all;
+}
+
+module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs };

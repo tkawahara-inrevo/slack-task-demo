@@ -709,6 +709,115 @@ function registerDashboardApi(deps) {
   });
 
   // ================================
+  // HRMOS勤怠 月次チェック（人事 / admin）
+  // ================================
+  function detectAttendanceIssues(row) {
+    const issues = [];
+    const seg = (row.segment_title || '').trim();
+    const startStamp = row.stamping_start_at;
+    const endStamp = row.stamping_end_at;
+    const startCalc = row.start_at;
+    const endCalc = row.end_at;
+    const totalBreakStr = row.total_break_time || '';
+    const totalWorkingStr = row.total_working_hours || '';
+
+    const toMin = (hhmm) => {
+      if (!hhmm || typeof hhmm !== 'string') return 0;
+      const m = hhmm.match(/^(\d+):(\d+)/);
+      if (!m) return 0;
+      return Number(m[1]) * 60 + Number(m[2]);
+    };
+    const breakMin = toMin(totalBreakStr);
+    const workMin  = toMin(totalWorkingStr);
+
+    // 休日・公休系は対象外（segment_title が含むキーワードで判定）
+    const isOffDay = /公休|休日|有給|有休|欠勤|特別休/.test(seg);
+    // 何の打刻もない＆休日ならスキップ
+    if (isOffDay && !startStamp && !endStamp) return [];
+
+    // 出勤打刻はあるが退勤打刻なし
+    if (startStamp && !endStamp && !isOffDay) issues.push('退勤打刻漏れ');
+    // 退勤打刻はあるが出勤打刻なし
+    if (!startStamp && endStamp && !isOffDay) issues.push('出勤打刻漏れ');
+    // 両方なし＆勤務予定（segmentが勤務系）なら
+    if (!startStamp && !endStamp && !isOffDay && /勤務|出勤|フレックス/.test(seg)) {
+      // 当日や未来日は除外（呼び出し側で判定）
+      issues.push('出退勤打刻なし');
+    }
+    // 休憩登録漏れ: 実働6時間超で休憩0
+    if (workMin > 6 * 60 && breakMin === 0 && (startStamp || startCalc)) {
+      issues.push('休憩登録漏れ');
+    }
+    // 申請ステータス（1=未申請）で何らかの打刻あり
+    if (row.status === 1 && (startStamp || endStamp)) {
+      issues.push('勤怠申請が未申請');
+    }
+    return issues;
+  }
+
+  async function fetchHrmosMonthlyCheck(month) {
+    const { getMonthlyWorkOutputs } = require('./ieyasu');
+    const rows = await getMonthlyWorkOutputs(month);
+    const today = new Date();
+    const todayYmd = today.toISOString().slice(0, 10);
+
+    // ユーザーごとに違反日をまとめる
+    const byUser = new Map();
+    for (const r of rows) {
+      if (!r.day) continue;
+      // 当日と未来日は除外（まだ打刻余地がある）
+      if (r.day >= todayYmd) continue;
+      const issues = detectAttendanceIssues(r);
+      if (issues.length === 0) continue;
+      const key = r.user_id;
+      if (!byUser.has(key)) {
+        byUser.set(key, {
+          user_id: r.user_id,
+          number: r.number,
+          full_name: r.full_name,
+          days: [],
+        });
+      }
+      const dayStr = r.day.slice(5).replace('-', '/'); // MM/DD
+      byUser.get(key).days.push({
+        day: r.day,
+        day_display: `${parseInt(r.day.slice(5,7),10)}/${parseInt(r.day.slice(8,10),10)}`,
+        wday: r.wday,
+        issues,
+        stamping_start_at: r.stamping_start_at,
+        stamping_end_at: r.stamping_end_at,
+        total_working_hours: r.total_working_hours,
+        total_break_time: r.total_break_time,
+        segment_title: r.segment_title,
+        status: r.status,
+      });
+    }
+    const list = [...byUser.values()].sort((a, b) => b.days.length - a.days.length);
+    return { month, generated_at: new Date().toISOString(), users: list, total_users: list.length };
+  }
+
+  // 人事 or admin
+  function personnelOrAdmin(req, res, next) {
+    const role = req.dashboardUser?.role;
+    if (role !== 'admin' && role !== 'personnel') {
+      return res.status(403).json({ error: 'personnel_required' });
+    }
+    next();
+  }
+
+  expressApp.get("/api/dashboard/admin/hrmos-monthly-check", authWithRole, personnelOrAdmin, async (req, res) => {
+    try {
+      const month = (req.query.month || '').match(/^\d{4}-\d{2}$/)?.[0]
+        || new Date().toISOString().slice(0, 7);
+      const data = await fetchHrmosMonthlyCheck(month);
+      res.json(data);
+    } catch (e) {
+      console.error('[hrmos-check]', e);
+      res.status(500).json({ error: 'internal', message: e.message });
+    }
+  });
+
+  // ================================
   // 期限切れタスクレポート（admin限定）
   // ================================
   // 担当者ごと集約 + 明細を返す

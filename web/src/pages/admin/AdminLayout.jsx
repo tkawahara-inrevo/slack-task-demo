@@ -82,6 +82,11 @@ export default function AdminLayout() {
 
         {/* Personnel 所属のみ */}
         {isPersonnel && (
+          <NavLink to="/admin/hrmos-check" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '🕒' : 'HRMOS勤怠チェック'}
+          </NavLink>
+        )}
+        {isPersonnel && (
           <NavLink to="/admin/recruitment" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '📋' : '採用管理（自社）'}
           </NavLink>

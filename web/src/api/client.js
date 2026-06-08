@@ -249,6 +249,7 @@ export const api = {
   myTaskTriggerToggle:   (id, enabled) => apiFetch(`/me/task-triggers/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }),
   myTaskTriggerDelete:   (id) => apiFetch(`/me/task-triggers/${id}`, { method: 'DELETE' }),
   overdueReport:         () => apiFetch('/admin/overdue-report'),
+  hrmosMonthlyCheck:     (month) => apiFetch(`/admin/hrmos-monthly-check${month ? `?month=${month}` : ''}`),
   crmRoleTargets: () => crmFetch('/role-targets'),
   crmRoleTargetsSave: (targets) => crmFetch('/role-targets', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets}) }),
   crmPeriodSettings: () => crmFetch('/period-settings'),

@@ -3051,6 +3051,46 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
   const STAMP_IN_CHS  = toChSet(process.env.HRMOS_STAMP_IN_CHANNELS);
   const STAMP_OUT_CHS = toChSet(process.env.HRMOS_STAMP_OUT_CHANNELS);
 
+  // 一時的エラー（自動リトライ対象）
+  const TRANSIENT_REASONS = new Set(['api_error', 'exception']);
+
+  // Slack絵文字リアクション付与
+  async function addStampReaction(client, channel, ts, name) {
+    if (!channel || !ts) return;
+    try { await client.reactions.add({ channel, timestamp: ts, name }); }
+    catch (e) {
+      // already_reacted は無視
+      if (!/already_reacted|reaction_remove|invalid/.test(e?.data?.error || '')) {
+        console.warn('[IEYASU] reaction add fail:', e?.data?.error || e.message);
+      }
+    }
+  }
+
+  // 失敗時の本人DM
+  async function notifyStampFailure(client, slackUserId, stampType, reason) {
+    const label = stampType === 1 ? '出勤' : '退勤';
+    const reasonText = {
+      no_email: 'Slackプロフィールにメールアドレスが登録されていません',
+      user_not_found: 'HRMOS側に同じメールの社員アカウントが見つかりません',
+      api_error: 'HRMOSのAPIエラーで打刻できませんでした',
+      exception: '通信エラーで打刻できませんでした',
+      no_token: 'システム設定エラー（管理者へ）',
+    }[reason] || `不明なエラー: ${reason}`;
+    try {
+      const dm = await client.conversations.open({ users: slackUserId });
+      const channel = dm?.channel?.id;
+      if (!channel) return;
+      await client.chat.postMessage({
+        channel,
+        text: `⚠️ HRMOS ${label}打刻ができませんでした`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `⚠️ *HRMOS ${label}打刻ができませんでした*` } },
+          { type: 'section', text: { type: 'mrkdwn', text: `理由: ${reasonText}\n\nお手数ですが HRMOS で手動打刻をお願いします。` } },
+        ],
+      });
+    } catch (e) { console.warn('[IEYASU] DM通知失敗:', e.message); }
+  }
+
   const doStamp = async (client, message, stampType) => {
     // スレッド返信は除外
     if (message.thread_ts && message.thread_ts !== message.ts) return;
@@ -3066,12 +3106,31 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     const label = stampType === 1 ? '出勤' : '退勤';
     console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${targetUserId}`);
     const result = await stampAttendance(client, targetUserId, stampType);
-    await dbQuery(
-      `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
-      [teamId, targetUserId, stampType, result.ok, result.userId || null, result.ok ? null : result.reason]
-    ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-    if (!result.ok) console.warn(`[IEYASU] ${label}打刻失敗:`, result);
+
+    if (result.ok) {
+      await addStampReaction(client, message.channel, message.ts, 'white_check_mark');
+      await dbQuery(
+        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, channel_id, message_ts)
+         VALUES (gen_random_uuid(), $1, $2, $3, true, $4, $5, $6)`,
+        [teamId, targetUserId, stampType, result.userId || null, message.channel, message.ts]
+      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
+    } else {
+      // 失敗: 一時的なら retry_state='pending' で10分後にリトライ
+      const willRetry = TRANSIENT_REASONS.has(result.reason);
+      const retryState = willRetry ? 'pending' : 'final_failed';
+      await dbQuery(
+        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason, channel_id, message_ts, retry_state)
+         VALUES (gen_random_uuid(), $1, $2, $3, false, $4, $5, $6, $7, $8)`,
+        [teamId, targetUserId, stampType, result.userId || null, result.reason, message.channel, message.ts, retryState]
+      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
+      console.warn(`[IEYASU] ${label}打刻失敗 (retry=${willRetry}):`, result);
+      if (!willRetry) {
+        // 恒久エラーは即DM＋⚠️
+        await addStampReaction(client, message.channel, message.ts, 'warning');
+        await notifyStampFailure(client, targetUserId, stampType, result.reason);
+      }
+      // 一時エラー時はリアクション保留（10分後worker で結果に応じて付与）
+    }
   };
 
   if (STAMP_IN_CHS.size > 0 || STAMP_OUT_CHS.size > 0) {
@@ -3079,6 +3138,40 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       if (STAMP_IN_CHS.has(message.channel))  await doStamp(client, message, 1);
       if (STAMP_OUT_CHS.has(message.channel)) await doStamp(client, message, 2);
     });
+
+    // 10分後リトライworker（5分おきに走査）
+    setInterval(async () => {
+      try {
+        const { rows } = await dbQuery(
+          `SELECT id, team_id, slack_user_id, stamp_type, channel_id, message_ts
+           FROM hrmos_stamps
+           WHERE retry_state='pending'
+             AND stamped_at <= now() - interval '10 minutes'
+             AND stamped_at > now() - interval '6 hours'
+           ORDER BY stamped_at ASC LIMIT 20`
+        );
+        if (rows.length === 0) return;
+        for (const row of rows) {
+          const result = await stampAttendance(app.client, row.slack_user_id, row.stamp_type);
+          if (result.ok) {
+            await addStampReaction(app.client, row.channel_id, row.message_ts, 'white_check_mark');
+            await dbQuery(
+              `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state='retried_ok', error_reason=NULL WHERE id=$1`,
+              [row.id, result.userId || null]
+            ).catch(() => {});
+            console.log(`[IEYASU] retry成功: user=${row.slack_user_id} type=${row.stamp_type}`);
+          } else {
+            await addStampReaction(app.client, row.channel_id, row.message_ts, 'warning');
+            await notifyStampFailure(app.client, row.slack_user_id, row.stamp_type, result.reason);
+            await dbQuery(
+              `UPDATE hrmos_stamps SET retry_state='final_failed', error_reason=$2 WHERE id=$1`,
+              [row.id, result.reason]
+            ).catch(() => {});
+            console.warn(`[IEYASU] retry最終失敗: user=${row.slack_user_id}`, result);
+          }
+        }
+      } catch (e) { console.error('[IEYASU] retry worker error:', e.message); }
+    }, 5 * 60 * 1000);
   }
 
   // ── 問い合わせフォーム → CRM 自動登録 ──────────────────────────

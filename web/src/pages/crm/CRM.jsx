@@ -116,20 +116,25 @@ function YomiPanel({ full = false }) {
   const [memoCache, setMemoCache] = useState({});
   const [filterStaff, setFilterStaff] = useState('');
   const [filterYomi, setFilterYomi] = useState(new Set());
+  const [sortBy, setSortBy] = useState('yomi'); // 'yomi' | 'na'
+  const [showOnlyToday, setShowOnlyToday] = useState(false);
 
   // 個人モード判定（特定担当者選択時）→ D/E含む全件取得
   const isIndividualMode = !!filterStaff;
 
+  // 今日の日付（ローカル）
+  const todayYmd = new Date().toISOString().slice(0, 10);
+
   useEffect(() => {
     setLoading(true);
-    api.crmYomiKanri({ includeAll: isIndividualMode })
+    api.crmYomiKanri({ includeAll: isIndividualMode, sort: sortBy })
       .then(r => {
         setYomiKanri(r);
         const init = {};
         Object.values(r.byStaff).flat().forEach(d => { init[d.id] = d.sales_memo || ''; });
         setMemoCache(init);
       }).catch(() => {}).finally(() => setLoading(false));
-  }, [isIndividualMode]);
+  }, [isIndividualMode, sortBy]);
 
   if (loading) return <div style={{ padding:40, textAlign:'center', color:'#94a3b8', fontSize:'0.85rem' }}>読み込み中…</div>;
   if (!yomiKanri) return null;
@@ -145,6 +150,13 @@ function YomiPanel({ full = false }) {
   if (isIndividualMode && filterYomi.size > 0) {
     entries = entries.map(([name, deals]) => [name, deals.filter(d => filterYomi.has(d.yomi))])
                      .filter(([, deals]) => deals.length > 0);
+  }
+  // 今日やることフィルタ
+  if (showOnlyToday) {
+    entries = entries.map(([name, deals]) => [name, deals.filter(d => {
+      const nd = d.next_action_date ? String(d.next_action_date).slice(0,10) : '';
+      return nd === todayYmd;
+    })]).filter(([, deals]) => deals.length > 0);
   }
   const totalFiltered = entries.reduce((s,[,d]) => s + d.length, 0);
   // 個人モード時のヨミ別カウント（filterYomi適用前のもの）
@@ -240,6 +252,39 @@ function YomiPanel({ full = false }) {
       </div>
     );
 
+    // NA インライン編集
+    const [naDate, setNaDate] = useState(d.next_action_date ? String(d.next_action_date).slice(0,10) : '');
+    const [naContent, setNaContent] = useState(d.next_action_content || '');
+    const [naFocused, setNaFocused] = useState(false);
+    const saveNa = async (date, content) => {
+      try {
+        await api.crmUpdateDeal(d.id, {
+          nextActionDate: date || null,
+          nextActionContent: content || null,
+        });
+        d.next_action_date = date; d.next_action_content = content;
+      } catch (e) { console.error(e); }
+    };
+    const naIsToday = naDate === todayYmd;
+    const naIsOverdue = naDate && naDate < todayYmd;
+    const naIsFuture = naDate && naDate > todayYmd;
+    const inlineNa = (
+      <div onClick={e => e.stopPropagation()} style={{ marginTop:6, display:'flex', gap:5, alignItems:'center', flexWrap:'wrap',
+        padding: naIsToday ? '5px 8px' : '0', borderRadius:6,
+        background: naIsToday ? '#fef3c7' : 'transparent',
+        border: naIsToday ? '1px solid #fcd34d' : 'none' }}>
+        {naIsToday && <span style={{ fontSize:'0.66rem', fontWeight:800, color:'#92400e', whiteSpace:'nowrap' }}>📌 今日</span>}
+        {naIsOverdue && <span style={{ fontSize:'0.66rem', fontWeight:800, color:'#dc2626', whiteSpace:'nowrap' }}>⏰ 期限超過</span>}
+        <input type="date" value={naDate} onChange={e => { setNaDate(e.target.value); saveNa(e.target.value, naContent); }}
+          onFocus={() => setNaFocused(true)} onBlur={() => setNaFocused(false)}
+          style={{ fontSize:'0.7rem', padding:'2px 6px', border:`1px solid ${naFocused?'#6366f1':'#e2e8f0'}`, borderRadius:5,
+            color: naIsToday?'#92400e':naIsOverdue?'#dc2626':naIsFuture?'#0f172a':'#94a3b8', fontWeight: naDate?700:400, background:'#fff' }} />
+        <input type="text" value={naContent} onChange={e => setNaContent(e.target.value)} onBlur={() => saveNa(naDate, naContent)}
+          placeholder="NA内容（やること）" maxLength={200}
+          style={{ flex:1, minWidth:120, fontSize:'0.72rem', padding:'2px 8px', border:'1px solid #e2e8f0', borderRadius:5, color:'#374151', background:'#fff' }} />
+      </div>
+    );
+
     if (compact) {
       return (
         <div style={{ padding:'10px 14px', borderBottom:'1px solid #f8fafc' }}>
@@ -248,6 +293,7 @@ function YomiPanel({ full = false }) {
               <div onClick={() => setSelectedDeal(d)} style={{ fontWeight:700, fontSize:'0.85rem', color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}>{d.customer_name}</div>
               {badges}
               {inlineForecast}
+              {inlineNa}
               {inlineMemo}
             </div>
             <div style={{ textAlign:'right', flexShrink:0 }}>
@@ -289,13 +335,35 @@ function YomiPanel({ full = false }) {
               {isIndividualMode && filterYomi.size > 0 && <span style={{ marginLeft:4 }}>（{filterYomi.size}ヨミで絞り込み）</span>}
             </div>
           </div>
-          <select value={filterStaff} onChange={e => { setFilterStaff(e.target.value); setFilterYomi(new Set()); }}
-            style={{ marginLeft:'auto', padding:'5px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', background:'#fff', color:'#374151', outline:'none', cursor:'pointer' }}>
-            <option value="">全員</option>
-            {staffOptions.map(name => (
-              <option key={name} value={name}>{name.split('/')[0].trim()}</option>
-            ))}
-          </select>
+          <div style={{ marginLeft:'auto', display:'flex', gap:6, alignItems:'center' }}>
+            {/* 並び順切替 */}
+            <div style={{ display:'flex', background:'#f1f5f9', borderRadius:8, padding:2 }}>
+              {[['yomi','ヨミ順'],['na','NA順']].map(([v,l]) => (
+                <button key={v} onClick={() => setSortBy(v)}
+                  style={{ padding:'4px 12px', borderRadius:6, border:'none', cursor:'pointer', fontSize:'0.74rem',
+                    fontWeight: sortBy===v?700:500, background: sortBy===v?'#fff':'transparent',
+                    color: sortBy===v?'#0f172a':'#64748b',
+                    boxShadow: sortBy===v?'0 1px 2px rgba(0,0,0,0.05)':'none' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {/* 今日やることだけ */}
+            <button onClick={() => setShowOnlyToday(v => !v)}
+              title="NextActionが今日の案件のみ表示"
+              style={{ padding:'4px 12px', borderRadius:8, border:`1px solid ${showOnlyToday?'#f59e0b':'#e2e8f0'}`,
+                background: showOnlyToday?'#fef3c7':'#fff', color: showOnlyToday?'#92400e':'#475569',
+                fontSize:'0.74rem', fontWeight:700, cursor:'pointer' }}>
+              📌 今日やること
+            </button>
+            <select value={filterStaff} onChange={e => { setFilterStaff(e.target.value); setFilterYomi(new Set()); }}
+              style={{ padding:'5px 10px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:'0.8rem', background:'#fff', color:'#374151', outline:'none', cursor:'pointer' }}>
+              <option value="">全員</option>
+              {staffOptions.map(name => (
+                <option key={name} value={name}>{name.split('/')[0].trim()}</option>
+              ))}
+            </select>
+          </div>
         </div>
         {/* 個人モード時のヨミチップフィルタ */}
         {isIndividualMode && (

@@ -2127,6 +2127,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const yomiClause = includeAll
         ? ''
         : `AND d.yomi IN ('C 30％','B 50％','A 70％','S 90％')`;
+      const sortBy = req.query.sort === 'na' ? 'na' : 'yomi';
+      const orderClause = sortBy === 'na'
+        ? `d.next_action_date ASC NULLS LAST, d.updated_at DESC`
+        : `CASE d.yomi
+             WHEN 'S 90％' THEN 1 WHEN 'A 70％' THEN 2
+             WHEN 'B 50％' THEN 3 WHEN 'C 30％' THEN 4
+             WHEN 'D 15％' THEN 5 WHEN 'E 5％' THEN 6 ELSE 7
+           END, d.updated_at DESC`;
       const { rows } = await dbQuery(`
         SELECT d.id, d.customer_id, d.name, d.yomi, d.contract_type,
                d.initial_fee, d.monthly_fee, d.unit_price,
@@ -2134,17 +2142,16 @@ function registerCrmApi({ expressApp, authWithRole }) {
                d.conclusion_date, d.updated_at, d.sales_memo, d.memo,
                d.next_action_date, d.next_action_content,
                d.settlement_forecast, d.forecast_confidence,
+               kc.data->>'ヨミ_経過フロー' AS yomi_flow,
                c.name AS customer_name
-        FROM deals d JOIN customers c ON c.id = d.customer_id
+        FROM deals d
+        JOIN customers c ON c.id = d.customer_id
+        LEFT JOIN kintone_cache kc
+          ON kc.app_id='102' AND kc.record_id = d.data->>'kintone_record_id'
         WHERE d.team_id=$1
           ${yomiClause}
           AND d.status = 'active'
-        ORDER BY
-          CASE d.yomi
-            WHEN 'S 90％' THEN 1 WHEN 'A 70％' THEN 2
-            WHEN 'B 50％' THEN 3 WHEN 'C 30％' THEN 4
-            WHEN 'D 15％' THEN 5 WHEN 'E 5％' THEN 6 ELSE 7
-          END, d.updated_at DESC
+        ORDER BY ${orderClause}
       `, [teamId]);
 
       // 担当者別にグルーピング

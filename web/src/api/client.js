@@ -240,7 +240,12 @@ export const api = {
     const qs = p.toString();
     return crmFetch(`/monthly-summary${qs ? '?'+qs : ''}`);
   },
-  crmYomiKanri: (opts = {}) => crmFetch(`/yomi-kanri${opts.includeAll ? '?includeAll=1' : ''}`),
+  crmYomiKanri: (opts = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.includeAll) qs.set('includeAll', '1');
+    if (opts.sort) qs.set('sort', opts.sort);
+    return crmFetch(`/yomi-kanri${qs.toString() ? `?${qs}` : ''}`);
+  },
   viewAsUsers: () => apiFetch('/view-as/users'),
   viewAsSet:   (body) => apiFetch('/view-as', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   viewAsClear: () => apiFetch('/view-as/clear', { method: 'POST' }),

@@ -23,6 +23,7 @@ const KINTONE_DEAL_FIELD_MAP = {
   '流入日':                             'inflow_date',
   'IS用最終対応日付':                    'inflow_date',
   'NextAction日':                       'next_action_date',
+  'NA内容':                             'next_action_content',
   '営業メモ最終日付':                    'sales_memo_last_date',
   // 金額
   '見込売り上げ_税抜き':                 'initial_fee',
@@ -214,6 +215,8 @@ async function syncDealsFromKintoneCache() {
       { col: 'acquisition_date',       kc: `kc.data->>'商談獲得日_マーケチーム'`,           type: 'date' },
       { col: 'inflow_date',            kc: `COALESCE(NULLIF(kc.data->>'流入日',''), kc.data->>'商談獲得日_マーケチーム')`, type: 'date' },
       { col: 'next_action_date',       kc: `kc.data->>'NextAction日'`,                   type: 'date' },
+      { col: 'next_action_content',    kc: `kc.data->>'NA内容'`,                          type: 'text' },
+      { col: 'yomi_flow',              kc: `kc.data->>'ヨミ_経過フロー'`,                 type: 'text' },
       { col: 'sales_memo_last_date',   kc: `kc.data->>'営業メモ最終日付'`,                  type: 'date' },
       { col: 'antisocial_check_date',  kc: `kc.data->>'反社チェック実行日'`,                type: 'date' },
       { col: 'legal_check_date',       kc: `kc.data->>'リーガルチェック実行日'`,            type: 'date' },

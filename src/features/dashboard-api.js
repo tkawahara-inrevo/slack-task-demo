@@ -809,6 +809,11 @@ function registerDashboardApi(deps) {
     try {
       const month = (req.query.month || '').match(/^\d{4}-\d{2}$/)?.[0]
         || new Date().toISOString().slice(0, 7);
+      // ?refresh=1 でキャッシュをスキップ
+      if (req.query.refresh === '1') {
+        const { invalidateMonthlyCache } = require('./ieyasu');
+        invalidateMonthlyCache(month);
+      }
       const data = await fetchHrmosMonthlyCheck(month);
       res.json(data);
     } catch (e) {

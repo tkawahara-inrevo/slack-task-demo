@@ -18,9 +18,9 @@ export default function HrmosCheck() {
   const [err, setErr] = useState('');
   const [copied, setCopied] = useState(null);
 
-  const load = (m) => {
+  const load = (m, opts) => {
     setLoading(true); setErr('');
-    api.hrmosMonthlyCheck(m).then(setData).catch(e => setErr(e.message || '取得失敗')).finally(() => setLoading(false));
+    api.hrmosMonthlyCheck(m, opts).then(setData).catch(e => setErr(e.message || '取得失敗')).finally(() => setLoading(false));
   };
   useEffect(() => { load(month); }, [month]);
 
@@ -66,7 +66,7 @@ export default function HrmosCheck() {
         <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0f172a' }}>🕒 HRMOS 勤怠不備チェック</div>
         <input type="month" value={month} onChange={e => setMonth(e.target.value)}
           style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: '0.86rem', background: '#fff' }} />
-        <button onClick={() => load(month)} disabled={loading}
+        <button onClick={() => load(month, { refresh: true })} disabled={loading}
           style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: '0.8rem' }}>
           ⟳ 再取得
         </button>

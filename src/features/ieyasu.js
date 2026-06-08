@@ -155,29 +155,39 @@ async function getMonthlyWorkOutputs(month, { forceRefresh = false } = {}) {
     if (c && Date.now() - c.at < MONTHLY_TTL) return c.data;
   }
   const token = await getToken();
-  const LIMIT = 500;
 
-  // 1ページ目を取得して総量推定（500未満なら1回で終わり）
+  // limit は API側でキャップされる可能性があるため、1ページ目の実件数を基準にする
   const fetchPage = (page) => ieyasuRequest({
-    path: `/api/${COMPANY}/v1/work_outputs/monthly/${month}?page=${page}&limit=${LIMIT}`,
+    path: `/api/${COMPANY}/v1/work_outputs/monthly/${month}?page=${page}&limit=500`,
     auth: `Token ${token}`,
   });
 
   const first = await fetchPage(1);
   if (first.status !== 200) throw new Error(`HRMOS work_outputs error: ${first.status} ${JSON.stringify(first.body).slice(0,200)}`);
   if (!Array.isArray(first.body)) return [];
+  const pageSize = first.body.length;
   const all = [...first.body];
 
-  if (first.body.length === LIMIT) {
-    // 残ページを並列取得（最大20ページ）
-    const pages = Array.from({ length: 19 }, (_, i) => i + 2);
-    const results = await Promise.all(pages.map(p => fetchPage(p).catch(e => ({ status: 0, body: null, err: e.message }))));
-    for (const r of results) {
-      if (r.status === 200 && Array.isArray(r.body) && r.body.length > 0) all.push(...r.body);
-      if (r.status !== 200 || !r.body || r.body.length < LIMIT) break;
+  // 1ページ目が空 or 期待より少なければ終わり
+  if (pageSize > 0) {
+    // 残ページを並列取得。「空ページが返るまで」進む（最大50ページ）
+    const MAX_PAGES = 50;
+    let page = 2;
+    while (page <= MAX_PAGES) {
+      const batchPages = Array.from({ length: Math.min(5, MAX_PAGES - page + 1) }, (_, i) => page + i);
+      const results = await Promise.all(batchPages.map(p => fetchPage(p).catch(e => ({ status: 0, body: null }))));
+      let stop = false;
+      for (const r of results) {
+        if (r.status !== 200 || !Array.isArray(r.body) || r.body.length === 0) { stop = true; break; }
+        all.push(...r.body);
+        if (r.body.length < pageSize) { stop = true; break; }
+      }
+      if (stop) break;
+      page += batchPages.length;
     }
   }
 
+  console.log(`[HRMOS] monthly ${month}: ${all.length} records (pageSize=${pageSize})`);
   _monthlyCache.set(month, { at: Date.now(), data: all });
   return all;
 }

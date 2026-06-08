@@ -28,20 +28,34 @@ export default function HrmosCheck() {
 
   const excludeUser = async (u, reason) => {
     if (!window.confirm(`「${u.full_name}」をチェック対象から除外しますか？（後で解除可能）`)) return;
+    // 楽観的更新：即座に画面から消す
+    setData(prev => prev ? {
+      ...prev,
+      users: prev.users.filter(x => x.user_id !== u.user_id),
+      total_users: Math.max(0, (prev.total_users || 0) - 1),
+      excluded_count: (prev.excluded_count || 0) + 1,
+    } : prev);
     try {
       await api.hrmosExcludeUser({
         hrmos_user_id: u.user_id, full_name: u.full_name, number: u.number, reason: reason || null,
       });
-      load(month, { refresh: true });
       loadExcluded();
-    } catch (e) { alert('失敗: ' + e.message); }
+    } catch (e) {
+      alert('失敗: ' + e.message);
+      load(month); // ロールバック
+    }
   };
   const unexcludeUser = async (id) => {
+    // 楽観的更新：除外モーダル側で即削除
+    setExcludedList(prev => prev.filter(e => e.hrmos_user_id !== id));
+    setData(prev => prev ? { ...prev, excluded_count: Math.max(0, (prev.excluded_count || 0) - 1) } : prev);
     try {
       await api.hrmosUnexcludeUser(id);
-      load(month, { refresh: true });
+      load(month); // 解除した人を本体リストに戻すため再取得
+    } catch (e) {
+      alert('失敗: ' + e.message);
       loadExcluded();
-    } catch (e) { alert('失敗: ' + e.message); }
+    }
   };
 
   const summary = useMemo(() => {

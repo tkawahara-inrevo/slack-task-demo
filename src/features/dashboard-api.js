@@ -4037,6 +4037,78 @@ function registerDashboardApi(deps) {
   });
 
   // --- GET /tasks/:id/thread (Slack thread messages) ---
+  // ─── AI秘書（タスク要約・分類） ─────────────────────────────
+  // 結果は tasks.ai_summary / ai_type / ai_key_points / ai_generated_at に保存
+  async function analyzeAndPersist(teamId, taskId) {
+    const { analyzeTask } = require('./ai-assistant');
+    const task = await dbGetTaskById(teamId, taskId);
+    if (!task) throw new Error('task_not_found');
+
+    // 依頼者名・スレッド前後文脈を集める（軽量）
+    let requesterName = null;
+    if (task.requester_user_id) {
+      requesterName = await getUserDisplayName(teamId, task.requester_user_id).catch(() => null);
+    }
+    let threadContext = [];
+    if (task.channel_id && task.message_ts) {
+      try {
+        const r = await slackClient.conversations.replies({
+          channel: task.channel_id, ts: task.message_ts, limit: 10,
+        });
+        for (const m of (r.messages || []).slice(0, 8)) {
+          const author = m.user ? await getUserDisplayName(teamId, m.user).catch(() => m.user) : (m.username || 'bot');
+          threadContext.push({ author, text: (m.text || '').slice(0, 500) });
+        }
+      } catch (e) { /* スレッド取れなくても続行 */ }
+    }
+
+    const result = await analyzeTask({
+      title: task.title,
+      description: task.description,
+      requesterName,
+      dueDate: task.due_date ? String(task.due_date).slice(0, 10) : null,
+      threadContext,
+    });
+
+    await dbQuery(
+      `UPDATE tasks SET ai_summary=$2, ai_type=$3, ai_key_points=$4::jsonb, ai_generated_at=now()
+       WHERE id=$1 AND team_id=$5`,
+      [taskId, result.summary, result.type, JSON.stringify(result.key_points), teamId]
+    );
+    return result;
+  }
+
+  // 手動トリガ: 解析結果を返す＋DB保存
+  expressApp.post("/api/dashboard/tasks/:id/ai-analyze", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const result = await analyzeAndPersist(teamId, req.params.id);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      console.error('[AI] analyze error:', e.message);
+      res.status(500).json({ error: 'internal', message: e.message });
+    }
+  });
+
+  // 解析結果取得（生成済みのキャッシュを返す。未生成なら 404）
+  expressApp.get("/api/dashboard/tasks/:id/ai-summary", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [row] } = await dbQuery(
+        `SELECT ai_summary, ai_type, ai_key_points, ai_generated_at
+         FROM tasks WHERE id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!row || !row.ai_summary) return res.status(404).json({ error: 'not_generated' });
+      res.json({
+        summary: row.ai_summary,
+        type: row.ai_type,
+        key_points: row.ai_key_points || [],
+        generated_at: row.ai_generated_at,
+      });
+    } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
   expressApp.get("/api/dashboard/tasks/:id/thread", authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;

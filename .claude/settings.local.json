@@ -108,7 +108,10 @@
       "Bash(curl -s \"https://ieyasu.co/docs/api.html\")",
       "Bash(curl -s \"https://ieyasu.co/docs/openapi.json\" -o /tmp/hrmos-openapi.json)",
       "Bash(curl -s \"https://ieyasu.co/docs/openapi.json\" -o /e/dev/slack-task-demo/_hrmos.json)",
-      "Bash(node -c src/features/ieyasu.js)"
+      "Bash(node -c src/features/ieyasu.js)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(node -c src/features/ai-assistant.js)"
     ]
   }
 }

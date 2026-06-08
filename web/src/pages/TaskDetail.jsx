@@ -70,6 +70,9 @@ export default function TaskDetail() {
             </div>
           </div>
 
+          {/* AI秘書（Claude Haiku 4.5） */}
+          <AiSummarySection taskId={task.id} />
+
           <div className="task-detail-section">
             <h3>コメント ({comments.length})</h3>
             <div className="comments-list">
@@ -148,6 +151,88 @@ export default function TaskDetail() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// AI秘書セクション
+function AiSummarySection({ taskId }) {
+  const [data, setData] = useState(null);   // {summary, type, key_points, generated_at}
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    api.taskAiSummary(taskId)
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  const generate = async () => {
+    setGenerating(true); setErr('');
+    try {
+      const r = await api.taskAiAnalyze(taskId);
+      setData({
+        summary: r.summary, type: r.type, key_points: r.key_points,
+        generated_at: new Date().toISOString(),
+      });
+    } catch (e) { setErr(e.message || '生成失敗'); }
+    finally { setGenerating(false); }
+  };
+
+  const typeColors = {
+    '確認': { bg: '#dbeafe', fg: '#1e40af' },
+    '対応': { bg: '#fef3c7', fg: '#92400e' },
+    '思考': { bg: '#ede9fe', fg: '#5b21b6' },
+    '作業': { bg: '#dcfce7', fg: '#15803d' },
+    'その他': { bg: '#f1f5f9', fg: '#64748b' },
+  };
+  const c = typeColors[data?.type] || typeColors['その他'];
+
+  return (
+    <div className="task-detail-section" style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderRadius: 10, padding: '14px 16px', border: '1px solid #fde68a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: '1.1rem' }}>🐶</span>
+        <h3 style={{ margin: 0, fontSize: '0.9rem', color: '#92400e', fontWeight: 800 }}>AI秘書</h3>
+        {data?.type && (
+          <span style={{ padding: '2px 10px', borderRadius: 99, background: c.bg, color: c.fg, fontSize: '0.74rem', fontWeight: 700 }}>
+            {data.type}
+          </span>
+        )}
+        <button onClick={generate} disabled={generating}
+          style={{ marginLeft: 'auto', padding: '4px 12px', borderRadius: 6, border: '1px solid #f59e0b', background: '#fef3c7', color: '#92400e', cursor: generating ? 'not-allowed' : 'pointer', fontSize: '0.74rem', fontWeight: 700 }}>
+          {generating ? '生成中…' : (data ? '🔄 再生成' : '✨ 要約を生成')}
+        </button>
+      </div>
+
+      {loading && !data && <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>読み込み中…</div>}
+      {err && <div style={{ fontSize: '0.76rem', color: '#dc2626' }}>エラー: {err}</div>}
+
+      {!loading && !data && !generating && (
+        <div style={{ fontSize: '0.78rem', color: '#a16207' }}>
+          「✨ 要約を生成」をクリックすると、Claude Haiku 4.5 がタスクの要約と分類を返します。
+        </div>
+      )}
+
+      {data && (
+        <>
+          <div style={{ fontSize: '0.88rem', color: '#0f172a', lineHeight: 1.6, marginBottom: data.key_points?.length ? 8 : 0 }}>
+            {data.summary}
+          </div>
+          {data.key_points?.length > 0 && (
+            <ul style={{ margin: 0, paddingLeft: 18, color: '#475569', fontSize: '0.8rem', lineHeight: 1.7 }}>
+              {data.key_points.map((p, i) => <li key={i}>{p}</li>)}
+            </ul>
+          )}
+          {data.generated_at && (
+            <div style={{ fontSize: '0.64rem', color: '#a16207', marginTop: 6 }}>
+              生成: {new Date(data.generated_at).toLocaleString('ja-JP')}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

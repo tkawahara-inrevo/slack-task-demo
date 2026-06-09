@@ -83,7 +83,8 @@ function YomiTimeline({ activities, yomiFlow }) {
     .filter(a => a.activity_type === 'yomi_change')
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   const flowSteps = (yomiFlow || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (yomiChanges.length === 0 && flowSteps.length === 0) return null;
+  const allCount = (activities || []).length;
+  if (allCount === 0 && flowSteps.length === 0) return null;
 
   const yomiColor = (y) => {
     if (!y) return '#94a3b8';
@@ -116,9 +117,9 @@ function YomiTimeline({ activities, yomiFlow }) {
     <div style={{ background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderRadius: 10, padding: '12px 16px', marginBottom: 14, border: '1px solid #fde68a' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
         <span style={{ fontSize: '0.95rem' }}>📊</span>
-        <span style={{ fontWeight: 800, fontSize: 14, color: '#92400e' }}>ヨミ推移タイムライン</span>
+        <span style={{ fontWeight: 800, fontSize: 14, color: '#92400e' }}>推移＆活動 タイムライン</span>
         <span style={{ fontSize: 11, color: '#a16207', marginLeft: 'auto' }}>
-          {flowSteps.length > 0 ? `kintone履歴 ${flowSteps.length}段階 / ` : ''}{yomiChanges.length}回の変更
+          {flowSteps.length > 0 ? `kintone履歴 ${flowSteps.length}段階 / ` : ''}ヨミ変更 {yomiChanges.length}回・活動 {allCount - yomiChanges.length}件
         </span>
       </div>
 
@@ -143,29 +144,53 @@ function YomiTimeline({ activities, yomiFlow }) {
         </div>
       )}
 
+      {/* 推移＋活動 統合タイムライン（古い順） */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {yomiChanges.map((a, i) => {
-          const dir = direction(a.metadata?.from, a.metadata?.to);
-          const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : dir === 'won' ? '✅' : dir === 'lost' ? '❌' : '→';
-          const arrowColor = dir === 'up' || dir === 'won' ? '#059669' : (dir === 'down' || dir === 'lost') ? '#dc2626' : '#94a3b8';
-          return (
-            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fff', borderRadius: 6, fontSize: 12 }}>
-              <span style={{ fontSize: 10, color: '#a16207', minWidth: 80 }}>{fmtDate(a.created_at)}</span>
-              {a.metadata?.from && (
-                <span style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(a.metadata.from), color: yomiColor(a.metadata.from), fontSize: 11, fontWeight: 700 }}>
-                  {a.metadata.from}
-                </span>
-              )}
-              <span style={{ color: arrowColor, fontWeight: 800, fontSize: 13 }}>{arrow}</span>
-              <span style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(a.metadata?.to), color: yomiColor(a.metadata?.to), fontSize: 11, fontWeight: 700 }}>
-                {a.metadata?.to || '?'}
-              </span>
-              <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>
-                {a.metadata?.trigger === 'kintone-sync' ? '🔄 kintone' : (a.displayName || a.user_id || '')}
-              </span>
-            </div>
-          );
-        })}
+        {(activities || [])
+          .slice()
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+          .map((a, i) => {
+            const isYomi = a.activity_type === 'yomi_change';
+            if (isYomi) {
+              const dir = direction(a.metadata?.from, a.metadata?.to);
+              const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : dir === 'won' ? '✅' : dir === 'lost' ? '❌' : '→';
+              const arrowColor = dir === 'up' || dir === 'won' ? '#059669' : (dir === 'down' || dir === 'lost') ? '#dc2626' : '#94a3b8';
+              return (
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: '#fff', borderRadius: 6, fontSize: 12, border: '2px solid #fde68a', boxShadow: '0 1px 2px rgba(252,211,77,0.2)' }}>
+                  <span style={{ fontSize: 10, color: '#a16207', minWidth: 80, fontWeight: 700 }}>{fmtDate(a.created_at)}</span>
+                  <span style={{ fontSize: 13 }}>📊</span>
+                  {a.metadata?.from && (
+                    <span style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(a.metadata.from), color: yomiColor(a.metadata.from), fontSize: 11, fontWeight: 700 }}>
+                      {a.metadata.from}
+                    </span>
+                  )}
+                  <span style={{ color: arrowColor, fontWeight: 800, fontSize: 13 }}>{arrow}</span>
+                  <span style={{ padding: '2px 8px', borderRadius: 12, background: yomiBg(a.metadata?.to), color: yomiColor(a.metadata?.to), fontSize: 11, fontWeight: 700 }}>
+                    {a.metadata?.to || '?'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>
+                    {a.metadata?.trigger === 'kintone-sync' ? '🔄 kintone' : (a.displayName || a.user_id || '')}
+                  </span>
+                </div>
+              );
+            }
+            // 通常活動: コンパクト表示
+            const icon = actIcon(a.activity_type);
+            const label = actLabel(a.activity_type);
+            const preview = (a.content || '').replace(/\n+/g, ' ').slice(0, 60);
+            return (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', fontSize: 11, color: '#64748b', borderLeft: '2px solid #fde68a', marginLeft: 4 }}>
+                <span style={{ fontSize: 10, color: '#94a3b8', minWidth: 76 }}>{fmtDate(a.created_at)}</span>
+                <span style={{ fontSize: 12 }}>{icon}</span>
+                <span style={{ fontWeight: 600, minWidth: 50 }}>{label}</span>
+                {a.result && (
+                  <span style={{ fontSize: 10, background: '#e3f2fd', color: '#1976d2', padding: '1px 6px', borderRadius: 10 }}>{a.result}</span>
+                )}
+                {preview && <span style={{ color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{preview}{(a.content || '').length > 60 ? '…' : ''}</span>}
+                <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{a.displayName || ''}</span>
+              </div>
+            );
+          })}
       </div>
     </div>
   );

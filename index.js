@@ -291,6 +291,12 @@ registerSourceDoneListener({
   app,
   dbGetTaskBySource,
   dbUpdateStatus,
+  dbUpsertCompletion,
+  dbCountCompletions,
+  dbCountTargets,
+  dbListTargetUserIds,
+  dbUpdateBroadcastCounts,
+  dbQuery,
   notifyTaskSimpleDM,
 });
 

@@ -11,7 +11,7 @@
 //   - 元メッセージに ✅（target本人）→ その人の完了として記録（全員揃えば全体done）
 //   - 元メッセージから ✅（target本人）→ その人の完了を取り消し（doneだった場合 in_progress に戻る）
 
-const DONE_REACTION = 'white_check_mark';
+const DONE_REACTION = '済';
 
 async function syncTaskDoneReaction(client, task) {
   if (!client || !task || !task.channel_id || !task.message_ts) return;

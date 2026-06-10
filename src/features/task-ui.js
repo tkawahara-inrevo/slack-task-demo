@@ -667,6 +667,22 @@ try {
   console.error("create result notify failed:", e?.data || e);
 }
 
+// 元メッセージへタスク化リアクション付与（チャンネル投稿が起点の時のみ）
+if (!isStandalone && !isDmLikeSource && channelId && parentTs) {
+  try {
+    await client.reactions.add({
+      channel: channelId,
+      timestamp: parentTs,
+      name: "pushpin",
+    });
+  } catch (e) {
+    const err = e?.data?.error || "";
+    if (!/already_reacted|no_reaction/.test(err)) {
+      console.warn("task-created reaction add fail:", err || e.message);
+    }
+  }
+}
+
     try {
       await publishHomeBurst(client, teamId, [
         actorUserId,

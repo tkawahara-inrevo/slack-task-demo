@@ -89,8 +89,20 @@ async function getAllUsers(token) {
   return users;
 }
 
+// ── 本日の打刻状況取得（指定ユーザー） ───────────────────────
+// 戻り値: { stamping_start_at, stamping_end_at } | null
+async function getDailyWorkOutput(token, hrmosUserId, dateYmd) {
+  const res = await ieyasuRequest({
+    path: `/api/${COMPANY}/v1/work_outputs/daily/${dateYmd}?user_id=${hrmosUserId}`,
+    auth: `Token ${token}`,
+  });
+  if (res.status !== 200 || !Array.isArray(res.body)) return null;
+  return res.body.find(r => Number(r.user_id) === Number(hrmosUserId)) || null;
+}
+
 // ── メインの打刻関数 ───────────────────────────────────────────
 // type: 1=出勤 / 2=退勤
+// 戻り値: { ok, skipped?, alreadyAt?, type, typeName, email, userId, reason? }
 async function stampAttendance(slackClient, slackUserId, type) {
   if (!SECRET_KEY) {
     console.warn('[HRMOS] IEYASU_API_TOKEN not set');
@@ -98,7 +110,7 @@ async function stampAttendance(slackClient, slackUserId, type) {
   }
 
   try {
-    // 1. Slackメール取得（users:read.email スコープで動作）
+    // 1. Slackメール取得
     const userRes = await slackClient.users.info({ user: slackUserId });
     const email = (userRes.user?.profile?.email || '').toLowerCase();
     if (!email) return { ok: false, reason: 'no_email' };
@@ -114,7 +126,28 @@ async function stampAttendance(slackClient, slackUserId, type) {
       return { ok: false, reason: 'user_not_found', email };
     }
 
-    // 4. 打刻
+    const typeName = type === 1 ? '出勤' : '退勤';
+
+    // 4. 二重打刻チェック: 本日の打刻状況を取得
+    // JSTの今日（HRMOSは社員ごとの締め日考慮の業務日付）
+    const now = new Date();
+    const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 9 * 60) * 60000);
+    const todayYmd = jst.toISOString().slice(0, 10);
+    try {
+      const daily = await getDailyWorkOutput(token, hrUser.id, todayYmd);
+      if (daily) {
+        const alreadyAt = type === 1 ? daily.stamping_start_at : daily.stamping_end_at;
+        if (alreadyAt) {
+          console.log(`[HRMOS] ${typeName}打刻 既存あり: ${email} ${alreadyAt} → skip`);
+          return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
+        }
+      }
+    } catch (e) {
+      // チェック失敗時はそのまま打刻に進む（致命的ではない）
+      console.warn('[HRMOS] daily check error (continuing):', e.message);
+    }
+
+    // 5. 打刻
     const stampRes = await ieyasuRequest({
       method: 'POST',
       path: `/api/${COMPANY}/v1/stamp_logs`,
@@ -123,12 +156,11 @@ async function stampAttendance(slackClient, slackUserId, type) {
     });
 
     if (stampRes.status === 200 || stampRes.status === 201) {
-      const typeName = type === 1 ? '出勤' : '退勤';
       console.log(`[HRMOS] ${typeName}打刻 OK: ${email} (user_id=${hrUser.id})`);
       return { ok: true, type, typeName, email, userId: hrUser.id };
     } else {
       console.warn(`[HRMOS] stamp failed:`, stampRes.body);
-      return { ok: false, reason: 'api_error', detail: stampRes.body };
+      return { ok: false, reason: 'api_error', detail: stampRes.body, userId: hrUser.id };
     }
   } catch (e) {
     console.error('[HRMOS] stampAttendance error:', e.message);

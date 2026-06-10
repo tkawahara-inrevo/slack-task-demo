@@ -3074,16 +3074,20 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     }
   }
 
-  // 失敗時の本人DM
-  async function notifyStampFailure(client, slackUserId, stampType, reason) {
-    const label = stampType === 1 ? '出勤' : '退勤';
-    const reasonText = {
+  function stampReasonText(reason) {
+    return {
       no_email: 'Slackプロフィールにメールアドレスが登録されていません',
       user_not_found: 'HRMOS側に同じメールの社員アカウントが見つかりません',
       api_error: 'HRMOSのAPIエラーで打刻できませんでした',
       exception: '通信エラーで打刻できませんでした',
       no_token: 'システム設定エラー（管理者へ）',
     }[reason] || `不明なエラー: ${reason}`;
+  }
+
+  // 失敗時の本人DM
+  async function notifyStampFailure(client, slackUserId, stampType, reason) {
+    const label = stampType === 1 ? '出勤' : '退勤';
+    const reasonText = stampReasonText(reason);
     try {
       const dm = await client.conversations.open({ users: slackUserId });
       const channel = dm?.channel?.id;
@@ -3097,6 +3101,25 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         ],
       });
     } catch (e) { console.warn('[IEYASU] DM通知失敗:', e.message); }
+  }
+
+  // 失敗時の日報スレッドへの公開返信（人事・上長も気づける）
+  async function postStampFailureToThread(client, channelId, messageTs, slackUserId, stampType, reason) {
+    if (!channelId || !messageTs) return;
+    const label = stampType === 1 ? '出勤' : '退勤';
+    const reasonText = stampReasonText(reason);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: messageTs,
+        text: `⚠️ HRMOS ${label}打刻に失敗`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn',
+            text: `⚠️ *HRMOS ${label}打刻に失敗しました* <@${slackUserId}>\n理由: ${reasonText}\n\n本人は HRMOS で手動打刻をお願いします。人事・上長の方はご確認ください。` } },
+        ],
+        unfurl_links: false, unfurl_media: false,
+      });
+    } catch (e) { console.warn('[IEYASU] スレッド通知失敗:', e.message); }
   }
 
   const doStamp = async (client, message, stampType) => {
@@ -3116,11 +3139,16 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     const result = await stampAttendance(client, targetUserId, stampType);
 
     if (result.ok) {
-      await addStampReaction(client, message.channel, message.ts, 'white_check_mark');
+      // 既打刻スキップ時は青✅、新規打刻時は緑✅で区別
+      const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';
+      await addStampReaction(client, message.channel, message.ts, reactionName);
+      if (result.skipped) {
+        console.log(`[IEYASU] ${label} 既打刻スキップ: ${result.email} @ ${result.alreadyAt}`);
+      }
       await dbQuery(
-        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, channel_id, message_ts)
-         VALUES (gen_random_uuid(), $1, $2, $3, true, $4, $5, $6)`,
-        [teamId, targetUserId, stampType, result.userId || null, message.channel, message.ts]
+        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, channel_id, message_ts, error_reason)
+         VALUES (gen_random_uuid(), $1, $2, $3, true, $4, $5, $6, $7)`,
+        [teamId, targetUserId, stampType, result.userId || null, message.channel, message.ts, result.skipped ? 'already_stamped' : null]
       ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
     } else {
       // 失敗: 一時的なら retry_state='pending' で10分後にリトライ
@@ -3133,9 +3161,10 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
       console.warn(`[IEYASU] ${label}打刻失敗 (retry=${willRetry}):`, result);
       if (!willRetry) {
-        // 恒久エラーは即DM＋⚠️
+        // 恒久エラーは即DM＋スレッド返信＋⚠️
         await addStampReaction(client, message.channel, message.ts, 'warning');
         await notifyStampFailure(client, targetUserId, stampType, result.reason);
+        await postStampFailureToThread(client, message.channel, message.ts, targetUserId, stampType, result.reason);
       }
       // 一時エラー時はリアクション保留（10分後worker で結果に応じて付与）
     }
@@ -3162,15 +3191,17 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         for (const row of rows) {
           const result = await stampAttendance(app.client, row.slack_user_id, row.stamp_type);
           if (result.ok) {
-            await addStampReaction(app.client, row.channel_id, row.message_ts, 'white_check_mark');
+            const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';
+            await addStampReaction(app.client, row.channel_id, row.message_ts, reactionName);
             await dbQuery(
-              `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state='retried_ok', error_reason=NULL WHERE id=$1`,
-              [row.id, result.userId || null]
+              `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state='retried_ok', error_reason=$3 WHERE id=$1`,
+              [row.id, result.userId || null, result.skipped ? 'already_stamped' : null]
             ).catch(() => {});
-            console.log(`[IEYASU] retry成功: user=${row.slack_user_id} type=${row.stamp_type}`);
+            console.log(`[IEYASU] retry成功: user=${row.slack_user_id} type=${row.stamp_type} skipped=${!!result.skipped}`);
           } else {
             await addStampReaction(app.client, row.channel_id, row.message_ts, 'warning');
             await notifyStampFailure(app.client, row.slack_user_id, row.stamp_type, result.reason);
+            await postStampFailureToThread(app.client, row.channel_id, row.message_ts, row.slack_user_id, row.stamp_type, result.reason);
             await dbQuery(
               `UPDATE hrmos_stamps SET retry_state='final_failed', error_reason=$2 WHERE id=$1`,
               [row.id, result.reason]

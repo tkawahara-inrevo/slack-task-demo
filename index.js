@@ -13,6 +13,7 @@ const { registerTaskUiFeature } = require("./src/features/task-ui");
 const { generateToken, registerDashboardApi } = require("./src/features/dashboard-api");
 const { stampAttendance } = require("./src/features/ieyasu");
 const { registerPochiAiSlack } = require("./src/features/pochi-ai-slack");
+const { registerSourceDoneListener, syncTaskDoneReaction } = require("./src/features/task-source-reaction");
 const { INQUIRY_CHANNEL_ID, handleInquiryMessage } = require("./src/features/crm-inquiry");
 const {
   __cacheGet,
@@ -284,6 +285,13 @@ registerPochiAiSlack({
   app,
   getUserDisplayName,
   getTeamIdFromBody,
+});
+
+registerSourceDoneListener({
+  app,
+  dbGetTaskBySource,
+  dbUpdateStatus,
+  notifyTaskSimpleDM,
 });
 
 registerAdminFeature({

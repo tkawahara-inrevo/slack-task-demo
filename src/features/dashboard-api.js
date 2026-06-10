@@ -4254,7 +4254,8 @@ function registerDashboardApi(deps) {
 
       // ステータス変更
       if (status && status !== task.status) {
-        await dbUpdateStatus(teamId, req.params.id, status);
+        const stUpd = await dbUpdateStatus(teamId, req.params.id, status);
+        try { if (stUpd) await require('./task-source-reaction').syncTaskDoneReaction(slackClient, stUpd); } catch (e) {}
       }
 
       // フィールド更新（title は description カラムに保存 — 既存DBの構造に合わせる）
@@ -4327,6 +4328,7 @@ function registerDashboardApi(deps) {
         } catch (e) {
           console.error("Slack sync error (PATCH /tasks/:id/status):", e);
         }
+        try { await require('./task-source-reaction').syncTaskDoneReaction(slackClient, updated); } catch (e) {}
       }
       res.json({ task: updated });
     } catch (e) {

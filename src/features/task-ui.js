@@ -1,4 +1,6 @@
-﻿function registerTaskUiFeature(deps) {
+﻿const { syncTaskDoneReaction } = require('./task-source-reaction');
+
+function registerTaskUiFeature(deps) {
   const {
     app,
     __cacheGet,
@@ -952,7 +954,8 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
       if (doneCount >= total && total > 0) {
         const fresh = await dbGetTaskById(teamId, taskId);
         if (fresh && !["done", "cancelled"].includes(fresh.status)) {
-          await dbUpdateStatus(teamId, taskId, "done");
+          const upd = await dbUpdateStatus(teamId, taskId, "done");
+          if (upd) await syncTaskDoneReaction(client, upd);
         }
 
         if (fresh && !fresh.notified_at) {
@@ -1005,6 +1008,7 @@ async function handleCompleteTask({ client, body, teamId, taskId }) {
     // personal
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
+    await syncTaskDoneReaction(client, updated);
 
     try {
       const toNotify = Array.from(
@@ -1103,6 +1107,7 @@ app.action("confirm_broadcast_done", async ({ ack, body, action, client }) => {
     // waiting縺ｧ縺ｪ縺上※繧ょｼｷ蛻ｶ逧・↓done縺ｸ
     const updated = await dbUpdateStatus(teamId, taskId, "done");
     if (!updated) return;
+    await syncTaskDoneReaction(client, updated);
 
     // 笘・夂衍・壼ｮ御ｺ・ｼ・roadcast・峨・縲御ｾ晞ｼ閠・□縺代・
     try {
@@ -1194,6 +1199,7 @@ app.action("status_select", async ({ ack, body, action, client }) => {
 
     const updated = await dbUpdateStatus(teamId, taskId, nextStatus);
     if (!updated) return;
+    await syncTaskDoneReaction(client, updated);
 
     if (body.view?.callback_id === "list_detail_modal") {
       const meta2 = safeJsonParse(body.view?.private_metadata || "{}") || {};
@@ -1446,7 +1452,8 @@ app.action("remove_target_user", async ({ ack, body, action, client }) => {
 
     const doneCount = await dbCountCompletions(teamId, taskId);
     if (newTotal > 0 && doneCount >= newTotal && !["done", "cancelled"].includes(task.status)) {
-      await dbUpdateStatus(teamId, taskId, "done");
+      const upd = await dbUpdateStatus(teamId, taskId, "done");
+      if (upd) await syncTaskDoneReaction(client, upd);
     }
 
     // 現在のページを維持してモーダルを再描画（hash不一致時もhashなしでリトライ）
@@ -2726,6 +2733,7 @@ app.action("reopen_task", async ({ ack, body, action, client }) => {
     // 譛ｪ螳御ｺ・∈謌ｻ縺呻ｼ・pen 縺ｧ繧ゅ＞縺・￠縺ｩ縲ゞI逧・↓縺ｯ in_progress 縺瑚・辟ｶ・・
     const updated = await dbUpdateStatus(teamId, taskId, "in_progress");
     if (!updated) return;
+    await syncTaskDoneReaction(client, updated);
 
     // 隧ｳ邏ｰ繝｢繝ｼ繝繝ｫ繧貞・謠冗判・井ｻ企幕縺・※繧九Δ繝ｼ繝繝ｫ・・
     if (body.view?.id) {

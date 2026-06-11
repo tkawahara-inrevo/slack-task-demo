@@ -1744,7 +1744,7 @@ async function publishHomeV2({ client, teamId, userId }) {
     { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
   ];
 
-  // 検索ボックス（Enterで検索発火）
+  // 検索ボックス（タイプ止めて0.6秒で検索発火、ボタン不要）
   blocks.push({
     type: "input",
     block_id: "home_search_block",
@@ -1754,9 +1754,9 @@ async function publishHomeV2({ client, teamId, userId }) {
     element: {
       type: "plain_text_input",
       action_id: "home_search_input",
-      placeholder: { type: "plain_text", text: "タスクを検索…" },
+      placeholder: { type: "plain_text", text: "タスクを検索（入力すれば自動で絞り込み）" },
       initial_value: searchQuery || "",
-      dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] },
+      dispatch_action_config: { trigger_actions_on: ["on_character_entered"] },
     },
   });
 
@@ -1773,19 +1773,12 @@ async function publishHomeV2({ client, teamId, userId }) {
       options: stateOptions,
       initial_option: stateOptions.find(o => o.value === scopeKey) || stateOptions[0],
     },
-    {
-      type: "button",
-      action_id: "home_search_submit",
-      style: "primary",
-      text: { type: "plain_text", text: "🔍 検索" },
-      value: "submit",
-    },
   ];
   if (searchQuery) {
     filterButtons.push({
       type: "button",
       action_id: "home_search_clear",
-      text: { type: "plain_text", text: "クリア" },
+      text: { type: "plain_text", text: "検索クリア" },
       value: "clear",
     });
   }
@@ -1793,6 +1786,7 @@ async function publishHomeV2({ client, teamId, userId }) {
     {
       type: "button",
       action_id: "open_home_task_create_modal",
+      style: "primary",
       text: { type: "plain_text", text: "＋ タスク作成" },
       value: JSON.stringify({ teamId, userId }),
     },
@@ -1951,31 +1945,38 @@ async function publishHomeV2({ client, teamId, userId }) {
   });
 }
 
-// ホームの検索 input：Enter で検索実行
+// ホーム検索: タイプごとに発火する on_character_entered を、
+// サーバー側で 600ms デバウンス（タイプ止めた時だけ republish）
+const _pendingSearch = new Map(); // key=`${teamId}:${userId}` → Timeout
+const _lastSearchQuery = new Map(); // key → 最後に適用したクエリ
+
 app.action("home_search_input", async ({ ack, body, action, client }) => {
   await ack();
   try {
     const teamId = getTeamIdFromBody(body);
     const userId = getUserIdFromBody(body);
-    const query = action?.value || body.view?.state?.values?.home_search_block?.home_search_input?.value || "";
-    setHomeState(teamId, userId, { searchQuery: query });
-    await publishHome({ client, teamId, userId });
+    if (!teamId || !userId) return;
+    const query = (action?.value ?? body.view?.state?.values?.home_search_block?.home_search_input?.value ?? "").trim();
+    const key = `${teamId}:${userId}`;
+
+    // 既存の保留をクリア
+    const prevTimer = _pendingSearch.get(key);
+    if (prevTimer) clearTimeout(prevTimer);
+
+    const timer = setTimeout(async () => {
+      _pendingSearch.delete(key);
+      if (_lastSearchQuery.get(key) === query) return; // 変化なしならスキップ
+      _lastSearchQuery.set(key, query);
+      try {
+        setHomeState(teamId, userId, { searchQuery: query });
+        await publishHome({ client, teamId, userId });
+      } catch (e) {
+        console.error("home_search debounced publish error:", e?.data || e);
+      }
+    }, 600);
+    _pendingSearch.set(key, timer);
   } catch (e) {
     console.error("home_search_input error:", e?.data || e);
-  }
-});
-
-// ホームの 🔍 検索ボタン
-app.action("home_search_submit", async ({ ack, body, client }) => {
-  await ack();
-  try {
-    const teamId = getTeamIdFromBody(body);
-    const userId = getUserIdFromBody(body);
-    const query = body.view?.state?.values?.home_search_block?.home_search_input?.value || "";
-    setHomeState(teamId, userId, { searchQuery: query });
-    await publishHome({ client, teamId, userId });
-  } catch (e) {
-    console.error("home_search_submit error:", e?.data || e);
   }
 });
 

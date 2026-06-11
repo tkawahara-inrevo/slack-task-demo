@@ -1616,6 +1616,8 @@ async function publishHomeV2({ client, teamId, userId }) {
 
   const personalScope = (rangeKey === "to_me" || rangeKey === "requested_by_me") ? rangeKey : "all";
   const fetchLimit = 200;
+  const searchQuery = String(st.searchQuery || "").trim();
+  const q = searchQuery.toLowerCase();
 
   const [personalRaw, broadcastRaw] = await Promise.all([
     dbListPersonalTasksByStatusesWithScope(teamId, statuses, personalScope, userId, fetchLimit),
@@ -1678,6 +1680,15 @@ async function publishHomeV2({ client, teamId, userId }) {
 
   const dueYmdOf = (t) => slackDateYmd(t?.due_date) || (typeof t?.due_date === "string" ? t.due_date.slice(0, 10) : "");
 
+  // 検索フィルタ
+  let displayTasks = tasks;
+  if (q) {
+    displayTasks = tasks.filter(t => {
+      const hay = `${t.title || ""} ${t.description || ""} ${t.assignee_label || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
   // グルーピング: 期限切れ / 今日中 / 明日以降 / 期限なし
   const groups = {
     overdue: [],
@@ -1686,7 +1697,7 @@ async function publishHomeV2({ client, teamId, userId }) {
     noDue: [],
     done: [],
   };
-  for (const t of tasks) {
+  for (const t of displayTasks) {
     if (isDoneView) { groups.done.push(t); continue; }
     const ymd = dueYmdOf(t);
     if (!ymd) groups.noDue.push(t);
@@ -1733,42 +1744,64 @@ async function publishHomeV2({ client, teamId, userId }) {
     { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
   ];
 
+  // 検索ボックス
   blocks.push({
-    type: "actions",
-    elements: [
-      {
-        type: "static_select",
-        action_id: "home_broadcast_scope_select",
-        options: rangeOptions,
-        initial_option: rangeOptions.find(o => o.value === rangeKey) || rangeOptions[0],
-      },
-      {
-        type: "static_select",
-        action_id: "home_scope_select",
-        options: stateOptions,
-        initial_option: stateOptions.find(o => o.value === scopeKey) || stateOptions[0],
-      },
-      {
-        type: "button",
-        action_id: "open_task_list_modal",
-        text: { type: "plain_text", text: "🔍 検索/一覧" },
-        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
-      },
-      {
-        type: "button",
-        action_id: "open_home_task_create_modal",
-        text: { type: "plain_text", text: "＋ タスク作成" },
-        style: "primary",
-        value: JSON.stringify({ teamId, userId }),
-      },
-      {
-        type: "button",
-        action_id: "open_user_settings_from_home",
-        text: { type: "plain_text", text: "⚙️ 設定" },
-        value: JSON.stringify({ teamId, userId }),
-      },
-    ],
+    type: "input",
+    block_id: "home_search_block",
+    optional: true,
+    label: { type: "plain_text", text: "🔍 検索" },
+    element: {
+      type: "plain_text_input",
+      action_id: "home_search_input",
+      placeholder: { type: "plain_text", text: "タスクを検索…" },
+      initial_value: searchQuery || "",
+    },
   });
+
+  const filterButtons = [
+    {
+      type: "static_select",
+      action_id: "home_broadcast_scope_select",
+      options: rangeOptions,
+      initial_option: rangeOptions.find(o => o.value === rangeKey) || rangeOptions[0],
+    },
+    {
+      type: "static_select",
+      action_id: "home_scope_select",
+      options: stateOptions,
+      initial_option: stateOptions.find(o => o.value === scopeKey) || stateOptions[0],
+    },
+    {
+      type: "button",
+      action_id: "home_search_submit",
+      style: "primary",
+      text: { type: "plain_text", text: "🔍 検索" },
+      value: "submit",
+    },
+  ];
+  if (searchQuery) {
+    filterButtons.push({
+      type: "button",
+      action_id: "home_search_clear",
+      text: { type: "plain_text", text: "クリア" },
+      value: "clear",
+    });
+  }
+  filterButtons.push(
+    {
+      type: "button",
+      action_id: "open_home_task_create_modal",
+      text: { type: "plain_text", text: "＋ タスク作成" },
+      value: JSON.stringify({ teamId, userId }),
+    },
+    {
+      type: "button",
+      action_id: "open_user_settings_from_home",
+      text: { type: "plain_text", text: "⚙️ 設定" },
+      value: JSON.stringify({ teamId, userId }),
+    },
+  );
+  blocks.push({ type: "actions", elements: filterButtons });
   blocks.push({ type: "divider" });
 
   // ── タスクレンダリング ──────────────────────
@@ -1906,6 +1939,36 @@ async function publishHomeV2({ client, teamId, userId }) {
     view: { type: "home", callback_id: "home", blocks },
   });
 }
+
+// ホームの検索 input：値変更では何もしない（🔍検索 ボタン押下で確定）
+app.action("home_search_input", async ({ ack }) => { await ack(); });
+
+// ホームの 🔍 検索ボタン
+app.action("home_search_submit", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const query = body.view?.state?.values?.home_search_block?.home_search_input?.value || "";
+    setHomeState(teamId, userId, { searchQuery: query });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_search_submit error:", e?.data || e);
+  }
+});
+
+// 検索クリア
+app.action("home_search_clear", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    setHomeState(teamId, userId, { searchQuery: "" });
+    await publishHome({ client, teamId, userId });
+  } catch (e) {
+    console.error("home_search_clear error:", e?.data || e);
+  }
+});
 
 app.options("assignee_groups_select", async ({ ack, payload }) => {
   try {

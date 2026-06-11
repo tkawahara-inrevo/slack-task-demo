@@ -1645,25 +1645,36 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
   const meta = JSON.stringify({ teamId, userId, rangeKey, scopeKey, page, searchQuery });
   const blocks = [];
 
-  // 検索フィールド（Enterで適用）
+  // 検索フィールド（🔍ボタン押下で適用）
   blocks.push({
     type: "input",
     block_id: "search_block",
-    dispatch_action: true,
     optional: true,
     label: { type: "plain_text", text: "🔍 検索" },
     element: {
       type: "plain_text_input",
       action_id: "my_tasks_search_input",
-      placeholder: { type: "plain_text", text: "タイトル・本文・担当で絞り込み（Enterで検索）" },
+      placeholder: { type: "plain_text", text: "タイトル・本文・担当で絞り込み" },
       initial_value: searchQuery || "",
-      dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] },
     },
   });
 
   blocks.push({
     type: "actions",
     elements: [
+      {
+        type: "button",
+        action_id: "my_tasks_search_submit",
+        style: "primary",
+        text: { type: "plain_text", text: "🔍 検索" },
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
+      },
+      ...(q ? [{
+        type: "button",
+        action_id: "my_tasks_search_clear",
+        text: { type: "plain_text", text: "検索クリア" },
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
+      }] : []),
       {
         type: "static_select",
         action_id: "my_tasks_scope_select",
@@ -1676,12 +1687,6 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
         options: statusOptions,
         initial_option: statusOptions.find((o) => o.value === scopeKey) || statusOptions[0],
       },
-      ...(q ? [{
-        type: "button",
-        action_id: "my_tasks_search_clear",
-        text: { type: "plain_text", text: "検索クリア" },
-        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
-      }] : []),
     ],
   });
   blocks.push({ type: "divider" });

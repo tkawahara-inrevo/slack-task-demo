@@ -2375,14 +2375,18 @@ async function handleTaskListModalPage({ ack, body, client }) {
 app.action("task_list_modal_prev", handleTaskListModalPage);
 app.action("task_list_modal_next", handleTaskListModalPage);
 
-// 検索 input
-app.action("my_tasks_search_input", async ({ ack, body, client }) => {
+// 検索 input は値変更を発火しない（dispatch_action 無し）
+// → 検索適用は 🔍 検索ボタン押下で行う
+app.action("my_tasks_search_input", async ({ ack }) => { await ack(); });
+
+// 🔍 検索ボタン: input の現在値を state から読み取って再描画
+app.action("my_tasks_search_submit", async ({ ack, body, client }) => {
   await ack();
   try {
     const teamId = getTeamIdFromBody(body);
     const userId = getUserIdFromBody(body);
     const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
-    const query = body.actions?.[0]?.value || "";
+    const query = body.view?.state?.values?.search_block?.my_tasks_search_input?.value || "";
     const view = await buildTaskListModalView({
       teamId,
       userId,
@@ -2393,7 +2397,7 @@ app.action("my_tasks_search_input", async ({ ack, body, client }) => {
     });
     await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
   } catch (e) {
-    console.error("my_tasks_search_input error:", e?.data || e);
+    console.error("my_tasks_search_submit error:", e?.data || e);
   }
 });
 

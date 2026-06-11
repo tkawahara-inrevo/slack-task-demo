@@ -1832,12 +1832,21 @@ async function publishHomeV2({ client, teamId, userId }) {
     const isDone = t.status === "done";
     const broadcastMark = t.task_type === "broadcast" ? "（一斉）" : "";
 
+    // 元メッセージへのリンク（あれば）
+    let sourceLink = "";
+    if (t.source_permalink) {
+      sourceLink = ` ・ <${t.source_permalink}|🔗 元メッセージへ>`;
+    } else if (t.channel_id && t.message_ts) {
+      const tsPart = String(t.message_ts).replace(".", "");
+      sourceLink = ` ・ <https://slack.com/archives/${t.channel_id}/p${tsPart}|🔗 元メッセージへ>`;
+    }
+
     // section: タイトル（太字なし）+ メタ情報を改行で結合
     const sectionBlock = {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${titleText}\n_<@${t.requester_user_id}> → ${assigneeDisplay(t)}${broadcastMark}　·　📅 ${dueLabel}_`,
+        text: `${titleText}\n_<@${t.requester_user_id}> → ${assigneeDisplay(t)}${broadcastMark}　·　📅 ${dueLabel}${sourceLink}_`,
       },
     };
 

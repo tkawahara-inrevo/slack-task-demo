@@ -1678,11 +1678,10 @@ async function publishHomeV2({ client, teamId, userId }) {
 
   const dueYmdOf = (t) => slackDateYmd(t?.due_date) || (typeof t?.due_date === "string" ? t.due_date.slice(0, 10) : "");
 
-  // グルーピング
+  // グルーピング: 期限切れ / 今日中 / 明日以降 / 期限なし
   const groups = {
     overdue: [],
     today: [],
-    week: [],
     later: [],
     noDue: [],
     done: [],
@@ -1693,7 +1692,6 @@ async function publishHomeV2({ client, teamId, userId }) {
     if (!ymd) groups.noDue.push(t);
     else if (ymd < todayYmd) groups.overdue.push(t);
     else if (ymd === todayYmd) groups.today.push(t);
-    else if (ymd <= weekEndYmd) groups.week.push(t);
     else groups.later.push(t);
   }
 
@@ -1708,13 +1706,13 @@ async function publishHomeV2({ client, teamId, userId }) {
   if (!isDoneView) {
     const overdueN = groups.overdue.length;
     const todayN = groups.today.length;
-    const weekN = groups.week.length;
-    const totalN = overdueN + todayN + weekN + groups.later.length + groups.noDue.length;
+    const laterN = groups.later.length;
+    const totalN = overdueN + todayN + laterN + groups.noDue.length;
     blocks.push({
       type: "context",
       elements: [{
         type: "mrkdwn",
-        text: `📊 未完了 *${totalN}* 件　/　🔴 期限切れ *${overdueN}*　🟡 今日 *${todayN}*　🟢 今週 *${weekN}*`,
+        text: `📊 未完了 *${totalN}* 件　/　🔴 期限切れ *${overdueN}*　🟡 今日中 *${todayN}*　🟢 明日以降 *${laterN}*`,
       }],
     });
   } else {
@@ -1822,12 +1820,11 @@ async function publishHomeV2({ client, teamId, userId }) {
   };
 
   const sectionConfig = isDoneView
-    ? [{ key: "done", icon: "✅", title: "完了済み", color: "" }]
+    ? [{ key: "done", icon: "✅", title: "完了済み" }]
     : [
         { key: "overdue", icon: "🔴", title: "期限切れ" },
-        { key: "today",   icon: "🟡", title: "今日が期限" },
-        { key: "week",    icon: "🟢", title: "今週中" },
-        { key: "later",   icon: "🔵", title: "それ以降" },
+        { key: "today",   icon: "🟡", title: "今日中" },
+        { key: "later",   icon: "🟢", title: "明日以降" },
         { key: "noDue",   icon: "⚪", title: "期限なし" },
       ];
 
@@ -1838,10 +1835,10 @@ async function publishHomeV2({ client, teamId, userId }) {
     const list = groups[sec.key];
     if (!list.length) continue;
 
-    // セクションヘッダー
+    // セクションヘッダー（大きな header + 件数 context で境目を強調）
     blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `${sec.icon} *${sec.title}*　_${list.length}件_` },
+      type: "header",
+      text: { type: "plain_text", text: `${sec.icon} ${sec.title}（${list.length}件）`, emoji: true },
     });
 
     const willRender = Math.min(list.length, SECTION_LIMIT);

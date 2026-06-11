@@ -1832,7 +1832,7 @@ async function publishHomeV2({ client, teamId, userId }) {
       ];
 
   const SECTION_LIMIT = 8; // 各セクション最大表示
-  const TASK_BLOCKS = 2; // section + actions
+  const TASK_BLOCKS = 3; // section + actions + divider
 
   for (const sec of sectionConfig) {
     const list = groups[sec.key];
@@ -1859,6 +1859,7 @@ async function publishHomeV2({ client, teamId, userId }) {
       if (sec.key === "overdue") dueLabel += "（期限切れ）";
       if (sec.key === "done") { dueIcon = "✅"; dueLabel = formatDueDateOnly(t.due_date) || "—"; }
       blocks.push(...renderTaskRow(t, dueIcon, dueLabel));
+      if (i < shown - 1) blocks.push({ type: "divider" });
     }
 
     if (list.length > shown) {

@@ -454,6 +454,10 @@ app.view("home_filters_modal", async ({ ack, body, view, client }) => {
 });
 
 async function publishHome({ client, teamId, userId }) {
+  // HOME_V2=1 で新ホームUIに切替（V1は無変更で残す）
+  if (process.env.HOME_V2 === "1") {
+    return publishHomeV2({ client, teamId, userId });
+  }
   await ensureHomeStateLoaded(teamId, userId);
   const st = getHomeState(teamId, userId);
   const statuses = st.scopeKey === "done" ? DONE_STATUSES : ACTIVE_STATUSES;
@@ -1594,6 +1598,296 @@ async function publishHome({ client, teamId, userId }) {
       callback_id: "home",
       blocks,
     },
+  });
+}
+
+// ============================================================================
+// publishHomeV2: 期限グルーピング + 色分け + クイック完了の新ホーム
+// HOME_V2=1 で有効化。データ取得は最小限（rangeKey: to_me/requested_by_me/all、
+// 部署フィルタ・パーソナルフィルタは詳細フィルタモーダルからのみ）。
+// ============================================================================
+async function publishHomeV2({ client, teamId, userId }) {
+  await ensureHomeStateLoaded(teamId, userId);
+  const st = getHomeState(teamId, userId);
+  const statuses = st.scopeKey === "done" ? DONE_STATUSES : ACTIVE_STATUSES;
+  const rangeKey = st.broadcastScopeKey || "to_me";
+  const scopeKey = st.scopeKey || "active";
+  const isDoneView = scopeKey === "done";
+
+  const personalScope = (rangeKey === "to_me" || rangeKey === "requested_by_me") ? rangeKey : "all";
+  const fetchLimit = 200;
+
+  const [personalRaw, broadcastRaw] = await Promise.all([
+    dbListPersonalTasksByStatusesWithScope(teamId, statuses, personalScope, userId, fetchLimit),
+    (rangeKey === "to_me" || rangeKey === "requested_by_me")
+      ? dbListBroadcastTasksByStatusesWithScope(teamId, statuses, rangeKey, userId, fetchLimit)
+      : dbListBroadcastTasksByStatuses(teamId, statuses, "all", fetchLimit),
+  ]);
+
+  // to_me で broadcast を補完取得（V1と同様、assigned だが完了済みでないものを拾う）
+  let broadcastTasks = broadcastRaw || [];
+  if (rangeKey === "to_me") {
+    const fallback = await dbListBroadcastTasksByStatuses(teamId, statuses, "all", Math.max(120, fetchLimit * 2));
+    const existing = new Set(broadcastTasks.map(t => String(t.id)));
+    const candidates = (fallback || []).filter(t => !existing.has(String(t.id)));
+    if (candidates.length) {
+      const ids = candidates.map(t => t.id);
+      const completedSet = await dbGetUserCompletedTaskIds(teamId, ids, userId).catch(() => new Set());
+      const assignedIds = new Set((await Promise.all(
+        candidates.map(async t => (await dbIsUserTarget(teamId, t.id, userId)) ? String(t.id) : null)
+      )).filter(Boolean));
+      for (const task of candidates) {
+        if (!assignedIds.has(String(task.id))) continue;
+        const alreadyCompleted = completedSet.has(task.id);
+        const shouldInclude = isDoneView ? (task.status === "done" || alreadyCompleted) : !alreadyCompleted;
+        if (shouldInclude) broadcastTasks.push(task);
+      }
+    }
+  }
+
+  // 重複排除 + ソート
+  const seen = new Set();
+  const tasks = [];
+  const all = [...(personalRaw || []), ...broadcastTasks];
+  all.sort((a, b) => {
+    const at = a?.due_date ? new Date(a.due_date).getTime() : null;
+    const bt = b?.due_date ? new Date(b.due_date).getTime() : null;
+    if (at === null && bt !== null) return 1;
+    if (at !== null && bt === null) return -1;
+    if (at !== null && bt !== null && at !== bt) return at - bt;
+    const ac = a?.created_at ? new Date(a.created_at).getTime() : 0;
+    const bc = b?.created_at ? new Date(b.created_at).getTime() : 0;
+    return bc - ac;
+  });
+  for (const t of all) {
+    const k = `${t.task_type || "personal"}:${t.id}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    tasks.push(t);
+  }
+
+  // JST 日付ユーティリティ
+  const todayYmd = todayJstYmd();
+  const addDaysYmd = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    const j = new Date(d.getTime() + (d.getTimezoneOffset() + 9 * 60) * 60000);
+    return j.toISOString().slice(0, 10);
+  };
+  const weekEndYmd = addDaysYmd(7);
+
+  const dueYmdOf = (t) => slackDateYmd(t?.due_date) || (typeof t?.due_date === "string" ? t.due_date.slice(0, 10) : "");
+
+  // グルーピング
+  const groups = {
+    overdue: [],
+    today: [],
+    week: [],
+    later: [],
+    noDue: [],
+    done: [],
+  };
+  for (const t of tasks) {
+    if (isDoneView) { groups.done.push(t); continue; }
+    const ymd = dueYmdOf(t);
+    if (!ymd) groups.noDue.push(t);
+    else if (ymd < todayYmd) groups.overdue.push(t);
+    else if (ymd === todayYmd) groups.today.push(t);
+    else if (ymd <= weekEndYmd) groups.week.push(t);
+    else groups.later.push(t);
+  }
+
+  const blocks = [];
+
+  // ── ヘッダー & サマリ ─────────────────────────
+  blocks.push({
+    type: "header",
+    text: { type: "plain_text", text: isDoneView ? "🐶 完了タスク" : "🐶 タスクホーム" },
+  });
+
+  if (!isDoneView) {
+    const overdueN = groups.overdue.length;
+    const todayN = groups.today.length;
+    const weekN = groups.week.length;
+    const totalN = overdueN + todayN + weekN + groups.later.length + groups.noDue.length;
+    blocks.push({
+      type: "context",
+      elements: [{
+        type: "mrkdwn",
+        text: `📊 未完了 *${totalN}* 件　/　🔴 期限切れ *${overdueN}*　🟡 今日 *${todayN}*　🟢 今週 *${weekN}*`,
+      }],
+    });
+  } else {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `📊 完了 *${groups.done.length}* 件（最近）` }],
+    });
+  }
+
+  // ── フィルタ行 ─────────────────────────────
+  const stateOptions = [
+    { text: { type: "plain_text", text: "状態：未完了" }, value: "active" },
+    { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
+  ];
+  const rangeOptions = [
+    { text: { type: "plain_text", text: "範囲：自分あて" }, value: "to_me" },
+    { text: { type: "plain_text", text: "範囲：自分が発行" }, value: "requested_by_me" },
+    { text: { type: "plain_text", text: "範囲：すべて" }, value: "all" },
+  ];
+
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "static_select",
+        action_id: "home_broadcast_scope_select",
+        options: rangeOptions,
+        initial_option: rangeOptions.find(o => o.value === rangeKey) || rangeOptions[0],
+      },
+      {
+        type: "static_select",
+        action_id: "home_scope_select",
+        options: stateOptions,
+        initial_option: stateOptions.find(o => o.value === scopeKey) || stateOptions[0],
+      },
+      {
+        type: "button",
+        action_id: "open_task_list_modal",
+        text: { type: "plain_text", text: "🔍 検索/一覧" },
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
+      },
+      {
+        type: "button",
+        action_id: "open_home_task_create_modal",
+        text: { type: "plain_text", text: "＋ タスク作成" },
+        style: "primary",
+        value: JSON.stringify({ teamId, userId }),
+      },
+      {
+        type: "button",
+        action_id: "open_user_settings_from_home",
+        text: { type: "plain_text", text: "⚙️ 設定" },
+        value: JSON.stringify({ teamId, userId }),
+      },
+    ],
+  });
+  blocks.push({ type: "divider" });
+
+  // ── タスクレンダリング ──────────────────────
+  const SLACK_BLOCK_LIMIT = 100;
+  const RESERVE = 4; // 末尾フッター余裕
+
+  const renderTaskRow = (t, dueIcon, dueLabel) => {
+    const payload = JSON.stringify({ teamId, taskId: t.id, origin: "home" });
+    const titleText = noMention(String(t.title || t.description || "（本文なし）")).slice(0, 150);
+    const typeIcon = t.task_type === "broadcast" ? "👥" : "👤";
+    const isDone = t.status === "done";
+    const out = [];
+    out.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `${dueIcon} *${titleText}*` },
+    });
+    out.push({
+      type: "context",
+      elements: [{
+        type: "mrkdwn",
+        text: `${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}　·　📅 ${dueLabel}`,
+      }],
+    });
+    const actionElements = [];
+    if (!isDone) {
+      actionElements.push({
+        type: "button",
+        style: "primary",
+        text: { type: "plain_text", text: "✅ 完了" },
+        action_id: "complete_task",
+        value: payload,
+        confirm: {
+          title: { type: "plain_text", text: "完了にしますか？" },
+          text: { type: "mrkdwn", text: `*${titleText.slice(0, 80)}*` },
+          confirm: { type: "plain_text", text: "完了する" },
+          deny: { type: "plain_text", text: "キャンセル" },
+        },
+      });
+    }
+    actionElements.push({
+      type: "button",
+      text: { type: "plain_text", text: "📄 詳細" },
+      action_id: "open_detail_modal",
+      value: payload,
+    });
+    out.push({ type: "actions", elements: actionElements });
+    return out;
+  };
+
+  const sectionConfig = isDoneView
+    ? [{ key: "done", icon: "✅", title: "完了済み", color: "" }]
+    : [
+        { key: "overdue", icon: "🔴", title: "期限切れ" },
+        { key: "today",   icon: "🟡", title: "今日が期限" },
+        { key: "week",    icon: "🟢", title: "今週中" },
+        { key: "later",   icon: "🔵", title: "それ以降" },
+        { key: "noDue",   icon: "⚪", title: "期限なし" },
+      ];
+
+  const SECTION_LIMIT = 6; // 各セクション最大表示
+  const TASK_BLOCKS = 4;   // section + context + actions + divider
+
+  for (const sec of sectionConfig) {
+    const list = groups[sec.key];
+    if (!list.length) continue;
+
+    // セクションヘッダー
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `${sec.icon} *${sec.title}*　_${list.length}件_` },
+    });
+
+    const willRender = Math.min(list.length, SECTION_LIMIT);
+    // 余白計算
+    const remainingBudget = SLACK_BLOCK_LIMIT - RESERVE - blocks.length;
+    const maxByBudget = Math.max(0, Math.floor(remainingBudget / TASK_BLOCKS));
+    const shown = Math.min(willRender, maxByBudget);
+
+    for (let i = 0; i < shown; i++) {
+      const t = list[i];
+      const ymd = dueYmdOf(t);
+      let dueIcon = sec.icon, dueLabel = "期限なし";
+      if (ymd) dueLabel = formatDueDateOnly(t.due_date) || ymd;
+      if (sec.key === "today") dueLabel += "（今日）";
+      if (sec.key === "overdue") dueLabel += "（期限切れ）";
+      if (sec.key === "done") { dueIcon = "✅"; dueLabel = formatDueDateOnly(t.due_date) || "—"; }
+      blocks.push(...renderTaskRow(t, dueIcon, dueLabel));
+      if (i < shown - 1) blocks.push({ type: "divider" });
+    }
+
+    if (list.length > shown) {
+      blocks.push({
+        type: "actions",
+        elements: [{
+          type: "button",
+          text: { type: "plain_text", text: `…他 ${list.length - shown} 件を一覧で見る` },
+          action_id: "open_task_list_modal",
+          value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
+        }],
+      });
+    }
+    blocks.push({ type: "divider" });
+  }
+
+  if (!blocks.some(b => b.type === "section" && b.text?.text?.includes("*"))) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: isDoneView ? "_完了タスクなし_" : "🎉 _未完了タスクなし。お疲れさまです！_" },
+    });
+  }
+
+  // フッター余白
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: " " }] });
+
+  await client.views.publish({
+    user_id: userId,
+    view: { type: "home", callback_id: "home", blocks },
   });
 }
 

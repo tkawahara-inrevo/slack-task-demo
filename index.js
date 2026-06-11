@@ -3150,6 +3150,19 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     const { teamId } = await dbQuery('SELECT DISTINCT team_id FROM tasks LIMIT 1').then(r => ({ teamId: r.rows[0]?.team_id || '' }));
     const label = stampType === 1 ? '出勤' : '退勤';
     console.log(`[IEYASU] ${label}日報受信 ch:${message.channel} user:${targetUserId}`);
+
+    // 退勤は10分遅延打刻（その間に本人がHRMOSで手動打刻すればスキップされる）
+    if (stampType === 2) {
+      await addStampReaction(client, message.channel, message.ts, 'hourglass_flowing_sand');
+      await dbQuery(
+        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, channel_id, message_ts, retry_state)
+         VALUES (gen_random_uuid(), $1, $2, $3, false, $4, $5, 'delayed')`,
+        [teamId, targetUserId, stampType, message.channel, message.ts]
+      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
+      console.log(`[IEYASU] 退勤 10分後に打刻予定 user:${targetUserId}`);
+      return;
+    }
+
     const result = await stampAttendance(client, targetUserId, stampType);
 
     if (result.ok) {
@@ -3196,7 +3209,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         const { rows } = await dbQuery(
           `SELECT id, team_id, slack_user_id, stamp_type, channel_id, message_ts
            FROM hrmos_stamps
-           WHERE retry_state='pending'
+           WHERE retry_state IN ('pending','delayed')
              AND stamped_at <= now() - interval '10 minutes'
              AND stamped_at > now() - interval '6 hours'
            ORDER BY stamped_at ASC LIMIT 20`

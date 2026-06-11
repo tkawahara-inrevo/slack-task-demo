@@ -1898,13 +1898,6 @@ async function publishHomeV2({ client, teamId, userId }) {
     }
   }
 
-  if (!blocks.some(b => b.type === "section" && b.text?.text?.includes("*"))) {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: isDoneView ? "_完了タスクなし_" : "🎉 _未完了タスクなし。お疲れさまです！_" },
-    });
-  }
-
   // フッター余白
   blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: " " }] });
 

@@ -115,7 +115,8 @@
       "Bash(grep -n \"registerSettingsFeature\\\\|getUserDisplayName,\\\\s*$\\\\|registerKintoneApi\\\\|registerAnApi\" e:/dev/slack-task-demo/index.js)",
       "Bash(node -c src/features/pochi-ai-slack.js)",
       "Bash(node -e \"const fs=require\\('fs'\\);let s=fs.readFileSync\\('src/features/task-ui.js','utf8'\\);let lines=s.split\\('\\\\n'\\);console.log\\(JSON.stringify\\(lines[1106]\\)+'|'+JSON.stringify\\(lines[1107]\\)\\)\")",
-      "Bash(node -c src/features/task-source-reaction.js)"
+      "Bash(node -c src/features/task-source-reaction.js)",
+      "Bash(node -c src/features/recruit-notify.js)"
     ]
   }
 }

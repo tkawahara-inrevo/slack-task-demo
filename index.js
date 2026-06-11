@@ -14,6 +14,7 @@ const { generateToken, registerDashboardApi } = require("./src/features/dashboar
 const { stampAttendance } = require("./src/features/ieyasu");
 const { registerPochiAiSlack } = require("./src/features/pochi-ai-slack");
 const { registerSourceDoneListener, syncTaskDoneReaction } = require("./src/features/task-source-reaction");
+const { registerRecruitNotify } = require("./src/features/recruit-notify");
 const { INQUIRY_CHANNEL_ID, handleInquiryMessage } = require("./src/features/crm-inquiry");
 const {
   __cacheGet,
@@ -299,6 +300,8 @@ registerSourceDoneListener({
   dbQuery,
   notifyTaskSimpleDM,
 });
+
+registerRecruitNotify({ app });
 
 registerAdminFeature({
   app,

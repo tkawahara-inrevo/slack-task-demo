@@ -1777,18 +1777,34 @@ async function publishHomeV2({ client, teamId, userId }) {
 
   const renderTaskRow = (t, _dueIcon, dueLabel) => {
     const payload = JSON.stringify({ teamId, taskId: t.id, origin: "home" });
-    // taskLineForHome でメンション・絵文字コード等を除去、1行化
-    let titleText = taskLineForHome(t).split(/\r?\n/)[0].slice(0, 90);
-    if (!titleText) titleText = "（本文なし）";
-    const typeIcon = t.task_type === "broadcast" ? "👥" : "👤";
-    const isDone = t.status === "done";
+    // taskLineForHome でメンション・絵文字コード等を除去、最大2行で表示
+    const cleaned = taskLineForHome(t);
+    const cleanedLines = cleaned.split(/\r?\n/).filter(Boolean);
+    let titleText = "";
+    if (cleanedLines.length === 0) {
+      titleText = "（本文なし）";
+    } else if (cleanedLines.length === 1) {
+      // 1行が長ければ約60字でやさしく折り返し
+      const line = cleanedLines[0];
+      if (line.length > 70) {
+        titleText = line.slice(0, 60) + "\n" + line.slice(60, 120) + (line.length > 120 ? "…" : "");
+      } else {
+        titleText = line;
+      }
+    } else {
+      titleText = cleanedLines.slice(0, 2).join("\n");
+      if (titleText.length > 140) titleText = titleText.slice(0, 140) + "…";
+    }
 
-    // section: タイトル + メタ情報を改行で結合（タイトル左バッジなし）
+    const isDone = t.status === "done";
+    const broadcastMark = t.task_type === "broadcast" ? "（一斉）" : "";
+
+    // section: タイトル（太字なし）+ メタ情報を改行で結合
     const sectionBlock = {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${titleText}*\n${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}　·　📅 ${dueLabel}`,
+        text: `${titleText}\n_<@${t.requester_user_id}> → ${assigneeDisplay(t)}${broadcastMark}　·　📅 ${dueLabel}_`,
       },
     };
 
@@ -1831,15 +1847,25 @@ async function publishHomeV2({ client, teamId, userId }) {
   const SECTION_LIMIT = 8; // 各セクション最大表示
   const TASK_BLOCKS = 3; // section + actions + divider
 
+  let sectionIdx = 0;
   for (const sec of sectionConfig) {
     const list = groups[sec.key];
     if (!list.length) continue;
 
-    // セクションヘッダー（大きな header + 件数 context で境目を強調）
+    // セクション境目を強調: 上に余白 → header → 件数 context
+    if (sectionIdx > 0) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "　" }] });
+    }
+    sectionIdx++;
     blocks.push({
       type: "header",
-      text: { type: "plain_text", text: `${sec.icon} ${sec.title}（${list.length}件）`, emoji: true },
+      text: { type: "plain_text", text: `${sec.icon}  ${sec.title}  ${sec.icon}`, emoji: true },
     });
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `_${list.length}件_` }],
+    });
+    blocks.push({ type: "divider" });
 
     const willRender = Math.min(list.length, SECTION_LIMIT);
     // 余白計算
@@ -1870,7 +1896,6 @@ async function publishHomeV2({ client, teamId, userId }) {
         }],
       });
     }
-    blocks.push({ type: "divider" });
   }
 
   if (!blocks.some(b => b.type === "section" && b.text?.text?.includes("*"))) {

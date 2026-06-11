@@ -1779,44 +1779,54 @@ async function publishHomeV2({ client, teamId, userId }) {
 
   const renderTaskRow = (t, dueIcon, dueLabel) => {
     const payload = JSON.stringify({ teamId, taskId: t.id, origin: "home" });
-    const titleText = noMention(String(t.title || t.description || "（本文なし）")).slice(0, 150);
+    // taskLineForHome でメンション・絵文字コード等を除去、1行化
+    let titleText = taskLineForHome(t).split(/\r?\n/)[0].slice(0, 90);
+    if (!titleText) titleText = "（本文なし）";
     const typeIcon = t.task_type === "broadcast" ? "👥" : "👤";
     const isDone = t.status === "done";
-    const out = [];
-    out.push({
+
+    // 1ブロック化: タイトル + メタ情報を改行で結合、accessoryで完了ボタン
+    const sectionBlock = {
       type: "section",
-      text: { type: "mrkdwn", text: `${dueIcon} *${titleText}*` },
-    });
-    out.push({
-      type: "context",
-      elements: [{
+      text: {
         type: "mrkdwn",
-        text: `${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}　·　📅 ${dueLabel}`,
-      }],
-    });
-    const actionElements = [];
+        text: `${dueIcon} *${titleText}*\n${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}　·　📅 ${dueLabel}`,
+      },
+      accessory: isDone
+        ? {
+            type: "button",
+            text: { type: "plain_text", text: "📄 詳細" },
+            action_id: "open_detail_modal",
+            value: payload,
+          }
+        : {
+            type: "button",
+            style: "primary",
+            text: { type: "plain_text", text: "✅ 完了" },
+            action_id: "complete_task",
+            value: payload,
+            confirm: {
+              title: { type: "plain_text", text: "完了にしますか？" },
+              text: { type: "mrkdwn", text: `*${titleText.slice(0, 80)}*` },
+              confirm: { type: "plain_text", text: "完了する" },
+              deny: { type: "plain_text", text: "キャンセル" },
+            },
+          },
+    };
+
+    const out = [sectionBlock];
     if (!isDone) {
-      actionElements.push({
-        type: "button",
-        style: "primary",
-        text: { type: "plain_text", text: "✅ 完了" },
-        action_id: "complete_task",
-        value: payload,
-        confirm: {
-          title: { type: "plain_text", text: "完了にしますか？" },
-          text: { type: "mrkdwn", text: `*${titleText.slice(0, 80)}*` },
-          confirm: { type: "plain_text", text: "完了する" },
-          deny: { type: "plain_text", text: "キャンセル" },
-        },
+      // 未完了は詳細ボタンを小さくactions行で追加
+      out.push({
+        type: "actions",
+        elements: [{
+          type: "button",
+          text: { type: "plain_text", text: "📄 詳細" },
+          action_id: "open_detail_modal",
+          value: payload,
+        }],
       });
     }
-    actionElements.push({
-      type: "button",
-      text: { type: "plain_text", text: "📄 詳細" },
-      action_id: "open_detail_modal",
-      value: payload,
-    });
-    out.push({ type: "actions", elements: actionElements });
     return out;
   };
 
@@ -1830,8 +1840,8 @@ async function publishHomeV2({ client, teamId, userId }) {
         { key: "noDue",   icon: "⚪", title: "期限なし" },
       ];
 
-  const SECTION_LIMIT = 6; // 各セクション最大表示
-  const TASK_BLOCKS = 4;   // section + context + actions + divider
+  const SECTION_LIMIT = 8; // 各セクション最大表示
+  const TASK_BLOCKS = isDoneView ? 1 : 2; // section + (active のみ actions)
 
   for (const sec of sectionConfig) {
     const list = groups[sec.key];
@@ -1858,7 +1868,6 @@ async function publishHomeV2({ client, teamId, userId }) {
       if (sec.key === "overdue") dueLabel += "（期限切れ）";
       if (sec.key === "done") { dueIcon = "✅"; dueLabel = formatDueDateOnly(t.due_date) || "—"; }
       blocks.push(...renderTaskRow(t, dueIcon, dueLabel));
-      if (i < shown - 1) blocks.push({ type: "divider" });
     }
 
     if (list.length > shown) {

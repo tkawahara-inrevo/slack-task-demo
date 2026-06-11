@@ -1777,7 +1777,7 @@ async function publishHomeV2({ client, teamId, userId }) {
   const SLACK_BLOCK_LIMIT = 100;
   const RESERVE = 4; // 末尾フッター余裕
 
-  const renderTaskRow = (t, dueIcon, dueLabel) => {
+  const renderTaskRow = (t, _dueIcon, dueLabel) => {
     const payload = JSON.stringify({ teamId, taskId: t.id, origin: "home" });
     // taskLineForHome でメンション・絵文字コード等を除去、1行化
     let titleText = taskLineForHome(t).split(/\r?\n/)[0].slice(0, 90);
@@ -1785,49 +1785,40 @@ async function publishHomeV2({ client, teamId, userId }) {
     const typeIcon = t.task_type === "broadcast" ? "👥" : "👤";
     const isDone = t.status === "done";
 
-    // 1ブロック化: タイトル + メタ情報を改行で結合、accessoryで完了ボタン
+    // section: タイトル + メタ情報を改行で結合（タイトル左バッジなし）
     const sectionBlock = {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${dueIcon} *${titleText}*\n${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}　·　📅 ${dueLabel}`,
+        text: `*${titleText}*\n${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}　·　📅 ${dueLabel}`,
       },
-      accessory: isDone
-        ? {
-            type: "button",
-            text: { type: "plain_text", text: "📄 詳細" },
-            action_id: "open_detail_modal",
-            value: payload,
-          }
-        : {
-            type: "button",
-            style: "primary",
-            text: { type: "plain_text", text: "✅ 完了" },
-            action_id: "complete_task",
-            value: payload,
-            confirm: {
-              title: { type: "plain_text", text: "完了にしますか？" },
-              text: { type: "mrkdwn", text: `*${titleText.slice(0, 80)}*` },
-              confirm: { type: "plain_text", text: "完了する" },
-              deny: { type: "plain_text", text: "キャンセル" },
-            },
-          },
     };
 
-    const out = [sectionBlock];
+    // actions: 完了 + 詳細（下に並ぶ）
+    const actionElements = [];
     if (!isDone) {
-      // 未完了は詳細ボタンを小さくactions行で追加
-      out.push({
-        type: "actions",
-        elements: [{
-          type: "button",
-          text: { type: "plain_text", text: "📄 詳細" },
-          action_id: "open_detail_modal",
-          value: payload,
-        }],
+      actionElements.push({
+        type: "button",
+        style: "primary",
+        text: { type: "plain_text", text: "✅ 完了" },
+        action_id: "complete_task",
+        value: payload,
+        confirm: {
+          title: { type: "plain_text", text: "完了にしますか？" },
+          text: { type: "mrkdwn", text: `*${titleText.slice(0, 80)}*` },
+          confirm: { type: "plain_text", text: "完了する" },
+          deny: { type: "plain_text", text: "キャンセル" },
+        },
       });
     }
-    return out;
+    actionElements.push({
+      type: "button",
+      text: { type: "plain_text", text: "📄 詳細" },
+      action_id: "open_detail_modal",
+      value: payload,
+    });
+
+    return [sectionBlock, { type: "actions", elements: actionElements }];
   };
 
   const sectionConfig = isDoneView
@@ -1841,7 +1832,7 @@ async function publishHomeV2({ client, teamId, userId }) {
       ];
 
   const SECTION_LIMIT = 8; // 各セクション最大表示
-  const TASK_BLOCKS = isDoneView ? 1 : 2; // section + (active のみ actions)
+  const TASK_BLOCKS = 2; // section + actions
 
   for (const sec of sectionConfig) {
     const list = groups[sec.key];

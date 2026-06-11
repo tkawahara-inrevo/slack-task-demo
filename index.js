@@ -1663,19 +1663,6 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
     type: "actions",
     elements: [
       {
-        type: "button",
-        action_id: "my_tasks_search_submit",
-        style: "primary",
-        text: { type: "plain_text", text: "🔍 検索" },
-        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
-      },
-      ...(q ? [{
-        type: "button",
-        action_id: "my_tasks_search_clear",
-        text: { type: "plain_text", text: "検索クリア" },
-        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
-      }] : []),
-      {
         type: "static_select",
         action_id: "my_tasks_scope_select",
         options: rangeOptions,
@@ -1687,6 +1674,12 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
         options: statusOptions,
         initial_option: statusOptions.find((o) => o.value === scopeKey) || statusOptions[0],
       },
+      ...(q ? [{
+        type: "button",
+        action_id: "my_tasks_search_clear",
+        text: { type: "plain_text", text: "検索クリア" },
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
+      }] : []),
     ],
   });
   blocks.push({ type: "divider" });
@@ -1798,6 +1791,7 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
     callback_id: "task_list_modal",
     private_metadata: meta,
     title: { type: "plain_text", text: "タスク一覧" },
+    submit: { type: "plain_text", text: "🔍 検索" },
     close: { type: "plain_text", text: "閉じる" },
     blocks,
   };

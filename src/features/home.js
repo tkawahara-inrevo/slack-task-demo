@@ -2376,18 +2376,16 @@ app.action("task_list_modal_prev", handleTaskListModalPage);
 app.action("task_list_modal_next", handleTaskListModalPage);
 
 // 検索 input は値変更を発火しない（dispatch_action 無し）
-// → 検索適用は 🔍 検索ボタン押下で行う
 app.action("my_tasks_search_input", async ({ ack }) => { await ack(); });
 
-// 🔍 検索ボタン: input の現在値を state から読み取って再描画
-app.action("my_tasks_search_submit", async ({ ack, body, client }) => {
-  await ack();
+// モーダルの submit（🔍 検索）→ state から検索ワード読んで再描画
+app.view("task_list_modal", async ({ ack, body, view }) => {
   try {
     const teamId = getTeamIdFromBody(body);
     const userId = getUserIdFromBody(body);
-    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
-    const query = body.view?.state?.values?.search_block?.my_tasks_search_input?.value || "";
-    const view = await buildTaskListModalView({
+    const meta = safeJsonParse(view?.private_metadata || "{}") || {};
+    const query = view?.state?.values?.search_block?.my_tasks_search_input?.value || "";
+    const newView = await buildTaskListModalView({
       teamId,
       userId,
       rangeKey: meta.rangeKey || "to_me",
@@ -2395,9 +2393,10 @@ app.action("my_tasks_search_submit", async ({ ack, body, client }) => {
       page: 0,
       searchQuery: query,
     });
-    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+    await ack({ response_action: "update", view: newView });
   } catch (e) {
-    console.error("my_tasks_search_submit error:", e?.data || e);
+    console.error("task_list_modal submit error:", e?.data || e);
+    await ack();
   }
 });
 

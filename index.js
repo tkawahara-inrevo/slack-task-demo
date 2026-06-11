@@ -1506,8 +1506,9 @@ async function buildDetailModalView({
 // ================================
 // タスク一覧モーダル（ページング付き）
 // ================================
-async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scopeKey = "active", page = 0 }) {
-  const PAGE_SIZE = 18;
+async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scopeKey = "active", page = 0, searchQuery = "" }) {
+  const PAGE_SIZE = 12;
+  const q = String(searchQuery || "").trim().toLowerCase();
   const statuses = scopeKey === "done" ? ["done"] : ["in_progress"];
   const personalScope = (rangeKey === "to_me" || rangeKey === "requested_by_me") ? rangeKey : "all";
   const fetchLimit = 300;
@@ -1605,9 +1606,18 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
     tasks.push(t);
   }
 
-  const total = tasks.length;
+  // 検索フィルタ（タイトル / 本文 / 担当者名 / 依頼者名の部分一致）
+  let filteredTasks = tasks;
+  if (q) {
+    filteredTasks = tasks.filter(t => {
+      const hay = `${t.title || ""} ${t.description || ""} ${t.assignee_label || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  const total = filteredTasks.length;
   const start = page * PAGE_SIZE;
-  const pageTasks = tasks.slice(start, start + PAGE_SIZE);
+  const pageTasks = filteredTasks.slice(start, start + PAGE_SIZE);
 
   // rangeOptions: Home と同じ順・同じ権限ルール
   let rangeInitialOption;
@@ -1632,8 +1642,24 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
     { text: { type: "plain_text", text: "状態：完了" }, value: "done" },
   ];
 
-  const meta = JSON.stringify({ teamId, userId, rangeKey, scopeKey, page });
+  const meta = JSON.stringify({ teamId, userId, rangeKey, scopeKey, page, searchQuery });
   const blocks = [];
+
+  // 検索フィールド（Enterで適用）
+  blocks.push({
+    type: "input",
+    block_id: "search_block",
+    dispatch_action: true,
+    optional: true,
+    label: { type: "plain_text", text: "🔍 検索" },
+    element: {
+      type: "plain_text_input",
+      action_id: "my_tasks_search_input",
+      placeholder: { type: "plain_text", text: "タイトル・本文・担当で絞り込み（Enterで検索）" },
+      initial_value: searchQuery || "",
+      dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] },
+    },
+  });
 
   blocks.push({
     type: "actions",
@@ -1650,35 +1676,87 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
         options: statusOptions,
         initial_option: statusOptions.find((o) => o.value === scopeKey) || statusOptions[0],
       },
+      ...(q ? [{
+        type: "button",
+        action_id: "my_tasks_search_clear",
+        text: { type: "plain_text", text: "検索クリア" },
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey }),
+      }] : []),
     ],
   });
   blocks.push({ type: "divider" });
 
   if (!pageTasks.length) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "（該当するタスクなし）" } });
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: q ? `🔍 「${searchQuery}」に一致するタスクなし` : "（該当するタスクなし）" },
+    });
   }
 
-  for (const t of pageTasks) {
+  // 日付ユーティリティ（JST）
+  const toJstYmd = (d) => {
+    if (!d) return null;
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return null;
+    const j = new Date(dt.getTime() + (dt.getTimezoneOffset() + 9 * 60) * 60000);
+    return j.toISOString().slice(0, 10);
+  };
+  const todayYmd = toJstYmd(new Date());
+
+  for (let i = 0; i < pageTasks.length; i++) {
+    const t = pageTasks[i];
     const payload = JSON.stringify({ teamId, taskId: t.id, origin: "list_modal" });
     const rawTitle = String(t.title || t.description || "（本文なし）");
     const titleText = noMention(rawTitle).slice(0, 150);
+    const dueYmd = toJstYmd(t.due_date);
+    const isDone = t.status === 'done';
+    let dueIcon = '⚪';
+    let dueLabel = '期限なし';
+    if (dueYmd) {
+      if (isDone) { dueIcon = '✅'; dueLabel = formatDueDateOnly(t.due_date); }
+      else if (dueYmd < todayYmd) { dueIcon = '🔴'; dueLabel = `${formatDueDateOnly(t.due_date)}（期限切れ）`; }
+      else if (dueYmd === todayYmd) { dueIcon = '🟡'; dueLabel = `${formatDueDateOnly(t.due_date)}（今日）`; }
+      else { dueIcon = '🟢'; dueLabel = formatDueDateOnly(t.due_date); }
+    } else if (isDone) {
+      dueIcon = '✅';
+    }
+    const typeIcon = t.task_type === 'broadcast' ? '👥' : '👤';
+
     blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: titleText },
-      accessory: {
-        type: "button",
-        text: { type: "plain_text", text: "詳細" },
-        action_id: "open_detail_modal",
-        value: payload,
-      },
+      text: { type: "mrkdwn", text: `${dueIcon} *${titleText}*` },
     });
     blocks.push({
       type: "context",
       elements: [{
         type: "mrkdwn",
-        text: `<@${t.requester_user_id}> → ${assigneeDisplay(t)}  /  ${formatDueDateOnly(t.due_date) || "期限なし"}`,
+        text: `${typeIcon} <@${t.requester_user_id}> → ${assigneeDisplay(t)}  ·  📅 ${dueLabel}`,
       }],
     });
+    const actionElements = [];
+    if (!isDone) {
+      actionElements.push({
+        type: "button",
+        style: "primary",
+        text: { type: "plain_text", text: "✅ 完了" },
+        action_id: "complete_task",
+        value: payload,
+        confirm: {
+          title: { type: "plain_text", text: "完了にしますか？" },
+          text: { type: "mrkdwn", text: `*${titleText.slice(0, 80)}*` },
+          confirm: { type: "plain_text", text: "完了する" },
+          deny: { type: "plain_text", text: "キャンセル" },
+        },
+      });
+    }
+    actionElements.push({
+      type: "button",
+      text: { type: "plain_text", text: "📄 詳細" },
+      action_id: "open_detail_modal",
+      value: payload,
+    });
+    blocks.push({ type: "actions", elements: actionElements });
+    if (i < pageTasks.length - 1) blocks.push({ type: "divider" });
   }
 
   const hasPrev = page > 0;
@@ -1690,7 +1768,7 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
         type: "button",
         text: { type: "plain_text", text: `← 前${PAGE_SIZE}件` },
         action_id: "task_list_modal_prev",
-        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey, page: page - 1 }),
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey, page: page - 1, searchQuery }),
       });
     }
     if (hasNext) {
@@ -1698,7 +1776,7 @@ async function buildTaskListModalView({ teamId, userId, rangeKey = "to_me", scop
         type: "button",
         text: { type: "plain_text", text: `次${PAGE_SIZE}件 →` },
         action_id: "task_list_modal_next",
-        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey, page: page + 1 }),
+        value: JSON.stringify({ teamId, userId, rangeKey, scopeKey, page: page + 1, searchQuery }),
       });
     }
     blocks.push({ type: "divider" });

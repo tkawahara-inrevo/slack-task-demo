@@ -1074,9 +1074,25 @@ app.action("complete_task", async ({ ack, body, action, client }) => {
   const { teamId, taskId } = parseActionMeta(body, action);
   if (!teamId || !taskId) return;
 
-  // 譌｢蟄倥・縲悟渚譏荳ｭ窶ｦ縲崎｡ｨ遉ｺ縺後≠繧九↑繧峨％縺薙・谿九＠縺溘∪縺ｾ縺ｧOK
-
   await handleCompleteTask({ client, body, teamId, taskId });
+
+  // タスク一覧モーダルから完了した場合は、リストを再描画して完了したタスクを消す
+  if (body.view?.id && body.view.callback_id === "task_list_modal") {
+    try {
+      const meta = safeJsonParse(body.view.private_metadata || "{}") || {};
+      const view = await buildTaskListModalView({
+        teamId,
+        userId: meta.userId || body.user?.id,
+        rangeKey: meta.rangeKey || "to_me",
+        scopeKey: meta.scopeKey || "active",
+        page: meta.page || 0,
+        searchQuery: meta.searchQuery || "",
+      });
+      await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+    } catch (e) {
+      console.error("task_list_modal refresh after complete error:", e?.data || e);
+    }
+  }
 });
 
 // broadcast: requester confirms after all targets completed (waiting -> done)

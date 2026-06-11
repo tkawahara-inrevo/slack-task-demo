@@ -1716,12 +1716,14 @@ app.action("my_tasks_scope_select", async ({ ack, body, client }) => {
 
     const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
     const scopeKey = meta.scopeKey || "active";
+    const searchQuery = meta.searchQuery || "";
 
     const view = await buildTaskListModalView({
       teamId,
       userId,
       rangeKey: selected,
       scopeKey,
+      searchQuery,
     });
 
     await client.views.update({
@@ -1743,6 +1745,7 @@ app.action("my_tasks_status_select", async ({ ack, body, client }) => {
 
     const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
     const rangeKey = meta.rangeKey || "to_me";
+    const searchQuery = meta.searchQuery || "";
 
     // 📱スマホ対策：まずローディング表示（ここが体感に効く！）
     const loadingView = {
@@ -1773,6 +1776,7 @@ app.action("my_tasks_status_select", async ({ ack, body, client }) => {
       userId,
       rangeKey,
       scopeKey: selected,
+      searchQuery,
     });
 
     await client.views.update({
@@ -2353,9 +2357,9 @@ async function handleTaskListModalPage({ ack, body, client }) {
     const p = safeJsonParse(body.actions?.[0]?.value || "{}") || {};
     const teamId = p.teamId || getTeamIdFromBody(body);
     const userId = p.userId || getUserIdFromBody(body);
-    const { rangeKey = "to_me", scopeKey = "active", page = 0 } = p;
+    const { rangeKey = "to_me", scopeKey = "active", page = 0, searchQuery = "" } = p;
     if (!teamId || !userId) return;
-    const view = await buildTaskListModalView({ teamId, userId, rangeKey, scopeKey, page });
+    const view = await buildTaskListModalView({ teamId, userId, rangeKey, scopeKey, page, searchQuery });
     await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
   } catch (e) {
     console.error("task_list_modal_page error:", e?.data || e);
@@ -2363,6 +2367,49 @@ async function handleTaskListModalPage({ ack, body, client }) {
 }
 app.action("task_list_modal_prev", handleTaskListModalPage);
 app.action("task_list_modal_next", handleTaskListModalPage);
+
+// 検索 input
+app.action("my_tasks_search_input", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+    const query = body.actions?.[0]?.value || "";
+    const view = await buildTaskListModalView({
+      teamId,
+      userId,
+      rangeKey: meta.rangeKey || "to_me",
+      scopeKey: meta.scopeKey || "active",
+      page: 0,
+      searchQuery: query,
+    });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+  } catch (e) {
+    console.error("my_tasks_search_input error:", e?.data || e);
+  }
+});
+
+// 検索クリア
+app.action("my_tasks_search_clear", async ({ ack, body, client }) => {
+  await ack();
+  try {
+    const teamId = getTeamIdFromBody(body);
+    const userId = getUserIdFromBody(body);
+    const meta = safeJsonParse(body.view?.private_metadata || "{}") || {};
+    const view = await buildTaskListModalView({
+      teamId,
+      userId,
+      rangeKey: meta.rangeKey || "to_me",
+      scopeKey: meta.scopeKey || "active",
+      page: 0,
+      searchQuery: "",
+    });
+    await client.views.update({ view_id: body.view.id, hash: body.view.hash, view });
+  } catch (e) {
+    console.error("my_tasks_search_clear error:", e?.data || e);
+  }
+});
 
   return {
     getHomeState,

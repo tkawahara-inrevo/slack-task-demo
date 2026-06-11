@@ -1859,7 +1859,7 @@ async function publishHomeV2({ client, teamId, userId }) {
     sectionIdx++;
     blocks.push({
       type: "header",
-      text: { type: "plain_text", text: `${sec.icon}  ${sec.title}  ${sec.icon}`, emoji: true },
+      text: { type: "plain_text", text: `${sec.icon}  ${sec.title}`, emoji: true },
     });
     blocks.push({
       type: "context",

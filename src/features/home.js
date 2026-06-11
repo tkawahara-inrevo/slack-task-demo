@@ -584,6 +584,13 @@ async function publishHome({ client, teamId, userId }) {
 
   actionElements.push({
     type: "button",
+    action_id: "open_task_list_modal",
+    text: { type: "plain_text", text: "🔍 検索/一覧" },
+    value: JSON.stringify({ teamId, userId, rangeKey: rangeKey0, scopeKey: stateKey0 }),
+  });
+
+  actionElements.push({
+    type: "button",
     action_id: "open_home_task_create_modal",
     text: { type: "plain_text", text: "＋ タスク作成" },
     style: "primary",

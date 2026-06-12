@@ -11,6 +11,7 @@ function registerHomeFeature(deps) {
     dbListBroadcastTasksByStatusesWithScope,
     dbListPersonalTasksByStatusesWithScope,
     formatDueDateOnly,
+    formatTaskDue = (t) => formatDueDateOnly(t?.due_date),
     getTeamIdFromBody,
     getUserDisplayName,
     getUserIconUrl,
@@ -1927,10 +1928,10 @@ async function publishHomeV2({ client, teamId, userId }) {
       const t = list[i];
       const ymd = dueYmdOf(t);
       let dueIcon = sec.icon, dueLabel = "期限なし";
-      if (ymd) dueLabel = formatDueDateOnly(t.due_date) || ymd;
+      if (ymd) dueLabel = formatTaskDue(t) || ymd;
       if (sec.key === "today") dueLabel += "（今日）";
       if (sec.key === "overdue") dueLabel += "（期限切れ）";
-      if (sec.key === "done") { dueIcon = "✅"; dueLabel = formatDueDateOnly(t.due_date) || "—"; }
+      if (sec.key === "done") { dueIcon = "✅"; dueLabel = formatTaskDue(t) || "—"; }
       blocks.push(...renderTaskRow(t, dueIcon, dueLabel));
       if (i < shown - 1) blocks.push({ type: "divider" });
     }

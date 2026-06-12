@@ -509,6 +509,9 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
     }
 
     const due = view.state.values.due?.due_date?.selected_date || null;
+    const dueTime = view.state.values.due_time?.due_time?.selected_time || null;
+    // 時刻指定があれば due_at（JST）に combined timestamp を作る
+    const dueAt = (due && dueTime) ? `${due}T${dueTime}:00+09:00` : null;
     const requesterUserId =
       view.state.values.requester?.requester_user_select?.selected_user ||
       actorUserId;
@@ -584,6 +587,7 @@ app.view("task_modal", async ({ ack, body, view, client }) => {
       assignee_label: assigneeLabelRaw || null,
       status: "in_progress",
       due_date: due,
+      due_at: dueAt,
       requester_dept: requesterDept,
       assignee_dept: assigneeDept,
       task_type: taskType,
@@ -1675,6 +1679,7 @@ app.view("detail_modal", async ({ ack, body, view, client }) => {
         assignee_label: assigneeLabelRaw || null,
         assignee_dept: null,
         due_date: nextDue,
+        due_at: nextDueAt,
         description: before.description,
         broadcast_group_handle: groupHandles.length
           ? `@${groupHandles[0]}`
@@ -1702,6 +1707,7 @@ app.view("detail_modal", async ({ ack, body, view, client }) => {
         assignee_label: null,
         assignee_dept: patchAssigneeDept,
         due_date: nextDue,
+        due_at: nextDueAt,
         description: before.description,
         broadcast_group_handle: null,
         broadcast_group_id: null,
@@ -1800,6 +1806,15 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
     if (!canEditTask) return;
 
     const initDue = slackDateYmd(task.due_date);
+    // due_at から時刻部分を取り出す（JST、HH:MM）
+    let initDueTime = null;
+    if (task.due_at) {
+      try {
+        const d = new Date(task.due_at);
+        const jst = new Date(d.getTime() + (d.getTimezoneOffset() + 9 * 60) * 60000);
+        initDueTime = jst.toISOString().slice(11, 16);
+      } catch {}
+    }
     const blocks = [];
     const { initialUserIds, initialGroupOptions } = isBroadcast
       ? await buildBroadcastInitialOptions(teamId, task)
@@ -1858,6 +1873,19 @@ app.action("open_edit_task_modal", async ({ ack, body, action, client }) => {
 
     blocks.push({
       type: "input",
+      block_id: "due_time",
+      optional: true,
+      label: { type: "plain_text", text: "期限時刻（任意）" },
+      element: {
+        type: "timepicker",
+        action_id: "due_time",
+        ...(initDueTime ? { initial_time: initDueTime } : {}),
+        placeholder: { type: "plain_text", text: "未指定なら終日扱い" },
+      },
+    });
+
+    blocks.push({
+      type: "input",
       block_id: "content",
       label: { type: "plain_text", text: "タスク内容" },
       element: {
@@ -1894,6 +1922,8 @@ app.view("edit_task_modal", async ({ ack, body, view, client }) => {
   const actorUserId = getUserIdFromBody(body);
 
   const nextDue = view.state.values.due?.due_date?.selected_date || null;
+  const nextDueTime = view.state.values.due_time?.due_time?.selected_time || null;
+  const nextDueAt = (nextDue && nextDueTime) ? `${nextDue}T${nextDueTime}:00+09:00` : null;
   const nextContent = (
     view.state.values.content?.content_text?.value || ""
   ).trim();

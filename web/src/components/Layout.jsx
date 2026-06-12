@@ -128,6 +128,7 @@ function BrowserTransferButton({ onClose, floating } = {}) {
 export default function Layout({ children }) {
   const [user,      setUser]      = useState(null);
   const [rpoAccess, setRpoAccess] = useState(false);
+  const [featureAccess, setFeatureAccess] = useState({});
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isDark,    setIsDark]    = useState(false);
   const location = useLocation();
@@ -179,6 +180,7 @@ export default function Layout({ children }) {
 
     api.me().then(setUser).catch(() => {});
     api.rpoAccess().then(r => setRpoAccess(!!r.canAccess)).catch(() => setRpoAccess(false));
+    api.featureAccess().then(r => setFeatureAccess(r.access || {})).catch(() => setFeatureAccess({}));
   }, []);
 
   // ページ遷移時にモバイルメニューを閉じる
@@ -189,7 +191,7 @@ export default function Layout({ children }) {
     { to: '/crm/leads', label: 'リード管理' },
     ...(rpoAccess ? [{ to: '/rpo', label: '案件管理' }] : []),
     { to: '/an', label: 'AN一覧' },
-    { to: '/legal', label: '法務' },
+    ...(featureAccess.legal ? [{ to: '/legal', label: '法務' }] : []),
   ];
 
   const navLinks = [

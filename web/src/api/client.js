@@ -676,6 +676,13 @@ export const api = {
   legalDelete:      (id)      => apiFetch(`/legal/cases/${id}`, { method: 'DELETE' }),
   legalAi:          (id)      => apiFetch(`/legal/cases/${id}/ai`, { method: 'POST' }),
 
+  // 機能別アクセス権限
+  featureAccess:    () => apiFetch('/me/feature-access'),
+  featureAccessCatalog: () => apiFetch('/admin/feature-access/catalog'),
+  featureAccessGrants: (key) => apiFetch(`/admin/feature-access/${key}`),
+  featureAccessAdd: (key, body) => apiFetch(`/admin/feature-access/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  featureAccessDelete: (key, subject_type, subject_id) => apiFetch(`/admin/feature-access/${key}?subject_type=${encodeURIComponent(subject_type)}&subject_id=${encodeURIComponent(subject_id)}`, { method: 'DELETE' }),
+
   // チャンネルマッピング
   channelMappingSync: () => apiFetch('/admin/channel-mapping/sync', { method: 'POST' }),
   channelMappingSyncStatus: (jobId) => apiFetch(`/admin/channel-mapping/sync/status/${jobId}`),

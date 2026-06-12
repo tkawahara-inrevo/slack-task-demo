@@ -11,6 +11,7 @@ import ProjectsAdmin from './pages/admin/ProjectsAdmin'
 import RolesAdmin from './pages/admin/RolesAdmin'
 import CrmPermissions from './pages/admin/CrmPermissions'
 import PermissionsAdmin from './pages/admin/PermissionsAdmin'
+import FeatureAccessAdmin from './pages/admin/FeatureAccessAdmin'
 import IntegrationsAdmin from './pages/admin/IntegrationsAdmin'
 import FormulasAdmin from './pages/admin/FormulasAdmin'
 import UserMappingAdmin from './pages/admin/UserMappingAdmin'
@@ -69,6 +70,7 @@ function App() {
           <Route path="roles" element={<RolesAdmin />} />
           <Route path="crm-permissions" element={<CrmPermissions />} />
           <Route path="permissions" element={<PermissionsAdmin />} />
+          <Route path="feature-access" element={<FeatureAccessAdmin />} />
           <Route path="user-mapping" element={<UserMappingAdmin />} />
           <Route path="integrations" element={<IntegrationsAdmin />} />
           <Route path="formulas" element={<FormulasAdmin />} />

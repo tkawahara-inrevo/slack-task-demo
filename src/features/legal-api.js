@@ -21,10 +21,12 @@ const LEGAL_AI_SCHEMA = {
   },
 };
 
-function registerLegalApi({ expressApp, authWithRole }) {
+function registerLegalApi({ expressApp, authWithRole, requireFeatureAccess }) {
+  // requireFeatureAccess('legal') があれば全エンドポイントに適用
+  const gate = requireFeatureAccess ? requireFeatureAccess('legal') : (_q, _s, n) => n();
 
   // ── 一覧 ────────────────────────────────────────────────
-  expressApp.get('/api/dashboard/legal/cases', authWithRole, async (req, res) => {
+  expressApp.get('/api/dashboard/legal/cases', authWithRole, gate, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const { rows } = await dbQuery(
@@ -36,7 +38,7 @@ function registerLegalApi({ expressApp, authWithRole }) {
   });
 
   // ── 作成 ────────────────────────────────────────────────
-  expressApp.post('/api/dashboard/legal/cases', authWithRole, async (req, res) => {
+  expressApp.post('/api/dashboard/legal/cases', authWithRole, gate, async (req, res) => {
     try {
       const { teamId, userId } = req.dashboardUser;
       const { rows: [row] } = await dbQuery(
@@ -48,7 +50,7 @@ function registerLegalApi({ expressApp, authWithRole }) {
   });
 
   // ── 更新 ────────────────────────────────────────────────
-  expressApp.patch('/api/dashboard/legal/cases/:id', authWithRole, async (req, res) => {
+  expressApp.patch('/api/dashboard/legal/cases/:id', authWithRole, gate, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const {
@@ -103,7 +105,7 @@ function registerLegalApi({ expressApp, authWithRole }) {
   });
 
   // ── AI 要約・次アクション提案 ───────────────────────────
-  expressApp.post('/api/dashboard/legal/cases/:id/ai', authWithRole, async (req, res) => {
+  expressApp.post('/api/dashboard/legal/cases/:id/ai', authWithRole, gate, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       const { rows: [c] } = await dbQuery(
@@ -161,7 +163,7 @@ function registerLegalApi({ expressApp, authWithRole }) {
   });
 
   // ── 削除 ────────────────────────────────────────────────
-  expressApp.delete('/api/dashboard/legal/cases/:id', authWithRole, async (req, res) => {
+  expressApp.delete('/api/dashboard/legal/cases/:id', authWithRole, gate, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
       await dbQuery(`DELETE FROM legal_cases WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]);

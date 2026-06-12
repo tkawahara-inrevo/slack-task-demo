@@ -53,6 +53,11 @@ export default function AdminLayout() {
           </NavLink>
         )}
         {isAdmin && (
+          <NavLink to="/admin/feature-access" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '🛡️' : 'アクセス権限'}
+          </NavLink>
+        )}
+        {isAdmin && (
           <NavLink to="/admin/overdue-report" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '📊' : '期限切れタスク'}
           </NavLink>

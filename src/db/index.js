@@ -886,6 +886,31 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS final_result TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS closed_date DATE`).catch(() => {});
 
+  // 機能別アクセス権限テーブル
+  // admin は常に全機能アクセス可。それ以外は subject_type/subject_id でマッチした場合のみ通る
+  // subject_type: 'user' / 'role' / 'slack_usergroup'
+  // subject_id: user_id / role名 / usergroup_id (S0...)
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS feature_access (
+      team_id      TEXT NOT NULL,
+      feature_key  TEXT NOT NULL,
+      subject_type TEXT NOT NULL,
+      subject_id   TEXT NOT NULL,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (team_id, feature_key, subject_type, subject_id)
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS idx_feature_access_lookup ON feature_access(team_id, feature_key)`).catch(() => {});
+
+  // 初期 seed: legal 機能を 地藤さん・志摩さん に許可
+  // ON CONFLICT で既存の編集を上書きしない
+  await dbQuery(`
+    INSERT INTO feature_access (team_id, feature_key, subject_type, subject_id) VALUES
+      ('T086C06L5V0', 'legal', 'user', 'U08BFBM22BW'),
+      ('T086C06L5V0', 'legal', 'user', 'U0A1HAC11KJ')
+    ON CONFLICT DO NOTHING
+  `).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

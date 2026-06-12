@@ -1,6 +1,26 @@
 // 法務案件管理 API
 const { dbQuery } = require('../db/index');
 
+let _anthropic = null;
+function getAnthropic() {
+  if (_anthropic) return _anthropic;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
+  const Anthropic = require('@anthropic-ai/sdk').default;
+  _anthropic = new Anthropic({ apiKey });
+  return _anthropic;
+}
+
+const LEGAL_AI_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'next_action'],
+  properties: {
+    summary: { type: 'string', description: 'これまでの経緯を3-5文で簡潔に要約' },
+    next_action: { type: 'string', description: '次に誰が何をすべきかを具体的に1-2文で提案' },
+  },
+};
+
 function registerLegalApi({ expressApp, authWithRole }) {
 
   // ── 一覧 ────────────────────────────────────────────────
@@ -80,6 +100,64 @@ function registerLegalApi({ expressApp, authWithRole }) {
       if (!row) return res.status(404).json({ error: 'not_found' });
       res.json({ case: row });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
+  });
+
+  // ── AI 要約・次アクション提案 ───────────────────────────
+  expressApp.post('/api/dashboard/legal/cases/:id/ai', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const { rows: [c] } = await dbQuery(
+        `SELECT * FROM legal_cases WHERE id=$1 AND team_id=$2`,
+        [req.params.id, teamId]
+      );
+      if (!c) return res.status(404).json({ error: 'not_found' });
+
+      const historyStr = Array.isArray(c.history)
+        ? c.history.map(h => `${h.date || ''} [${h.type || ''}] ${h.content || ''}`).join('\n')
+        : '';
+      const minutesStr = Array.isArray(c.minutes)
+        ? c.minutes.map(m => `${m.date || ''} [${m.type || ''}] ${m.content || ''}`).join('\n')
+        : '';
+
+      const userPrompt = [
+        `案件名: ${c.case_name || ''}`,
+        `現在のステータス: ${c.status_phase || ''}`,
+        `ボール: ${c.ball || ''}`,
+        `担当: ${c.chief || ''}`,
+        `問題該当箇所: ${c.issue_details || ''}`,
+        `契約書該当箇所: ${c.contract_details || ''}`,
+        `方向性: ${c.direction || ''}`,
+        `現状メモ: ${c.current_state || ''}`,
+        `結果: ${c.final_result || c.result || ''}`,
+        '',
+        '【対応履歴】',
+        historyStr || '（なし）',
+        '',
+        '【議事録】',
+        minutesStr || '（なし）',
+      ].join('\n');
+
+      const client = getAnthropic();
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 800,
+        system: 'あなたは法務部のAIアシスタント。提供された案件情報・履歴・議事録から、これまでの経緯を3-5文で簡潔に要約し、次に誰が何をすべきかを具体的に1-2文で提案する。出力は構造化された日本語で。',
+        messages: [{ role: 'user', content: userPrompt }],
+        tools: [{
+          name: 'output_summary',
+          description: '案件の要約と次アクションを返す',
+          input_schema: LEGAL_AI_SCHEMA,
+        }],
+        tool_choice: { type: 'tool', name: 'output_summary' },
+      });
+
+      const toolUse = (response.content || []).find(b => b.type === 'tool_use');
+      const result = toolUse?.input || { summary: '生成に失敗しました', next_action: '再度お試しください' };
+      res.json(result);
+    } catch (e) {
+      console.error('legal AI error:', e);
+      res.status(500).json({ error: 'internal', message: e.message });
+    }
   });
 
   // ── 削除 ────────────────────────────────────────────────

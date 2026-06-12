@@ -674,6 +674,7 @@ export const api = {
   legalCreate:      ()        => apiFetch('/legal/cases', { method: 'POST' }),
   legalUpdate:      (id, body) => apiFetch(`/legal/cases/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   legalDelete:      (id)      => apiFetch(`/legal/cases/${id}`, { method: 'DELETE' }),
+  legalAi:          (id)      => apiFetch(`/legal/cases/${id}/ai`, { method: 'POST' }),
 
   // チャンネルマッピング
   channelMappingSync: () => apiFetch('/admin/channel-mapping/sync', { method: 'POST' }),

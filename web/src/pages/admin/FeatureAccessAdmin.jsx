@@ -33,14 +33,14 @@ export default function FeatureAccessAdmin() {
 
   useEffect(() => {
     Promise.all([
-      api.featureAccessCatalog(),
+      api.featureAccessCatalog().catch(() => ({ features: [] })),
       api.usergroups().catch(() => ({ usergroups: [] })),
-      api.adminUserMapping().catch(() => ({ items: [] })),
+      api.adminUserMapping().catch(() => ({ members: [] })),
     ]).then(([cat, ug, dir]) => {
-      setFeatures(cat.features || []);
-      setUsergroups(ug.usergroups || ug || []);
-      setUserDir(dir.items || dir || []);
-      if (cat.features?.length) setSelected(cat.features[0]);
+      setFeatures(Array.isArray(cat?.features) ? cat.features : []);
+      setUsergroups(Array.isArray(ug?.usergroups) ? ug.usergroups : Array.isArray(ug) ? ug : []);
+      setUserDir(Array.isArray(dir?.members) ? dir.members : Array.isArray(dir?.items) ? dir.items : Array.isArray(dir) ? dir : []);
+      if (cat?.features?.length) setSelected(cat.features[0]);
     }).finally(() => setLoading(false));
   }, []);
 

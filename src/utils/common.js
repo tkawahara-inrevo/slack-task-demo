@@ -116,26 +116,6 @@ function formatDueDateOnly(due) {
   return String(due);
 }
 
-// task オブジェクトから「期限」を整形して返す。
-// due_at（時刻あり）→ "2026/06/13 15:00" / due_date のみ → "2026/06/13"
-function formatTaskDue(task) {
-  if (!task) return "未設定";
-  if (task.due_at) {
-    const d = new Date(task.due_at);
-    if (!Number.isNaN(d.getTime())) {
-      // JST へ変換
-      const jst = new Date(d.getTime() + (d.getTimezoneOffset() + 9 * 60) * 60000);
-      const y = jst.getUTCFullYear();
-      const mm = String(jst.getUTCMonth() + 1).padStart(2, "0");
-      const dd = String(jst.getUTCDate()).padStart(2, "0");
-      const hh = String(jst.getUTCHours()).padStart(2, "0");
-      const mi = String(jst.getUTCMinutes()).padStart(2, "0");
-      return `${y}/${mm}/${dd} ${hh}:${mi}`;
-    }
-  }
-  return formatDueDateOnly(task.due_date);
-}
-
 function slackDateYmd(due) {
   if (!due) return null;
   if (typeof due === "string") {
@@ -387,7 +367,6 @@ module.exports = {
   extractTsFromPermalink,
   fetchMessageTextByTs,
   formatDueDateOnly,
-  formatTaskDue,
   getTeamIdFromBody,
   getUserIdFromBody,
   groupBy,

@@ -120,8 +120,7 @@
       "Bash(node -c src/db/index.js)",
       "Bash(node -c src/features/legal-api.js)",
       "Bash(node -c scripts/legal-import.js)",
-      "Bash(node -c src/features/feature-access.js)",
-      "Bash(node -c src/utils/common.js)"
+      "Bash(node -c src/features/feature-access.js)"
     ]
   }
 }

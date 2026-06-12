@@ -26,7 +26,6 @@ const {
   extractTsFromPermalink,
   fetchMessageTextByTs,
   formatDueDateOnly,
-  formatTaskDue,
   getTeamIdFromBody,
   getUserIdFromBody,
   groupBy,
@@ -221,7 +220,6 @@ const {
   dbListBroadcastTasksByStatusesWithScope,
   dbListPersonalTasksByStatusesWithScope,
   formatDueDateOnly,
-  formatTaskDue,
   getSubteamIdMap: (...args) => getSubteamIdMap(...args),
   getTeamIdFromBody,
   getUserDisplayName: (...args) => getUserDisplayName(...args),
@@ -408,7 +406,6 @@ const { expandTargetsFromGroups } = registerTaskUiFeature({
   ensureBotInChannel: (...args) => ensureBotInChannel(...args),
   fetchMessageTextByTs,
   formatDueDateOnly,
-  formatTaskDue,
   getSubteamIdMap: (...args) => getSubteamIdMap(...args),
   getTeamIdFromBody,
   getUserDisplayName: (...args) => getUserDisplayName(...args),
@@ -985,18 +982,6 @@ function buildTaskCreateModalBlocks({
       action_id: "due_date",
       placeholder: { type: "plain_text", text: "期限" },
       initial_date: todayJstYmd(),
-    },
-  });
-
-  blocks.push({
-    type: "input",
-    block_id: "due_time",
-    optional: true,
-    label: { type: "plain_text", text: "期限時刻（任意）" },
-    element: {
-      type: "timepicker",
-      action_id: "due_time",
-      placeholder: { type: "plain_text", text: "未指定なら終日扱い" },
     },
   });
 

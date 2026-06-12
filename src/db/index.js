@@ -794,9 +794,6 @@ async function dbEnsureSettingsSchema() {
 
   // タスク通知遅延（キーワード/リアクション経由タスクは10分後に通知）
   await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});
-  // 期限を時刻まで保持する任意フィールド（既存 due_date と併存）
-  // 値があれば「6/13 15:00」形式で表示・判定。値がなければ従来通り due_date のみで動作。
-  await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS tasks_notify_scheduled ON tasks(notify_scheduled_at) WHERE notify_scheduled_at IS NOT NULL AND notified_at IS NULL`).catch(() => {});
 
   // メンション追跡（未確認メンションをホームに表示するため）
@@ -1101,7 +1098,7 @@ async function dbCreateTask(task) {
       title, description,
       requester_user_id, created_by_user_id,
       assignee_id, assignee_label,
-      status, due_date, due_at,
+      status, due_date,
       requester_dept, assignee_dept,
       task_type, broadcast_group_handle, broadcast_group_id,
       total_count, completed_count,
@@ -1112,7 +1109,7 @@ async function dbCreateTask(task) {
       $6,$7,
       $8,$9,
       $10,$11,
-      $12,$13,$22,
+      $12,$13,
       $14,$15,
       $16,$17,$18,
       $19,$20,
@@ -1143,7 +1140,6 @@ async function dbCreateTask(task) {
     task.total_count ?? null,
     task.completed_count ?? 0,
     task.notified_at ?? null,
-    task.due_at ?? null,
   ];
   const res = await dbQuery(q, params);
   return res.rows[0];
@@ -1320,8 +1316,6 @@ async function dbReplaceTaskTargets(teamId, taskId, userIds) {
 }
 
 async function dbUpdateTaskEditableFields(teamId, taskId, patch) {
-  // due_at は patch に明示的に含まれていれば更新、なければそのまま（後方互換）
-  const updateDueAt = Object.prototype.hasOwnProperty.call(patch || {}, 'due_at');
   const q = `
     UPDATE tasks
     SET
@@ -1335,12 +1329,11 @@ async function dbUpdateTaskEditableFields(teamId, taskId, patch) {
       broadcast_group_id = $10,
       total_count = $11,
       completed_count = $12,
-      ${updateDueAt ? 'due_at = $13,' : ''}
       updated_at = now()
     WHERE team_id=$1 AND id=$2
     RETURNING *;
   `;
-  const params = [
+  const res = await dbQuery(q, [
     teamId,
     taskId,
     patch?.task_type ?? null,
@@ -1353,9 +1346,7 @@ async function dbUpdateTaskEditableFields(teamId, taskId, patch) {
     patch?.broadcast_group_id ?? null,
     patch?.total_count ?? null,
     patch?.completed_count ?? 0,
-  ];
-  if (updateDueAt) params.push(patch.due_at ?? null);
-  const res = await dbQuery(q, params);
+  ]);
   return res.rows[0] || null;
 }
 

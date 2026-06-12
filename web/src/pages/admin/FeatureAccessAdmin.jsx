@@ -118,7 +118,7 @@ export default function FeatureAccessAdmin() {
           <Lock size={18} color="#dc2626"/> アクセス権限管理
         </h2>
         <p style={{ margin: 0, fontSize: '0.82rem', color: '#6b7280' }}>
-          各機能の閲覧／操作を、ユーザー個別 / 役職ロール / Slackユーザーグループ単位で許可します。<br/>
+          各機能の閲覧／操作を、ユーザー個別 / Slackユーザーグループ単位で許可します。<br/>
           <strong>admin ロールは常にすべての機能にアクセスできます。</strong>誰も許可がない機能は admin 以外見えません。
         </p>
       </div>
@@ -167,7 +167,6 @@ export default function FeatureAccessAdmin() {
                     <select value={addType} onChange={e => { setAddType(e.target.value); setAddValue(''); setUserQuery(''); }}
                       style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12 }}>
                       <option value="user">ユーザー個別</option>
-                      <option value="role">役職ロール</option>
                       <option value="slack_usergroup">Slackユーザーグループ</option>
                     </select>
                   </div>
@@ -190,13 +189,6 @@ export default function FeatureAccessAdmin() {
                         {filteredUsers.length === 0 && <div style={{ padding: 12, fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>該当ユーザーなし</div>}
                       </div>
                     </div>
-                  )}
-                  {addType === 'role' && (
-                    <select value={addValue} onChange={e => setAddValue(e.target.value)}
-                      style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12, marginBottom: 10 }}>
-                      <option value="">役職を選択…</option>
-                      {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                    </select>
                   )}
                   {addType === 'slack_usergroup' && (
                     <select value={addValue} onChange={e => setAddValue(e.target.value)}

@@ -1719,12 +1719,22 @@ async function publishHomeV2({ client, teamId, userId }) {
     const todayN = groups.today.length;
     const laterN = groups.later.length;
     const totalN = overdueN + todayN + laterN + groups.noDue.length;
+    const activeFilter = st.groupFilter || 'all';
+    const fbtn = (val, text) => ({
+      type: 'button',
+      action_id: `home_group_filter_${val}`,
+      text: { type: 'plain_text', text, emoji: true },
+      value: val,
+      ...(activeFilter === val ? { style: 'primary' } : {}),
+    });
     blocks.push({
-      type: "context",
-      elements: [{
-        type: "mrkdwn",
-        text: `📊 未完了 *${totalN}* 件　/　🔴 期限切れ *${overdueN}*　🟡 今日中 *${todayN}*　🟢 明日以降 *${laterN}*`,
-      }],
+      type: 'actions',
+      elements: [
+        fbtn('all',     `📊 全件 ${totalN}`),
+        fbtn('overdue', `🔴 期限切れ ${overdueN}`),
+        fbtn('today',   `🟡 今日中 ${todayN}`),
+        fbtn('later',   `🟢 明日以降 ${laterN}`),
+      ],
     });
   } else {
     blocks.push({
@@ -1885,8 +1895,10 @@ async function publishHomeV2({ client, teamId, userId }) {
   const SECTION_LIMIT = 8; // 各セクション最大表示
   const TASK_BLOCKS = 3; // section + actions + divider
 
+  const groupFilter = isDoneView ? 'all' : (st.groupFilter || 'all');
   let sectionIdx = 0;
   for (const sec of sectionConfig) {
+    if (groupFilter !== 'all' && groupFilter !== sec.key) continue;
     const list = groups[sec.key];
     if (!list.length) continue;
 
@@ -1944,6 +1956,21 @@ async function publishHomeV2({ client, teamId, userId }) {
     view: { type: "home", callback_id: "home", blocks },
   });
 }
+
+// ホーム サマリの絞り込みボタン（全件 / 期限切れ / 今日中 / 明日以降）
+['all', 'overdue', 'today', 'later'].forEach(key => {
+  app.action(`home_group_filter_${key}`, async ({ ack, body, client }) => {
+    await ack();
+    try {
+      const teamId = getTeamIdFromBody(body);
+      const userId = getUserIdFromBody(body);
+      setHomeState(teamId, userId, { groupFilter: key });
+      await publishHome({ client, teamId, userId });
+    } catch (e) {
+      console.error(`home_group_filter_${key} error:`, e?.data || e);
+    }
+  });
+});
 
 // ホーム検索: タイプごとに発火する on_character_entered を、
 // サーバー側で 600ms デバウンス（タイプ止めた時だけ republish）

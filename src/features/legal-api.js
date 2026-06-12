@@ -34,7 +34,9 @@ function registerLegalApi({ expressApp, authWithRole }) {
       const {
         case_name, na_date, start_date, priority, chief, ball,
         na_ledger, issue_summary, issue_details, contract_details,
-        direction, thread_url, result, history, minutes
+        direction, thread_url, result, history, minutes,
+        status_phase, current_state, ledger_url, contract_url,
+        email_slack_url, minutes_url, final_result, closed_date,
       } = req.body;
 
       const fields = [];
@@ -55,6 +57,14 @@ function registerLegalApi({ expressApp, authWithRole }) {
       set('direction',        direction);
       set('thread_url',       thread_url);
       set('result',           result);
+      set('status_phase',     status_phase);
+      set('current_state',    current_state);
+      set('ledger_url',       ledger_url);
+      set('contract_url',     contract_url);
+      set('email_slack_url',  email_slack_url);
+      set('minutes_url',      minutes_url);
+      set('final_result',     final_result);
+      set('closed_date',      closed_date || null);
       if (history  !== undefined) { fields.push(`history=$${i++}`);  vals.push(JSON.stringify(history)); }
       if (minutes  !== undefined) { fields.push(`minutes=$${i++}`);  vals.push(JSON.stringify(minutes)); }
 

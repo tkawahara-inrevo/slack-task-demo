@@ -2,7 +2,12 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { api } from '../../api/client';
 
 const PRIORITY_COLOR = { 高: { bg: '#fef2f2', color: '#dc2626', border: '#fca5a5' }, 中: { bg: '#fffbeb', color: '#d97706', border: '#fde68a' }, 低: { bg: '#f0fdf4', color: '#16a34a', border: '#86efac' } };
-const isClosed = (result) => /close|完了|クローズ/i.test(result || '');
+const isClosed = (c) => {
+  if (!c) return false;
+  if (c.closed_date) return true;
+  const r = `${c.status_phase || ''} ${c.final_result || ''} ${c.result || ''}`;
+  return /close|完了|クローズ|法務移行|返金クローズ|対象外了承/i.test(r);
+};
 const isStale  = (ts) => ts && (Date.now() - new Date(ts).getTime()) > 48 * 60 * 60 * 1000;
 const fmtDate  = (d) => d ? String(d).slice(0, 10) : '';
 const today    = () => new Date().toISOString().slice(0, 10);
@@ -145,25 +150,39 @@ function CaseDetail({ c, onChange, onDelete, onBack }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <F label="結果・ステータス">
-              <input value={local.result || ''} onChange={e => setLocal(l => ({ ...l, result: e.target.value }))}
-                onBlur={e => save({ result: e.target.value })}
-                style={{ padding: '6px 8px', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: '0.85rem', background: '#eff6ff', color: '#1e40af', fontWeight: 700 }} />
-            </F>
+            <F label="📍 ステータス（フェーズ）">{inp('status_phase', { placeholder: '見解送付済み / MTGセット / 法務移行 etc' })}</F>
             <F label="NA処理台帳番号">{inp('na_ledger', { placeholder: 'NA-2606-01' })}</F>
           </div>
-          <F label="問題箇所（1行）">{inp('issue_summary', { placeholder: '問題の核心を1行で' })}</F>
+          <F label="現状（フリーメモ）">{ta('current_state', 4)}</F>
+          <F label="問題箇所（1行サマリ）">{inp('issue_summary', { placeholder: '問題の核心を1行で' })}</F>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <F label="契約書該当箇所">{ta('contract_details')}</F>
             <F label="問題該当箇所詳細">{ta('issue_details')}</F>
           </div>
           <F label="方向性・対応方針">{ta('direction', 2)}</F>
-          <F label="スレッドURL">
-            <div style={{ display: 'flex', gap: 6 }}>
-              {inp('thread_url', { type: 'url', placeholder: 'https://', style: { flex: 1 } })}
-              {local.thread_url && <a href={local.thread_url} target="_blank" rel="noopener noreferrer"
-                style={{ padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', color: 'var(--gray-600)', textDecoration: 'none' }}>開く</a>}
-            </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <F label="📎 契約書URL">{inp('contract_url', { type: 'url', placeholder: 'https://drive.google.com/...' })}</F>
+            <F label="📋 処理台帳URL">{inp('ledger_url', { type: 'url', placeholder: 'https://drive.google.com/...' })}</F>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <F label="💬 スレッドURL">
+              <div style={{ display: 'flex', gap: 6 }}>
+                {inp('thread_url', { type: 'url', placeholder: 'https://', style: { flex: 1 } })}
+                {local.thread_url && <a href={local.thread_url} target="_blank" rel="noopener noreferrer"
+                  style={{ padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--gray-200)', borderRadius: 6, fontSize: '0.82rem', color: 'var(--gray-600)', textDecoration: 'none' }}>開く</a>}
+              </div>
+            </F>
+            <F label="✉️ メール履歴URL">{inp('email_slack_url', { type: 'url', placeholder: 'Slack/Doc URL' })}</F>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <F label="📝 議事録URL">{inp('minutes_url', { type: 'url', placeholder: 'Google Docs URL' })}</F>
+            <F label="📅 クローズ／法務移行日">{inp('closed_date', { type: 'date' })}</F>
+          </div>
+          <F label="🏁 結果（最終結論）">
+            <input value={local.final_result || ''} onChange={e => setLocal(l => ({ ...l, final_result: e.target.value }))}
+              onBlur={e => save({ final_result: e.target.value })}
+              style={{ padding: '6px 8px', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: '0.85rem', background: '#eff6ff', color: '#1e40af', fontWeight: 700 }} />
           </F>
         </div>
       </div>
@@ -220,15 +239,18 @@ export default function LegalHub() {
     setSelected(updated);
   };
 
-  const staleCount = cases.filter(c => !isClosed(c.result) && isStale(c.updated_at)).length;
+  const staleCount = cases.filter(c => !isClosed(c) && isStale(c.updated_at)).length;
 
   const displayed = useMemo(() => {
     let list = [...cases];
-    if (tab === 'active') list = list.filter(c => !isClosed(c.result));
-    if (staleOnly) list = list.filter(c => !isClosed(c.result) && isStale(c.updated_at));
+    if (tab === 'active') list = list.filter(c => !isClosed(c));
+    if (staleOnly) list = list.filter(c => !isClosed(c) && isStale(c.updated_at));
     if (query) {
       const q = query.toLowerCase();
-      list = list.filter(c => (c.case_name || '').toLowerCase().includes(q) || (c.chief || '').toLowerCase().includes(q) || (c.issue_summary || '').toLowerCase().includes(q));
+      list = list.filter(c => {
+        const hay = `${c.case_name || ''} ${c.chief || ''} ${c.issue_summary || ''} ${c.issue_details || ''} ${c.status_phase || ''} ${c.ball || ''}`.toLowerCase();
+        return hay.includes(q);
+      });
     }
     list.sort((a, b) => {
       const va = a[sortKey] || '', vb = b[sortKey] || '';
@@ -244,14 +266,16 @@ export default function LegalHub() {
   const SortIcon = ({ k }) => sortKey !== k ? null : <span style={{ fontSize: 10, marginLeft: 2 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>;
 
   const COLS = [
-    { key: 'case_name',     label: '案件名（企業名）', w: '25%' },
-    { key: 'na_date',       label: 'NA日',            w: 100 },
+    { key: 'case_name',     label: '案件名（企業名）', w: '22%' },
+    { key: 'na_date',       label: 'NA日',            w: 90 },
     { key: 'priority',      label: '優先度',           w: 72 },
-    { key: 'chief',         label: '担当',             w: 90 },
-    { key: 'ball',          label: 'ボール',           w: 120 },
-    { key: 'issue_summary', label: '問題箇所',         w: '30%' },
+    { key: 'chief',         label: '担当',             w: 80 },
+    { key: 'status_phase',  label: 'ステータス',       w: 130 },
+    { key: 'ball',          label: 'ボール',           w: 100 },
+    { key: 'issue_details', label: '問題箇所',         w: '24%' },
     { key: 'updated_at',    label: '最終更新',         w: 90 },
-    { key: 'result',        label: '結果',             w: 90 },
+    { key: 'final_result',  label: '結果',             w: 120 },
+    { key: 'closed_date',   label: 'クローズ日',       w: 100 },
   ];
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-400)' }}>読み込み中...</div>;
@@ -313,8 +337,8 @@ export default function LegalHub() {
               <tbody>
                 {displayed.map(c => {
                   const pri = PRIORITY_COLOR[c.priority] || PRIORITY_COLOR['中'];
-                  const stale = !isClosed(c.result) && isStale(c.updated_at);
-                  const closed = isClosed(c.result);
+                  const stale = !isClosed(c) && isStale(c.updated_at);
+                  const closed = isClosed(c);
                   return (
                     <tr key={c.id} onClick={() => setSelected(c)}
                       style={{ borderBottom: '1px solid var(--gray-100)', cursor: 'pointer', opacity: closed ? 0.6 : 1,

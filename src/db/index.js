@@ -876,6 +876,16 @@ async function dbEnsureSettingsSchema() {
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS idx_legal_cases_team ON legal_cases(team_id, updated_at DESC)`).catch(() => {});
 
+  // スプシ移行に伴うカラム追加（既存テーブルへの拡張、権限エラー無視）
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS status_phase TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS current_state TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS ledger_url TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS contract_url TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS email_slack_url TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS minutes_url TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS final_result TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE legal_cases ADD COLUMN IF NOT EXISTS closed_date DATE`).catch(() => {});
+
   // HRMOS採用設定（スプシURLなど）
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS hrmos_recruitment_settings (

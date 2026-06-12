@@ -193,24 +193,26 @@ function CaseDetail({ c, onChange, onDelete, onBack }) {
           <div style={metaBox}>
             <label style={metaLabel}><Calendar size={12}/> NA日</label>
             <input type="date" value={fmtDate(local.na_date)} onChange={e => commit('na_date', e.target.value)}
-              style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 13, fontWeight: 700, padding: 0 }} />
+              style={{ width: '100%', border: '1px solid #e5e7eb', background: '#fff', fontSize: 13, fontWeight: 700, padding: '4px 6px', borderRadius: 6, cursor: 'text' }} />
           </div>
           <div style={metaBox}>
             <label style={metaLabel}><AlertTriangle size={12}/> 優先度</label>
             <select value={local.priority || '中'} onChange={e => commit('priority', e.target.value)}
-              style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 13, fontWeight: 700, padding: 0, color: pri.color, cursor: 'pointer' }}>
+              style={{ width: '100%', border: '1px solid #e5e7eb', background: '#fff', fontSize: 13, fontWeight: 700, padding: '4px 6px', borderRadius: 6, color: pri.color, cursor: 'pointer' }}>
               {['高','中','低'].map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
           <div style={metaBox}>
             <label style={metaLabel}><User size={12}/> 担当</label>
             <input value={local.chief || ''} onChange={e => updateLocal('chief', e.target.value)} onBlur={e => commit('chief', e.target.value)}
-              style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 13, fontWeight: 700, padding: 0 }} />
+              placeholder="担当者名"
+              style={{ width: '100%', border: '1px solid #e5e7eb', background: '#fff', fontSize: 13, fontWeight: 700, padding: '4px 6px', borderRadius: 6, cursor: 'text' }} />
           </div>
           <div style={metaBox}>
             <label style={metaLabel}><Briefcase size={12}/> ボール</label>
             <input value={local.ball || ''} onChange={e => updateLocal('ball', e.target.value)} onBlur={e => commit('ball', e.target.value)}
-              style={{ width: '100%', border: 'none', background: 'transparent', fontSize: 13, fontWeight: 700, padding: 0 }} />
+              placeholder="ボール"
+              style={{ width: '100%', border: '1px solid #e5e7eb', background: '#fff', fontSize: 13, fontWeight: 700, padding: '4px 6px', borderRadius: 6, cursor: 'text' }} />
           </div>
         </div>
 
@@ -351,7 +353,7 @@ function CaseDetail({ c, onChange, onDelete, onBack }) {
         <div style={{ marginTop: 28, background: 'linear-gradient(135deg, #eef2ff, #faf5ff)', padding: 18, borderRadius: 14, border: '1px solid #c7d2fe' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontWeight: 800, color: '#312e81', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
-              <Sparkles size={18} color="#6366f1"/> AI アシスタント（Claude Haiku 4.5）
+              <Sparkles size={18} color="#6366f1"/> AI アシスタント
             </h3>
             <button onClick={generateAi} disabled={aiLoading}
               style={{ background: aiLoading ? '#a5b4fc' : '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: aiLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>

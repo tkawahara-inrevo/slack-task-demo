@@ -4,6 +4,7 @@
 //   team_id 省略時は process.env.LEGAL_IMPORT_TEAM_ID
 //   既存案件（同名）はスキップ（重複防止）
 
+require('dotenv').config();
 const { dbQuery } = require('../src/db/index');
 
 const TEAM_ID = process.argv[2] || process.env.LEGAL_IMPORT_TEAM_ID || 'T086C06L5V0';

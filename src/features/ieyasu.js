@@ -91,13 +91,18 @@ async function getAllUsers(token) {
 
 // ── 本日の打刻状況取得（指定ユーザー） ───────────────────────
 // 戻り値: { stamping_start_at, stamping_end_at } | null
+// HRMOS の daily エンドポイントは user_id クエリで絞り込めず全社員返るのでページングで探す
 async function getDailyWorkOutput(token, hrmosUserId, dateYmd) {
-  const res = await ieyasuRequest({
-    path: `/api/${COMPANY}/v1/work_outputs/daily/${dateYmd}?user_id=${hrmosUserId}`,
-    auth: `Token ${token}`,
-  });
-  if (res.status !== 200 || !Array.isArray(res.body)) return null;
-  return res.body.find(r => Number(r.user_id) === Number(hrmosUserId)) || null;
+  for (let page = 1; page <= 20; page++) {
+    const res = await ieyasuRequest({
+      path: `/api/${COMPANY}/v1/work_outputs/daily/${dateYmd}?page=${page}`,
+      auth: `Token ${token}`,
+    });
+    if (res.status !== 200 || !Array.isArray(res.body) || res.body.length === 0) return null;
+    const found = res.body.find(r => Number(r.user_id) === Number(hrmosUserId));
+    if (found) return found;
+  }
+  return null;
 }
 
 // ── メインの打刻関数 ───────────────────────────────────────────

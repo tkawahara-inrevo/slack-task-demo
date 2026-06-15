@@ -134,7 +134,9 @@ async function stampAttendance(slackClient, slackUserId, type) {
     const typeName = type === 1 ? '出勤' : '退勤';
 
     // 4. 二重打刻チェック: 本日の打刻状況を取得
-    // JSTの今日（HRMOSは社員ごとの締め日考慮の業務日付）
+    //   - 直近 SKIP_WINDOW_MIN 分以内に同タイプの打刻ありなら skip（手動打刻直後の日報投稿を吸収）
+    //   - それより前なら新規打刻に進む（夕方退勤→夜再勤務→再退勤、のケースを許容）
+    const SKIP_WINDOW_MIN = 30;
     const now = new Date();
     const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 9 * 60) * 60000);
     const todayYmd = jst.toISOString().slice(0, 10);
@@ -143,8 +145,18 @@ async function stampAttendance(slackClient, slackUserId, type) {
       if (daily) {
         const alreadyAt = type === 1 ? daily.stamping_start_at : daily.stamping_end_at;
         if (alreadyAt) {
-          console.log(`[HRMOS] ${typeName}打刻 既存あり: ${email} ${alreadyAt} → skip`);
-          return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
+          const m = String(alreadyAt).match(/^(\d{1,2}):(\d{2})/);
+          if (m) {
+            const stampMin = Number(m[1]) * 60 + Number(m[2]);
+            const nowMin = jst.getUTCHours() * 60 + jst.getUTCMinutes();
+            let diff = nowMin - stampMin;
+            if (diff < 0) diff += 24 * 60; // 跨日対策
+            if (diff < SKIP_WINDOW_MIN) {
+              console.log(`[HRMOS] ${typeName}打刻 既存 ${alreadyAt} (${diff}分前) → skip`);
+              return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
+            }
+            console.log(`[HRMOS] ${typeName}打刻 既存 ${alreadyAt} (${diff}分前) → 新規打刻へ`);
+          }
         }
       }
     } catch (e) {

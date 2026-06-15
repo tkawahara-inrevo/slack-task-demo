@@ -3216,6 +3216,39 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     } catch (e) { console.warn('[IEYASU] スレッド通知失敗:', e.message); }
   }
 
+  // 遅延／リトライ記録を1件処理する（setTimeoutとworker両方から呼ぶ）
+  async function processDelayedRecord(recordId) {
+    const { rows } = await dbQuery(
+      `SELECT id, team_id, slack_user_id, stamp_type, channel_id, message_ts, retry_state
+       FROM hrmos_stamps WHERE id=$1 LIMIT 1`,
+      [recordId]
+    );
+    const row = rows[0];
+    if (!row) return;
+    // 既に処理済みなら何もしない（重複実行防止）
+    if (!['pending', 'delayed'].includes(row.retry_state)) return;
+
+    const result = await stampAttendance(app.client, row.slack_user_id, row.stamp_type);
+    if (result.ok) {
+      const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';
+      await addStampReaction(app.client, row.channel_id, row.message_ts, reactionName);
+      await dbQuery(
+        `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state='retried_ok', error_reason=$3 WHERE id=$1`,
+        [row.id, result.userId || null, result.skipped ? 'already_stamped' : null]
+      ).catch(() => {});
+      console.log(`[IEYASU] 遅延処理OK: user=${row.slack_user_id} type=${row.stamp_type} skipped=${!!result.skipped}`);
+    } else {
+      await addStampReaction(app.client, row.channel_id, row.message_ts, 'warning');
+      await notifyStampFailure(app.client, row.slack_user_id, row.stamp_type, result.reason);
+      await postStampFailureToThread(app.client, row.channel_id, row.message_ts, row.slack_user_id, row.stamp_type, result.reason);
+      await dbQuery(
+        `UPDATE hrmos_stamps SET retry_state='final_failed', error_reason=$2 WHERE id=$1`,
+        [row.id, result.reason]
+      ).catch(() => {});
+      console.warn(`[IEYASU] 遅延処理失敗: user=${row.slack_user_id}`, result);
+    }
+  }
+
   const doStamp = async (client, message, stampType) => {
     // スレッド返信は除外
     if (message.thread_ts && message.thread_ts !== message.ts) return;
@@ -3234,12 +3267,16 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     // 退勤は10分遅延打刻（その間に本人がHRMOSで手動打刻すればスキップされる）
     if (stampType === 2) {
       await addStampReaction(client, message.channel, message.ts, 'hourglass_flowing_sand');
+      const { randomUUID } = require('crypto');
+      const recordId = randomUUID();
       await dbQuery(
         `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, channel_id, message_ts, retry_state)
-         VALUES (gen_random_uuid(), $1, $2, $3, false, $4, $5, 'delayed')`,
-        [teamId, targetUserId, stampType, message.channel, message.ts]
+         VALUES ($1, $2, $3, $4, false, $5, $6, 'delayed')`,
+        [recordId, teamId, targetUserId, stampType, message.channel, message.ts]
       ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-      console.log(`[IEYASU] 退勤 10分後に打刻予定 user:${targetUserId}`);
+      console.log(`[IEYASU] 退勤 10分後ピンポイントで打刻予定 user:${targetUserId} id:${recordId}`);
+      // 正確に10分後に処理（プロセス再起動時の救済は worker が担う）
+      setTimeout(() => processDelayedRecord(recordId).catch(e => console.error('[IEYASU] 遅延処理エラー:', e.message)), 10 * 60 * 1000);
       return;
     }
 
@@ -3283,41 +3320,23 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       if (STAMP_OUT_CHS.has(message.channel)) await doStamp(client, message, 2);
     });
 
-    // 10分後リトライworker（5分おきに走査）
+    // 救済worker（1分おきに走査）— setTimeout が失われた取り残し（プロセス再起動時等）専用
     setInterval(async () => {
       try {
         const { rows } = await dbQuery(
-          `SELECT id, team_id, slack_user_id, stamp_type, channel_id, message_ts
-           FROM hrmos_stamps
+          `SELECT id FROM hrmos_stamps
            WHERE retry_state IN ('pending','delayed')
              AND stamped_at <= now() - interval '10 minutes'
              AND stamped_at > now() - interval '6 hours'
            ORDER BY stamped_at ASC LIMIT 20`
         );
         if (rows.length === 0) return;
+        console.log(`[IEYASU] 救済worker: ${rows.length}件の取り残しを処理`);
         for (const row of rows) {
-          const result = await stampAttendance(app.client, row.slack_user_id, row.stamp_type);
-          if (result.ok) {
-            const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';
-            await addStampReaction(app.client, row.channel_id, row.message_ts, reactionName);
-            await dbQuery(
-              `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state='retried_ok', error_reason=$3 WHERE id=$1`,
-              [row.id, result.userId || null, result.skipped ? 'already_stamped' : null]
-            ).catch(() => {});
-            console.log(`[IEYASU] retry成功: user=${row.slack_user_id} type=${row.stamp_type} skipped=${!!result.skipped}`);
-          } else {
-            await addStampReaction(app.client, row.channel_id, row.message_ts, 'warning');
-            await notifyStampFailure(app.client, row.slack_user_id, row.stamp_type, result.reason);
-            await postStampFailureToThread(app.client, row.channel_id, row.message_ts, row.slack_user_id, row.stamp_type, result.reason);
-            await dbQuery(
-              `UPDATE hrmos_stamps SET retry_state='final_failed', error_reason=$2 WHERE id=$1`,
-              [row.id, result.reason]
-            ).catch(() => {});
-            console.warn(`[IEYASU] retry最終失敗: user=${row.slack_user_id}`, result);
-          }
+          await processDelayedRecord(row.id).catch(e => console.error('[IEYASU] 救済処理エラー:', e.message));
         }
       } catch (e) { console.error('[IEYASU] retry worker error:', e.message); }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
   }
 
   // ── 問い合わせフォーム → CRM 自動登録 ──────────────────────────

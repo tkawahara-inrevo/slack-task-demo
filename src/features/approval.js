@@ -248,9 +248,11 @@ function registerApproval({
   });
 
   function buildCreateModal({ defaultChannel } = {}) {
+    // 起点のチャンネルを private_metadata に保持（投稿先選択は不要）
     return {
       type: 'modal',
       callback_id: 'approval_create_modal',
+      private_metadata: JSON.stringify({ channelId: defaultChannel || null }),
       title: { type: 'plain_text', text: '電子決裁を起票' },
       submit: { type: 'plain_text', text: '起票' },
       close: { type: 'plain_text', text: 'キャンセル' },
@@ -267,17 +269,6 @@ function registerApproval({
           optional: true,
           label: { type: 'plain_text', text: '内容・補足' },
           element: { type: 'plain_text_input', action_id: 'v', multiline: true, max_length: 3000, placeholder: { type: 'plain_text', text: '金額・背景・添付など' } },
-        },
-        {
-          type: 'input',
-          block_id: 'channel',
-          label: { type: 'plain_text', text: '投稿先チャンネル' },
-          element: {
-            type: 'conversations_select',
-            action_id: 'v',
-            ...(defaultChannel ? { initial_conversation: defaultChannel } : {}),
-            filter: { include: ['public', 'private'], exclude_bot_users: true },
-          },
         },
         {
           type: 'input',
@@ -309,18 +300,34 @@ function registerApproval({
     const teamId = getTeamIdFromBody(body);
     const title = view.state.values.title?.v?.value?.trim() || '';
     const description = view.state.values.desc?.v?.value?.trim() || '';
-    const channelId = view.state.values.channel?.v?.selected_conversation;
+    const meta = safeJsonParse(view.private_metadata) || {};
+    let channelId = meta.channelId;
     const voters = view.state.values.voters?.v?.selected_users || [];
     const mode = view.state.values.mode?.v?.selected_option?.value || 'parallel';
 
     const errors = {};
     if (!title) errors.title = 'タイトルを入力してください';
-    if (!channelId) errors.channel = 'チャンネルを選択してください';
     if (voters.length === 0) errors.voters = '承認者を1人以上選択してください';
     if (voters.includes(requester)) errors.voters = '自分自身を承認者にはできません';
     if (Object.keys(errors).length) {
       await ack({ response_action: 'errors', errors });
       return;
+    }
+    if (!channelId) {
+      // チャンネル情報が取れていない場合（グローバルショートカット等）は起票者のDMにフォールバック
+      try {
+        const dm = await client.conversations.open({ users: requester });
+        const dmChannel = dm?.channel?.id;
+        if (!dmChannel) {
+          await ack({ response_action: 'errors', errors: { voters: 'チャンネル情報が取得できませんでした。スレッドや投稿欄から起動してください' } });
+          return;
+        }
+        channelId = dmChannel;
+        meta.channelId = dmChannel;
+      } catch {
+        await ack({ response_action: 'errors', errors: { voters: 'チャンネル情報が取得できませんでした' } });
+        return;
+      }
     }
 
     // 順次承認 かつ 承認者2人以上の場合は並び順モーダルへ

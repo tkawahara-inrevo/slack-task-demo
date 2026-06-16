@@ -799,6 +799,38 @@ async function dbEnsureSettingsSchema() {
   // 救済 worker 高速ピックアップ用
   await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_stamps_due ON hrmos_stamps(scheduled_at) WHERE retry_state IN ('pending','delayed')`).catch(() => {});
 
+  // ── 電子決裁 ──
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS approvals (
+      id                 TEXT PRIMARY KEY,
+      team_id            TEXT NOT NULL,
+      requester_user_id  TEXT NOT NULL,
+      title              TEXT NOT NULL,
+      description        TEXT,
+      channel_id         TEXT NOT NULL,
+      message_ts         TEXT,
+      mode               TEXT NOT NULL DEFAULT 'parallel', -- parallel | sequential
+      status             TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected | cancelled
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      completed_at       TIMESTAMPTZ
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS approvals_team_status ON approvals(team_id, status, created_at DESC)`).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS approvals_requester ON approvals(team_id, requester_user_id, created_at DESC)`).catch(() => {});
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS approval_voters (
+      approval_id  TEXT NOT NULL,
+      user_id      TEXT NOT NULL,
+      order_idx    INT NOT NULL DEFAULT 0,
+      status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+      comment      TEXT,
+      decided_at   TIMESTAMPTZ,
+      PRIMARY KEY (approval_id, user_id)
+    )
+  `).catch(() => {});
+  await dbQuery(`CREATE INDEX IF NOT EXISTS approval_voters_user ON approval_voters(user_id, status)`).catch(() => {});
+
   // タスク通知遅延（キーワード/リアクション経由タスクは10分後に通知）
   await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS tasks_notify_scheduled ON tasks(notify_scheduled_at) WHERE notify_scheduled_at IS NOT NULL AND notified_at IS NULL`).catch(() => {});

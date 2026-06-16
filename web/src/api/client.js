@@ -676,6 +676,10 @@ export const api = {
   legalDelete:      (id)      => apiFetch(`/legal/cases/${id}`, { method: 'DELETE' }),
   legalAi:          (id)      => apiFetch(`/legal/cases/${id}/ai`, { method: 'POST' }),
 
+  // 電子決裁
+  approvals: (status) => apiFetch(`/approvals${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  approvalDetail: (id) => apiFetch(`/approvals/${id}`),
+
   // 機能別アクセス権限
   featureAccess:    () => apiFetch('/me/feature-access'),
   featureAccessCatalog: () => apiFetch('/admin/feature-access/catalog'),

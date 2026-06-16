@@ -15,6 +15,7 @@ const { stampAttendance } = require("./src/features/ieyasu");
 const { registerPochiAiSlack } = require("./src/features/pochi-ai-slack");
 const { registerSourceDoneListener, syncTaskDoneReaction } = require("./src/features/task-source-reaction");
 const { registerRecruitNotify } = require("./src/features/recruit-notify");
+const { registerApproval } = require("./src/features/approval");
 const { INQUIRY_CHANNEL_ID, handleInquiryMessage } = require("./src/features/crm-inquiry");
 const {
   __cacheGet,
@@ -302,6 +303,15 @@ registerSourceDoneListener({
 });
 
 registerRecruitNotify({ app });
+
+registerApproval({
+  app,
+  dbQuery,
+  getUserDisplayName,
+  getTeamIdFromBody,
+  noMention,
+  safeJsonParse,
+});
 
 registerAdminFeature({
   app,

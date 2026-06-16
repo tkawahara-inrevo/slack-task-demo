@@ -41,6 +41,7 @@ import SlackWorkflows from './pages/SlackWorkflows'
 import LegalHub from './pages/legal/LegalHub'
 import AnList from './pages/an/AnList'
 import MySettings from './pages/MySettings'
+import Approvals from './pages/Approvals'
 import OverdueReport from './pages/admin/OverdueReport'
 import HrmosCheck from './pages/admin/HrmosCheck'
 import './App.css'
@@ -62,6 +63,7 @@ function App() {
         <Route path="/org-chart" element={<OrgChart />} />
         <Route path="/ranking" element={<Ranking />} />
         <Route path="/my-settings" element={<MySettings />} />
+        <Route path="/approvals" element={<Approvals />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="roles" replace />} />

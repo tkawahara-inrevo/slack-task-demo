@@ -198,6 +198,7 @@ export default function Layout({ children }) {
     { to: '/', label: 'ホーム', end: true },
     { to: '/workload', label: '業務ガント' },
     { to: '/workflows', label: 'WF' },
+    { to: '/approvals', label: '電子決裁' },
     { to: '/analytics', label: '分析' },
     { to: '/org-chart', label: 'チーム設定' },
   ];

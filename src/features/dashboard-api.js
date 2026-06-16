@@ -3,6 +3,7 @@ const { randomUUID } = require("crypto");
 const { registerRpoApi } = require("./rpo-api");
 const { registerLegalApi } = require("./legal-api");
 const { registerFeatureAccess } = require("./feature-access");
+const { registerApprovalApi } = require("./approval-api");
 const { registerAnApi } = require("./an-api");
 const { registerKintoneApi } = require("./kintone-api");
 const { registerDriveApi } = require("./drive-api");
@@ -5215,6 +5216,9 @@ function registerDashboardApi(deps) {
 
   // 法務案件管理API（requireFeatureAccess('legal') で保護）
   registerLegalApi({ expressApp, authWithRole, requireFeatureAccess: featureAccess.requireFeatureAccess });
+
+  // 電子決裁API（全員アクセス可、認証だけ）
+  registerApprovalApi({ expressApp, authWithRole });
 
   // AN依頼管理API
   registerAnApi({ expressApp, authWithRole, slackApp: deps.boltApp, teamId: process.env.SLACK_TEAM_ID || 'T086C06L5V0' });

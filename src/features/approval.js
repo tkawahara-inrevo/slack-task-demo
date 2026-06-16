@@ -229,9 +229,10 @@ function registerApproval({
       const defaultChannel = shortcut.channel?.id;
       // クリックしたメッセージがスレッド内なら thread_ts、トップレベルなら ts を起点に
       const originThreadTs = shortcut.message?.thread_ts || shortcut.message?.ts || null;
+      const sourceText = (shortcut.message?.text || '').slice(0, 2800);
       await client.views.open({
         trigger_id: shortcut.trigger_id,
-        view: buildCreateModal({ defaultChannel, originThreadTs }),
+        view: buildCreateModal({ defaultChannel, originThreadTs, initialDescription: sourceText }),
       });
     } catch (e) {
       console.error('[approval] open create modal (shortcut) fail:', e?.data || e);
@@ -251,7 +252,7 @@ function registerApproval({
     }
   });
 
-  function buildCreateModal({ defaultChannel, originThreadTs } = {}) {
+  function buildCreateModal({ defaultChannel, originThreadTs, initialDescription } = {}) {
     // 起点のチャンネル + スレッド情報を private_metadata に保持
     return {
       type: 'modal',
@@ -272,7 +273,14 @@ function registerApproval({
           block_id: 'desc',
           optional: true,
           label: { type: 'plain_text', text: '内容・補足' },
-          element: { type: 'plain_text_input', action_id: 'v', multiline: true, max_length: 3000, placeholder: { type: 'plain_text', text: '金額・背景・添付など' } },
+          element: {
+            type: 'plain_text_input',
+            action_id: 'v',
+            multiline: true,
+            max_length: 3000,
+            placeholder: { type: 'plain_text', text: '金額・背景・添付など' },
+            ...(initialDescription ? { initial_value: initialDescription } : {}),
+          },
         },
         {
           type: 'input',

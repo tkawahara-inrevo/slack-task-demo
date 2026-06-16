@@ -830,6 +830,7 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS approval_voters_user ON approval_voters(user_id, status)`).catch(() => {});
+  await dbQuery(`ALTER TABLE approvals ADD COLUMN IF NOT EXISTS origin_thread_ts TEXT`).catch(() => {});
 
   // タスク通知遅延（キーワード/リアクション経由タスクは10分後に通知）
   await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});

@@ -18,11 +18,11 @@ function registerApproval({
 
   // ── DB ヘルパー ─────────────────────────────────
   async function createApproval(data) {
-    const { id, team_id, requester_user_id, title, description, channel_id, mode, voters } = data;
+    const { id, team_id, requester_user_id, title, description, channel_id, mode, voters, origin_thread_ts } = data;
     await dbQuery(
-      `INSERT INTO approvals (id, team_id, requester_user_id, title, description, channel_id, mode, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending')`,
-      [id, team_id, requester_user_id, title, description || null, channel_id, mode || 'parallel']
+      `INSERT INTO approvals (id, team_id, requester_user_id, title, description, channel_id, mode, status, origin_thread_ts)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)`,
+      [id, team_id, requester_user_id, title, description || null, channel_id, mode || 'parallel', origin_thread_ts || null]
     );
     for (let i = 0; i < voters.length; i++) {
       await dbQuery(
@@ -181,9 +181,11 @@ function registerApproval({
 
   async function postThreadLog(client, approval, text) {
     try {
+      // origin_thread_ts があれば そのスレッドに、なければ approval カード自身をスレッド親として
+      const thread_ts = approval.origin_thread_ts || approval.message_ts;
       await client.chat.postMessage({
         channel: approval.channel_id,
-        thread_ts: approval.message_ts,
+        thread_ts,
         text,
         unfurl_links: false,
         unfurl_media: false,
@@ -225,9 +227,11 @@ function registerApproval({
     await ack();
     try {
       const defaultChannel = shortcut.channel?.id;
+      // クリックしたメッセージがスレッド内なら thread_ts、トップレベルなら ts を起点に
+      const originThreadTs = shortcut.message?.thread_ts || shortcut.message?.ts || null;
       await client.views.open({
         trigger_id: shortcut.trigger_id,
-        view: buildCreateModal({ defaultChannel }),
+        view: buildCreateModal({ defaultChannel, originThreadTs }),
       });
     } catch (e) {
       console.error('[approval] open create modal (shortcut) fail:', e?.data || e);
@@ -247,12 +251,12 @@ function registerApproval({
     }
   });
 
-  function buildCreateModal({ defaultChannel } = {}) {
-    // 起点のチャンネルを private_metadata に保持（投稿先選択は不要）
+  function buildCreateModal({ defaultChannel, originThreadTs } = {}) {
+    // 起点のチャンネル + スレッド情報を private_metadata に保持
     return {
       type: 'modal',
       callback_id: 'approval_create_modal',
-      private_metadata: JSON.stringify({ channelId: defaultChannel || null }),
+      private_metadata: JSON.stringify({ channelId: defaultChannel || null, originThreadTs: originThreadTs || null }),
       title: { type: 'plain_text', text: '電子決裁を起票' },
       submit: { type: 'plain_text', text: '起票' },
       close: { type: 'plain_text', text: 'キャンセル' },
@@ -302,6 +306,7 @@ function registerApproval({
     const description = view.state.values.desc?.v?.value?.trim() || '';
     const meta = safeJsonParse(view.private_metadata) || {};
     let channelId = meta.channelId;
+    const originThreadTs = meta.originThreadTs || null;
     const voters = view.state.values.voters?.v?.selected_users || [];
     const mode = view.state.values.mode?.v?.selected_option?.value || 'parallel';
 
@@ -332,18 +337,18 @@ function registerApproval({
 
     // 順次承認 かつ 承認者2人以上の場合は並び順モーダルへ
     if (mode === 'sequential' && voters.length > 1) {
-      const reorderView = buildReorderModal({ title, description, channelId, voters, mode });
+      const reorderView = buildReorderModal({ title, description, channelId, voters, mode, originThreadTs });
       await ack({ response_action: 'push', view: reorderView });
       return;
     }
 
     await ack();
-    await createAndPostApproval(client, { requester, teamId, title, description, channelId, voters, mode });
+    await createAndPostApproval(client, { requester, teamId, title, description, channelId, voters, mode, originThreadTs });
   });
 
   // 順次モード: 並び順指定モーダル
-  function buildReorderModal({ title, description, channelId, voters, mode }) {
-    const metadata = JSON.stringify({ title, description, channelId, voters, mode });
+  function buildReorderModal({ title, description, channelId, voters, mode, originThreadTs }) {
+    const metadata = JSON.stringify({ title, description, channelId, voters, mode, originThreadTs: originThreadTs || null });
     const blocks = [
       {
         type: 'section',
@@ -377,7 +382,7 @@ function registerApproval({
   // 並び順モーダル送信
   app.view('approval_reorder_modal', async ({ ack, body, view, client }) => {
     const meta = safeJsonParse(view.private_metadata) || {};
-    const { title, description, channelId, voters: originalVoters, mode } = meta;
+    const { title, description, channelId, voters: originalVoters, mode, originThreadTs } = meta;
     const requester = body.user?.id;
     const teamId = getTeamIdFromBody(body);
 
@@ -414,11 +419,11 @@ function registerApproval({
     }
 
     await ack({ response_action: 'clear' });
-    await createAndPostApproval(client, { requester, teamId, title, description, channelId, voters: orderedVoters, mode });
+    await createAndPostApproval(client, { requester, teamId, title, description, channelId, voters: orderedVoters, mode, originThreadTs });
   });
 
   // 共通: 決裁レコード作成 + Slack投稿
-  async function createAndPostApproval(client, { requester, teamId, title, description, channelId, voters, mode }) {
+  async function createAndPostApproval(client, { requester, teamId, title, description, channelId, voters, mode, originThreadTs }) {
     try {
       try { await client.conversations.join({ channel: channelId }); } catch {}
 
@@ -429,6 +434,7 @@ function registerApproval({
         title, description,
         channel_id: channelId,
         mode, voters,
+        origin_thread_ts: originThreadTs || null,
       });
 
       const approval = await getApprovalById(id);
@@ -438,6 +444,7 @@ function registerApproval({
         channel: channelId,
         text: `📋 電子決裁: ${noMention(title)}`,
         blocks,
+        ...(originThreadTs ? { thread_ts: originThreadTs } : {}),
       });
       await setApprovalMessageTs(id, postRes.ts);
       approval.message_ts = postRes.ts;

@@ -70,43 +70,147 @@ async function notifyUserDM(userId, task, roleLabel, kind = "due") {
   });
 }
 
+// 朝の集約リマインド: 1ユーザーに「期限切れ + 当日期限」を1通のDMで配信（営業日のみ）
+function buildTaskListItem(task, label) {
+  const payload = JSON.stringify({ teamId: task.team_id, taskId: task.id });
+  const due = formatDueDateOnly(task.due_date);
+  const titleLine = `*${noMention(task.title).slice(0, 100)}*  _(期限: ${due} / ${label})_`;
+  const elements = [
+    {
+      type: "button",
+      text: { type: "plain_text", text: "詳細を開く" },
+      action_id: "open_detail_modal",
+      value: payload,
+    },
+  ];
+  if (task.source_permalink) {
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: "元メッセージ" },
+      url: task.source_permalink,
+    });
+  }
+  return [
+    { type: "section", text: { type: "mrkdwn", text: `• ${titleLine}` } },
+    { type: "actions", elements },
+  ];
+}
+
+async function sendMorningReminderDm(userId, overdueItems, todayItems) {
+  if (!overdueItems.length && !todayItems.length) return;
+  if (!userId) return;
+  // 最初のタスクの team_id を使って DM 可否判定（簡略）
+  const sampleTask = (overdueItems[0] || todayItems[0])?.task;
+  if (sampleTask && !(await canUserReceiveDm(sampleTask.team_id, userId, "due"))) return;
+
+  const dm = await app.client.conversations.open({ users: userId });
+  const channel = dm.channel?.id;
+  if (!channel) return;
+
+  const blocks = [];
+  blocks.push({
+    type: "header",
+    text: { type: "plain_text", text: "⏰ 本日のタスクリマインド" },
+  });
+  blocks.push({
+    type: "context",
+    elements: [{
+      type: "mrkdwn",
+      text: `期限切れ *${overdueItems.length}* 件　/　今日が期限 *${todayItems.length}* 件`,
+    }],
+  });
+
+  if (overdueItems.length) {
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `🚨 *期限切れタスク (${overdueItems.length}件)*` },
+    });
+    for (const { task, role } of overdueItems) {
+      const label = role === "requester" ? "依頼者" : "対応者";
+      blocks.push(...buildTaskListItem(task, label));
+    }
+  }
+
+  if (todayItems.length) {
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `🗓️ *今日が期限のタスク (${todayItems.length}件)*` },
+    });
+    for (const { task, role } of todayItems) {
+      const label = role === "requester" ? "依頼者" : "対応者";
+      blocks.push(...buildTaskListItem(task, label));
+    }
+  }
+
+  // Slack chat.postMessage の blocks 上限は 50。超えたら末尾は省略表示に
+  const SLACK_BLOCK_LIMIT = 50;
+  if (blocks.length > SLACK_BLOCK_LIMIT) {
+    blocks.length = SLACK_BLOCK_LIMIT - 1;
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "_…件数が多いため一部省略。ホームタブで全件確認してください_" }],
+    });
+  }
+
+  await app.client.chat.postMessage({
+    channel,
+    text: `タスクリマインド: 期限切れ ${overdueItems.length}件 / 今日 ${todayItems.length}件`,
+    blocks,
+  });
+}
+
 async function runDueNotifyJob() {
   const today = todayJstYmd();
+  // 営業日のみ配信
+  if (!isJpBusinessDayYmd(today)) {
+    console.log(`[notify] skipped (not business day): ${today}`);
+    return;
+  }
 
+  // 期限切れ + 当日期限のタスクを取得（個人タスクのみ）
   const q = `
     SELECT *
     FROM tasks
-    WHERE due_date = $1
+    WHERE due_date IS NOT NULL
+      AND due_date <= $1
       AND status NOT IN ('done','cancelled')
-      AND (notified_at IS NULL)
       AND (task_type IS NULL OR task_type='personal')
-    ORDER BY created_at ASC
-    LIMIT 500;
+    ORDER BY due_date ASC, created_at ASC
+    LIMIT 2000;
   `;
   const tasks = (await dbQuery(q, [today])).rows;
 
-  const BATCH_SIZE = 5;
-  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-    const batch = tasks.slice(i, i + BATCH_SIZE);
-    await Promise.allSettled(
-      batch.map(async (t) => {
-        try {
-          await Promise.all([
-            notifyUserDM(t.requester_user_id, t, "依頼者", "due_requester"),
-            notifyUserDM(t.assignee_id, t, "対応者", "due"),
-          ]);
-          await dbQuery(
-            `UPDATE tasks SET notified_at = now() WHERE team_id=$1 AND id=$2`,
-            [t.team_id, t.id],
-          );
-        } catch (e) {
-          console.error("notify error:", e?.data || e);
-        }
-      }),
-    );
+  // ユーザー別にバケツへ振り分け（対応者 + 依頼者の両方を別エントリで通知）
+  const byUser = new Map(); // user_id → { overdue: [], today: [] }
+  const pushItem = (userId, role, task, bucket) => {
+    if (!userId) return;
+    if (!byUser.has(userId)) byUser.set(userId, { overdue: [], today: [] });
+    byUser.get(userId)[bucket].push({ task, role });
+  };
+  for (const t of tasks) {
+    const due = String(t.due_date).slice(0, 10);
+    const bucket = due === today ? "today" : "overdue";
+    pushItem(t.assignee_id, "assignee", t, bucket);
+    // 依頼者と対応者が同じ場合は重複させない
+    if (t.requester_user_id && t.requester_user_id !== t.assignee_id) {
+      pushItem(t.requester_user_id, "requester", t, bucket);
+    }
   }
 
-  console.log(`[notify] done. today=${today} count=${tasks.length}`);
+  // ユーザーごとに集約DM配信
+  let sent = 0;
+  for (const [userId, items] of byUser) {
+    try {
+      await sendMorningReminderDm(userId, items.overdue, items.today);
+      sent++;
+    } catch (e) {
+      console.error("[notify] aggregated dm error:", e?.data || e);
+    }
+  }
+
+  console.log(`[notify] done. today=${today} tasks=${tasks.length} users_notified=${sent}`);
 }
 
 cron.schedule(

@@ -3274,9 +3274,9 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
          VALUES ($1, $2, $3, $4, false, $5, $6, 'delayed')`,
         [recordId, teamId, targetUserId, stampType, message.channel, message.ts]
       ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-      console.log(`[IEYASU] 退勤 5分後ピンポイントで打刻予定 user:${targetUserId} id:${recordId}`);
-      // 正確に5分後に処理（プロセス再起動時の救済は worker が担う）
-      setTimeout(() => processDelayedRecord(recordId).catch(e => console.error('[IEYASU] 遅延処理エラー:', e.message)), 5 * 60 * 1000);
+      console.log(`[IEYASU] 退勤 10分後ピンポイントで打刻予定 user:${targetUserId} id:${recordId}`);
+      // 正確に10分後に処理（プロセス再起動時の救済は worker が担う）
+      setTimeout(() => processDelayedRecord(recordId).catch(e => console.error('[IEYASU] 遅延処理エラー:', e.message)), 10 * 60 * 1000);
       return;
     }
 
@@ -3326,7 +3326,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         const { rows } = await dbQuery(
           `SELECT id FROM hrmos_stamps
            WHERE retry_state IN ('pending','delayed')
-             AND stamped_at <= now() - interval '5 minutes'
+             AND stamped_at <= now() - interval '10 minutes'
              AND stamped_at > now() - interval '6 hours'
            ORDER BY stamped_at ASC LIMIT 20`
         );

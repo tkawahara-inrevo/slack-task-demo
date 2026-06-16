@@ -672,7 +672,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.get('/api/crm/dashboard', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { salesUser, period = 'month', customMonth } = req.query; // period: 'month' | 'term' | 'custom'
+      const { salesUser, period = 'month', customMonth, startMonth, endMonth } = req.query; // period: 'month' | 'term' | 'prevterm' | 'custom' | 'range'
 
       const ADDA_REF = '添田/リファラル';
       const isAddaRef = salesUser === ADDA_REF;
@@ -693,6 +693,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
       let rangeStart, rangeEnd;
       if (period === 'term') {
         [rangeStart, rangeEnd] = [ps.curr_start, ps.curr_end];
+      } else if (period === 'prevterm') {
+        [rangeStart, rangeEnd] = [ps.prev_start, ps.prev_end];
+      } else if (period === 'range' && startMonth && endMonth) {
+        const sm = new Date(`${startMonth}-01`);
+        const em = new Date(`${endMonth}-01`);
+        rangeStart = `${sm.getFullYear()}-${String(sm.getMonth()+1).padStart(2,'0')}-01`;
+        rangeEnd   = new Date(em.getFullYear(), em.getMonth()+1, 0).toISOString().split('T')[0];
       } else if (period === 'custom' && customMonth) {
         const cm = new Date(`${customMonth}-01`);
         const cy = cm.getFullYear(), cmn = cm.getMonth() + 1;
@@ -800,6 +807,17 @@ function registerCrmApi({ expressApp, authWithRole }) {
       let prevRangeStart = null, prevRangeEnd = null;
       if (period === 'term') {
         [prevRangeStart, prevRangeEnd] = [prevStart, prevEnd];
+      } else if (period === 'prevterm') {
+        // 前期モードは比較対象を出さない（前々期がない）
+        [prevRangeStart, prevRangeEnd] = [null, null];
+      } else if (period === 'range' && startMonth && endMonth) {
+        const sm = new Date(`${startMonth}-01`);
+        const em = new Date(`${endMonth}-01`);
+        const monthsInRange = (em.getFullYear() - sm.getFullYear()) * 12 + (em.getMonth() - sm.getMonth()) + 1;
+        const prevSm = new Date(sm); prevSm.setMonth(prevSm.getMonth() - monthsInRange);
+        const prevEm = new Date(em); prevEm.setMonth(prevEm.getMonth() - monthsInRange);
+        prevRangeStart = `${prevSm.getFullYear()}-${String(prevSm.getMonth()+1).padStart(2,'0')}-01`;
+        prevRangeEnd   = new Date(prevEm.getFullYear(), prevEm.getMonth()+1, 0).toISOString().split('T')[0];
       } else if (period === 'custom' && customMonth) {
         const cm = new Date(`${customMonth}-01`);
         cm.setMonth(cm.getMonth() - 1);

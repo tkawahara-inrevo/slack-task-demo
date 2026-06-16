@@ -478,6 +478,8 @@ export default function CrmDashboard() {
   const [salesUser, setSalesUser] = useState('');
   const [period, setPeriod]       = useState('custom');
   const [customMonth, setCustomMonth] = useState(currentMonth);
+  const [rangeStartMonth, setRangeStartMonth] = useState(currentMonth);
+  const [rangeEndMonth, setRangeEndMonth]     = useState(currentMonth);
   const [drill, setDrill]         = useState(null);
   const [forecastDrill, setForecastDrill] = useState(null); // { label, color, items }
   const [alertOpen, setAlertOpen] = useState(true);
@@ -497,17 +499,20 @@ export default function CrmDashboard() {
     api.kintoneStatus().then(r => setLastSync(r.lastSync)).catch(() => {});
   }, [syncDone]);
 
-  const load = async (u, p, cm) => {
+  const load = async (u, p, cm, rs, re) => {
     setLoading(true);
     try {
       const params = { period: p };
       if (u) params.salesUser = u;
       if (p === 'custom' && cm) params.customMonth = cm;
+      if (p === 'range' && rs && re) { params.startMonth = rs; params.endMonth = re; }
+      // monthly-summary（予測）: 単月モード時のみ。複数月・期間モードでは forecast 自体が意味をなさないのでスキップ
       const summaryMonth = p === 'custom' && cm ? cm : undefined;
+      const shouldFetchSummary = p === 'custom' || p === 'month';
       const [d, s, t, acts] = await Promise.all([
         api.crmDashboard(params),
-        api.crmMonthlySummary(summaryMonth, u || undefined),
-        api.crmDashboardMonthlyTrend({ months: p === 'term' ? 12 : 6, ...(u ? { salesUser: u } : {}) }),
+        shouldFetchSummary ? api.crmMonthlySummary(summaryMonth, u || undefined) : Promise.resolve(null),
+        api.crmDashboardMonthlyTrend({ months: (p === 'term' || p === 'prevterm') ? 12 : (p === 'range' ? 12 : 6), ...(u ? { salesUser: u } : {}) }),
         api.crmDashboardRecentActivities(8),
       ]);
       setData(d); setSummary(s); setTrend(t.rows || []); setActivities(acts.rows || []);
@@ -627,22 +632,38 @@ export default function CrmDashboard() {
       {/* ── フィルターバー ── */}
       <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
         <div style={{ display:'flex', background:C.surface, borderRadius:8, padding:3, border:`1px solid ${C.border}` }}>
-          {[['custom','指定月'], ['term','今期']].map(([v, l]) => (
-            <button key={v} onClick={() => { setPeriod(v); load(salesUser, v, customMonth); }}
-              style={{ padding:'4px 16px', borderRadius:6, border:'none', cursor:'pointer', fontSize:'0.8rem',
+          {[['custom','指定月'], ['range','範囲'], ['prevterm','前期'], ['term','今期']].map(([v, l]) => (
+            <button key={v} onClick={() => {
+              setPeriod(v);
+              if (v === 'range') load(salesUser, v, customMonth, rangeStartMonth, rangeEndMonth);
+              else load(salesUser, v, customMonth);
+            }}
+              style={{ padding:'4px 14px', borderRadius:6, border:'none', cursor:'pointer', fontSize:'0.8rem',
                 fontWeight:period===v ? 700 : 400, background:period===v ? 'var(--primary)' : 'transparent',
                 color:period===v ? '#fff' : C.textMid, transition:'all 0.15s' }}>
               {l}
             </button>
           ))}
         </div>
-        <input type="month" value={customMonth} disabled={period === 'term'}
-          onChange={e => { setCustomMonth(e.target.value); load(salesUser, 'custom', e.target.value); }}
-          style={{ padding:'4px 10px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.8rem',
-            background: period === 'term' ? C.surface2 : C.surface,
-            color: period === 'term' ? 'var(--gray-300)' : C.text,
-            outline:'none', cursor: period === 'term' ? 'not-allowed' : 'auto' }} />
-        <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period, customMonth); }}
+        {/* 指定月モード */}
+        {period === 'custom' && (
+          <input type="month" value={customMonth}
+            onChange={e => { setCustomMonth(e.target.value); load(salesUser, 'custom', e.target.value); }}
+            style={{ padding:'4px 10px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.8rem', background:C.surface, color:C.text, outline:'none' }} />
+        )}
+        {/* 範囲モード */}
+        {period === 'range' && (
+          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <input type="month" value={rangeStartMonth}
+              onChange={e => { setRangeStartMonth(e.target.value); load(salesUser, 'range', customMonth, e.target.value, rangeEndMonth); }}
+              style={{ padding:'4px 10px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.8rem', background:C.surface, color:C.text, outline:'none' }} />
+            <span style={{ fontSize:'0.78rem', color:C.textSub }}>〜</span>
+            <input type="month" value={rangeEndMonth}
+              onChange={e => { setRangeEndMonth(e.target.value); load(salesUser, 'range', customMonth, rangeStartMonth, e.target.value); }}
+              style={{ padding:'4px 10px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.8rem', background:C.surface, color:C.text, outline:'none' }} />
+          </div>
+        )}
+        <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period, customMonth, rangeStartMonth, rangeEndMonth); }}
           style={{ padding:'5px 12px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.82rem', background:C.surface, cursor:'pointer', color:C.text }}>
           <option value="">全員</option>
           {targetReps.map(u => <option key={u} value={u}>{u}</option>)}

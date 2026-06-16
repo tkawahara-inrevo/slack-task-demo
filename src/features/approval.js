@@ -296,10 +296,96 @@ function registerApproval({
       return;
     }
 
-    await ack();
+    // 順次承認 かつ 承認者2人以上の場合は並び順モーダルへ
+    if (mode === 'sequential' && voters.length > 1) {
+      const reorderView = buildReorderModal({ title, description, channelId, voters, mode });
+      await ack({ response_action: 'push', view: reorderView });
+      return;
+    }
 
+    await ack();
+    await createAndPostApproval(client, { requester, teamId, title, description, channelId, voters, mode });
+  });
+
+  // 順次モード: 並び順指定モーダル
+  function buildReorderModal({ title, description, channelId, voters, mode }) {
+    const metadata = JSON.stringify({ title, description, channelId, voters, mode });
+    const blocks = [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*順次承認の並び順を指定してください*\n上から順に1人ずつ承認していきます（先に選んだ人が押すまで次の人は押せません）。` },
+      },
+      { type: 'divider' },
+    ];
+    voters.forEach((uid, idx) => {
+      blocks.push({
+        type: 'input',
+        block_id: `slot_${idx}`,
+        label: { type: 'plain_text', text: `${idx + 1}番目` },
+        element: {
+          type: 'users_select',
+          action_id: 'v',
+          initial_user: uid,
+        },
+      });
+    });
+    return {
+      type: 'modal',
+      callback_id: 'approval_reorder_modal',
+      private_metadata: metadata,
+      title: { type: 'plain_text', text: '承認の並び順' },
+      submit: { type: 'plain_text', text: '起票' },
+      close: { type: 'plain_text', text: 'キャンセル' },
+      blocks,
+    };
+  }
+
+  // 並び順モーダル送信
+  app.view('approval_reorder_modal', async ({ ack, body, view, client }) => {
+    const meta = safeJsonParse(view.private_metadata) || {};
+    const { title, description, channelId, voters: originalVoters, mode } = meta;
+    const requester = body.user?.id;
+    const teamId = getTeamIdFromBody(body);
+
+    // 各スロットから選ばれたユーザーを順番に集める
+    const orderedVoters = [];
+    for (let i = 0; i < originalVoters.length; i++) {
+      const uid = view.state.values[`slot_${i}`]?.v?.selected_user;
+      if (uid) orderedVoters.push(uid);
+    }
+
+    // バリデーション: 重複 / 元のメンバーと異なる
+    const uniq = new Set(orderedVoters);
+    if (uniq.size !== orderedVoters.length) {
+      const errors = {};
+      // 重複している最初のスロットにエラー表示
+      const seen = new Set();
+      for (let i = 0; i < orderedVoters.length; i++) {
+        if (seen.has(orderedVoters[i])) {
+          errors[`slot_${i}`] = '同じ人が複数のスロットに設定されています';
+          break;
+        }
+        seen.add(orderedVoters[i]);
+      }
+      await ack({ response_action: 'errors', errors });
+      return;
+    }
+    if (orderedVoters.length !== originalVoters.length) {
+      await ack({ response_action: 'errors', errors: { slot_0: '全てのスロットを設定してください' } });
+      return;
+    }
+    if (orderedVoters.includes(requester)) {
+      await ack({ response_action: 'errors', errors: { slot_0: '自分自身を承認者にはできません' } });
+      return;
+    }
+
+    await ack({ response_action: 'clear' });
+    await createAndPostApproval(client, { requester, teamId, title, description, channelId, voters: orderedVoters, mode });
+  });
+
+  // 共通: 決裁レコード作成 + Slack投稿
+  async function createAndPostApproval(client, { requester, teamId, title, description, channelId, voters, mode }) {
     try {
-      // Botがチャンネル参加してない場合に対応
       try { await client.conversations.join({ channel: channelId }); } catch {}
 
       const id = randomUUID();
@@ -323,7 +409,9 @@ function registerApproval({
       approval.message_ts = postRes.ts;
 
       // スレッドに「承認お願いします」+ メンション
-      const mentionLine = voterRows.map(v => `<@${v.user_id}>`).join(' ');
+      // 順次モードでは1人目だけメンション、並列モードでは全員
+      const targetMentions = mode === 'sequential' ? [voterRows[0].user_id] : voterRows.map(v => v.user_id);
+      const mentionLine = targetMentions.map(u => `<@${u}>`).join(' ');
       await postThreadLog(client, approval, `${mentionLine}\n承認をお願いします 🙏`);
 
       // 起票者にDM
@@ -338,7 +426,7 @@ function registerApproval({
     } catch (e) {
       console.error('[approval] create error:', e?.data || e);
     }
-  });
+  }
 
   // ── 承認/否認ボタン共通処理 ────────────────────
   async function handleVote(body, action, client, decision /* 'approved' | 'rejected' */) {

@@ -4680,6 +4680,161 @@ function registerDashboardApi(deps) {
     }
   });
 
+  // --- GET /analytics/task-ops ---
+  // 監視対象ユーザー（複数）の期間内タスク統計
+  // query: users=U1,U2,...&from=YYYY-MM-DD&to=YYYY-MM-DD
+  expressApp.get("/api/dashboard/analytics/task-ops", authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const userIds = String(req.query.users || "").split(",").map(s => s.trim()).filter(Boolean);
+      const fromStr = String(req.query.from || "").match(/^\d{4}-\d{2}-\d{2}$/) ? req.query.from : null;
+      const toStr   = String(req.query.to   || "").match(/^\d{4}-\d{2}-\d{2}$/) ? req.query.to   : null;
+      if (userIds.length === 0) return res.json({ users: [], timeline: [] });
+
+      const fromDate = fromStr || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const toDate   = toStr   || new Date().toISOString().slice(0, 10);
+
+      // ユーザー名解決
+      const dirRes = await dbQuery(
+        `SELECT user_id, display_name, real_name FROM dashboard_user_directory
+         WHERE team_id=$1 AND user_id = ANY($2)`,
+        [teamId, userIds]
+      ).catch(() => ({ rows: [] }));
+      const nameMap = new Map(dirRes.rows.map(r => [r.user_id, r.display_name || r.real_name || r.user_id]));
+
+      // 各ユーザーの集計（個人タスクのみ）
+      const aggQ = `
+        WITH
+        issued AS (
+          SELECT requester_user_id AS uid, COUNT(*)::int AS cnt
+          FROM tasks
+          WHERE team_id=$1
+            AND requester_user_id = ANY($2)
+            AND created_at::date BETWEEN $3::date AND $4::date
+            AND (task_type IS NULL OR task_type='personal')
+          GROUP BY requester_user_id
+        ),
+        completed AS (
+          SELECT assignee_id AS uid,
+                 COUNT(*) FILTER (WHERE status='done')::int AS done_cnt,
+                 COUNT(*) FILTER (WHERE status='done' AND due_date IS NOT NULL AND completed_at::date <= due_date)::int AS on_time,
+                 COUNT(*) FILTER (WHERE status='done' AND due_date IS NOT NULL AND completed_at::date > due_date)::int AS late,
+                 COUNT(*) FILTER (WHERE status='done' AND due_date IS NOT NULL)::int AS with_due
+          FROM tasks
+          WHERE team_id=$1
+            AND assignee_id = ANY($2)
+            AND completed_at IS NOT NULL
+            AND completed_at::date BETWEEN $3::date AND $4::date
+            AND (task_type IS NULL OR task_type='personal')
+          GROUP BY assignee_id
+        ),
+        pending AS (
+          SELECT assignee_id AS uid,
+                 COUNT(*)::int AS pending_cnt,
+                 COUNT(*) FILTER (WHERE due_date IS NOT NULL AND due_date < CURRENT_DATE)::int AS overdue_cnt
+          FROM tasks
+          WHERE team_id=$1
+            AND assignee_id = ANY($2)
+            AND status NOT IN ('done','cancelled')
+            AND (task_type IS NULL OR task_type='personal')
+          GROUP BY assignee_id
+        )
+        SELECT u.uid,
+               COALESCE(i.cnt, 0)         AS issued,
+               COALESCE(c.done_cnt, 0)    AS completed,
+               COALESCE(c.on_time, 0)     AS on_time,
+               COALESCE(c.late, 0)        AS late,
+               COALESCE(c.with_due, 0)    AS with_due,
+               COALESCE(p.pending_cnt, 0) AS pending,
+               COALESCE(p.overdue_cnt, 0) AS pending_overdue
+        FROM unnest($2::text[]) AS u(uid)
+        LEFT JOIN issued    i ON i.uid = u.uid
+        LEFT JOIN completed c ON c.uid = u.uid
+        LEFT JOIN pending   p ON p.uid = u.uid
+      `;
+      const aggRes = await dbQuery(aggQ, [teamId, userIds, fromDate, toDate]);
+      const users = aggRes.rows.map(r => ({
+        user_id: r.uid,
+        display_name: nameMap.get(r.uid) || r.uid,
+        issued: r.issued,
+        completed: r.completed,
+        on_time: r.on_time,
+        late: r.late,
+        with_due: r.with_due,
+        on_time_rate: r.with_due > 0 ? Math.round((r.on_time / r.with_due) * 100) : null,
+        pending: r.pending,
+        pending_overdue: r.pending_overdue,
+      }));
+
+      // タイムライン（指定期間内の完了タスクを時系列で）
+      const tlQ = `
+        SELECT id, title, assignee_id, requester_user_id, due_date, completed_at,
+               (due_date IS NOT NULL AND completed_at::date <= due_date) AS on_time
+        FROM tasks
+        WHERE team_id=$1
+          AND assignee_id = ANY($2)
+          AND status='done'
+          AND completed_at IS NOT NULL
+          AND completed_at::date BETWEEN $3::date AND $4::date
+          AND (task_type IS NULL OR task_type='personal')
+        ORDER BY completed_at DESC
+        LIMIT 200
+      `;
+      const tlRes = await dbQuery(tlQ, [teamId, userIds, fromDate, toDate]);
+      const timeline = tlRes.rows.map(r => ({
+        task_id: r.id,
+        title: r.title,
+        assignee_id: r.assignee_id,
+        assignee_name: nameMap.get(r.assignee_id) || r.assignee_id,
+        requester_user_id: r.requester_user_id,
+        requester_name: nameMap.get(r.requester_user_id) || r.requester_user_id,
+        due_date: r.due_date,
+        completed_at: r.completed_at,
+        on_time: r.on_time,
+      }));
+
+      // 日別の発行数・完了数（時系列グラフ用）
+      const daily = await dbQuery(
+        `WITH series AS (
+           SELECT generate_series($3::date, $4::date, '1 day'::interval)::date AS d
+         ),
+         issued AS (
+           SELECT created_at::date AS d, COUNT(*)::int AS cnt
+           FROM tasks
+           WHERE team_id=$1 AND requester_user_id = ANY($2)
+             AND created_at::date BETWEEN $3::date AND $4::date
+             AND (task_type IS NULL OR task_type='personal')
+           GROUP BY 1
+         ),
+         done AS (
+           SELECT completed_at::date AS d, COUNT(*)::int AS cnt
+           FROM tasks
+           WHERE team_id=$1 AND assignee_id = ANY($2) AND status='done'
+             AND completed_at::date BETWEEN $3::date AND $4::date
+             AND (task_type IS NULL OR task_type='personal')
+           GROUP BY 1
+         )
+         SELECT s.d AS date, COALESCE(i.cnt, 0) AS issued, COALESCE(do.cnt, 0) AS done
+         FROM series s
+         LEFT JOIN issued i ON i.d = s.d
+         LEFT JOIN done   do ON do.d = s.d
+         ORDER BY s.d ASC`,
+        [teamId, userIds, fromDate, toDate]
+      );
+
+      res.json({
+        users,
+        timeline,
+        daily: daily.rows,
+        from: fromDate,
+        to: toDate,
+      });
+    } catch (e) {
+      console.error("analytics task-ops error:", e);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // --- GET /analytics/project-progress ---
   // プロジェクト別の進捗状況
   expressApp.get("/api/dashboard/analytics/project-progress", authWithRole, async (req, res) => {

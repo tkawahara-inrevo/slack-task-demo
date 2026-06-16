@@ -397,6 +397,10 @@ export const api = {
     return apiFetch(`/analytics/due-compliance${qs ? '?' + qs : ''}`);
   },
   analyticsProjectProgress: () => apiFetch('/analytics/project-progress'),
+  analyticsTaskOps: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/analytics/task-ops${qs ? '?' + qs : ''}`);
+  },
 
   // kintone連携
   kintoneSearch:    (q)  => kintoneFetch(`/search?q=${encodeURIComponent(q)}`),

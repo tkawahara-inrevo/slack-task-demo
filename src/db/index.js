@@ -791,6 +791,13 @@ async function dbEnsureSettingsSchema() {
     )
   `).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_stamps_user_date ON hrmos_stamps(team_id, slack_user_id, stamped_at DESC)`).catch(() => {});
+  // 退勤遅延処理を再起動耐性付きにするため scheduled_at（処理予約時刻）/ channel_id / message_ts / retry_state を追加
+  await dbQuery(`ALTER TABLE hrmos_stamps ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {});
+  await dbQuery(`ALTER TABLE hrmos_stamps ADD COLUMN IF NOT EXISTS channel_id TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE hrmos_stamps ADD COLUMN IF NOT EXISTS message_ts TEXT`).catch(() => {});
+  await dbQuery(`ALTER TABLE hrmos_stamps ADD COLUMN IF NOT EXISTS retry_state TEXT`).catch(() => {});
+  // 救済 worker 高速ピックアップ用
+  await dbQuery(`CREATE INDEX IF NOT EXISTS hrmos_stamps_due ON hrmos_stamps(scheduled_at) WHERE retry_state IN ('pending','delayed')`).catch(() => {});
 
   // タスク通知遅延（キーワード/リアクション経由タスクは10分後に通知）
   await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});

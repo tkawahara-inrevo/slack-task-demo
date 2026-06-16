@@ -3269,14 +3269,16 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       await addStampReaction(client, message.channel, message.ts, 'hourglass_flowing_sand');
       const { randomUUID } = require('crypto');
       const recordId = randomUUID();
+      const DELAY_MS = 10 * 60 * 1000;
+      const scheduledAt = new Date(Date.now() + DELAY_MS);
       await dbQuery(
-        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, channel_id, message_ts, retry_state)
-         VALUES ($1, $2, $3, $4, false, $5, $6, 'delayed')`,
-        [recordId, teamId, targetUserId, stampType, message.channel, message.ts]
+        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, channel_id, message_ts, retry_state, scheduled_at)
+         VALUES ($1, $2, $3, $4, false, $5, $6, 'delayed', $7)`,
+        [recordId, teamId, targetUserId, stampType, message.channel, message.ts, scheduledAt.toISOString()]
       ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-      console.log(`[IEYASU] 退勤 10分後ピンポイントで打刻予定 user:${targetUserId} id:${recordId}`);
-      // 正確に10分後に処理（プロセス再起動時の救済は worker が担う）
-      setTimeout(() => processDelayedRecord(recordId).catch(e => console.error('[IEYASU] 遅延処理エラー:', e.message)), 10 * 60 * 1000);
+      console.log(`[IEYASU] 退勤 10分後ピンポイントで打刻予定 user:${targetUserId} id:${recordId} scheduled_at:${scheduledAt.toISOString()}`);
+      // 正確に10分後に処理（再起動時は startup で setTimeout を再構築、救済 worker も拾える）
+      setTimeout(() => processDelayedRecord(recordId).catch(e => console.error('[IEYASU] 遅延処理エラー:', e.message)), DELAY_MS);
       return;
     }
 
@@ -3320,15 +3322,39 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       if (STAMP_OUT_CHS.has(message.channel)) await doStamp(client, message, 2);
     });
 
-    // 救済worker（1分おきに走査）— setTimeout が失われた取り残し（プロセス再起動時等）専用
+    // ── 起動時: 未処理 delayed レコードを拾って setTimeout を再構築 ──
+    // プロセス再起動で in-memory タイマが失われても、scheduled_at にピッタリ復帰する
+    (async () => {
+      try {
+        const { rows } = await dbQuery(
+          `SELECT id, scheduled_at FROM hrmos_stamps
+           WHERE retry_state IN ('pending','delayed')
+             AND scheduled_at IS NOT NULL
+             AND scheduled_at > now() - interval '6 hours'`
+        );
+        if (rows.length === 0) return;
+        console.log(`[IEYASU] 起動時リハイドレート: ${rows.length}件の遅延処理を再スケジュール`);
+        for (const row of rows) {
+          const delayMs = new Date(row.scheduled_at).getTime() - Date.now();
+          const wait = Math.max(0, delayMs);
+          setTimeout(() => processDelayedRecord(row.id).catch(e => console.error('[IEYASU] リハイドレート処理エラー:', e.message)), wait);
+        }
+      } catch (e) { console.error('[IEYASU] rehydrate error:', e.message); }
+    })();
+
+    // ── 救済worker: 30秒おきに「予定時刻を過ぎたのに未処理」を拾う ──
+    // 通常は setTimeout が先に発火するので空振り。再起動直後の取りこぼし防止。
     setInterval(async () => {
       try {
         const { rows } = await dbQuery(
           `SELECT id FROM hrmos_stamps
            WHERE retry_state IN ('pending','delayed')
-             AND stamped_at <= now() - interval '10 minutes'
+             AND (
+               (scheduled_at IS NOT NULL AND scheduled_at <= now())
+               OR (scheduled_at IS NULL AND stamped_at <= now() - interval '10 minutes')
+             )
              AND stamped_at > now() - interval '6 hours'
-           ORDER BY stamped_at ASC LIMIT 20`
+           ORDER BY COALESCE(scheduled_at, stamped_at) ASC LIMIT 20`
         );
         if (rows.length === 0) return;
         console.log(`[IEYASU] 救済worker: ${rows.length}件の取り残しを処理`);
@@ -3336,7 +3362,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
           await processDelayedRecord(row.id).catch(e => console.error('[IEYASU] 救済処理エラー:', e.message));
         }
       } catch (e) { console.error('[IEYASU] retry worker error:', e.message); }
-    }, 60 * 1000);
+    }, 30 * 1000);
   }
 
   // ── 問い合わせフォーム → CRM 自動登録 ──────────────────────────

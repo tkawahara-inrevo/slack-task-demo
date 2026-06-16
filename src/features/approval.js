@@ -220,6 +220,33 @@ function registerApproval({
     }
   });
 
+  // ── メッセージショートカット: スレッドからでも起票可能 ──
+  app.shortcut('create_approval', async ({ ack, shortcut, client }) => {
+    await ack();
+    try {
+      const defaultChannel = shortcut.channel?.id;
+      await client.views.open({
+        trigger_id: shortcut.trigger_id,
+        view: buildCreateModal({ defaultChannel }),
+      });
+    } catch (e) {
+      console.error('[approval] open create modal (shortcut) fail:', e?.data || e);
+    }
+  });
+
+  // ── グローバルショートカット: どこからでも起票 ──
+  app.shortcut('create_approval_global', async ({ ack, shortcut, client }) => {
+    await ack();
+    try {
+      await client.views.open({
+        trigger_id: shortcut.trigger_id,
+        view: buildCreateModal({}),
+      });
+    } catch (e) {
+      console.error('[approval] open create modal (global) fail:', e?.data || e);
+    }
+  });
+
   function buildCreateModal({ defaultChannel } = {}) {
     return {
       type: 'modal',

@@ -47,6 +47,7 @@ const {
   statusLabel,
   toAtShortName,
   todayJstYmd,
+  defaultDueYmd,
   uniqIds,
 } = require("./src/utils/common");
 const {
@@ -238,6 +239,7 @@ const {
   slackDateYmd,
   toAtShortName,
   todayJstYmd,
+  defaultDueYmd,
   dbQuery,
   dbListDashTeamMembers,
   getUserSettings: (...args) => getUserSettingsForHome(...args),
@@ -351,6 +353,7 @@ registerNotificationJobs({
   shortenAssigneeLabel,
   shortenOneLine,
   todayJstYmd,
+  defaultDueYmd,
   getUserDueSchedule,
 });
 
@@ -383,6 +386,7 @@ const {
   safeEphemeral: (...args) => safeEphemeral(...args),
   safeJsonParse,
   slackDateYmd,
+  defaultDueYmd,
   uniqIds,
   upsertThreadCard: (...args) => upsertThreadCard(...args),
   notifyTaskSimpleDM: (...args) => notifyTaskSimpleDM(...args),
@@ -991,7 +995,7 @@ function buildTaskCreateModalBlocks({
       type: "datepicker",
       action_id: "due_date",
       placeholder: { type: "plain_text", text: "期限" },
-      initial_date: todayJstYmd(),
+      initial_date: defaultDueYmd(),
     },
   });
 

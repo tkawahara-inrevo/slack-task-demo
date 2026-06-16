@@ -23,6 +23,7 @@ function registerReactionFeature(deps) {
     safeEphemeral,
     safeJsonParse,
     slackDateYmd,
+    defaultDueYmd = () => slackDateYmd(new Date()),
     publishHomeBurst = () => {},
     uniqIds = (arr) => [...new Set(arr)],
     upsertThreadCard,
@@ -390,7 +391,7 @@ app.event("reaction_added", async ({ event, client, body }) => {
     }
 
     // 期限は今日固定
-    const dueYmd = slackDateYmd(new Date());
+    const dueYmd = defaultDueYmd();
     const effectiveRequester = requesterUserId || actorUserId;
 
     // permalink取得
@@ -552,7 +553,7 @@ app.event("message", async ({ event, client, body }) => {
     }
     cleanText = cleanText.trim();
 
-    const dueYmd = slackDateYmd(new Date());
+    const dueYmd = defaultDueYmd();
 
     // permalink取得
     const permalink = await client.chat.getPermalink({ channel: channelId, message_ts: msgTs })
@@ -629,7 +630,7 @@ app.action("reaction_task_confirm_create", async ({ ack, body, client }) => {
 
     const requesterUserId = payload.requesterUserId || actorUserId;
     const assigneeId = payload.assigneeId || actorUserId;
-    const dueYmd = payload.dueYmd || slackDateYmd(new Date());
+    const dueYmd = payload.dueYmd || defaultDueYmd();
     const rawText = payload.messageText || "";
 
     if (!teamId || !channelId || !msgTs || !actorUserId) return;

@@ -122,7 +122,8 @@
       "Bash(node -c scripts/legal-import.js)",
       "Bash(node -c src/features/feature-access.js)",
       "Bash(node -c src/features/approval.js)",
-      "Bash(node -c src/features/approval-api.js)"
+      "Bash(node -c src/features/approval-api.js)",
+      "Bash(node -c src/utils/common.js)"
     ]
   }
 }

@@ -287,6 +287,21 @@ function todayJstYmd() {
   return `${y}-${m}-${d}`;
 }
 
+// タスク作成時の期限初期値: JST 15:00 以降は翌日、それ以前は今日
+// すべてのタスク作成ルート（モーダル / リアクション / キーワード）で共通使用
+function defaultDueYmd() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const hour = jst.getUTCHours();
+  if (hour >= 15) {
+    jst.setUTCDate(jst.getUTCDate() + 1);
+  }
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(jst.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function normalizeHandle(handle) {
   return String(handle || "")
     .trim()
@@ -389,5 +404,6 @@ module.exports = {
   statusLabel,
   toAtShortName,
   todayJstYmd,
+  defaultDueYmd,
   uniqIds,
 };

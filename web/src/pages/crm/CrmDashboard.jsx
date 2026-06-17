@@ -663,6 +663,12 @@ export default function CrmDashboard() {
               style={{ padding:'4px 10px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.8rem', background:C.surface, color:C.text, outline:'none' }} />
           </div>
         )}
+        {/* 前期/今期モード: 期間を表示 */}
+        {(period === 'term' || period === 'prevterm') && rangeStart && rangeEnd && (
+          <span style={{ padding:'4px 12px', background: period==='term' ? '#eff6ff' : '#fef3c7', color: period==='term' ? '#1e40af' : '#92400e', borderRadius:8, fontSize:'0.78rem', fontWeight:600, border:`1px solid ${period==='term' ? '#bfdbfe' : '#fde68a'}` }}>
+            📅 {period==='term' ? '今期' : '前期'}: {fmtDate(rangeStart)} 〜 {fmtDate(rangeEnd)}
+          </span>
+        )}
         <select value={salesUser} onChange={e => { setSalesUser(e.target.value); load(e.target.value, period, customMonth, rangeStartMonth, rangeEndMonth); }}
           style={{ padding:'5px 12px', border:`1px solid ${C.border}`, borderRadius:8, fontSize:'0.82rem', background:C.surface, cursor:'pointer', color:C.text }}>
           <option value="">全員</option>

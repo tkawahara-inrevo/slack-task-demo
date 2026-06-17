@@ -46,21 +46,20 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
     return d.toISOString().slice(0, 10);
   }
 
-  // 名前パース: 各行を取り出して「漢字含む短文字列」をユーザー名として拾う
+  // 名前パース: 「姓 名/Romaji」形式の行のみ抽出
+  // 例: "外山 雄大/Yudai Toyama" → "外山 雄大"
   function parseNames(text) {
     const names = [];
     for (const raw of text.split(/\r?\n+/)) {
       let line = raw.trim();
-      // 行頭の箇条書きマーカー除去
       line = line.replace(/^[-・•●◯○]\s*/, '');
-      if (!line) continue;
-      // 漢字 or カタカナを含む短い文字列のみ
-      if (line.length > 80) continue;
-      if (line.length < 2) continue;
-      // 明らかなヘッダー/フッター除外
-      if (/^(未提出者|お疲れ|本日|日付|よろしく|以下|下記|ご確認|お知らせ)/.test(line)) continue;
-      if (!/[一-鿿゠-ヿ]/.test(line)) continue;
-      names.push(line);
+      if (!line || line.length > 80) continue;
+      // 漢字/かな + スラッシュ + 半角英字 のパターン
+      const m = line.match(/^([一-鿿ぁ-んァ-ヶー々〆〤\s]{2,20})\/[A-Za-z]/);
+      if (!m) continue;
+      const jp = m[1].trim();
+      if (jp.length < 2) continue;
+      names.push(jp);
     }
     return names;
   }

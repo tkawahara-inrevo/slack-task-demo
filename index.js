@@ -3327,22 +3327,20 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       return;
     }
 
-    // 出勤: DB事前保存 → 即時試行（プロセス再起動時は救済workerが拾える設計）
+    // 出勤: 60秒遅延処理（HRMOS daily endpoint の同期遅延を吸収し、二重打刻を防止）
+    await addStampReaction(client, message.channel, message.ts, 'hourglass_flowing_sand');
     const { randomUUID } = require('crypto');
     const recordId = randomUUID();
-    const scheduledAt = new Date(Date.now() + 30 * 1000); // 30秒後にworker救済が動くようマーキング
+    const STAMP_IN_DELAY_MS = 60 * 1000;
+    const scheduledAt = new Date(Date.now() + STAMP_IN_DELAY_MS);
     await dbQuery(
       `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, channel_id, message_ts, retry_state, scheduled_at)
-       VALUES ($1, $2, $3, $4, false, $5, $6, 'pending', $7)`,
+       VALUES ($1, $2, $3, $4, false, $5, $6, 'delayed', $7)`,
       [recordId, teamId, targetUserId, stampType, message.channel, message.ts, scheduledAt.toISOString()]
     ).catch(e => console.error('[IEYASU] 出勤 DB事前記録失敗:', e.message));
-
-    // 即時試行（成功すれば retry_state=NULL に更新、失敗で final_failed や pending のまま）
-    try {
-      await processDelayedRecord(recordId);
-    } catch (e) {
-      console.error(`[IEYASU] 出勤即時試行エラー（救済workerが拾います）:`, e.message);
-    }
+    console.log(`[IEYASU] 出勤 60秒後に処理 user:${targetUserId} id:${recordId}`);
+    // setTimeout で正確に60秒後に発火（再起動時は startup setTimeout 再構築 + 救済workerが拾える）
+    setTimeout(() => processDelayedRecord(recordId).catch(e => console.error('[IEYASU] 出勤遅延処理エラー:', e.message)), STAMP_IN_DELAY_MS);
   };
 
   if (STAMP_IN_CHS.size > 0 || STAMP_OUT_CHS.size > 0) {

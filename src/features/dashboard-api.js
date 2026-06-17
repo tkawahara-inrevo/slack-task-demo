@@ -4814,10 +4814,10 @@ function registerDashboardApi(deps) {
              AND (task_type IS NULL OR task_type='personal')
            GROUP BY 1
          )
-         SELECT s.d AS date, COALESCE(i.cnt, 0) AS issued, COALESCE(do.cnt, 0) AS done
+         SELECT s.d AS date, COALESCE(i.cnt, 0) AS issued, COALESCE(dn.cnt, 0) AS done
          FROM series s
          LEFT JOIN issued i ON i.d = s.d
-         LEFT JOIN done   do ON do.d = s.d
+         LEFT JOIN done   dn ON dn.d = s.d
          ORDER BY s.d ASC`,
         [teamId, userIds, fromDate, toDate]
       );

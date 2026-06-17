@@ -246,4 +246,32 @@ function invalidateMonthlyCache(month) {
   else _monthlyCache.clear();
 }
 
-module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache };
+// 本日打刻済みユーザーをHRMOSから取得（全件・ページング）
+// 戻り値: [{user_id, full_name, email, stamping_start_at, stamping_end_at}, ...]
+async function getStampedUsersForDay(dateYmd) {
+  const token = await getToken();
+  const users = await getAllUsers(token);
+  const emailMap = new Map(users.map(u => [u.id, (u.email || '').toLowerCase()]));
+  const stamped = [];
+  for (let p = 1; p <= 20; p++) {
+    const res = await ieyasuRequest({
+      path: `/api/${COMPANY}/v1/work_outputs/daily/${dateYmd}?page=${p}`,
+      auth: `Token ${token}`,
+    });
+    if (res.status !== 200 || !Array.isArray(res.body) || res.body.length === 0) break;
+    for (const r of res.body) {
+      if (r.stamping_start_at) {
+        stamped.push({
+          user_id: r.user_id,
+          full_name: r.full_name,
+          email: emailMap.get(r.user_id) || null,
+          stamping_start_at: r.stamping_start_at,
+          stamping_end_at: r.stamping_end_at,
+        });
+      }
+    }
+  }
+  return stamped;
+}
+
+module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache, getStampedUsersForDay };

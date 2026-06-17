@@ -11,7 +11,7 @@ const { registerNotificationJobs } = require("./src/features/notifications");
 const { registerReactionFeature } = require("./src/features/reaction-task");
 const { registerTaskUiFeature } = require("./src/features/task-ui");
 const { generateToken, registerDashboardApi } = require("./src/features/dashboard-api");
-const { stampAttendance } = require("./src/features/ieyasu");
+const { stampAttendance, getStampedUsersForDay } = require("./src/features/ieyasu");
 const { registerPochiAiSlack } = require("./src/features/pochi-ai-slack");
 const { registerSourceDoneListener, syncTaskDoneReaction } = require("./src/features/task-source-reaction");
 const { registerRecruitNotify } = require("./src/features/recruit-notify");
@@ -3372,6 +3372,100 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         }
       } catch (e) { console.error('[IEYASU] retry worker error:', e.message); }
     }, 30 * 1000);
+
+    // ── 出勤日報未提出リマインドジョブ ───────────────────────────
+    // HRMOSで出勤打刻されているのに Slack 出勤日報未投稿のユーザーにDM
+    async function runMissingReportCheck() {
+      try {
+        const today = todayJstYmd();
+        if (typeof isJpBusinessDayYmd === 'function' && !isJpBusinessDayYmd(today)) {
+          console.log(`[missing-report] skipped (not business day): ${today}`);
+          return;
+        }
+        const teamId = process.env.SLACK_TEAM_ID || 'T086C06L5V0';
+
+        // 1. HRMOSで本日打刻済みのユーザー
+        const stamped = await getStampedUsersForDay(today);
+        if (stamped.length === 0) {
+          console.log(`[missing-report] no HRMOS stamps today (${today})`);
+          return;
+        }
+
+        // 2. Slack側で本日 出勤日報を投稿済みのユーザーID（hrmos_stampsから）
+        const reportedRes = await dbQuery(
+          `SELECT DISTINCT slack_user_id FROM hrmos_stamps
+           WHERE stamp_type=1 AND stamped_at::date = $1`,
+          [today]
+        );
+        const reportedSet = new Set(reportedRes.rows.map(r => r.slack_user_id));
+
+        // 3. 本日既にリマインドしたユーザー
+        const remindedRes = await dbQuery(
+          `SELECT slack_user_id FROM attendance_report_reminders WHERE team_id=$1 AND reminded_date = $2`,
+          [teamId, today]
+        );
+        const remindedSet = new Set(remindedRes.rows.map(r => r.slack_user_id));
+
+        // 4. HRMOS打刻ユーザーをチェックして、Slack日報未投稿+未リマインドの人に通知
+        let notified = 0;
+        for (const h of stamped) {
+          if (!h.email) continue;
+          // Slack のメールでユーザー検索
+          let slackUserId = null;
+          try {
+            const r = await app.client.users.lookupByEmail({ email: h.email });
+            slackUserId = r.user?.id;
+          } catch { continue; }
+          if (!slackUserId) continue;
+          if (reportedSet.has(slackUserId)) continue;
+          if (remindedSet.has(slackUserId)) continue;
+
+          // DM 送信
+          try {
+            const dm = await app.client.conversations.open({ users: slackUserId });
+            const channel = dm?.channel?.id;
+            if (!channel) continue;
+            await app.client.chat.postMessage({
+              channel,
+              text: '出勤日報の投稿をお忘れではないですか？',
+              blocks: [
+                {
+                  type: 'section',
+                  text: {
+                    type: 'mrkdwn',
+                    text: `⚠️ *出勤日報の投稿をお忘れではないですか？*\nHRMOS で出勤打刻 (*${h.stamping_start_at}*) は記録されていますが、Slack の出勤日報チャンネルへの投稿が確認できませんでした。\nお手数ですが、投稿をお願いします 🙏`,
+                  },
+                },
+              ],
+            });
+            await dbQuery(
+              `INSERT INTO attendance_report_reminders (team_id, slack_user_id, reminded_date)
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+              [teamId, slackUserId, today]
+            ).catch(() => {});
+            notified++;
+            console.log(`[missing-report] DM sent: ${h.email} (${slackUserId})`);
+          } catch (e) {
+            console.warn('[missing-report] DM error:', e?.data?.error || e.message);
+          }
+        }
+
+        console.log(`[missing-report] done. date=${today} stamped=${stamped.length} notified=${notified}`);
+      } catch (e) {
+        console.error('[missing-report] error:', e?.data || e.message);
+      }
+    }
+
+    // 10:00, 11:00, 12:00 JST に走らせる（営業日内で複数回チェック、初回投稿で済んだ人は notified_at で除外）
+    const { cron: nodecron } = (() => { try { return { cron: require('node-cron') }; } catch { return {}; } })();
+    if (nodecron) {
+      nodecron.schedule('0 10,11,12 * * *', () => {
+        runMissingReportCheck().catch(e => console.error('[missing-report] cron error:', e?.message || e));
+      }, { timezone: 'Asia/Tokyo' });
+      console.log('[missing-report] cron scheduled at 10:00, 11:00, 12:00 JST');
+    } else {
+      console.warn('[missing-report] node-cron not available, skipping schedule');
+    }
   }
 
   // ── 問い合わせフォーム → CRM 自動登録 ──────────────────────────

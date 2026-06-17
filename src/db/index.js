@@ -832,6 +832,17 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`CREATE INDEX IF NOT EXISTS approval_voters_user ON approval_voters(user_id, status)`).catch(() => {});
   await dbQuery(`ALTER TABLE approvals ADD COLUMN IF NOT EXISTS origin_thread_ts TEXT`).catch(() => {});
 
+  // 出勤日報未提出リマインド: 1日1回送信、重複防止
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS attendance_report_reminders (
+      team_id TEXT NOT NULL,
+      slack_user_id TEXT NOT NULL,
+      reminded_date DATE NOT NULL,
+      reminded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (team_id, slack_user_id, reminded_date)
+    )
+  `).catch(() => {});
+
   // タスク通知遅延（キーワード/リアクション経由タスクは10分後に通知）
   await dbQuery(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notify_scheduled_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`CREATE INDEX IF NOT EXISTS tasks_notify_scheduled ON tasks(notify_scheduled_at) WHERE notify_scheduled_at IS NOT NULL AND notified_at IS NULL`).catch(() => {});

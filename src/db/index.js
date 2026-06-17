@@ -569,6 +569,9 @@ async function dbEnsureSettingsSchema() {
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS personality_completed_at TIMESTAMPTZ`).catch(() => {});
   await dbQuery(`ALTER TABLE recruitment_candidates ADD COLUMN IF NOT EXISTS department TEXT`).catch(() => {});
   await dbQuery(`ALTER TABLE crm_period_settings ADD COLUMN IF NOT EXISTS term_target BIGINT`).catch(() => {});
+  // 前期目標（前期に確定で current から複写してこの値が固定される）
+  await dbQuery(`ALTER TABLE crm_period_settings ADD COLUMN IF NOT EXISTS prev_term_target BIGINT`).catch(() => {});
+  await dbQuery(`ALTER TABLE crm_role_targets ADD COLUMN IF NOT EXISTS prev_monthly_target BIGINT`).catch(() => {});
 
   // kintone App103 (活動履歴) キャッシュ
   await dbQuery(`

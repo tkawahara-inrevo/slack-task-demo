@@ -3242,6 +3242,26 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
     // 既に処理済みなら何もしない（重複実行防止）
     if (!['pending', 'delayed'].includes(row.retry_state)) return;
 
+    // 出勤の場合、当日リマインド送信済みなら HRMOS 既打刻が確定しているのでスキップ
+    // （リマインドの送信条件 = HRMOS打刻あり + Slack日報未投稿）
+    if (row.stamp_type === 1) {
+      const today = todayJstYmd();
+      const remindRes = await dbQuery(
+        `SELECT 1 FROM attendance_report_reminders
+         WHERE team_id=$1 AND slack_user_id=$2 AND reminded_date=$3 LIMIT 1`,
+        [row.team_id, row.slack_user_id, today]
+      ).catch(() => ({ rows: [] }));
+      if (remindRes.rows.length > 0) {
+        await addStampReaction(app.client, row.channel_id, row.message_ts, 'ballot_box_with_check');
+        await dbQuery(
+          `UPDATE hrmos_stamps SET ok=true, retry_state=NULL, error_reason='already_stamped_remind' WHERE id=$1`,
+          [row.id]
+        ).catch(() => {});
+        console.log(`[IEYASU] 出勤スキップ（リマインド送信済み=HRMOS既打刻確定）: ${row.slack_user_id}`);
+        return;
+      }
+    }
+
     const result = await stampAttendance(app.client, row.slack_user_id, row.stamp_type);
     if (result.ok) {
       const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';

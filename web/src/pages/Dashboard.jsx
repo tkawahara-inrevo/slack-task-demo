@@ -1315,8 +1315,14 @@ export default function Dashboard() {
   return (
     <div style={{ padding: isMobile ? '12px' : '20px 24px', background:'var(--gray-50)', minHeight:'100%' }}>
       {/* 勤怠（右にチーム稼働ボタン） */}
-      <div style={{ marginBottom:16 }}>
-        <AttendanceWidget onTeamClick={() => setShowTeamModal(true)} />
+      <div style={{ marginBottom:16, display:'flex', alignItems:'flex-start', gap:12 }}>
+        <div style={{ flex:1 }}>
+          <AttendanceWidget onTeamClick={() => setShowTeamModal(true)} />
+        </div>
+        <Link to="/analytics"
+          style={{ flexShrink:0, padding:'8px 14px', background:'var(--surface)', border:'1px solid var(--gray-200)', borderRadius:10, fontSize:'0.78rem', fontWeight:700, color:T.text, textDecoration:'none', display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
+          📊 分析を見る
+        </Link>
       </div>
 
       {/* ── 自分のこと ── */}

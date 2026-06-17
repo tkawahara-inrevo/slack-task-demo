@@ -123,7 +123,8 @@
       "Bash(node -c src/features/feature-access.js)",
       "Bash(node -c src/features/approval.js)",
       "Bash(node -c src/features/approval-api.js)",
-      "Bash(node -c src/utils/common.js)"
+      "Bash(node -c src/utils/common.js)",
+      "Bash(grep -nE \"//.*analytic|/\\\\\\\\*.*analytic\" web/src/pages/Dashboard.jsx)"
     ]
   }
 }

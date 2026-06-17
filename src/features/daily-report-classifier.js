@@ -217,6 +217,7 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         thread_ts: threadTs,
         text: `Pochi 自動仕分け（${reportType}）`,
         blocks,
+        link_names: false,
         unfurl_links: false,
         unfurl_media: false,
       });

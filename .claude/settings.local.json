@@ -124,7 +124,9 @@
       "Bash(node -c src/features/approval.js)",
       "Bash(node -c src/features/approval-api.js)",
       "Bash(node -c src/utils/common.js)",
-      "Bash(grep -nE \"//.*analytic|/\\\\\\\\*.*analytic\" web/src/pages/Dashboard.jsx)"
+      "Bash(grep -nE \"//.*analytic|/\\\\\\\\*.*analytic\" web/src/pages/Dashboard.jsx)",
+      "Bash(node -c src/features/daily-report-classifier.js)",
+      "Bash(git reset *)"
     ]
   }
 }

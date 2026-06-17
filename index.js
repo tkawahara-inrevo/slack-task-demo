@@ -1483,7 +1483,7 @@ async function buildDetailModalView({
         ],
       });
     }
-    if (task.status !== "done" && task.status !== "cancelled" && task.broadcast_group_id) {
+    if (task.status !== "done" && task.status !== "cancelled") {
       const elems = [
         {
           type: "button",
@@ -1491,15 +1491,6 @@ async function buildDetailModalView({
           style: "primary",
           action_id: "confirm_broadcast_done",
           value: JSON.stringify({ teamId, taskId: task.id }),
-          confirm: {
-            title: { type: "plain_text", text: "確認" },
-            text: {
-              type: "mrkdwn",
-              text: "まだ未完了の人がいても、このタスクを完了にします。",
-            },
-            confirm: { type: "plain_text", text: "完了にする" },
-            deny: { type: "plain_text", text: "やめる" },
-          },
         },
       ];
 

@@ -3470,14 +3470,18 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       }
     }
 
-    // 営業時間中（07:00-14:00 JST）に10分おきに走らせる
+    // 検知対象時間: 07:00-11:00 JST、10分おき
     // 重複通知は attendance_report_reminders テーブルで防ぐ（1人1日1回）
     const { cron: nodecron } = (() => { try { return { cron: require('node-cron') }; } catch { return {}; } })();
     if (nodecron) {
-      nodecron.schedule('*/10 7-14 * * *', () => {
+      nodecron.schedule('*/10 7-10 * * *', () => {
         runMissingReportCheck().catch(e => console.error('[missing-report] cron error:', e?.message || e));
       }, { timezone: 'Asia/Tokyo' });
-      console.log('[missing-report] cron scheduled every 10min from 07:00-14:00 JST (business days)');
+      // 11:00 ちょうど 1回も実行
+      nodecron.schedule('0 11 * * *', () => {
+        runMissingReportCheck().catch(e => console.error('[missing-report] cron error:', e?.message || e));
+      }, { timezone: 'Asia/Tokyo' });
+      console.log('[missing-report] cron scheduled every 10min from 07:00-11:00 JST');
     } else {
       console.warn('[missing-report] node-cron not available, skipping schedule');
     }

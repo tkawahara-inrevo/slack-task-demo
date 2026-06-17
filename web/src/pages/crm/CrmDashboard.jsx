@@ -581,21 +581,23 @@ export default function CrmDashboard() {
   const forecastTotal    = forecast?.kpiTotal || 0;  // インセンベース（KPI計算用）
   const forecastDispTotal = forecast?.total   || 0;  // 実入金ベース（表示・バー用）
 
-  // 今期モード専用: termMonthsをkpiDenom計算より先に定義
-  const termMonths = (period === 'term' && rangeStart && rangeEnd)
+  // 複数月集計モード判定（今期 / 前期 / 範囲）
+  const isMultiMonthMode = period === 'term' || period === 'prevterm' || period === 'range';
+  // termMonths: 期間の月数（年月跨ぎ対応）
+  const termMonths = (isMultiMonthMode && rangeStart && rangeEnd)
     ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)))
     : 1;
   // 担当者フィルタ時は個人目標、全員表示時はチーム合計
   const effectiveMonthlyTarget = salesUser && repTargetMap[salesUser] > 0
     ? repTargetMap[salesUser]
     : teamTarget;
-  // 今期チーム目標は上書き設定があればそれを優先（担当者フィルタ時は除く）
-  const termKpiTarget = period === 'term'
-    ? ((!salesUser && termTargetOverride > 0) ? termTargetOverride : effectiveMonthlyTarget * termMonths)
+  // 今期チーム目標は上書き設定があればそれを優先（担当者フィルタ時は除く）。前期/範囲は上書き対象外
+  const termKpiTarget = isMultiMonthMode
+    ? ((period === 'term' && !salesUser && termTargetOverride > 0) ? termTargetOverride : effectiveMonthlyTarget * termMonths)
     : 0;
 
-  // KPI分母: 今期は月次目標×月数、指定月は月次目標（担当者フィルタ時は個人目標）
-  const kpiDenom   = period === 'term'
+  // KPI分母: 複数月モードは月次目標×月数、指定月は月次目標（担当者フィルタ時は個人目標）
+  const kpiDenom   = isMultiMonthMode
     ? (termKpiTarget > 0 ? termKpiTarget : (forecast?.kpi || 0))
     : (effectiveMonthlyTarget > 0 ? effectiveMonthlyTarget : (forecast?.kpi || 0));
   const kpiAchieve = kpiDenom > 0 ? Math.round((curr.incentiveAmount || 0) / kpiDenom * 100) : null;

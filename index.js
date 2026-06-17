@@ -11,7 +11,7 @@ const { registerNotificationJobs } = require("./src/features/notifications");
 const { registerReactionFeature } = require("./src/features/reaction-task");
 const { registerTaskUiFeature } = require("./src/features/task-ui");
 const { generateToken, registerDashboardApi } = require("./src/features/dashboard-api");
-const { stampAttendance, getStampedUsersForDay } = require("./src/features/ieyasu");
+const { stampAttendance, getStampedUsersForDay, getUserDailyContext } = require("./src/features/ieyasu");
 const { registerPochiAiSlack } = require("./src/features/pochi-ai-slack");
 const { registerSourceDoneListener, syncTaskDoneReaction } = require("./src/features/task-source-reaction");
 const { registerRecruitNotify } = require("./src/features/recruit-notify");
@@ -3259,6 +3259,44 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         ).catch(() => {});
         console.log(`[IEYASU] 出勤スキップ（リマインド送信済み=HRMOS既打刻確定）: ${row.slack_user_id}`);
         return;
+      }
+    }
+
+    // 退勤の場合、「昨日分の遅出し」判定
+    //   - 昨日HRMOSが未退勤打刻 AND 今日出勤打刻からの経過時間が2時間未満 → 前日分遅出しの可能性大、スキップ
+    //   - 昨日HRMOSが既に退勤打刻済み → 今日の正規退勤として処理
+    if (row.stamp_type === 2) {
+      try {
+        const ctx = await getUserDailyContext(app.client, row.slack_user_id);
+        if (ctx && !ctx.yesterdayOut && ctx.todayInMin != null) {
+          let gapMin = ctx.nowJstMin - ctx.todayInMin;
+          if (gapMin < 0) gapMin += 24 * 60;
+          if (gapMin < 120) {
+            // 出勤直後 = 昨日分の遅出し可能性大 → 自動打刻スキップ
+            await addStampReaction(app.client, row.channel_id, row.message_ts, 'rewind');
+            await dbQuery(
+              `UPDATE hrmos_stamps SET ok=true, retry_state=NULL, error_reason='retroactive_yesterday_skip' WHERE id=$1`,
+              [row.id]
+            ).catch(() => {});
+            // スレッドに案内
+            try {
+              await app.client.chat.postMessage({
+                channel: row.channel_id,
+                thread_ts: row.message_ts,
+                text: `⏪ 前日分の退勤日報として処理しました（自動打刻なし）`,
+                blocks: [{
+                  type: 'section',
+                  text: { type: 'mrkdwn', text: `⏪ *前日分の退勤日報として処理しました*\n本日の出勤打刻が直近のため、自動打刻はスキップしました。\n昨日の退勤打刻はHRMOSで手動で設定してください 🙏` },
+                }],
+                unfurl_links: false, unfurl_media: false,
+              });
+            } catch {}
+            console.log(`[IEYASU] 退勤スキップ（前日分遅出し判定 gap=${gapMin}分）: ${row.slack_user_id}`);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('[IEYASU] 退勤前日分判定エラー（通常処理に進む）:', e.message);
       }
     }
 

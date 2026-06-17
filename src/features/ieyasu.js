@@ -280,4 +280,45 @@ async function getStampedUsersForDay(dateYmd) {
   return stamped;
 }
 
-module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache, getStampedUsersForDay };
+// HRMOS daily endpoint からユーザー単体の打刻状況を取得（slack user_id → メール → HRMOSユーザー解決込み）
+// 戻り値: { todayIn, todayOut, yesterdayIn, yesterdayOut, todayInMin }（HH:MM の分単位）
+async function getUserDailyContext(slackClient, slackUserId) {
+  const userRes = await slackClient.users.info({ user: slackUserId });
+  const email = (userRes.user?.profile?.email || '').toLowerCase();
+  if (!email) return null;
+  const token = await getToken();
+  const users = await getAllUsers(token);
+  const hrUser = users.find(u => (u.email || '').toLowerCase() === email);
+  if (!hrUser) return null;
+
+  const now = new Date();
+  const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 9 * 60) * 60000);
+  const todayYmd = jst.toISOString().slice(0, 10);
+  const ydJst = new Date(jst.getTime() - 24 * 3600 * 1000);
+  const yesterdayYmd = ydJst.toISOString().slice(0, 10);
+
+  const [todayD, ydD] = await Promise.all([
+    getDailyWorkOutput(token, hrUser.id, todayYmd).catch(() => null),
+    getDailyWorkOutput(token, hrUser.id, yesterdayYmd).catch(() => null),
+  ]);
+
+  const parseHHMM = (s) => {
+    if (!s) return null;
+    const m = String(s).match(/^(\d{1,2}):(\d{2})/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+
+  return {
+    todayIn: todayD?.stamping_start_at || null,
+    todayOut: todayD?.stamping_end_at || null,
+    yesterdayIn: ydD?.stamping_start_at || null,
+    yesterdayOut: ydD?.stamping_end_at || null,
+    todayInMin: parseHHMM(todayD?.stamping_start_at),
+    yesterdayOutMin: parseHHMM(ydD?.stamping_end_at),
+    nowJstMin: jst.getUTCHours() * 60 + jst.getUTCMinutes(),
+    hrmosUserId: hrUser.id,
+    email,
+  };
+}
+
+module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache, getStampedUsersForDay, getUserDailyContext };

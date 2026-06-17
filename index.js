@@ -3247,19 +3247,30 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';
       await addStampReaction(app.client, row.channel_id, row.message_ts, reactionName);
       await dbQuery(
-        `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state='retried_ok', error_reason=$3 WHERE id=$1`,
+        `UPDATE hrmos_stamps SET ok=true, hrmos_user_id=$2, retry_state=NULL, error_reason=$3 WHERE id=$1`,
         [row.id, result.userId || null, result.skipped ? 'already_stamped' : null]
       ).catch(() => {});
-      console.log(`[IEYASU] 遅延処理OK: user=${row.slack_user_id} type=${row.stamp_type} skipped=${!!result.skipped}`);
+      console.log(`[IEYASU] 処理OK: user=${row.slack_user_id} type=${row.stamp_type} skipped=${!!result.skipped}`);
     } else {
-      await addStampReaction(app.client, row.channel_id, row.message_ts, 'warning');
-      await notifyStampFailure(app.client, row.slack_user_id, row.stamp_type, result.reason);
-      await postStampFailureToThread(app.client, row.channel_id, row.message_ts, row.slack_user_id, row.stamp_type, result.reason);
-      await dbQuery(
-        `UPDATE hrmos_stamps SET retry_state='final_failed', error_reason=$2 WHERE id=$1`,
-        [row.id, result.reason]
-      ).catch(() => {});
-      console.warn(`[IEYASU] 遅延処理失敗: user=${row.slack_user_id}`, result);
+      // 一時的エラーなら pending のまま（次回 worker で再試行）。恒久エラーは final_failed + 通知
+      const willRetry = TRANSIENT_REASONS.has(result.reason);
+      if (willRetry) {
+        // scheduled_at を1分後に設定し、worker再試行を待つ（最大10回程度）
+        await dbQuery(
+          `UPDATE hrmos_stamps SET scheduled_at = now() + interval '1 minute', error_reason=$2 WHERE id=$1`,
+          [row.id, result.reason]
+        ).catch(() => {});
+        console.warn(`[IEYASU] 一時的エラーで再試行待ち: user=${row.slack_user_id} reason=${result.reason}`);
+      } else {
+        await addStampReaction(app.client, row.channel_id, row.message_ts, 'warning');
+        await notifyStampFailure(app.client, row.slack_user_id, row.stamp_type, result.reason);
+        await postStampFailureToThread(app.client, row.channel_id, row.message_ts, row.slack_user_id, row.stamp_type, result.reason);
+        await dbQuery(
+          `UPDATE hrmos_stamps SET retry_state='final_failed', error_reason=$2 WHERE id=$1`,
+          [row.id, result.reason]
+        ).catch(() => {});
+        console.warn(`[IEYASU] 恒久エラーで処理停止: user=${row.slack_user_id}`, result);
+      }
     }
   }
 
@@ -3296,37 +3307,21 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       return;
     }
 
-    const result = await stampAttendance(client, targetUserId, stampType);
+    // 出勤: DB事前保存 → 即時試行（プロセス再起動時は救済workerが拾える設計）
+    const { randomUUID } = require('crypto');
+    const recordId = randomUUID();
+    const scheduledAt = new Date(Date.now() + 30 * 1000); // 30秒後にworker救済が動くようマーキング
+    await dbQuery(
+      `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, channel_id, message_ts, retry_state, scheduled_at)
+       VALUES ($1, $2, $3, $4, false, $5, $6, 'pending', $7)`,
+      [recordId, teamId, targetUserId, stampType, message.channel, message.ts, scheduledAt.toISOString()]
+    ).catch(e => console.error('[IEYASU] 出勤 DB事前記録失敗:', e.message));
 
-    if (result.ok) {
-      // 既打刻スキップ時は青✅、新規打刻時は緑✅で区別
-      const reactionName = result.skipped ? 'ballot_box_with_check' : 'white_check_mark';
-      await addStampReaction(client, message.channel, message.ts, reactionName);
-      if (result.skipped) {
-        console.log(`[IEYASU] ${label} 既打刻スキップ: ${result.email} @ ${result.alreadyAt}`);
-      }
-      await dbQuery(
-        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, channel_id, message_ts, error_reason)
-         VALUES (gen_random_uuid(), $1, $2, $3, true, $4, $5, $6, $7)`,
-        [teamId, targetUserId, stampType, result.userId || null, message.channel, message.ts, result.skipped ? 'already_stamped' : null]
-      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-    } else {
-      // 失敗: 一時的なら retry_state='pending' で10分後にリトライ
-      const willRetry = TRANSIENT_REASONS.has(result.reason);
-      const retryState = willRetry ? 'pending' : 'final_failed';
-      await dbQuery(
-        `INSERT INTO hrmos_stamps (id, team_id, slack_user_id, stamp_type, ok, hrmos_user_id, error_reason, channel_id, message_ts, retry_state)
-         VALUES (gen_random_uuid(), $1, $2, $3, false, $4, $5, $6, $7, $8)`,
-        [teamId, targetUserId, stampType, result.userId || null, result.reason, message.channel, message.ts, retryState]
-      ).catch(e => console.error('[IEYASU] DB記録失敗:', e.message));
-      console.warn(`[IEYASU] ${label}打刻失敗 (retry=${willRetry}):`, result);
-      if (!willRetry) {
-        // 恒久エラーは即DM＋スレッド返信＋⚠️
-        await addStampReaction(client, message.channel, message.ts, 'warning');
-        await notifyStampFailure(client, targetUserId, stampType, result.reason);
-        await postStampFailureToThread(client, message.channel, message.ts, targetUserId, stampType, result.reason);
-      }
-      // 一時エラー時はリアクション保留（10分後worker で結果に応じて付与）
+    // 即時試行（成功すれば retry_state=NULL に更新、失敗で final_failed や pending のまま）
+    try {
+      await processDelayedRecord(recordId);
+    } catch (e) {
+      console.error(`[IEYASU] 出勤即時試行エラー（救済workerが拾います）:`, e.message);
     }
   };
 

@@ -3391,10 +3391,10 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
           return;
         }
 
-        // 2. Slack側で本日 出勤日報を投稿済みのユーザーID（hrmos_stampsから）
+        // 2. Slack側で本日 出勤日報を投稿済みのユーザーID（hrmos_stampsから、JSTで日付判定）
         const reportedRes = await dbQuery(
           `SELECT DISTINCT slack_user_id FROM hrmos_stamps
-           WHERE stamp_type=1 AND stamped_at::date = $1`,
+           WHERE stamp_type=1 AND (stamped_at AT TIME ZONE 'Asia/Tokyo')::date = $1::date`,
           [today]
         );
         const reportedSet = new Set(reportedRes.rows.map(r => r.slack_user_id));
@@ -3406,10 +3406,24 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
         );
         const remindedSet = new Set(remindedRes.rows.map(r => r.slack_user_id));
 
+        // 現在JST時刻（HH*60+MM）
+        const _now = new Date();
+        const _jst = new Date(_now.getTime() + (_now.getTimezoneOffset() + 9 * 60) * 60000);
+        const nowMin = _jst.getUTCHours() * 60 + _jst.getUTCMinutes();
+
         // 4. HRMOS打刻ユーザーをチェックして、Slack日報未投稿+未リマインドの人に通知
         let notified = 0;
         for (const h of stamped) {
           if (!h.email) continue;
+          if (!h.stamping_start_at) continue;
+          // 出勤打刻から10分以内ならまだ猶予あり（スキップ）
+          const stampMatch = String(h.stamping_start_at).match(/^(\d{1,2}):(\d{2})/);
+          if (!stampMatch) continue;
+          const stampMin = Number(stampMatch[1]) * 60 + Number(stampMatch[2]);
+          let elapsedMin = nowMin - stampMin;
+          if (elapsedMin < 0) elapsedMin += 24 * 60; // 跨日対策
+          if (elapsedMin < 10) continue; // 打刻から10分未満は猶予
+
           // Slack のメールでユーザー検索
           let slackUserId = null;
           try {
@@ -3456,13 +3470,14 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       }
     }
 
-    // 10:00, 11:00, 12:00 JST に走らせる（営業日内で複数回チェック、初回投稿で済んだ人は notified_at で除外）
+    // 営業時間中（07:00-14:00 JST）に10分おきに走らせる
+    // 重複通知は attendance_report_reminders テーブルで防ぐ（1人1日1回）
     const { cron: nodecron } = (() => { try { return { cron: require('node-cron') }; } catch { return {}; } })();
     if (nodecron) {
-      nodecron.schedule('0 10,11,12 * * *', () => {
+      nodecron.schedule('*/10 7-14 * * *', () => {
         runMissingReportCheck().catch(e => console.error('[missing-report] cron error:', e?.message || e));
       }, { timezone: 'Asia/Tokyo' });
-      console.log('[missing-report] cron scheduled at 10:00, 11:00, 12:00 JST');
+      console.log('[missing-report] cron scheduled every 10min from 07:00-14:00 JST (business days)');
     } else {
       console.warn('[missing-report] node-cron not available, skipping schedule');
     }

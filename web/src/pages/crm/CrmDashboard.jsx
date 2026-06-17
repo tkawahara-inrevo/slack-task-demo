@@ -561,6 +561,7 @@ export default function CrmDashboard() {
     curr, prev, repTable, yomiBreakdown = [], overdueAlerts = [], stagnantAlerts = [],
     rangeStart, rangeEnd, prevStart, prevEnd, repTargetMap = {}, repRoleInferred = {}, teamTarget = 0, planBreakdown = [],
     targetReps = [], termTargetOverride = null,
+    prevRepTargetMap = {}, prevTeamTarget = 0, prevTermTargetOverride = null, hasPrevTarget = false,
   } = data;
 
   const reps = buildRepTable(repTable, targetReps, salesUser);
@@ -587,13 +588,32 @@ export default function CrmDashboard() {
   const termMonths = (isMultiMonthMode && rangeStart && rangeEnd)
     ? Math.max(1, Math.round((new Date(rangeEnd) - new Date(rangeStart)) / (30.44 * 86400000)))
     : 1;
+
+  // モードに応じて使う目標マップを切替（前期モードは前期目標、それ以外は今期目標）
+  const isPrev = period === 'prevterm';
+  const activeRepTargetMap = isPrev ? prevRepTargetMap : repTargetMap;
+  const activeTeamTarget = isPrev ? prevTeamTarget : teamTarget;
+  const activeTermTargetOverride = isPrev ? prevTermTargetOverride : termTargetOverride;
+
+  // 前前期以前を範囲指定された場合は目標カードを非表示
+  // 判定: rangeStart < prevStart (今期/前期/範囲モードで、前期開始日より前を含む場合)
+  const isBeforePrevPeriod = (period === 'range' || period === 'custom')
+    && rangeStart && prevStart
+    && new Date(rangeStart) < new Date(prevStart);
+
+  // 前期データを表示するが前期目標が未設定の場合はカード非表示
+  const isPrevWithoutTarget = isPrev && !hasPrevTarget;
+
+  // 目標カード表示するか
+  const showTargetCard = !isBeforePrevPeriod && !isPrevWithoutTarget;
+
   // 担当者フィルタ時は個人目標、全員表示時はチーム合計
-  const effectiveMonthlyTarget = salesUser && repTargetMap[salesUser] > 0
-    ? repTargetMap[salesUser]
-    : teamTarget;
-  // 今期チーム目標は上書き設定があればそれを優先（担当者フィルタ時は除く）。前期/範囲は上書き対象外
+  const effectiveMonthlyTarget = salesUser && activeRepTargetMap[salesUser] > 0
+    ? activeRepTargetMap[salesUser]
+    : activeTeamTarget;
+  // チーム目標上書きは「全員表示時 + 上書き値あり」のみ
   const termKpiTarget = isMultiMonthMode
-    ? ((period === 'term' && !salesUser && termTargetOverride > 0) ? termTargetOverride : effectiveMonthlyTarget * termMonths)
+    ? ((!salesUser && activeTermTargetOverride > 0) ? activeTermTargetOverride : effectiveMonthlyTarget * termMonths)
     : 0;
 
   // KPI分母: 複数月モードは月次目標×月数、指定月は月次目標（担当者フィルタ時は個人目標）
@@ -763,7 +783,7 @@ export default function CrmDashboard() {
         </div>
 
         {/* KPI達成率 */}
-        {(() => {
+        {showTargetCard ? (() => {
           const kpiColor = kpiAchieve == null ? C.textSub : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#d97706' : '#ef4444';
           return (
             <div style={{ ...cardStyle, borderTop:`3px solid ${kpiColor}` }}>
@@ -787,7 +807,13 @@ export default function CrmDashboard() {
               )}
             </div>
           );
-        })()}
+        })() : (
+          <div style={{ ...cardStyle, borderTop:`3px solid ${C.textSub}`, display:'flex', flexDirection:'column', justifyContent:'center', alignItems:'center', minHeight:90 }}>
+            <div style={{ fontSize:'0.7rem', color:C.textSub, textAlign:'center', lineHeight:1.5 }}>
+              {isPrevWithoutTarget ? '前期目標が未設定のため達成率を表示できません' : '前期より前の期間は目標値が記録されていません'}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── メイン2カラム ── */}

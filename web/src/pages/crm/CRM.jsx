@@ -781,7 +781,14 @@ function CrmSettings() {
         monthly_to_adda_ref: !!r.monthly_to_adda_ref,
       })));
       const s = ps.settings || {};
-      setPeriod({ prevStart:s.prev_start?.split('T')[0]||'', prevEnd:s.prev_end?.split('T')[0]||'', currStart:s.curr_start?.split('T')[0]||'', currEnd:s.curr_end?.split('T')[0]||'', termTarget: s.term_target ? Math.round(Number(s.term_target)/10000) : '' });
+      setPeriod({
+        prevStart:s.prev_start?.split('T')[0]||'',
+        prevEnd:s.prev_end?.split('T')[0]||'',
+        currStart:s.curr_start?.split('T')[0]||'',
+        currEnd:s.curr_end?.split('T')[0]||'',
+        termTarget: s.term_target ? Math.round(Number(s.term_target)/10000) : '',
+        prevTermTarget: s.prev_term_target ? Math.round(Number(s.prev_term_target)/10000) : '',
+      });
     });
   }, []);
 
@@ -867,7 +874,12 @@ function CrmSettings() {
         monthly_to_adda_ref: !!r.monthly_to_adda_ref,
       }));
       const roleArr = roleTargetRows.map((r,i) => ({ role_name:r.role_name, monthly_target:r.monthly_target, sort_order:i }));
-      await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({ prevStart:period.prevStart, prevEnd:period.prevEnd, currStart:period.currStart, currEnd:period.currEnd, termTarget: period.termTarget === '' ? null : Number(period.termTarget) * 10000 })]);
+      await Promise.all([api.crmRepRolesSave(repArr), api.crmRoleTargetsSave(roleArr), api.crmPeriodSettingsSave({
+        prevStart:period.prevStart, prevEnd:period.prevEnd,
+        currStart:period.currStart, currEnd:period.currEnd,
+        termTarget: period.termTarget === '' ? null : Number(period.termTarget) * 10000,
+        prevTermTarget: period.prevTermTarget === '' || period.prevTermTarget == null ? null : Number(period.prevTermTarget) * 10000,
+      })]);
       setNotice('保存しました'); setTimeout(() => setNotice(''), 2500);
     } catch { setNotice('保存に失敗しました'); setTimeout(() => setNotice(''), 3000); }
     setSaving(false);
@@ -922,17 +934,53 @@ function CrmSettings() {
           </div>
           <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginTop:8, marginBottom:4 }}>今期チーム目標（上書き）</div>
           <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:12 }}>未入力なら役職別KPI × 月数の合算が使われます</div>
-          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 18px', maxWidth:480, marginBottom:20, display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 18px', maxWidth:480, marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
             <input type="number" min="0" step="100"
               value={period.termTarget} onChange={e => setPeriod(p => ({...p, termTarget:e.target.value}))} placeholder="未設定（合算値を使用）"
               style={{ flex:1, padding:'6px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.85rem', outline:'none', textAlign:'right' }} />
             <span style={{ fontSize:'0.8rem', color:'#64748b', fontWeight:600 }}>万円</span>
           </div>
-          <button onClick={handleSave} disabled={saving}
-            style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}>
-            {saving?'保存中…':'保存'}
-          </button>
-          {notice && <span style={{ marginLeft:12, fontSize:'0.8rem', color:notice.includes('失敗')?'#dc2626':'#059669', fontWeight:600 }}>{notice}</span>}
+
+          <div style={{ fontWeight:700, fontSize:'0.95rem', color:'#0f172a', marginTop:16, marginBottom:4 }}>前期チーム目標（上書き）</div>
+          <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:12 }}>前期分析時の達成率計算に使われます</div>
+          <div style={{ background:'#fff', borderRadius:12, border:'1px solid #e2e8f0', padding:'12px 18px', maxWidth:480, marginBottom:20, display:'flex', alignItems:'center', gap:10 }}>
+            <input type="number" min="0" step="100"
+              value={period.prevTermTarget || ''} onChange={e => setPeriod(p => ({...p, prevTermTarget:e.target.value}))} placeholder="未設定"
+              style={{ flex:1, padding:'6px 8px', border:'1px solid #e2e8f0', borderRadius:7, fontSize:'0.85rem', outline:'none', textAlign:'right' }} />
+            <span style={{ fontSize:'0.8rem', color:'#64748b', fontWeight:600 }}>万円</span>
+          </div>
+
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <button onClick={handleSave} disabled={saving}
+              style={{ padding:'8px 24px', background:saving?'#94a3b8':'#1e40af', color:'#fff', border:'none', borderRadius:8, fontSize:'0.85rem', fontWeight:700, cursor:'pointer' }}>
+              {saving?'保存中…':'保存'}
+            </button>
+            <button onClick={async () => {
+              if (!confirm('期繰越を実行します:\n・今期チーム目標 → 前期チーム目標\n・役職別月次目標 → 前期役職別月次目標\n・各担当者の役職/個別目標 → 前期役職/前期個別目標\n\nこの操作は取り消せません。続行しますか？')) return;
+              setSaving(true);
+              try {
+                await api.crmPeriodRollover();
+                // 再読込
+                const [rt, rr, ps] = await Promise.all([api.crmRoleTargets(), api.crmRepRoles(), api.crmPeriodSettings()]);
+                setRoleTargetRows(rt.targets || []);
+                setRepRoleRows(rr.roles || []);
+                setPeriod({
+                  prevStart: ps.settings?.prev_start || '', prevEnd: ps.settings?.prev_end || '',
+                  currStart: ps.settings?.curr_start || '', currEnd: ps.settings?.curr_end || '',
+                  termTarget: ps.settings?.term_target ? Math.round(ps.settings.term_target / 10000) : '',
+                  prevTermTarget: ps.settings?.prev_term_target ? Math.round(ps.settings.prev_term_target / 10000) : '',
+                });
+                setNotice('期繰越を実行しました');
+                setTimeout(() => setNotice(''), 3000);
+              } catch (e) {
+                setNotice('期繰越に失敗しました: ' + (e?.message || ''));
+              } finally { setSaving(false); }
+            }} disabled={saving}
+              style={{ padding:'8px 20px', background:'#fff', color:'#dc2626', border:'1px solid #fca5a5', borderRadius:8, fontSize:'0.82rem', fontWeight:700, cursor:'pointer' }}>
+              ⇨ 期繰越（今期→前期にコピー）
+            </button>
+            {notice && <span style={{ fontSize:'0.8rem', color:notice.includes('失敗')?'#dc2626':'#059669', fontWeight:600 }}>{notice}</span>}
+          </div>
         </>)}
 
         {section === 'kpi' && (<>

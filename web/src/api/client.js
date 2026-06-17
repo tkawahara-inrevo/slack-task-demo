@@ -264,6 +264,7 @@ export const api = {
   crmRoleTargetsSave: (targets) => crmFetch('/role-targets', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets}) }),
   crmPeriodSettings: () => crmFetch('/period-settings'),
   crmPeriodSettingsSave: (body) => crmFetch('/period-settings', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }),
+  crmPeriodRollover: () => crmFetch('/period-settings/rollover', { method:'POST' }),
   crmIndividualPerformance: (staff) => crmFetch(`/individual-performance?staff=${encodeURIComponent(staff)}`),
   crmPerfStaff: () => crmFetch('/perf-staff'),
 

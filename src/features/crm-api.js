@@ -990,25 +990,31 @@ function registerCrmApi({ expressApp, authWithRole }) {
            WHERE team_id=$1 AND COALESCE(sales_person, sales_user_id) IS NOT NULL ORDER BY name`,
           [teamId]
         ),
-        dbQuery('SELECT role_name, monthly_target FROM crm_role_targets WHERE team_id=$1', [teamId]),
-        dbQuery('SELECT rep_name, role_name, monthly_target_override FROM crm_rep_roles WHERE team_id=$1', [teamId]),
+        dbQuery('SELECT role_name, monthly_target, prev_monthly_target FROM crm_role_targets WHERE team_id=$1', [teamId]),
+        dbQuery('SELECT rep_name, role_name, monthly_target_override, prev_role_name, prev_monthly_target_override FROM crm_rep_roles WHERE team_id=$1', [teamId]),
       ]);
 
-      // 役職別目標マップ
+      // 役職別目標マップ（今期/前期）
       const roleTargetMap = {};
-      for (const r of roleTargetRes.rows) roleTargetMap[r.role_name] = Number(r.monthly_target || 0);
+      const prevRoleTargetMap = {};
+      for (const r of roleTargetRes.rows) {
+        roleTargetMap[r.role_name] = Number(r.monthly_target || 0);
+        if (r.prev_monthly_target != null) prevRoleTargetMap[r.role_name] = Number(r.prev_monthly_target);
+      }
 
       // 担当者別手動設定マップ
       const repRepRoleMap = {};
       for (const r of repRoleRes.rows) repRepRoleMap[r.rep_name] = r;
 
       const repTargetMap = {};
+      const prevRepTargetMap = {};
       const repRoleInferred = {}; // フロントに渡す役職（手動設定のみ。Slack自動推定は廃止）
       // KPI管理対象の担当者（BC担当）= crm_rep_roles 設定済 − 除外/退職 − 添田/リファラル予約名
       const TARGET_REPS_SERVER = REP_ROLES
         .filter(r => !r.exclude_from_kpi && !r.is_retired && r.rep_name !== ADDA_REF)
         .map(r => r.rep_name);
       let teamTarget = 0;
+      let prevTeamTarget = 0;
       for (const rep of TARGET_REPS_SERVER) {
         const repRole  = repRepRoleMap[rep];
         const override = repRole?.monthly_target_override;
@@ -1018,6 +1024,15 @@ function registerCrmApi({ expressApp, authWithRole }) {
         const effective = override != null ? Number(override) : (roleTargetMap[roleName] || 0);
         repTargetMap[rep] = effective;
         teamTarget += effective;
+
+        // 前期: rep_roles に履歴あり → それを使う。なければ前期役職別マップから、それもなければ0
+        const prevOverride = repRole?.prev_monthly_target_override;
+        const prevRoleName = repRole?.prev_role_name || roleName;
+        const prevEffective = prevOverride != null
+          ? Number(prevOverride)
+          : (prevRoleTargetMap[prevRoleName] != null ? prevRoleTargetMap[prevRoleName] : 0);
+        prevRepTargetMap[rep] = prevEffective;
+        prevTeamTarget += prevEffective;
       }
 
       res.json({
@@ -1027,9 +1042,13 @@ function registerCrmApi({ expressApp, authWithRole }) {
         prev: prevMetrics,
         repTable,
         repTargetMap,
+        prevRepTargetMap,
         repRoleInferred,
         teamTarget,
+        prevTeamTarget,
         termTargetOverride: ps.term_target != null ? Number(ps.term_target) : null,
+        prevTermTargetOverride: ps.prev_term_target != null ? Number(ps.prev_term_target) : null,
+        hasPrevTarget: prevTeamTarget > 0 || (ps.prev_term_target != null && Number(ps.prev_term_target) > 0),
         targetReps: [...TARGET_REPS_SERVER, ADDA_REF], // KPI担当者リスト + 添田/リファラル
         planBreakdown: planBreakdownRes.rows,
         yomiBreakdown: yomiRes.rows,
@@ -2017,14 +2036,49 @@ function registerCrmApi({ expressApp, authWithRole }) {
   expressApp.put('/api/crm/period-settings', authWithRole, async (req, res) => {
     try {
       const { teamId } = req.dashboardUser;
-      const { prevStart, prevEnd, currStart, currEnd, termTarget } = req.body;
+      const { prevStart, prevEnd, currStart, currEnd, termTarget, prevTermTarget } = req.body;
       const tgt = (termTarget === '' || termTarget == null) ? null : Number(termTarget);
-      await dbQuery(`INSERT INTO crm_period_settings (team_id, prev_start, prev_end, curr_start, curr_end, term_target)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (team_id) DO UPDATE SET prev_start=$2, prev_end=$3, curr_start=$4, curr_end=$5, term_target=$6, updated_at=now()`,
-        [teamId, prevStart, prevEnd, currStart, currEnd, tgt]);
+      const prevTgt = (prevTermTarget === '' || prevTermTarget == null) ? null : Number(prevTermTarget);
+      await dbQuery(`INSERT INTO crm_period_settings (team_id, prev_start, prev_end, curr_start, curr_end, term_target, prev_term_target)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (team_id) DO UPDATE SET prev_start=$2, prev_end=$3, curr_start=$4, curr_end=$5, term_target=$6, prev_term_target=$7, updated_at=now()`,
+        [teamId, prevStart, prevEnd, currStart, currEnd, tgt, prevTgt]);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'internal' }); }
+  });
+
+  // 期繰越: 今期目標→前期目標にコピー（DB更新のみ。期間日付は別途設定）
+  expressApp.post('/api/crm/period-settings/rollover', authWithRole, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      // 1. crm_period_settings: term_target → prev_term_target にコピー
+      await dbQuery(
+        `UPDATE crm_period_settings
+         SET prev_term_target = term_target,
+             updated_at = now()
+         WHERE team_id = $1`,
+        [teamId]
+      );
+      // 2. crm_role_targets: monthly_target → prev_monthly_target にコピー
+      await dbQuery(
+        `UPDATE crm_role_targets
+         SET prev_monthly_target = monthly_target
+         WHERE team_id = $1`,
+        [teamId]
+      );
+      // 3. crm_rep_roles: role_name → prev_role_name, monthly_target_override → prev_monthly_target_override にコピー
+      await dbQuery(
+        `UPDATE crm_rep_roles
+         SET prev_role_name = role_name,
+             prev_monthly_target_override = monthly_target_override
+         WHERE team_id = $1`,
+        [teamId]
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[CRM] rollover error:', e);
+      res.status(500).json({ error: 'internal' });
+    }
   });
 
   // 個人成績計算

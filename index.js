@@ -53,6 +53,7 @@ const {
 } = require("./src/utils/common");
 const {
   dbEnsureSettingsSchema,
+  dbEnsureOrgSchema,
   dbGetNotificationThread,
   dbCountCompletions,
   dbCountTargets,
@@ -3013,6 +3014,7 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
 (async () => {
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await dbEnsureSettingsSchema();
+  await dbEnsureOrgSchema().catch(e => console.warn('[db] dbEnsureOrgSchema:', e.message));
 
   const expressApp = receiver.app;
   expressApp.use(cookieParser());

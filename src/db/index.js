@@ -2822,9 +2822,125 @@ async function dbPipelineSummary(teamId) {
   return res.rows;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 組織・権限 再設計（Phase 1: テーブル追加のみ・空のまま）
+// docs/permission-redesign.md
+// 既存テーブル（dash_teams, dashboard_roles, dashboard_user_visibility 等）は
+// 触らず、新テーブルを並行追加。並行運用後に旧テーブルを廃止予定。
+// ─────────────────────────────────────────────────────────────
+async function dbEnsureOrgSchema() {
+  await Promise.all([
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS org_units (
+        id          SERIAL PRIMARY KEY,
+        team_id     TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        type        TEXT NOT NULL CHECK (type IN ('ceo','division','dept','team')),
+        parent_id   INTEGER REFERENCES org_units(id) ON DELETE SET NULL,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        is_active   BOOLEAN NOT NULL DEFAULT true,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `).catch(() => {}),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS positions (
+        id          SERIAL PRIMARY KEY,
+        team_id     TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        level       INTEGER NOT NULL,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        is_active   BOOLEAN NOT NULL DEFAULT true,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `).catch(() => {}),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS user_assignments (
+        id              SERIAL PRIMARY KEY,
+        team_id         TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        org_unit_id     INTEGER NOT NULL REFERENCES org_units(id) ON DELETE CASCADE,
+        position_id     INTEGER NOT NULL REFERENCES positions(id) ON DELETE RESTRICT,
+        is_primary      BOOLEAN NOT NULL DEFAULT false,
+        effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
+        effective_to    DATE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by      TEXT
+      );
+    `).catch(() => {}),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS permission_grants (
+        id             SERIAL PRIMARY KEY,
+        team_id        TEXT NOT NULL,
+        feature_key    TEXT NOT NULL,
+        subject_type   TEXT NOT NULL CHECK (subject_type IN ('user','org_unit','position','composite')),
+        subject_id     INTEGER,
+        composite_json JSONB,
+        effect         TEXT NOT NULL CHECK (effect IN ('allow','deny')),
+        granted_by     TEXT,
+        granted_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `).catch(() => {}),
+    dbQuery(`
+      CREATE TABLE IF NOT EXISTS visibility_overrides (
+        id              SERIAL PRIMARY KEY,
+        team_id         TEXT NOT NULL,
+        viewer_user_id  TEXT NOT NULL,
+        target_type     TEXT NOT NULL CHECK (target_type IN ('user','org_unit')),
+        target_id       INTEGER NOT NULL,
+        effect          TEXT NOT NULL CHECK (effect IN ('include','exclude')),
+        granted_by      TEXT,
+        granted_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `).catch(() => {}),
+  ]);
+
+  // インデックス
+  await Promise.all([
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_org_units_parent ON org_units(parent_id);`).catch(() => {}),
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_org_units_team ON org_units(team_id);`).catch(() => {}),
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_user_assignments_user ON user_assignments(team_id, user_id);`).catch(() => {}),
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_user_assignments_org ON user_assignments(org_unit_id);`).catch(() => {}),
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_user_assignments_active ON user_assignments(team_id, user_id) WHERE effective_to IS NULL;`).catch(() => {}),
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_permission_grants_feature ON permission_grants(team_id, feature_key);`).catch(() => {}),
+    dbQuery(`CREATE INDEX IF NOT EXISTS idx_visibility_overrides_viewer ON visibility_overrides(team_id, viewer_user_id);`).catch(() => {}),
+  ]);
+
+  // 役職マスター seed（team_id 未設定だと困るため、SLACK_TEAM_ID をデフォルトに）
+  const seedTeamId = process.env.SLACK_TEAM_ID || 'T086C06L5V0';
+  const positions = [
+    { name: 'メンバー',       level: 1, sort: 10 },
+    { name: 'リード',         level: 2, sort: 20 },
+    { name: 'チーフ',         level: 3, sort: 30 },
+    { name: 'マネージャー',   level: 4, sort: 40 },
+    { name: 'エキスパート',   level: 4, sort: 41 },
+    { name: 'ディレクター',   level: 5, sort: 50 },
+    { name: '取締役',         level: 6, sort: 60 },
+    { name: 'CTO',           level: 7, sort: 70 },
+    { name: 'CEO',           level: 8, sort: 80 },
+  ];
+  for (const p of positions) {
+    await dbQuery(
+      `INSERT INTO positions (team_id, name, level, sort_order)
+       SELECT $1, $2, $3, $4
+       WHERE NOT EXISTS (SELECT 1 FROM positions WHERE team_id=$1 AND name=$2)`,
+      [seedTeamId, p.name, p.level, p.sort],
+    ).catch(() => {});
+  }
+
+  // CEO unit seed（固定の最上位）
+  await dbQuery(
+    `INSERT INTO org_units (team_id, name, type, parent_id, sort_order)
+     SELECT $1, 'CEO', 'ceo', NULL, 0
+     WHERE NOT EXISTS (SELECT 1 FROM org_units WHERE team_id=$1 AND type='ceo')`,
+    [seedTeamId],
+  ).catch(() => {});
+}
+
 module.exports = {
   dbTransaction,
   dbEnsureSettingsSchema,
+  dbEnsureOrgSchema,
   dbCountCompletions,
   dbCountTargets,
   dbCreateTask,

@@ -702,10 +702,28 @@ export const api = {
   channelMappingUnhide: (id) => apiFetch(`/admin/channel-mapping/hidden/${id}`, { method: 'DELETE' }),
   channelMappingUnhideAll: () => apiFetch('/admin/channel-mapping/hidden', { method: 'DELETE' }),
 
-  // 組織・役職・所属（権限再設計 Phase 2-3）
+  // 組織・役職・所属（権限再設計 Phase 2-5）
   orgUnits: () => apiFetch('/admin/org/units'),
   orgPositions: () => apiFetch('/admin/org/positions'),
   orgMembers: () => apiFetch('/admin/org/members'),
   orgMigrateFromLegacy: () => apiFetch('/admin/org/migrate-from-legacy', { method: 'POST' }),
   orgMigrationStatus: () => apiFetch('/admin/org/migration-status'),
+  // 組織編集
+  orgUnitCreate: (body) => apiFetch('/admin/org/units', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgUnitUpdate: (id, body) => apiFetch(`/admin/org/units/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgUnitDelete: (id, force) => apiFetch(`/admin/org/units/${id}${force ? '?force=1' : ''}`, { method: 'DELETE' }),
+  // 役職編集
+  orgPositionCreate: (body) => apiFetch('/admin/org/positions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgPositionUpdate: (id, body) => apiFetch(`/admin/org/positions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgPositionDelete: (id) => apiFetch(`/admin/org/positions/${id}`, { method: 'DELETE' }),
+  // 所属（assignment）
+  orgAssignmentCreate: (body) => apiFetch('/admin/org/assignments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgAssignmentUpdate: (id, body) => apiFetch(`/admin/org/assignments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgAssignmentDelete: (id) => apiFetch(`/admin/org/assignments/${id}`, { method: 'DELETE' }),
+  // 権限グラント
+  orgFeatureCatalog: () => apiFetch('/admin/org/feature-catalog'),
+  orgPermissionGrants: () => apiFetch('/admin/org/permission-grants'),
+  orgPermissionGrantCreate: (body) => apiFetch('/admin/org/permission-grants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  orgPermissionGrantDelete: (id) => apiFetch(`/admin/org/permission-grants/${id}`, { method: 'DELETE' }),
+  orgMigratePermissions: () => apiFetch('/admin/org/migrate-permissions', { method: 'POST' }),
 };

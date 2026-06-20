@@ -701,4 +701,11 @@ export const api = {
   channelMappingHide: (id) => apiFetch(`/admin/channel-mapping/hidden/${id}`, { method: 'POST' }),
   channelMappingUnhide: (id) => apiFetch(`/admin/channel-mapping/hidden/${id}`, { method: 'DELETE' }),
   channelMappingUnhideAll: () => apiFetch('/admin/channel-mapping/hidden', { method: 'DELETE' }),
+
+  // 組織・役職・所属（権限再設計 Phase 2-3）
+  orgUnits: () => apiFetch('/admin/org/units'),
+  orgPositions: () => apiFetch('/admin/org/positions'),
+  orgMembers: () => apiFetch('/admin/org/members'),
+  orgMigrateFromLegacy: () => apiFetch('/admin/org/migrate-from-legacy', { method: 'POST' }),
+  orgMigrationStatus: () => apiFetch('/admin/org/migration-status'),
 };

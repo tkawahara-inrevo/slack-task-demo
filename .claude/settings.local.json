@@ -126,7 +126,10 @@
       "Bash(node -c src/utils/common.js)",
       "Bash(grep -nE \"//.*analytic|/\\\\\\\\*.*analytic\" web/src/pages/Dashboard.jsx)",
       "Bash(node -c src/features/daily-report-classifier.js)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Read(//c/Users/takar/**)",
+      "Read(//c/dev/**)",
+      "Bash(node -c src/features/org-api.js)"
     ]
   }
 }

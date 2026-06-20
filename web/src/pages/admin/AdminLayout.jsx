@@ -48,6 +48,11 @@ export default function AdminLayout() {
           </NavLink>
         )}
         {isAdmin && (
+          <NavLink to="/admin/org-chart" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '🏢' : '組織・役職（新）'}
+          </NavLink>
+        )}
+        {isAdmin && (
           <NavLink to="/admin/crm-permissions" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '🔐' : 'CRM権限管理'}
           </NavLink>

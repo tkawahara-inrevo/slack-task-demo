@@ -5361,6 +5361,10 @@ function registerDashboardApi(deps) {
   // RPO案件管理API
   registerRpoApi({ expressApp, authWithRole, adminOnly });
 
+  // 組織・役職・所属 API（権限再設計 Phase 2-3）
+  const { registerOrgApi } = require('./org-api');
+  registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery });
+
   // 機能別アクセス権限（先に登録して legal-api 等で参照可能に）
   const featureAccess = registerFeatureAccess({
     expressApp,

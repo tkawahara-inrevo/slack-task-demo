@@ -94,11 +94,16 @@ export default function OrgChartAdmin() {
     if (!confirm(`「${unit.name}」を削除しますか？`)) return;
     setBusy(true);
     try {
-      try { await api.orgUnitDelete(unit.id); }
-      catch (e) {
-        const msg = JSON.parse(e.message?.match(/\{.*\}/)?.[0] || '{}');
-        if (msg.error === 'has active assignments') {
-          if (!confirm(`${msg.assignments}件の所属があります。全部終了して削除しますか？`)) { setBusy(false); return; }
+      try {
+        await api.orgUnitDelete(unit.id);
+      } catch (e) {
+        const body = e.body || {};
+        if (body.error === 'has active children') {
+          notify(`子組織が ${body.children} 件あります。先に子を削除/移動してください`, 'error');
+          return;
+        }
+        if (body.error === 'has active assignments') {
+          if (!confirm(`${body.assignments}件の所属があります。全員の所属を終了して削除しますか？`)) return;
           await api.orgUnitDelete(unit.id, true);
         } else throw e;
       }

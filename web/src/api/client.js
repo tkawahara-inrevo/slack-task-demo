@@ -22,8 +22,12 @@ async function apiFetch(path, opts = {}) {
   }
   if (!res.ok) {
     let msg = `API error: ${res.status}`;
-    try { const body = await res.json(); if (body.message) msg = body.message; } catch {}
-    throw new Error(msg);
+    let body = {};
+    try { body = await res.json(); if (body.message) msg = body.message; else if (body.error) msg = body.error; } catch {}
+    const err = new Error(msg);
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   return res.json();
 }

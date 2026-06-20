@@ -81,46 +81,43 @@ export default function OrgChart() {
     <div style={{ padding: 20, maxWidth: 1000 }}>
       <h2 style={{ margin: '0 0 16px', fontSize: '1.2rem' }}>組織・役職管理（読み取り専用）</h2>
 
-      {/* 移行状態カード */}
-      {status && (
-        <div style={{
-          background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8,
-          padding: 12, marginBottom: 16,
-        }}>
-          <div style={{ display: 'flex', gap: 24, fontSize: 13 }}>
-            <div>
-              <div style={{ color: '#6b7280', fontSize: 11 }}>新スキーマ</div>
-              <div>org_units: <strong>{status.newSchema.orgUnits}</strong></div>
-              <div>有効 assignments: <strong>{status.newSchema.activeAssignments}</strong></div>
-            </div>
-            <div>
-              <div style={{ color: '#6b7280', fontSize: 11 }}>旧スキーマ（参考）</div>
-              <div>dash_teams: {status.legacy.dashTeams}</div>
-              <div>dash_team_members: {status.legacy.dashTeamMembers}</div>
-            </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-              <button
-                onClick={handleMigrate}
-                disabled={migrating}
-                style={{
-                  padding: '6px 14px', background: '#3b82f6', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: migrating ? 'wait' : 'pointer',
-                  fontSize: 12,
-                }}
-              >{migrating ? '移行中...' : '旧データから移行'}</button>
-            </div>
+      {/* 移行状態カード（status 取得失敗時もボタンは出す） */}
+      <div style={{
+        background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8,
+        padding: 12, marginBottom: 16,
+      }}>
+        <div style={{ display: 'flex', gap: 24, fontSize: 13, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ color: '#6b7280', fontSize: 11 }}>新スキーマ</div>
+            <div>org_units: <strong>{status?.newSchema?.orgUnits ?? '—'}</strong></div>
+            <div>有効 assignments: <strong>{status?.newSchema?.activeAssignments ?? '—'}</strong></div>
           </div>
-          {migrateResult?.summary && (
-            <div style={{ marginTop: 8, fontSize: 12, color: '#059669' }}>
-              ✓ unit: 作成 {migrateResult.summary.createdUnits} / スキップ {migrateResult.summary.skippedUnits} ／
-              assignment: 作成 {migrateResult.summary.createdAssignments} / スキップ {migrateResult.summary.skippedAssignments}
-            </div>
-          )}
-          {migrateResult?.error && (
-            <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626' }}>エラー: {migrateResult.error}</div>
-          )}
+          <div>
+            <div style={{ color: '#6b7280', fontSize: 11 }}>旧スキーマ（参考）</div>
+            <div>dash_teams: {status?.legacy?.dashTeams ?? '—'}</div>
+            <div>dash_team_members: {status?.legacy?.dashTeamMembers ?? '—'}</div>
+          </div>
+          <button
+            onClick={handleMigrate}
+            disabled={migrating}
+            style={{
+              marginLeft: 'auto',
+              padding: '8px 16px', background: '#3b82f6', color: 'white',
+              border: 'none', borderRadius: 6, cursor: migrating ? 'wait' : 'pointer',
+              fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+            }}
+          >{migrating ? '移行中...' : '旧データから移行（冪等）'}</button>
         </div>
-      )}
+        {migrateResult?.summary && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#059669' }}>
+            ✓ unit: 作成 {migrateResult.summary.createdUnits} / スキップ {migrateResult.summary.skippedUnits} ／
+            assignment: 作成 {migrateResult.summary.createdAssignments} / スキップ {migrateResult.summary.skippedAssignments}
+          </div>
+        )}
+        {migrateResult?.error && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626' }}>エラー: {migrateResult.error}</div>
+        )}
+      </div>
 
       {/* タブ */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e5e7eb', marginBottom: 16 }}>

@@ -15,6 +15,10 @@ export default function OrgChartAdmin() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
+  // DnD 状態
+  const [dragUnit, setDragUnit] = useState(null);   // ドラッグ中の unit id
+  const [dragMember, setDragMember] = useState(null); // ドラッグ中の member user_id
+  const [dragOverUnit, setDragOverUnit] = useState(null); // ドロップターゲット視覚化
 
   // モーダル状態
   const [unitModal, setUnitModal] = useState(null);       // {mode:'create'|'edit', data}
@@ -184,30 +188,144 @@ export default function OrgChartAdmin() {
     }
     return roots;
   }
+
+  // 自分の子孫かどうか判定（循環防止用）
+  function isDescendant(ancestorId, candidateId) {
+    if (ancestorId === candidateId) return true;
+    const stack = [ancestorId];
+    while (stack.length) {
+      const cur = stack.pop();
+      for (const u of units) {
+        if (u.parent_id === cur) {
+          if (u.id === candidateId) return true;
+          stack.push(u.id);
+        }
+      }
+    }
+    return false;
+  }
+
+  async function handleDropOnUnit(targetUnit) {
+    // unit → unit (parent 変更)
+    if (dragUnit) {
+      const dragged = units.find(u => u.id === dragUnit);
+      setDragUnit(null);
+      setDragOverUnit(null);
+      if (!dragged || dragged.id === targetUnit.id) return;
+      if (dragged.type === 'ceo') { notify('CEO は移動できません', 'error'); return; }
+      if (dragged.parent_id === targetUnit.id) return;
+      if (isDescendant(dragged.id, targetUnit.id)) {
+        notify('自分の子孫には移動できません', 'error');
+        return;
+      }
+      try {
+        await api.orgUnitUpdate(dragged.id, { parent_id: targetUnit.id });
+        notify(`「${dragged.name}」を「${targetUnit.name}」配下に移動`);
+        await reload();
+      } catch (e) { notify('エラー: ' + e.message, 'error'); }
+      return;
+    }
+    // member → unit (所属追加)
+    if (dragMember) {
+      const memberId = dragMember;
+      const member = members.find(m => m.user_id === memberId);
+      setDragMember(null);
+      setDragOverUnit(null);
+      if (!member) return;
+      if (targetUnit.type === 'ceo') { notify('CEO にはドロップできません', 'error'); return; }
+      // 既に所属済みかチェック
+      if (member.assignments.some(a => a.org_unit_id === targetUnit.id)) {
+        notify('既にその組織に所属しています', 'error');
+        return;
+      }
+      const defaultPos = positions.find(p => p.name === 'メンバー') || positions[0];
+      if (!defaultPos) { notify('役職マスターがありません', 'error'); return; }
+      try {
+        await api.orgAssignmentCreate({
+          user_id: memberId,
+          org_unit_id: targetUnit.id,
+          position_id: defaultPos.id,
+          is_primary: member.assignments.length === 0,
+        });
+        notify(`${member.display_name || memberId} を「${targetUnit.name}」に追加`);
+        await reload();
+      } catch (e) { notify('エラー: ' + e.message, 'error'); }
+    }
+  }
+
   function renderNode(node, depth = 0) {
+    const isDragging = dragUnit === node.id;
+    const isOver = dragOverUnit === node.id;
+    const canDrop = !!(dragUnit && dragUnit !== node.id) || !!dragMember;
     return (
-      <div key={node.id} style={{ marginLeft: depth * 20, padding: '4px 0' }}>
-        <span style={{
-          display: 'inline-block', minWidth: 60, fontSize: 11, color: '#6b7280',
-          background: '#f3f4f6', borderRadius: 4, padding: '2px 6px', marginRight: 8,
-        }}>{node.type}</span>
-        <span style={{ fontWeight: node.type === 'ceo' ? 700 : 500 }}>{node.name}</span>
-        <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 8 }}>#{node.id}</span>
-        <span style={{ marginLeft: 12 }}>
-          <button onClick={() => setUnitModal({ mode: 'create', data: { parent_id: node.id, type: node.type === 'ceo' ? 'division' : (node.type === 'division' ? 'dept' : 'team') } })}
-            style={btnMini('#10b981')}>+ 子追加</button>
-          {node.type !== 'ceo' && (
-            <>
-              <button onClick={() => setUnitModal({ mode: 'edit', data: node })} style={btnMini('#3b82f6')}>編集</button>
-              <button onClick={() => deleteUnit(node)} style={btnMini('#ef4444')}>削除</button>
-            </>
-          )}
-        </span>
+      <div key={node.id} style={{ marginLeft: depth * 20 }}>
+        <div
+          draggable={node.type !== 'ceo'}
+          onDragStart={(e) => {
+            if (node.type === 'ceo') return;
+            setDragUnit(node.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }}
+          onDragEnd={() => { setDragUnit(null); setDragOverUnit(null); }}
+          onDragOver={(e) => {
+            if (canDrop) { e.preventDefault(); setDragOverUnit(node.id); }
+          }}
+          onDragLeave={() => { if (dragOverUnit === node.id) setDragOverUnit(null); }}
+          onDrop={(e) => { e.preventDefault(); handleDropOnUnit(node); }}
+          style={{
+            padding: '6px 8px', borderRadius: 4, marginBottom: 2,
+            cursor: node.type !== 'ceo' ? 'grab' : 'default',
+            opacity: isDragging ? 0.4 : 1,
+            background: isOver ? '#dbeafe' : 'transparent',
+            border: isOver ? '2px dashed #3b82f6' : '2px solid transparent',
+            transition: 'background 0.1s',
+          }}>
+          <span style={{
+            display: 'inline-block', minWidth: 60, fontSize: 11, color: '#6b7280',
+            background: '#f3f4f6', borderRadius: 4, padding: '2px 6px', marginRight: 8,
+          }}>{node.type}</span>
+          <span style={{ fontWeight: node.type === 'ceo' ? 700 : 500 }}>{node.name}</span>
+          <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 8 }}>#{node.id}</span>
+          <span style={{ marginLeft: 12 }}>
+            <button onClick={() => setUnitModal({ mode: 'create', data: { parent_id: node.id, type: node.type === 'ceo' ? 'division' : (node.type === 'division' ? 'dept' : 'team') } })}
+              style={btnMini('#10b981')}>+ 子追加</button>
+            {node.type !== 'ceo' && (
+              <>
+                <button onClick={() => setUnitModal({ mode: 'edit', data: node })} style={btnMini('#3b82f6')}>編集</button>
+                <button onClick={() => deleteUnit(node)} style={btnMini('#ef4444')}>削除</button>
+              </>
+            )}
+          </span>
+        </div>
         {node.children?.map(c => renderNode(c, depth + 1))}
       </div>
     );
   }
   const tree = buildTree(units);
+
+  // ミニツリー（メンバータブ右側のドロップ先）
+  function renderMiniNode(node, depth = 0) {
+    const isOver = dragOverUnit === node.id;
+    const canDrop = !!dragMember && node.type !== 'ceo';
+    return (
+      <div key={node.id} style={{ marginLeft: depth * 12 }}>
+        <div
+          onDragOver={(e) => { if (canDrop) { e.preventDefault(); setDragOverUnit(node.id); } }}
+          onDragLeave={() => { if (dragOverUnit === node.id) setDragOverUnit(null); }}
+          onDrop={(e) => { e.preventDefault(); handleDropOnUnit(node); }}
+          style={{
+            padding: '4px 6px', borderRadius: 3, marginBottom: 1, fontSize: 12,
+            background: isOver ? '#dbeafe' : 'transparent',
+            border: isOver ? '2px dashed #3b82f6' : '2px solid transparent',
+            opacity: node.type === 'ceo' ? 0.5 : 1,
+          }}>
+          <span style={{ color: '#9ca3af', fontSize: 10, marginRight: 4 }}>{node.type}</span>
+          {node.name}
+        </div>
+        {node.children?.map(c => renderMiniNode(c, depth + 1))}
+      </div>
+    );
+  }
 
   if (loading) return <div style={{ padding: 20 }}>読み込み中...</div>;
 
@@ -285,29 +403,52 @@ export default function OrgChartAdmin() {
       {tab === 'members' && (
         <div>
           <div style={{ marginBottom: 8, fontSize: 12, color: '#6b7280' }}>
-            行クリックで所属詳細・編集
+            行クリックで詳細編集 / メンバーをドラッグして右の組織にドロップ = 所属追加（役職: メンバー）
           </div>
-          <table style={tableStyle}>
-            <thead><tr style={theadRow}>
-              <th style={thStyle}>名前</th><th style={thStyle}>所属（役職）★=本務</th>
-            </tr></thead>
-            <tbody>
-              {members.map(m => (
-                <tr key={m.user_id} style={{ ...trStyle, cursor: 'pointer' }} onClick={() => setMemberModal(m)}>
-                  <td style={tdStyle}>{m.display_name || m.real_name || m.user_id}</td>
-                  <td style={tdStyle}>
-                    {m.assignments.length === 0
-                      ? <span style={{ color: '#9ca3af' }}>—</span>
-                      : m.assignments.map((a, i) => (
-                        <span key={i} style={tagStyle(a.is_primary)}>
-                          {a.org_unit_name} ({a.position_name}){a.is_primary && ' ★'}
-                        </span>
-                      ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 12 }}>
+            <table style={tableStyle}>
+              <thead><tr style={theadRow}>
+                <th style={thStyle}>名前</th><th style={thStyle}>所属（役職）★=本務</th>
+              </tr></thead>
+              <tbody>
+                {members.map(m => (
+                  <tr
+                    key={m.user_id}
+                    style={{
+                      ...trStyle,
+                      cursor: 'grab',
+                      opacity: dragMember === m.user_id ? 0.4 : 1,
+                      background: dragMember === m.user_id ? '#fef3c7' : 'transparent',
+                    }}
+                    draggable
+                    onDragStart={(e) => { setDragMember(m.user_id); e.dataTransfer.effectAllowed = 'copy'; }}
+                    onDragEnd={() => { setDragMember(null); setDragOverUnit(null); }}
+                    onClick={() => setMemberModal(m)}
+                  >
+                    <td style={tdStyle}>{m.display_name || m.real_name || m.user_id}</td>
+                    <td style={tdStyle}>
+                      {m.assignments.length === 0
+                        ? <span style={{ color: '#9ca3af' }}>—</span>
+                        : m.assignments.map((a, i) => (
+                          <span key={i} style={tagStyle(a.is_primary)}>
+                            {a.org_unit_name} ({a.position_name}){a.is_primary && ' ★'}
+                          </span>
+                        ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {/* ミニツリー（ドロップ先） */}
+            <div style={{
+              background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+              padding: 12, position: 'sticky', top: 12, alignSelf: 'flex-start',
+              maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', fontSize: 12,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151', fontSize: 12 }}>組織（ドロップで所属追加）</div>
+              {tree.map(node => renderMiniNode(node))}
+            </div>
+          </div>
         </div>
       )}
 

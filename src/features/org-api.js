@@ -15,7 +15,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   }
 
   // ── 1. 組織ツリー取得 ─────────────────────────
-  expressApp.get('/api/admin/org/units', authWithRole, async (req, res) => {
+  expressApp.get('/api/dashboard/admin/org/units', authWithRole, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const r = await dbQuery(
@@ -33,7 +33,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // ── 2. 役職マスター取得 ────────────────────────
-  expressApp.get('/api/admin/org/positions', authWithRole, async (req, res) => {
+  expressApp.get('/api/dashboard/admin/org/positions', authWithRole, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const r = await dbQuery(
@@ -51,7 +51,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // ── 3. メンバー一覧（所属付き） ──────────────
-  expressApp.get('/api/admin/org/members', authWithRole, async (req, res) => {
+  expressApp.get('/api/dashboard/admin/org/members', authWithRole, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const r = await dbQuery(
@@ -98,7 +98,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   // POST /api/admin/org/migrate-from-legacy
   // 既存の dash_teams + dash_team_members を org_units + user_assignments にコピー。
   // 冪等: org_unit が既に存在する場合はスキップ。
-  expressApp.post('/api/admin/org/migrate-from-legacy', authWithRole, adminOnly, async (req, res) => {
+  expressApp.post('/api/dashboard/admin/org/migrate-from-legacy', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const createdBy = req.dashboardUser?.userId || 'system';
@@ -211,7 +211,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // ── 5. 移行状態確認 ───────────────────────────
-  expressApp.get('/api/admin/org/migration-status', authWithRole, async (req, res) => {
+  expressApp.get('/api/dashboard/admin/org/migration-status', authWithRole, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const [units, assignments, legacyTeams, legacyMembers] = await Promise.all([
@@ -243,7 +243,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   // ── 組織ツリー編集 ─────────────────────────────
 
   // POST /units 新規作成
-  expressApp.post('/api/admin/org/units', authWithRole, adminOnly, async (req, res) => {
+  expressApp.post('/api/dashboard/admin/org/units', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const { name, type, parent_id, sort_order = 0 } = req.body || {};
@@ -265,7 +265,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // PATCH /units/:id 編集（改名・親変更・並び替え）
-  expressApp.patch('/api/admin/org/units/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.patch('/api/dashboard/admin/org/units/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -322,7 +322,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // DELETE /units/:id 論理削除
-  expressApp.delete('/api/admin/org/units/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete('/api/dashboard/admin/org/units/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -380,7 +380,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   // ── メンバー所属編集 ───────────────────────────
 
   // POST /assignments 新規所属追加（兼任）
-  expressApp.post('/api/admin/org/assignments', authWithRole, adminOnly, async (req, res) => {
+  expressApp.post('/api/dashboard/admin/org/assignments', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const createdBy = req.dashboardUser?.userId || 'admin';
@@ -420,7 +420,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // PATCH /assignments/:id 編集（昇降格・primary 変更）
-  expressApp.patch('/api/admin/org/assignments/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.patch('/api/dashboard/admin/org/assignments/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -463,7 +463,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   });
 
   // DELETE /assignments/:id 所属終了（effective_to セット、履歴は残す）
-  expressApp.delete('/api/admin/org/assignments/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete('/api/dashboard/admin/org/assignments/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -486,7 +486,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   // Phase 4 続き: 役職マスター編集
   // ═══════════════════════════════════════════════════════════
 
-  expressApp.post('/api/admin/org/positions', authWithRole, adminOnly, async (req, res) => {
+  expressApp.post('/api/dashboard/admin/org/positions', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const { name, level, sort_order = 0 } = req.body || {};
@@ -504,7 +504,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
     }
   });
 
-  expressApp.patch('/api/admin/org/positions/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.patch('/api/dashboard/admin/org/positions/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -529,7 +529,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
     }
   });
 
-  expressApp.delete('/api/admin/org/positions/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete('/api/dashboard/admin/org/positions/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -571,11 +571,11 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
     { key: 'org.permission.edit', label: '権限グラント編集',  category: 'admin' },
   ];
 
-  expressApp.get('/api/admin/org/feature-catalog', authWithRole, async (req, res) => {
+  expressApp.get('/api/dashboard/admin/org/feature-catalog', authWithRole, async (req, res) => {
     res.json({ features: FEATURE_CATALOG });
   });
 
-  expressApp.get('/api/admin/org/permission-grants', authWithRole, adminOnly, async (req, res) => {
+  expressApp.get('/api/dashboard/admin/org/permission-grants', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const r = await dbQuery(
@@ -597,7 +597,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
     }
   });
 
-  expressApp.post('/api/admin/org/permission-grants', authWithRole, adminOnly, async (req, res) => {
+  expressApp.post('/api/dashboard/admin/org/permission-grants', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const grantedBy = req.dashboardUser?.userId || 'admin';
@@ -626,7 +626,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
     }
   });
 
-  expressApp.delete('/api/admin/org/permission-grants/:id', authWithRole, adminOnly, async (req, res) => {
+  expressApp.delete('/api/dashboard/admin/org/permission-grants/:id', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const id = Number(req.params.id);
@@ -644,7 +644,7 @@ function registerOrgApi({ expressApp, authWithRole, adminOnly, dbQuery }) {
   // Phase 5: 既存ロール/CRM権限 → permission_grants へ移行
   // ═══════════════════════════════════════════════════════════
 
-  expressApp.post('/api/admin/org/migrate-permissions', authWithRole, adminOnly, async (req, res) => {
+  expressApp.post('/api/dashboard/admin/org/migrate-permissions', authWithRole, adminOnly, async (req, res) => {
     try {
       const teamId = teamIdOf(req);
       const grantedBy = req.dashboardUser?.userId || 'admin';

@@ -371,8 +371,8 @@ async function runSync() {
     await syncDealsFromKintoneCache();
     // kintone_payments（App170）同期
     await syncKintonePayments();
-    // ※ App103（活動履歴）連携は方針変更により停止。活動履歴はTaskHub側UIで完結。
-    // await syncKintoneActivities();
+    // App103（活動履歴）同期（読み取り専用で TaskHub UI に表示）
+    await syncKintoneActivities().catch(e => console.error('[kintone] activities sync error:', e.message));
     // App225（媒体マスタ）同期
     await syncMediaMaster().catch(e => console.error('[kintone] media_master sync error:', e.message));
     // App221（AN調査管理表）同期

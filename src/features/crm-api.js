@@ -614,6 +614,21 @@ function registerCrmApi({ expressApp, authWithRole }) {
       const isBC = bcRes.rows.length > 0;
       const isBCManager = isBC && ['manager','sub_manager'].includes(role);
 
+      // feature_access による個別付与（BC所属判定と並行で評価）
+      // crm        → dashboard タブ
+      // crm.yomi   → yomi タブ
+      // crm.performance → performance タブ
+      const faRes = await dbQuery(
+        `SELECT feature_key FROM feature_access
+         WHERE team_id=$1 AND subject_type='user' AND subject_id=$2`,
+        [teamId, userId],
+      );
+      const faKeys = new Set(faRes.rows.map(r => r.feature_key));
+      const faTabMap = { 'crm': 'dashboard', 'crm.yomi': 'yomi', 'crm.performance': 'performance' };
+      const faGrantedTabs = new Set(
+        [...faKeys].map(k => faTabMap[k]).filter(Boolean),
+      );
+
       const tabAccess = {};
       for (const [tab, rule] of Object.entries(cfg.tabs)) {
         const acc = rule.access;
@@ -634,9 +649,14 @@ function registerCrmApi({ expressApp, authWithRole }) {
         } else {
           tabAccess[tab] = { visible: false, scope: 'none' };
         }
+
+        // feature_access で個別付与されていれば、全社スコープで上書き
+        if (faGrantedTabs.has(tab) && !tabAccess[tab].visible) {
+          tabAccess[tab] = { visible: true, scope: 'all' };
+        }
       }
 
-      res.json({ isBC, isBCManager, scope: isBC ? (isBCManager ? 'all' : 'self') : 'none', role, tabs: tabAccess, bcTeamName });
+      res.json({ isBC, isBCManager, scope: isBC ? (isBCManager ? 'all' : 'self') : 'none', role, tabs: tabAccess, bcTeamName, faGrants: [...faKeys] });
     } catch (e) { console.error(e); res.status(500).json({ error: 'internal' }); }
   });
 

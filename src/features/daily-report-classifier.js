@@ -12,6 +12,9 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
     (process.env.DAILY_REPORT_CLASSIFIER_CHANNELS || '')
       .split(',').map(s => s.trim()).filter(Boolean)
   );
+  // チャンネルID別の type（in/out）判定
+  const inChannels  = new Set((process.env.HRMOS_STAMP_IN_CHANNELS  || '').split(',').map(s => s.trim()).filter(Boolean));
+  const outChannels = new Set((process.env.HRMOS_STAMP_OUT_CHANNELS || '').split(',').map(s => s.trim()).filter(Boolean));
   if (channels.size === 0) {
     console.log('[dr-classifier] no channels configured, listener inactive');
     return;
@@ -113,12 +116,23 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
       if (!/未提出|提出.*いただけ|提出.*忘れ/.test(text)) return;
       // 名前リストっぽい（複数行 or 1名でも明示的リスト）
       const names = parseNames(text);
-      if (names.length === 0) return;
+      if (names.length === 0) {
+        console.log(`[dr-classifier] no names parsed in ch=${event.channel} ts=${event.ts}`);
+        return;
+      }
 
-      // 出勤 or 退勤 判定: テキストキーワード優先
-      const isOut = /退勤/.test(text);
-      const isIn  = /出勤/.test(text) && !isOut;
-      if (!isIn && !isOut) return;
+      // 出勤 or 退勤 判定: チャンネルID優先、フォールバックでテキストキーワード
+      let isOut = outChannels.has(event.channel);
+      let isIn  = inChannels.has(event.channel);
+      if (!isOut && !isIn) {
+        // チャンネル未マッピング時は親メッセージ or 自テキストから推定
+        isOut = /退勤/.test(text);
+        isIn  = /出勤/.test(text) && !isOut;
+      }
+      if (!isIn && !isOut) {
+        console.log(`[dr-classifier] type unknown ch=${event.channel}`);
+        return;
+      }
 
       const teamId = process.env.SLACK_TEAM_ID || 'T086C06L5V0';
       const today = todayJstYmd();

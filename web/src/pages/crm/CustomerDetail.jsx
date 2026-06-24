@@ -200,8 +200,12 @@ function DealActivitySection({ deal, activitySettings }) {
 
   const { activityTypes = ['架電','商談','メール','受電','その他'], resultOptions = ['アポ獲得','有効会話','不通','折り返し','NG','その他'] } = activitySettings || {};
 
+  const [kintoneActs, setKintoneActs] = useState([]);
   useEffect(() => {
-    api.crmActivities(deal.id).then(d => setActivities(d.activities || [])).catch(() => setActivities([]));
+    api.crmActivities(deal.id).then(d => {
+      setActivities(d.activities || []);
+      setKintoneActs(d.kintoneActivities || []);
+    }).catch(() => { setActivities([]); setKintoneActs([]); });
   }, [deal.id]);
 
   const handleAdd = async () => {
@@ -300,33 +304,52 @@ function DealActivitySection({ deal, activitySettings }) {
         </>)}
       </div>
 
-      {/* ログ（タイムライン） */}
+      {/* ログ（タイムライン: TaskHub内 + kintone を日付降順でマージ） */}
       {activities === null ? (
         <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem' }}>読み込み中…</div>
-      ) : activities.length === 0 ? (
+      ) : (activities.length === 0 && kintoneActs.length === 0) ? (
         <div style={{ color: 'var(--gray-400)', fontSize: '0.78rem', textAlign:'center', padding:16 }}>活動記録がありません</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {activities.map(a => (
-            <div key={a.id} style={{ background:'var(--surface)', borderRadius:8, border:'1px solid var(--gray-200)', borderLeft:'3px solid #93c5fd', padding:'10px 14px' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom: a.content?6:0 }}>
-                <span style={{ fontSize:'0.74rem', fontWeight:700, color:'#1d4ed8' }}>{fmtDate(a.activity_date || a.created_at)}</span>
-                <span style={{ fontSize:'0.76rem', fontWeight:700, color:'var(--gray-900)', background:'var(--surface-2)', borderRadius:4, padding:'1px 8px' }}>{a.activity_type}</span>
-                {a.result && <span style={{ fontSize:'0.72rem', fontWeight:600, color:'#059669', background:'#f0fdf4', borderRadius:4, padding:'1px 8px' }}>{a.result}</span>}
-                {a.yomi_at_time && <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>[{a.yomi_at_time}]</span>}
-                {a.displayName && <span style={{ fontSize:'0.72rem', color:'var(--gray-500)' }}>{a.displayName}</span>}
-                <button onClick={() => handleDelete(a.id)}
-                  style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#d1d5db', fontSize:14, padding:'0 2px', lineHeight:1 }}>×</button>
-              </div>
-              {a.content && <div style={{ fontSize:'0.84rem', color:'var(--gray-700)', whiteSpace:'pre-wrap', lineHeight:1.6 }}>{a.content}</div>}
-              {(a.next_action_date || a.next_action_content) && (
-                <div style={{ marginTop:6, padding:'4px 8px', background:'#fffbeb', borderRadius:4, fontSize:'0.74rem', color:'#92400e' }}>
-                  次回: {a.next_action_date ? fmtDate(a.next_action_date) : ''} {a.next_action_content || ''}
-                  {a.next_person_id && ` （${a.next_person_id}）`}
+          {[...activities.map(a => ({ ...a, _source: 'local' })),
+            ...kintoneActs.map(a => ({ ...a, _source: 'kintone' }))]
+            .sort((a, b) => {
+              const da = new Date(a.activity_date || a.created_at || 0).getTime();
+              const db = new Date(b.activity_date || b.created_at || 0).getTime();
+              return db - da;
+            })
+            .map(a => {
+              const isKintone = a._source === 'kintone';
+              return (
+                <div key={`${a._source}-${a.id || a.record_id}`} style={{
+                  background:'var(--surface)', borderRadius:8, border:'1px solid var(--gray-200)',
+                  borderLeft: isKintone ? '3px solid #fbbf24' : '3px solid #93c5fd',
+                  padding:'10px 14px',
+                }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom: a.content?6:0 }}>
+                    <span style={{ fontSize:'0.74rem', fontWeight:700, color:'#1d4ed8' }}>{fmtDate(a.activity_date || a.created_at)}</span>
+                    <span style={{ fontSize:'0.76rem', fontWeight:700, color:'var(--gray-900)', background:'var(--surface-2)', borderRadius:4, padding:'1px 8px' }}>{a.activity_type || '—'}</span>
+                    {a.result && <span style={{ fontSize:'0.72rem', fontWeight:600, color:'#059669', background:'#f0fdf4', borderRadius:4, padding:'1px 8px' }}>{a.result}</span>}
+                    {a.yomi_at_time && <span style={{ fontSize:'0.7rem', color:'var(--gray-400)' }}>[{a.yomi_at_time}]</span>}
+                    {isKintone && a.assignee && <span style={{ fontSize:'0.72rem', color:'var(--gray-500)' }}>{a.assignee}</span>}
+                    {!isKintone && a.displayName && <span style={{ fontSize:'0.72rem', color:'var(--gray-500)' }}>{a.displayName}</span>}
+                    {isKintone && <span style={{ fontSize:'0.68rem', fontWeight:600, color:'#92400e', background:'#fef3c7', borderRadius:3, padding:'1px 6px' }}>kintone</span>}
+                    {!isKintone && (
+                      <button onClick={() => handleDelete(a.id)}
+                        style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#d1d5db', fontSize:14, padding:'0 2px', lineHeight:1 }}>×</button>
+                    )}
+                  </div>
+                  {a.content && <div style={{ fontSize:'0.84rem', color:'var(--gray-700)', whiteSpace:'pre-wrap', lineHeight:1.6 }}>{a.content}</div>}
+                  {(a.next_action_date || a.next_action_content) && (
+                    <div style={{ marginTop:6, padding:'4px 8px', background:'#fffbeb', borderRadius:4, fontSize:'0.74rem', color:'#92400e' }}>
+                      次回: {a.next_action_date ? fmtDate(a.next_action_date) : ''} {a.next_action_content || ''}
+                      {a.next_assignee && ` （${a.next_assignee}）`}
+                      {a.next_person_id && ` （${a.next_person_id}）`}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+              );
+            })}
         </div>
       )}
     </div>

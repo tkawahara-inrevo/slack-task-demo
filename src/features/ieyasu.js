@@ -137,18 +137,30 @@ async function stampAttendance(slackClient, slackUserId, type) {
     //   - 出勤(type=1): 当日に既に出勤打刻が記録されていれば常にスキップ（朝1回ルール）
     //   - 退勤(type=2): 当日に既に退勤打刻が記録されていれば常にスキップ
     //     （手動打刻（残業時間調整等）を bot が上書きしないため）
+    //     ★ 2段階確認: HRMOS daily API は反映遅延があるため、1回目 null なら 60秒待って再確認
     const now = new Date();
     const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 9 * 60) * 60000);
     const todayYmd = jst.toISOString().slice(0, 10);
-    try {
+    const checkExisting = async () => {
       const daily = await getDailyWorkOutput(token, hrUser.id, todayYmd);
-      if (daily) {
-        const alreadyAt = type === 1 ? daily.stamping_start_at : daily.stamping_end_at;
+      if (!daily) return null;
+      return type === 1 ? daily.stamping_start_at : daily.stamping_end_at;
+    };
+    try {
+      let alreadyAt = await checkExisting();
+      // 退勤のみ: 1回目 null なら 60秒待って再確認（HRMOS daily 反映遅延対策）
+      if (!alreadyAt && type === 2) {
+        await new Promise(r => setTimeout(r, 60_000));
+        alreadyAt = await checkExisting();
         if (alreadyAt) {
-          const reason = type === 1 ? '出勤は1日1回' : '手動打刻優先';
-          console.log(`[HRMOS] ${typeName}打刻 既存 ${alreadyAt} → skip（${reason}）`);
+          console.log(`[HRMOS] 退勤打刻 既存 ${alreadyAt} → skip（2回目チェックで検知=反映遅延）`);
           return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
         }
+      }
+      if (alreadyAt) {
+        const reason = type === 1 ? '出勤は1日1回' : '手動打刻優先';
+        console.log(`[HRMOS] ${typeName}打刻 既存 ${alreadyAt} → skip（${reason}）`);
+        return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
       }
     } catch (e) {
       // チェック失敗時はそのまま打刻に進む（致命的ではない）

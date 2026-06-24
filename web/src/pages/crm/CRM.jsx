@@ -1163,13 +1163,12 @@ export default function CRM() {
     { key:'customers',   label:'顧客一覧',       msg:'' },
     { key:'yomi',        label:'ヨミ管理',       msg:'BC所属のみ' },
     { key:'performance', label:'成績',           msg:'管理者またはBC管理職のみ' },
-    { key:'incentive',   label:'インセン監査',   msg:'管理者またはBC管理職のみ' },
     { key:'payments',    label:'入金管理',       msg:'管理者またはBC管理職のみ' },
     { key:'settings',    label:'設定',           msg:'管理者またはBC管理職のみ' },
   ];
 
-  // 顧客一覧は常に表示。インセン監査は成績と同じ権限
-  const tabVisible = (key) => (key === 'incentive' || key === 'payments') ? access.tabs.performance?.visible : access.tabs[key]?.visible;
+  // 顧客一覧は常に表示。入金管理は成績と同じ権限
+  const tabVisible = (key) => (key === 'payments') ? access.tabs.performance?.visible : access.tabs[key]?.visible;
   const visibleTabs = tabDefs.filter(t => t.key === 'customers' || tabVisible(t.key));
 
   return (
@@ -1202,11 +1201,6 @@ export default function CRM() {
         {tab === 'performance' && (
           access.tabs.performance?.visible
             ? <div style={{ flex:1, overflow:'auto' }}><SalesPerformance embedded /></div>
-            : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
-        )}
-        {tab === 'incentive' && (
-          access.tabs.performance?.visible
-            ? <div style={{ flex:1, overflow:'auto' }}><IncentiveAudit /></div>
             : <AccessDenied message="管理者またはBC管理職のみ閲覧できます" />
         )}
         {tab === 'payments' && (

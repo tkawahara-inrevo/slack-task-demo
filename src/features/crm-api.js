@@ -98,6 +98,101 @@ function registerDailyReportApi({ expressApp, authWithRole, slackClient }) {
       res.status(500).json({ error: 'internal' });
     }
   });
+
+  // ─ 日報遵守率（月次） ───────────────────────────────────────
+  // GET /api/dashboard/admin/daily-report/compliance?month=YYYY-MM
+  expressApp.get('/api/dashboard/admin/daily-report/compliance', authWithRole, requireCorpOrAdmin, async (req, res) => {
+    try {
+      const { teamId } = req.dashboardUser;
+      const month = String(req.query.month || '').match(/^(\d{4})-(\d{2})$/);
+      if (!month) return res.status(400).json({ error: 'month format YYYY-MM required' });
+      const [, yy, mm] = month;
+      const yyyymm = `${yy}${mm}`;
+
+      // 対象メンバー
+      const memRes = await dbQuery(
+        `SELECT user_id, display_name FROM daily_report_members
+         WHERE team_id=$1 AND is_target=true ORDER BY display_name`,
+        [teamId],
+      );
+      if (memRes.rows.length === 0) return res.json({ month: `${yy}-${mm}`, members: [] });
+
+      // HRMOS 月次データ取得
+      const { getMonthlyWorkOutputs, getAllUsers, getToken } = require('./ieyasu');
+      const monthly = await getMonthlyWorkOutputs(yyyymm);
+      const token = await getToken();
+      const hrUsers = await getAllUsers(token);
+      const hrByEmail = new Map(hrUsers.map(u => [(u.email || '').toLowerCase(), u]));
+
+      // Slack → HRMOS user の email 解決のため、ディレクトリの profile_json から email を取得
+      const dirRes = await dbQuery(
+        `SELECT user_id, profile_json FROM dashboard_user_directory WHERE team_id=$1`,
+        [teamId],
+      );
+      const slackEmailByUid = new Map();
+      for (const r of dirRes.rows) {
+        const email = (r.profile_json?.email || '').toLowerCase();
+        if (email) slackEmailByUid.set(r.user_id, email);
+      }
+
+      // 月内の hrmos_stamps を取得（JSTで日付に変換）
+      const monthStartJst = `${yy}-${mm}-01`;
+      const monthEndJst = `${yy}-${mm}-31`;
+      const stampsRes = await dbQuery(
+        `SELECT slack_user_id, stamp_type,
+                to_char((stamped_at AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM-DD') AS d
+         FROM hrmos_stamps
+         WHERE team_id=$1 AND ok=true
+           AND (stamped_at AT TIME ZONE 'Asia/Tokyo')::date BETWEEN $2::date AND $3::date`,
+        [teamId, monthStartJst, monthEndJst],
+      );
+      // user_id → {in: Set<date>, out: Set<date>}
+      const submittedByUser = new Map();
+      for (const s of stampsRes.rows) {
+        if (!submittedByUser.has(s.slack_user_id)) submittedByUser.set(s.slack_user_id, { in: new Set(), out: new Set() });
+        const e = submittedByUser.get(s.slack_user_id);
+        if (s.stamp_type === 1) e.in.add(s.d);
+        else if (s.stamp_type === 2) e.out.add(s.d);
+      }
+
+      // メンバーごとに集計
+      const results = [];
+      for (const mem of memRes.rows) {
+        const email = slackEmailByUid.get(mem.user_id);
+        const hrUser = email ? hrByEmail.get(email) : null;
+        const workDays = []; // 出勤系segmentの日付
+        if (hrUser) {
+          for (const row of monthly) {
+            if (Number(row.user_id) !== Number(hrUser.id)) continue;
+            const segment = row.segment_display_title || '';
+            if (/^出勤/.test(segment)) workDays.push(row.day);
+          }
+        }
+        const subm = submittedByUser.get(mem.user_id) || { in: new Set(), out: new Set() };
+        const inCount  = workDays.filter(d => subm.in.has(d)).length;
+        const outCount = workDays.filter(d => subm.out.has(d)).length;
+        const inMissing  = workDays.filter(d => !subm.in.has(d));
+        const outMissing = workDays.filter(d => !subm.out.has(d));
+        results.push({
+          user_id: mem.user_id,
+          display_name: mem.display_name,
+          hrmos_resolved: !!hrUser,
+          work_days: workDays.length,
+          in_count: inCount,
+          out_count: outCount,
+          in_rate: workDays.length ? Math.round((inCount / workDays.length) * 100) : null,
+          out_rate: workDays.length ? Math.round((outCount / workDays.length) * 100) : null,
+          in_missing_dates: inMissing,
+          out_missing_dates: outMissing,
+        });
+      }
+
+      res.json({ month: `${yy}-${mm}`, members: results });
+    } catch (e) {
+      console.error('[DailyReport] compliance error:', e);
+      res.status(500).json({ error: 'internal', message: e.message });
+    }
+  });
 }
 
 

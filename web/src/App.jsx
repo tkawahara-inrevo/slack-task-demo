@@ -45,6 +45,7 @@ import Approvals from './pages/Approvals'
 import OverdueReport from './pages/admin/OverdueReport'
 import HrmosCheck from './pages/admin/HrmosCheck'
 import OrgChartAdmin from './pages/admin/OrgChart'
+import DailyReportCompliance from './pages/admin/DailyReportCompliance'
 import './App.css'
 
 function App() {
@@ -87,6 +88,7 @@ function App() {
           <Route path="overdue-report" element={<OverdueReport />} />
           <Route path="hrmos-check" element={<HrmosCheck />} />
           <Route path="org-chart" element={<OrgChartAdmin />} />
+          <Route path="daily-report-compliance" element={<DailyReportCompliance />} />
         </Route>
         <Route path="/crm/leads" element={<LeadsDashboard />} />
         <Route path="/crm" element={<CRM />} />

@@ -706,6 +706,9 @@ export const api = {
   channelMappingUnhide: (id) => apiFetch(`/admin/channel-mapping/hidden/${id}`, { method: 'DELETE' }),
   channelMappingUnhideAll: () => apiFetch('/admin/channel-mapping/hidden', { method: 'DELETE' }),
 
+  // 日報遵守率
+  dailyReportCompliance: (month) => apiFetch(`/admin/daily-report/compliance?month=${encodeURIComponent(month)}`),
+
   // 組織・役職・所属（権限再設計 Phase 2-5）
   orgUnits: () => apiFetch('/admin/org/units'),
   orgPositions: () => apiFetch('/admin/org/positions'),

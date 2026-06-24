@@ -80,6 +80,11 @@ export default function AdminLayout() {
           </NavLink>
         )}
         {isIT && (
+          <NavLink to="/admin/daily-report-compliance" style={({ isActive }) => navStyle(isActive)}>
+            {collapsed ? '📊' : '日報遵守率'}
+          </NavLink>
+        )}
+        {isIT && (
           <NavLink to="/admin/daily-report" style={({ isActive }) => navStyle(isActive)}>
             {collapsed ? '📋' : '日報管理'}
           </NavLink>

@@ -596,8 +596,8 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
 
         {!editing && (
           <div style={{ paddingBottom:14 }}>
-            {/* 失注/見送りは理由を表示 */}
-            {(deal.status === 'lost' || deal.status === 'dormant') ? (
+            {/* 失注/見送り時の理由（該当時のみ） */}
+            {(deal.status === 'lost' || deal.status === 'dormant') && (
               <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
                 <div style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, marginBottom:4 }}>
                   {deal.status === 'lost' ? '失注理由' : '見送り理由'}
@@ -607,8 +607,10 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                 </div>
                 {deal.loss_reason_detail && <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', marginTop:4 }}>{deal.loss_reason_detail}</div>}
               </div>
-            ) : (
-              /* ボールホルダー・次アクション（最重要）*/
+            )}
+
+            {/* ボールホルダー・次アクション（NA が設定されていれば status 問わず常時表示）*/}
+            {(deal.next_action_date || deal.next_action_content || deal.na_user_id) && (
               <div style={{ background: deal.next_action_date ? '#fffbeb' : '#fef2f2', border:`1px solid ${deal.next_action_date ? '#fef08a' : '#fecaca'}`, borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
                 <div style={{ display:'flex', gap:16, flexWrap:'wrap', alignItems:'flex-start' }}>
                   <div>
@@ -626,10 +628,18 @@ function DealCard({ deal, meta, members, onUpdate, onDelete, activitySettings, c
                   {deal.next_action_content && (
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize:'0.68rem', color:'var(--gray-400)', fontWeight:600, marginBottom:2 }}>次アクション内容</div>
-                      <div style={{ fontSize:'0.83rem', color:'var(--gray-700)' }}>{deal.next_action_content}</div>
+                      <div style={{ fontSize:'0.83rem', color:'var(--gray-700)', whiteSpace:'pre-wrap' }}>{deal.next_action_content}</div>
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* 進行中の案件で NA 未設定なら、警告カードを出す */}
+            {!(deal.status === 'lost' || deal.status === 'dormant')
+              && !deal.next_action_date && !deal.next_action_content && !deal.na_user_id && (
+              <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', marginBottom:10, fontSize:'0.82rem', color:'#dc2626' }}>
+                ⚠ ボールホルダー / 次アクションが未設定
               </div>
             )}
 

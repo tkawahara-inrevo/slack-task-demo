@@ -17,6 +17,7 @@ const { registerSourceDoneListener, syncTaskDoneReaction } = require("./src/feat
 const { registerRecruitNotify } = require("./src/features/recruit-notify");
 const { registerApproval } = require("./src/features/approval");
 const { registerDailyReportClassifier } = require("./src/features/daily-report-classifier");
+const { registerHrmosStampPoller } = require("./src/features/hrmos-stamp-poller");
 const { INQUIRY_CHANNEL_ID, handleInquiryMessage } = require("./src/features/crm-inquiry");
 const {
   __cacheGet,
@@ -309,6 +310,7 @@ registerSourceDoneListener({
 registerRecruitNotify({ app });
 
 registerDailyReportClassifier({ app, dbQuery, todayJstYmd });
+registerHrmosStampPoller({ dbQuery });
 
 registerApproval({
   app,

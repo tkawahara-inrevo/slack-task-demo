@@ -129,7 +129,8 @@
       "Bash(git reset *)",
       "Read(//c/Users/takar/**)",
       "Read(//c/dev/**)",
-      "Bash(node -c src/features/org-api.js)"
+      "Bash(node -c src/features/org-api.js)",
+      "Bash(grep -rn \"googleapis\\\\|google\\\\\\\\..*auth\\\\|GOOGLE_CLIENT\" e:/dev/slack-task-demo/src/features/)"
     ]
   }
 }

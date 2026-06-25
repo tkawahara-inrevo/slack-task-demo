@@ -9,6 +9,49 @@ const { getToken, getAllUsers } = require('./ieyasu');
 
 const KINTAI_NOTICE_CHANNEL_ID = process.env.KINTAI_NOTICE_CHANNEL_ID || 'C086FUWG9KR';
 
+// Google Calendar から該当日の休暇イベント検出
+// 「有給」「休暇」「休日」「全日」「時間給」「OOO」「不在」などのキーワード + 終日イベント
+async function getCalendarVacation(dbQuery, email, dateYmd) {
+  if (!email) return null;
+  try {
+    const tokRes = await dbQuery('SELECT * FROM google_oauth_tokens LIMIT 1');
+    const tok = tokRes.rows[0];
+    if (!tok?.refresh_token) return null;
+    const { google } = require('googleapis');
+    const auth = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'https://inrevo-task.com/api/google/oauth/callback',
+    );
+    auth.setCredentials({
+      access_token: tok.access_token,
+      refresh_token: tok.refresh_token,
+      expiry_date: Number(tok.expiry_date),
+    });
+    const calendar = google.calendar({ version: 'v3', auth });
+    const r = await calendar.events.list({
+      calendarId: email,
+      timeMin: `${dateYmd}T00:00:00+09:00`,
+      timeMax: `${dateYmd}T23:59:59+09:00`,
+      singleEvents: true,
+      maxResults: 50,
+    });
+    const kw = /有給|休暇|休日|国の代わり|全日|時間給|OOO|不在|代休|振休/;
+    for (const ev of r.data.items || []) {
+      const isAllDay = !!ev.start?.date;
+      const summary = ev.summary || '';
+      if (kw.test(summary) && isAllDay) {
+        return { absent: true, reason: summary };
+      }
+    }
+    return { absent: false };
+  } catch (e) {
+    // 404 (calendar not found / not shared) は普通に起こりうる、警告のみ
+    console.warn('[dr-classifier] gcal check', email, ':', e.code || e.message);
+    return null;
+  }
+}
+
 // 勤怠連絡チャンネルから欠勤連絡のユーザーIDセットを抽出
 // パターン: 「本日は <@U...> 欠勤します。」のような投稿で <@U...> を抽出
 async function getAbsenceUsers(client, channelId, dateYmd) {
@@ -223,17 +266,16 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         if (isOut) {
           // 退勤日報（昨日のデータ）
           if (!isWorkSegment(segment)) {
-            // 休暇 → 出さなくてOK
             buckets.leave.push({ name, segment });
           } else if (hasIn && !hasOut) {
-            // 出勤打刻あり + 退勤打刻なし → 出すべき
             buckets.submit.push({ name, time: daily.stamping_start_at });
           } else if (hasIn && hasOut) {
-            // 両方打刻あり → 日報忘れだけ (watcher 通知済み、人事フォロー軽微)
             buckets.report_only.push({ name, time: daily.stamping_end_at });
           } else {
-            // 出勤打刻なし + 出勤系segment → 要確認 (欠勤 or 打刻忘れ)
-            buckets.check.push({ name });
+            // 出勤打刻なし → カレンダー確認 → 休暇なら leave、なければ check
+            const cal = await getCalendarVacation(dbQuery, email, targetDate);
+            if (cal?.absent) buckets.leave.push({ name, segment: `${cal.reason}` });
+            else buckets.check.push({ name });
           }
         } else {
           // 出勤日報（当日のデータ）
@@ -242,10 +284,12 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
           } else if (hasIn) {
             buckets.submit.push({ name, time: daily.stamping_start_at });
           } else if (absenceUsers.has(slackUser.user_id)) {
-            // 勤怠連絡チャンネルで欠勤連絡あり → 出さなくてOK
             buckets.leave.push({ name, segment: '欠勤連絡あり' });
           } else {
-            buckets.check.push({ name });
+            // カレンダーで休暇確認
+            const cal = await getCalendarVacation(dbQuery, email, targetDate);
+            if (cal?.absent) buckets.leave.push({ name, segment: `${cal.reason}` });
+            else buckets.check.push({ name });
           }
         }
       }

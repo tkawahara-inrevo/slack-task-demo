@@ -176,9 +176,14 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
           continue;
         }
         const daily = dailyByUid.get(hrUser.id);
-        const segment = daily?.segment_display_title || '';
-        const hasIn = !!daily?.stamping_start_at;
-        const hasOut = !!daily?.stamping_end_at;
+        // HRMOS daily にデータがない（反映途中等）→ 要確認へ
+        if (!daily) {
+          buckets.check.push({ name, note: 'HRMOSデータ未取得' });
+          continue;
+        }
+        const segment = daily.segment_display_title || '';
+        const hasIn = !!daily.stamping_start_at;
+        const hasOut = !!daily.stamping_end_at;
 
         if (!isWorkSegment(segment)) {
           // 休暇/休日
@@ -186,14 +191,14 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         } else if (isOut) {
           // 退勤日報: 昨日出勤打刻あり = 出すべき / なし = 要確認
           if (hasIn) {
-            buckets.submit.push({ name, time: daily?.stamping_end_at || daily?.stamping_start_at });
+            buckets.submit.push({ name, time: daily.stamping_end_at || daily.stamping_start_at });
           } else {
             buckets.check.push({ name });
           }
         } else {
           // 出勤日報: 今日出勤打刻あり = 出すべき / なし = 要確認
           if (hasIn) {
-            buckets.submit.push({ name, time: daily?.stamping_start_at });
+            buckets.submit.push({ name, time: daily.stamping_start_at });
           } else {
             buckets.check.push({ name });
           }
@@ -209,7 +214,8 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
       lines.push(`*📝 出すべき (${buckets.submit.length}名)*`);
       if (buckets.submit.length === 0) lines.push('該当者なし');
       else for (const u of buckets.submit) {
-        lines.push(`• ${u.name}${u.time ? `  _(${u.time} 出勤)_` : ''}`);
+        const timeLabel = isOut ? '退勤' : '出勤';
+        lines.push(`• ${u.name}${u.time ? `  _(${u.time} ${timeLabel})_` : ''}`);
       }
       lines.push('');
       lines.push(`*❓ 要確認 (${buckets.check.length}名)*`);

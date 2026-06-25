@@ -250,42 +250,47 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         }
       }
 
-      // 返信ブロック構築
+      // 返信ブロック構築（カテゴリごとに section 分割し Slack の自動省略を回避）
+      const totalCategorized = buckets.submit.length + buckets.check.length + buckets.leave.length + buckets.report_only.length;
       const blocks = [
-        { type: 'header', text: { type: 'plain_text', text: `🤖 Pochi 自動仕分け（${reportType}）` } },
+        { type: 'header', text: { type: 'plain_text', text: `🤖 Pochi 自動仕分け（${reportType}） 全${totalCategorized}名` } },
       ];
 
-      const lines = [];
-      lines.push(`*📝 出すべき (${buckets.submit.length}名)*`);
-      if (isOut) lines.push('_退勤打刻も未実施 → HRMOSで打刻必要_');
-      if (buckets.submit.length === 0) lines.push('該当者なし');
-      else for (const u of buckets.submit) {
-        // 退勤日報/出勤日報どちらでも「出すべき」=出勤打刻ありのケース → 時刻は出勤時刻
-        lines.push(`• ${u.name}${u.time ? `  _(${u.time} 出勤)_` : ''}`);
+      function addSection(title, hint, items, formatter) {
+        const lines = [`*${title} (${items.length}名)*`];
+        if (hint) lines.push(`_${hint}_`);
+        if (items.length === 0) lines.push('該当者なし');
+        else lines.push(...items.map(formatter));
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } });
       }
-      lines.push('');
-      lines.push(`*❓ 要確認 (${buckets.check.length}名)*`);
-      if (buckets.check.length === 0) lines.push('該当者なし');
-      else for (const u of buckets.check) lines.push(`• ${u.name}${u.note ? `  _(${u.note})_` : ''}`);
-      lines.push('');
-      lines.push(`*🏖️ 出さなくてOK (${buckets.leave.length}名)*`);
-      if (buckets.leave.length === 0) lines.push('該当者なし');
-      else for (const u of buckets.leave) lines.push(`• ${u.name}${u.segment ? `  _(${u.segment})_` : ''}`);
 
+      addSection(
+        '📝 出すべき',
+        isOut ? '退勤打刻も未実施 → HRMOSで打刻必要' : null,
+        buckets.submit,
+        u => `• ${u.name}${u.time ? `  _(${u.time} 出勤)_` : ''}`,
+      );
+      addSection(
+        '❓ 要確認',
+        null,
+        buckets.check,
+        u => `• ${u.name}${u.note ? `  _(${u.note})_` : ''}`,
+      );
+      addSection(
+        '🏖️ 出さなくてOK',
+        null,
+        buckets.leave,
+        u => `• ${u.name}${u.segment ? `  _(${u.segment})_` : ''}`,
+      );
       // 退勤日報のみ: 「打刻はしてるが日報を出してない人」(参考、人事フォロー軽微)
-      if (isOut && buckets.report_only.length > 0) {
-        lines.push('');
-        lines.push(`*📌 日報のみ未提出 (${buckets.report_only.length}名)*`);
-        lines.push('_HRMOSは打刻済 → 本人に日報のみ提出を依頼_');
-        for (const u of buckets.report_only) {
-          lines.push(`• ${u.name}${u.time ? `  _(${u.time} 退勤)_` : ''}`);
-        }
+      if (isOut) {
+        addSection(
+          '📌 日報のみ未提出',
+          'HRMOSは打刻済 → 本人に日報のみ提出を依頼',
+          buckets.report_only,
+          u => `• ${u.name}${u.time ? `  _(${u.time} 退勤)_` : ''}`,
+        );
       }
-
-      blocks.push({
-        type: 'section',
-        text: { type: 'mrkdwn', text: lines.join('\n') },
-      });
 
       const threadTs = event.thread_ts || event.ts;
       await client.chat.postMessage({

@@ -7,6 +7,39 @@
 
 const { getToken, getAllUsers } = require('./ieyasu');
 
+const KINTAI_NOTICE_CHANNEL_ID = process.env.KINTAI_NOTICE_CHANNEL_ID || 'C086FUWG9KR';
+
+// 勤怠連絡チャンネルから欠勤連絡のユーザーIDセットを抽出
+// パターン: 「本日は <@U...> 欠勤します。」のような投稿で <@U...> を抽出
+async function getAbsenceUsers(client, channelId, dateYmd) {
+  if (!channelId) return new Set();
+  try {
+    const start = Math.floor(new Date(`${dateYmd}T00:00:00+09:00`).getTime() / 1000);
+    const end   = Math.floor(new Date(`${dateYmd}T23:59:59+09:00`).getTime() / 1000);
+    const r = await client.conversations.history({
+      channel: channelId,
+      oldest: String(start),
+      latest: String(end),
+      limit: 200,
+    });
+    const absent = new Set();
+    for (const msg of r.messages || []) {
+      const text = msg.text || '';
+      if (!/欠勤/.test(text)) continue;
+      // 「本日は <@U...> 欠勤」パターン優先
+      const m1 = text.match(/本日は\s*<@([A-Z0-9]+)>/);
+      if (m1) { absent.add(m1[1]); continue; }
+      // フォールバック: 「<@U...> 欠勤」が文中にあれば
+      const m2 = text.match(/<@([A-Z0-9]+)>[^<]*欠勤/);
+      if (m2) absent.add(m2[1]);
+    }
+    return absent;
+  } catch (e) {
+    console.warn('[dr-classifier] absence notice fetch failed:', e.message);
+    return new Set();
+  }
+}
+
 function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
   const channels = new Set(
     (process.env.DAILY_REPORT_CLASSIFIER_CHANNELS || '')
@@ -142,10 +175,11 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
 
       // HRMOS 当該日のデータ + ユーザー解決
       const token = await getToken();
-      const [hrmosUsers, dailyAll, dir] = await Promise.all([
+      const [hrmosUsers, dailyAll, dir, absenceUsers] = await Promise.all([
         getAllUsers(token),
         getDailyForDate(token, targetDate),
         getUserDir(teamId),
+        isIn ? getAbsenceUsers(client, KINTAI_NOTICE_CHANNEL_ID, targetDate) : Promise.resolve(new Set()),
       ]);
       const hrmosByEmail = new Map(hrmosUsers.map(u => [(u.email || '').toLowerCase(), u]));
       const dailyByUid = new Map(dailyAll.map(d => [d.user_id, d]));
@@ -158,7 +192,8 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         } catch { return null; }
       }
 
-      const buckets = { submit: [], check: [], leave: [] };
+      // バケット: submit(出すべき) / check(要確認) / leave(出さなくてOK) / report_only(日報のみ忘れ)
+      const buckets = { submit: [], check: [], leave: [], report_only: [] };
       for (const name of names) {
         const slackUser = resolveSlackUser(name, dir);
         if (!slackUser) {
@@ -185,20 +220,30 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         const hasIn = !!daily.stamping_start_at;
         const hasOut = !!daily.stamping_end_at;
 
-        if (!isWorkSegment(segment)) {
-          // 休暇/休日
-          buckets.leave.push({ name, segment });
-        } else if (isOut) {
-          // 退勤日報: 昨日出勤打刻あり = 出すべき / なし = 要確認
-          if (hasIn) {
-            buckets.submit.push({ name, time: daily.stamping_end_at || daily.stamping_start_at });
+        if (isOut) {
+          // 退勤日報（昨日のデータ）
+          if (!isWorkSegment(segment)) {
+            // 休暇 → 出さなくてOK
+            buckets.leave.push({ name, segment });
+          } else if (hasIn && !hasOut) {
+            // 出勤打刻あり + 退勤打刻なし → 出すべき
+            buckets.submit.push({ name, time: daily.stamping_start_at });
+          } else if (hasIn && hasOut) {
+            // 両方打刻あり → 日報忘れだけ (watcher 通知済み、人事フォロー軽微)
+            buckets.report_only.push({ name, time: daily.stamping_end_at });
           } else {
+            // 出勤打刻なし + 出勤系segment → 要確認 (欠勤 or 打刻忘れ)
             buckets.check.push({ name });
           }
         } else {
-          // 出勤日報: 今日出勤打刻あり = 出すべき / なし = 要確認
-          if (hasIn) {
+          // 出勤日報（当日のデータ）
+          if (!isWorkSegment(segment)) {
+            buckets.leave.push({ name, segment });
+          } else if (hasIn) {
             buckets.submit.push({ name, time: daily.stamping_start_at });
+          } else if (absenceUsers.has(slackUser.user_id)) {
+            // 勤怠連絡チャンネルで欠勤連絡あり → 出さなくてOK
+            buckets.leave.push({ name, segment: '欠勤連絡あり' });
           } else {
             buckets.check.push({ name });
           }
@@ -212,19 +257,30 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
 
       const lines = [];
       lines.push(`*📝 出すべき (${buckets.submit.length}名)*`);
+      if (isOut) lines.push('_退勤打刻も未実施 → HRMOSで打刻必要_');
       if (buckets.submit.length === 0) lines.push('該当者なし');
       else for (const u of buckets.submit) {
-        const timeLabel = isOut ? '退勤' : '出勤';
-        lines.push(`• ${u.name}${u.time ? `  _(${u.time} ${timeLabel})_` : ''}`);
+        // 退勤日報/出勤日報どちらでも「出すべき」=出勤打刻ありのケース → 時刻は出勤時刻
+        lines.push(`• ${u.name}${u.time ? `  _(${u.time} 出勤)_` : ''}`);
       }
       lines.push('');
       lines.push(`*❓ 要確認 (${buckets.check.length}名)*`);
       if (buckets.check.length === 0) lines.push('該当者なし');
-      else for (const u of buckets.check) lines.push(`• ${u.name}`);
+      else for (const u of buckets.check) lines.push(`• ${u.name}${u.note ? `  _(${u.note})_` : ''}`);
       lines.push('');
-      lines.push(`*🏖️ 休暇確認済み (${buckets.leave.length}名)*`);
+      lines.push(`*🏖️ 出さなくてOK (${buckets.leave.length}名)*`);
       if (buckets.leave.length === 0) lines.push('該当者なし');
       else for (const u of buckets.leave) lines.push(`• ${u.name}${u.segment ? `  _(${u.segment})_` : ''}`);
+
+      // 退勤日報のみ: 「打刻はしてるが日報を出してない人」(参考、人事フォロー軽微)
+      if (isOut && buckets.report_only.length > 0) {
+        lines.push('');
+        lines.push(`*📌 日報のみ未提出 (${buckets.report_only.length}名)*`);
+        lines.push('_HRMOSは打刻済 → 本人に日報のみ提出を依頼_');
+        for (const u of buckets.report_only) {
+          lines.push(`• ${u.name}${u.time ? `  _(${u.time} 退勤)_` : ''}`);
+        }
+      }
 
       blocks.push({
         type: 'section',
@@ -242,7 +298,7 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         unfurl_media: false,
       });
 
-      console.log(`[dr-classifier] posted: type=${reportType} submit=${buckets.submit.length} check=${buckets.check.length} leave=${buckets.leave.length}`);
+      console.log(`[dr-classifier] posted: type=${reportType} submit=${buckets.submit.length} check=${buckets.check.length} leave=${buckets.leave.length} report_only=${buckets.report_only.length}`);
     } catch (e) {
       console.warn('[dr-classifier] error:', e?.data?.error || e.message);
     }

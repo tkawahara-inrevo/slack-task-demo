@@ -3239,15 +3239,16 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
 
   // 遅延／リトライ記録を1件処理する（setTimeoutとworker両方から呼ぶ）
   async function processDelayedRecord(recordId) {
+    // ★ アトミック claim: retry_state='processing' に更新できた場合のみ処理を進める。
+    //   setTimeout と 30秒救済 worker が同時に走るレースコンディションを防ぐ。
     const { rows } = await dbQuery(
-      `SELECT id, team_id, slack_user_id, stamp_type, channel_id, message_ts, retry_state
-       FROM hrmos_stamps WHERE id=$1 LIMIT 1`,
+      `UPDATE hrmos_stamps SET retry_state='processing'
+       WHERE id=$1 AND retry_state IN ('pending', 'delayed')
+       RETURNING id, team_id, slack_user_id, stamp_type, channel_id, message_ts, retry_state`,
       [recordId]
     );
     const row = rows[0];
-    if (!row) return;
-    // 既に処理済みなら何もしない（重複実行防止）
-    if (!['pending', 'delayed'].includes(row.retry_state)) return;
+    if (!row) return; // 既に他のループで処理中 or 完了済み
 
     // 出勤の場合、当日リマインド送信済みなら HRMOS 既打刻が確定しているのでスキップ
     // （リマインドの送信条件 = HRMOS打刻あり + Slack日報未投稿）
@@ -3321,8 +3322,9 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
       const willRetry = TRANSIENT_REASONS.has(result.reason);
       if (willRetry) {
         // scheduled_at を1分後に設定し、worker再試行を待つ（最大10回程度）
+        // ★ claim時に 'processing' にした retry_state を 'delayed' に戻す
         await dbQuery(
-          `UPDATE hrmos_stamps SET scheduled_at = now() + interval '1 minute', error_reason=$2 WHERE id=$1`,
+          `UPDATE hrmos_stamps SET scheduled_at = now() + interval '1 minute', error_reason=$2, retry_state='delayed' WHERE id=$1`,
           [row.id, result.reason]
         ).catch(() => {});
         console.warn(`[IEYASU] 一時的エラーで再試行待ち: user=${row.slack_user_id} reason=${result.reason}`);
@@ -3416,8 +3418,17 @@ app.command("/dashboard", async ({ ack, body, respond }) => {
 
     // ── 救済worker: 30秒おきに「予定時刻を過ぎたのに未処理」を拾う ──
     // 通常は setTimeout が先に発火するので空振り。再起動直後の取りこぼし防止。
+    // ★ 'processing' のままスタックしてる(=プロセスクラッシュ等) ものを5分後にリカバリ。
     setInterval(async () => {
       try {
+        // 1) 'processing' のままスタック検知 → 'delayed' に戻す（5分タイムアウト）
+        await dbQuery(
+          `UPDATE hrmos_stamps SET retry_state='delayed'
+           WHERE retry_state='processing'
+             AND stamped_at > now() - interval '6 hours'
+             AND scheduled_at < now() - interval '5 minutes'`
+        ).catch(() => {});
+
         const { rows } = await dbQuery(
           `SELECT id FROM hrmos_stamps
            WHERE retry_state IN ('pending','delayed')

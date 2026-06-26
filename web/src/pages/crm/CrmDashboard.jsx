@@ -202,6 +202,7 @@ function Drilldown({ rep, type, start, end, onClose, onSaved }) {
 // 案件の主要項目をその場編集（ドリルダウン内）
 const YOMI_OPTS = ['アポ化前','アポ化済商談前','E 5％','D 15％','C 30％','B 50％','A 70％','S 90％','受注','失注'];
 function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
+  const navigate = useNavigate();
   const [deal, setDeal] = useState(null);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -264,7 +265,15 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
   const isWarranty = ct.includes('一括払い') || ct.includes('採用保証');
   return (
     <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:11 }}>
-      <button onClick={onBack} style={{ alignSelf:'flex-start', background:'none', border:'none', color:'#2563eb', cursor:'pointer', fontSize:'0.78rem', padding:0 }}>← 一覧に戻る</button>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <button onClick={onBack} style={{ background:'none', border:'none', color:'#2563eb', cursor:'pointer', fontSize:'0.78rem', padding:0 }}>← 一覧に戻る</button>
+        {deal?.customer_id && (
+          <button onClick={() => navigate(`/crm/customers/${deal.customer_id}`)}
+            style={{ background:'#eef2ff', border:'1px solid #c7d2fe', color:'#4338ca', padding:'4px 10px', borderRadius:6, cursor:'pointer', fontSize:'0.72rem', fontWeight:700 }}>
+            顧客ページを開く →
+          </button>
+        )}
+      </div>
       <div style={{ fontWeight:800, fontSize:'0.95rem', color:C.text }}>{dealRow.customer_name}</div>
 
       {/* 入金行から開いた時の文脈表示 */}
@@ -1119,24 +1128,34 @@ export default function CrmDashboard() {
           {period !== 'term' && forecast && (
             <div style={{ ...cardStyle, padding:'14px 16px' }}>
               {sectionHead('収支見込み', '対象月')}
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
-                <div>
-                  <div style={{ fontSize:'0.65rem', color:C.textSub, marginBottom:2 }}>見込み合計</div>
-                  <div style={{ fontSize:'1.45rem', fontWeight:800, color:C.text }}>
-                    {fmtM(forecastDispTotal)}<span style={{ fontSize:'0.8rem' }}>円</span>
+              {/* 主要2指標: 今月入金（確定額） / 今月見込みKPI（インセン合計） */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+                <div style={{ padding:'10px 12px', background:'#ecfdf5', borderRadius:8, borderLeft:'3px solid #059669' }}>
+                  <div style={{ fontSize:'0.65rem', color:'#047857', fontWeight:600, marginBottom:2 }}>今月入金</div>
+                  <div style={{ fontSize:'1.35rem', fontWeight:800, color:'#065f46', lineHeight:1.1 }}>
+                    {fmtM(forecast.confirmed)}<span style={{ fontSize:'0.75rem', marginLeft:1 }}>円</span>
                   </div>
-                  <div style={{ fontSize:'0.62rem', color:C.textSub, marginTop:1 }}>
-                    KPI見込み（インセン） {fmtM(forecastTotal)}
+                  <div style={{ fontSize:'0.6rem', color:'#047857', marginTop:2 }}>
+                    インセン {fmtM(forecast.confirmedIncentive)}
                   </div>
                 </div>
-                {kpiRate != null && (
-                  <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:'0.62rem', color: kpiRate >= 100 ? '#059669' : '#94a3b8', marginBottom:2 }}>KPI達成見込み {kpiRate}%</div>
-                    <div style={{ fontSize:'1rem', fontWeight:800, color: kpiRate >= 100 ? '#059669' : kpiRate >= 70 ? '#d97706' : '#dc2626' }}>
-                      {forecastTotal >= kpiDenom ? '+' : ''}{fmtM(forecastTotal - kpiDenom)}
-                    </div>
+                <div style={{ padding:'10px 12px', background:'#eef2ff', borderRadius:8, borderLeft:'3px solid #6366f1' }}>
+                  <div style={{ fontSize:'0.65rem', color:'#4338ca', fontWeight:600, marginBottom:2 }}>今月見込みKPI</div>
+                  <div style={{ fontSize:'1.35rem', fontWeight:800, color:'#312e81', lineHeight:1.1 }}>
+                    {fmtM(forecastTotal)}<span style={{ fontSize:'0.75rem', marginLeft:1 }}>円</span>
                   </div>
-                )}
+                  {kpiRate != null && (
+                    <div style={{ fontSize:'0.6rem', color: kpiRate >= 100 ? '#059669' : kpiRate >= 70 ? '#d97706' : '#dc2626', marginTop:2, fontWeight:600 }}>
+                      達成見込み {kpiRate}%
+                      {kpiDenom > 0 && <span style={{ marginLeft:4 }}>（{forecastTotal >= kpiDenom ? '+' : ''}{fmtM(forecastTotal - kpiDenom)}）</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* 副指標: 見込み合計（全パイプライン） */}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10, paddingBottom:6, borderBottom:`1px dashed ${C.border}` }}>
+                <span style={{ fontSize:'0.7rem', color:C.textSub }}>パイプライン見込み合計（入金確定+締結見込み）</span>
+                <span style={{ fontSize:'0.95rem', fontWeight:700, color:C.text }}>{fmtM(forecastDispTotal)}円</span>
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                 {[

@@ -1210,6 +1210,38 @@ export default function CrmDashboard() {
             const rows = summary.staffSummary.filter(s => s.confirmed > 0 || s.thisMonthMaybe > 0 || s.nextMonthForecast > 0);
             const t = summary.totals || {};
             if (rows.length === 0) return null;
+
+            // 担当者×バケットの該当案件/入金を抽出してスライド表示
+            const matchesStaff = (val, staffName) => {
+              if (!val || !staffName) return false;
+              const s = staffName.split('/')[0].trim();
+              return String(val).includes(s) || s.includes(String(val).split('/')[0].trim());
+            };
+            const openStaffDrill = (staffName, bucket) => {
+              if (bucket === 'confirmed') {
+                const items = (summary.payments || []).filter(p => matchesStaff(p.staff, staffName));
+                if (items.length === 0) return;
+                setForecastDrill({ label: `${staffName} - 今月確定`, color:'#059669', items, kind:'payments' });
+              } else if (bucket === 'thisMonthMaybe' || bucket === 'nextMonthForecast') {
+                const fc = bucket === 'thisMonthMaybe' ? '今月可能性あり' : '来月締結見込み';
+                const color = bucket === 'thisMonthMaybe' ? '#1e40af' : '#d97706';
+                const label = bucket === 'thisMonthMaybe' ? '今月可能性' : '来月見込み';
+                const items = (summary.highDeals || []).filter(d =>
+                  d.settlement_forecast === fc &&
+                  (matchesStaff(d.sales_person, staffName) || matchesStaff(d.sales_user_id, staffName))
+                );
+                if (items.length === 0) return;
+                setForecastDrill({ label: `${staffName} - ${label}`, color, items, kind:'deals' });
+              }
+            };
+
+            const numCellStyle = (color, clickable) => ({
+              textAlign:'right', padding:'6px', color, fontWeight:700,
+              cursor: clickable ? 'pointer' : 'default',
+              textDecoration: clickable ? 'underline dotted' : 'none',
+              textUnderlineOffset: 3,
+            });
+
             return (
               <div style={{ ...cardStyle, padding:'14px 16px' }}>
                 {sectionHead('担当者別 締結見込み', '今月確定 / 今月可能性 / 来月見込み')}
@@ -1227,9 +1259,18 @@ export default function CrmDashboard() {
                       {rows.map(s => (
                         <tr key={s.name} style={{ borderTop:`1px solid ${C.border}` }}>
                           <td style={{ textAlign:'left', padding:'6px', fontWeight:600, color:C.text, whiteSpace:'nowrap' }}>{(s.name||'').split('/')[0].split(/[\s　]/)[0]}</td>
-                          <td style={{ textAlign:'right', padding:'6px', color:'#059669', fontWeight:700 }}>{s.confirmed > 0 ? fmtM(s.confirmed) : '—'}</td>
-                          <td style={{ textAlign:'right', padding:'6px', color:'#1e40af' }}>{s.thisMonthMaybe > 0 ? fmtM(s.thisMonthMaybe) : '—'}</td>
-                          <td style={{ textAlign:'right', padding:'6px', color:'#d97706' }}>{s.nextMonthForecast > 0 ? fmtM(s.nextMonthForecast) : '—'}</td>
+                          <td onClick={() => s.confirmed > 0 && openStaffDrill(s.name, 'confirmed')}
+                              style={numCellStyle('#059669', s.confirmed > 0)}>
+                            {s.confirmed > 0 ? fmtM(s.confirmed) : '—'}
+                          </td>
+                          <td onClick={() => s.thisMonthMaybe > 0 && openStaffDrill(s.name, 'thisMonthMaybe')}
+                              style={numCellStyle('#1e40af', s.thisMonthMaybe > 0)}>
+                            {s.thisMonthMaybe > 0 ? fmtM(s.thisMonthMaybe) : '—'}
+                          </td>
+                          <td onClick={() => s.nextMonthForecast > 0 && openStaffDrill(s.name, 'nextMonthForecast')}
+                              style={numCellStyle('#d97706', s.nextMonthForecast > 0)}>
+                            {s.nextMonthForecast > 0 ? fmtM(s.nextMonthForecast) : '—'}
+                          </td>
                         </tr>
                       ))}
                       <tr style={{ borderTop:`2px solid ${C.border}`, fontWeight:800 }}>
@@ -1242,7 +1283,7 @@ export default function CrmDashboard() {
                   </table>
                 </div>
                 <div style={{ fontSize:'0.62rem', color:C.textSub, marginTop:6 }}>
-                  ※「今月可能性」「来月見込み」はヨミ管理でS/A案件に入力した締結見込み
+                  ※「今月可能性」「来月見込み」はヨミ管理でS/A案件に入力した締結見込み・数値クリックで案件詳細
                 </div>
               </div>
             );

@@ -89,9 +89,11 @@ async function getAllUsers(token) {
   return users;
 }
 
-// ── 本日の打刻状況取得（指定ユーザー） ───────────────────────
-// 戻り値: { stamping_start_at, stamping_end_at } | null
+// ── 本日の打刻状況取得（指定ユーザー、work_outputs/daily版） ─────
+// 戻り値: { stamping_start_at, stamping_end_at, segment_display_title } | null
 // HRMOS の daily エンドポイントは user_id クエリで絞り込めず全社員返るのでページングで探す
+// 注意: このエンドポイントはバッチ更新型でラグが大きい（最大30分超）。
+// 「打刻されているかの判定」には使わず、segment（休暇判定）等の参考に留めること。
 async function getDailyWorkOutput(token, hrmosUserId, dateYmd) {
   for (let page = 1; page <= 20; page++) {
     const res = await ieyasuRequest({
@@ -103,6 +105,34 @@ async function getDailyWorkOutput(token, hrmosUserId, dateYmd) {
     if (found) return found;
   }
   return null;
+}
+
+// ── 本日の生の打刻ログ取得（stamp_logs/daily版、リアルタイム） ──
+// 戻り値: [{ user_id, stamp_type, created_at, user_agent, ... }]
+// stamp_type: 1=出勤, 2=退勤, 7=休憩開始, 8=休憩終了
+// リアルタイム反映されるためこちらを打刻判定に使う。
+async function getStampLogsForDate(token, dateYmd) {
+  const all = [];
+  for (let page = 1; page <= 20; page++) {
+    const res = await ieyasuRequest({
+      path: `/api/${COMPANY}/v1/stamp_logs/daily/${dateYmd}?limit=100&page=${page}`,
+      auth: `Token ${token}`,
+    });
+    if (res.status !== 200 || !Array.isArray(res.body) || res.body.length === 0) break;
+    all.push(...res.body);
+    if (res.body.length < 100) break;
+  }
+  return all;
+}
+
+// 指定ユーザーの本日の指定種別打刻を探す
+// 戻り値: { stampedAt: "HH:MM:SS", rawCreatedAt: "ISO" } | null
+async function findStampForUserToday(token, hrmosUserId, type, dateYmd) {
+  const logs = await getStampLogsForDate(token, dateYmd);
+  const found = logs.find(x => Number(x.user_id) === Number(hrmosUserId) && Number(x.stamp_type) === Number(type));
+  if (!found) return null;
+  const t = String(found.created_at || '').match(/T(\d{2}:\d{2}:\d{2})/);
+  return { stampedAt: t ? t[1] : null, rawCreatedAt: found.created_at };
 }
 
 // ── メインの打刻関数 ───────────────────────────────────────────
@@ -133,38 +163,26 @@ async function stampAttendance(slackClient, slackUserId, type) {
 
     const typeName = type === 1 ? '出勤' : '退勤';
 
-    // 4. 二重打刻チェック: 本日の打刻状況を取得
-    //   - 出勤(type=1): 当日に既に出勤打刻が記録されていれば常にスキップ（朝1回ルール）
-    //   - 退勤(type=2): 当日に既に退勤打刻が記録されていれば常にスキップ
-    //     （手動打刻（残業時間調整等）を bot が上書きしないため）
-    //     ★ 2段階確認: HRMOS daily API は反映遅延があるため、1回目 null なら 60秒待って再確認
+    // 4. 二重打刻チェック: stamp_logs/daily（リアルタイム）で本日の打刻状況を確認
+    //   - 既に同種別の打刻があれば常にスキップ（手動打刻を上書きしない）
+    //   - stamp_logs API は生ログ取得（リアルタイム反映）
+    //     → 旧 work_outputs/daily の集計バッチ更新ラグ（最大30分超）問題を解消
     const now = new Date();
     const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 9 * 60) * 60000);
     const todayYmd = jst.toISOString().slice(0, 10);
-    const checkExisting = async () => {
-      const daily = await getDailyWorkOutput(token, hrUser.id, todayYmd);
-      if (!daily) return null;
-      return type === 1 ? daily.stamping_start_at : daily.stamping_end_at;
-    };
     try {
-      let alreadyAt = await checkExisting();
-      // 退勤のみ: 1回目 null なら 60秒待って再確認（HRMOS daily 反映遅延対策）
-      if (!alreadyAt && type === 2) {
-        await new Promise(r => setTimeout(r, 60_000));
-        alreadyAt = await checkExisting();
-        if (alreadyAt) {
-          console.log(`[HRMOS] 退勤打刻 既存 ${alreadyAt} → skip（2回目チェックで検知=反映遅延）`);
-          return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
-        }
-      }
-      if (alreadyAt) {
-        const reason = type === 1 ? '出勤は1日1回' : '手動打刻優先';
-        console.log(`[HRMOS] ${typeName}打刻 既存 ${alreadyAt} → skip（${reason}）`);
-        return { ok: true, skipped: true, alreadyAt, type, typeName, email, userId: hrUser.id };
+      const existing = await findStampForUserToday(token, hrUser.id, type, todayYmd);
+      if (existing) {
+        console.log(`[HRMOS] ${typeName}打刻 既存 ${existing.stampedAt} → skip（stamp_logs検知）`);
+        return {
+          ok: true, skipped: true,
+          alreadyAt: existing.stampedAt,
+          type, typeName, email, userId: hrUser.id,
+        };
       }
     } catch (e) {
       // チェック失敗時はそのまま打刻に進む（致命的ではない）
-      console.warn('[HRMOS] daily check error (continuing):', e.message);
+      console.warn('[HRMOS] stamp_logs check error (continuing):', e.message);
     }
 
     // 5. 打刻
@@ -318,4 +336,4 @@ async function getUserDailyContext(slackClient, slackUserId) {
   };
 }
 
-module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache, getStampedUsersForDay, getUserDailyContext };
+module.exports = { stampAttendance, getToken, getAllUsers, invalidateUsersCache, getMonthlyWorkOutputs, invalidateMonthlyCache, getStampedUsersForDay, getUserDailyContext, getStampLogsForDate, findStampForUserToday };

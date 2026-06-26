@@ -477,6 +477,8 @@ export default function CrmDashboard() {
   const [loading, setLoading]     = useState(true);
   const [salesUser, setSalesUser] = useState('');
   const [period, setPeriod]       = useState('custom');
+  // KPI(インセン)ベース or 入金ベース 表示切替
+  const [baseMode, setBaseMode]   = useState('kpi'); // 'kpi' | 'payment'
   const [customMonth, setCustomMonth] = useState(currentMonth);
   const [rangeStartMonth, setRangeStartMonth] = useState(currentMonth);
   const [rangeEndMonth, setRangeEndMonth]     = useState(currentMonth);
@@ -784,22 +786,44 @@ export default function CrmDashboard() {
 
         {/* KPI達成率 */}
         {showTargetCard ? (() => {
-          const kpiColor = kpiAchieve == null ? C.textSub : kpiAchieve >= 100 ? '#059669' : kpiAchieve >= 70 ? '#d97706' : '#ef4444';
+          // ベース切替: KPI(インセン) or 入金
+          const isPay = baseMode === 'payment';
+          const actualAmount = isPay ? (curr.paymentAmount || 0) : (curr.incentiveAmount || 0);
+          const achieve = kpiDenom > 0 ? Math.round(actualAmount / kpiDenom * 100) : null;
+          const kpiColor = achieve == null ? C.textSub : achieve >= 100 ? '#059669' : achieve >= 70 ? '#d97706' : '#ef4444';
+          const remaining = kpiDenom > 0 ? Math.max(0, kpiDenom - actualAmount) : null;
+          const baseLabel = isPay ? '入金' : 'インセン';
           return (
             <div style={{ ...cardStyle, borderTop:`3px solid ${kpiColor}` }}>
-              <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500, marginBottom:8 }}>KPI達成率</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+                <div style={{ fontSize:'0.75rem', color:C.textSub, fontWeight:500 }}>{baseLabel}達成率</div>
+                {/* 切替トグル */}
+                <div style={{ display:'flex', background:C.surface2, borderRadius:5, padding:2, fontSize:'0.6rem' }}>
+                  {[['kpi','KPI'],['payment','入金']].map(([v,l]) => (
+                    <button key={v} onClick={() => setBaseMode(v)}
+                      style={{ padding:'2px 8px', border:'none', borderRadius:3, cursor:'pointer',
+                        background: baseMode===v ? C.surface : 'transparent',
+                        color: baseMode===v ? C.text : C.textSub,
+                        fontWeight: baseMode===v ? 700 : 400 }}>{l}</button>
+                  ))}
+                </div>
+              </div>
               <div style={{ fontSize:'1.55rem', fontWeight:800, lineHeight:1.1, color:kpiColor }}>
-                {kpiAchieve != null ? kpiAchieve : '—'}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
+                {achieve != null ? achieve : '—'}<span style={{ fontSize:'1rem', marginLeft:1 }}>%</span>
               </div>
               {kpiDenom > 0 && (
                 <div style={{ marginTop:6 }}>
                   <div style={{ height:5, background:C.surface2, borderRadius:3, overflow:'hidden' }}>
-                    <div style={{ height:'100%', width:`${Math.min(100, kpiAchieve || 0)}%`, borderRadius:3, transition:'width 0.5s', background:kpiColor }} />
+                    <div style={{ height:'100%', width:`${Math.min(100, achieve || 0)}%`, borderRadius:3, transition:'width 0.5s', background:kpiColor }} />
                   </div>
                   <div style={{ fontSize:'0.6rem', color:C.textSub, marginTop:2 }}>
-                    インセン {fmtM(curr.incentiveAmount || 0)} / 目標 {fmtM(kpiDenom)}
-                    {curr.paymentAmount > 0 && <span style={{ marginLeft:6 }}>（入金 {fmtM(curr.paymentAmount)}）</span>}
+                    {baseLabel} {fmtM(actualAmount)} / 目標 {fmtM(kpiDenom)}
                   </div>
+                  {remaining != null && (
+                    <div style={{ fontSize:'0.65rem', color: remaining === 0 ? '#059669' : '#dc2626', marginTop:3, fontWeight:600 }}>
+                      残り必要 {remaining === 0 ? '達成済み 🎉' : fmtM(remaining)}
+                    </div>
+                  )}
                   {curr.allianceIncentive > 0 && (
                     <div style={{ fontSize:'0.6rem', color:C.textSub, marginTop:1 }}>＋アライアンス {fmtM(curr.allianceIncentive)}（KPI除外）</div>
                   )}
@@ -837,7 +861,7 @@ export default function CrmDashboard() {
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8rem' }}>
                 <thead>
                   <tr style={{ background:C.surface2 }}>
-                    {['担当者','入金額','インセン','受注','初回商談','受注率','達成率'].map((h, i) => (
+                    {['担当者','入金額','インセン','受注','初回商談','受注率','達成率','残り必要'].map((h, i) => (
                       <th key={h} style={{ padding:'8px 14px', textAlign:i === 0 ? 'left' : 'right', fontWeight:600, color:C.textSub, borderBottom:`1px solid ${C.border}`, fontSize:'0.72rem', whiteSpace:'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -904,6 +928,16 @@ export default function CrmDashboard() {
                                 <div style={{ fontSize:'0.58rem', color:C.textSub, marginTop:1 }}>{repRoleInferred[r.rep] || ''}</div>
                               </div>
                             : <span style={{ color:'#cbd5e1' }}>—</span>}
+                        </td>
+                        <td style={{ padding:'9px 14px', textAlign:'right' }}>
+                          {(() => {
+                            if (r.isOther || repTermTarget <= 0) return <span style={{ color:'#cbd5e1' }}>—</span>;
+                            const actual = baseMode === 'payment' ? (r.paymentAmount || 0) : (r.incentiveAmount || 0);
+                            const remaining = Math.max(0, repTermTarget - actual);
+                            return remaining === 0
+                              ? <span style={{ fontSize:'0.72rem', color:'#059669', fontWeight:700 }}>達成 🎉</span>
+                              : <span style={{ fontSize:'0.78rem', color:'#dc2626', fontWeight:600 }}>{fmtM(remaining)}</span>;
+                          })()}
                         </td>
                       </tr>
                     );

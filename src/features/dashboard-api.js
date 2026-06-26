@@ -1015,7 +1015,7 @@ function registerDashboardApi(deps) {
       for (const t of tasks) {
         lines.push([
           esc(t.assignee_name), esc(t.title),
-          esc(String(t.due_date).slice(0,10).replace(/-/g, '/')),
+          esc((t.due_date instanceof Date ? t.due_date.toISOString().slice(0,10) : String(t.due_date).slice(0,10)).replace(/-/g, '/')),
           esc(`${t.days_overdue}日`),
           esc(t.requester_name), esc(t.permalink),
         ].join(','));
@@ -4068,7 +4068,7 @@ function registerDashboardApi(deps) {
       title: task.title,
       description: task.description,
       requesterName,
-      dueDate: task.due_date ? String(task.due_date).slice(0, 10) : null,
+      dueDate: task.due_date ? (task.due_date instanceof Date ? task.due_date.toISOString().slice(0, 10) : String(task.due_date).slice(0, 10)) : null,
       threadContext,
     });
 

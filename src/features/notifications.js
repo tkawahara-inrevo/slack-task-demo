@@ -189,8 +189,10 @@ async function runDueNotifyJob() {
     if (!byUser.has(userId)) byUser.set(userId, { overdue: [], today: [] });
     byUser.get(userId)[bucket].push({ task, role });
   };
+  // pg ドライバが date 型を Date オブジェクトに変換するので、ISO日付文字列に正規化
+  const toYmd = (v) => v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
   for (const t of tasks) {
-    const due = String(t.due_date).slice(0, 10);
+    const due = toYmd(t.due_date);
     const bucket = due === today ? "today" : "overdue";
     pushItem(t.assignee_id, "assignee", t, bucket);
     // 依頼者と対応者が同じ場合は重複させない

@@ -5,7 +5,7 @@
 // チャンネル: env DAILY_REPORT_CLASSIFIER_CHANNELS（カンマ区切り）
 // 検知条件: bot_message + 「未提出」キーワード + 名前リスト含む
 
-const { getToken, getAllUsers } = require('./ieyasu');
+const { getToken, getAllUsers, getStampLogsForDate } = require('./ieyasu');
 
 const KINTAI_NOTICE_CHANNEL_ID = process.env.KINTAI_NOTICE_CHANNEL_ID || 'C086FUWG9KR';
 
@@ -217,15 +217,29 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
       const reportType = isOut ? '退勤日報' : '出勤日報';
 
       // HRMOS 当該日のデータ + ユーザー解決
+      // - work_outputs/daily: segment_display_title（休暇/祝日判定、ラグ問題なし）
+      // - stamp_logs/daily: 実打刻（リアルタイム反映、上書き・二重打刻防止に必要）
       const token = await getToken();
-      const [hrmosUsers, dailyAll, dir, absenceUsers] = await Promise.all([
+      const [hrmosUsers, dailyAll, stampLogs, dir, absenceUsers] = await Promise.all([
         getAllUsers(token),
         getDailyForDate(token, targetDate),
+        getStampLogsForDate(token, targetDate),
         getUserDir(teamId),
         isIn ? getAbsenceUsers(client, KINTAI_NOTICE_CHANNEL_ID, targetDate) : Promise.resolve(new Set()),
       ]);
       const hrmosByEmail = new Map(hrmosUsers.map(u => [(u.email || '').toLowerCase(), u]));
       const dailyByUid = new Map(dailyAll.map(d => [d.user_id, d]));
+      // stamp_logs から user_id ごとの出勤(1)/退勤(2) を構築
+      const stampsByUid = new Map();
+      for (const s of stampLogs || []) {
+        const uid = Number(s.user_id);
+        if (!stampsByUid.has(uid)) stampsByUid.set(uid, { in: null, out: null });
+        const entry = stampsByUid.get(uid);
+        const t = String(s.created_at || '').match(/T(\d{2}:\d{2})/);
+        const hhmm = t ? t[1] : null;
+        if (Number(s.stamp_type) === 1 && !entry.in)  entry.in  = hhmm;
+        if (Number(s.stamp_type) === 2 && !entry.out) entry.out = hhmm;
+      }
 
       // Slack メール解決
       async function getEmail(slackUserId) {
@@ -254,23 +268,21 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
           continue;
         }
         const daily = dailyByUid.get(hrUser.id);
-        // HRMOS daily にデータがない（反映途中等）→ 要確認へ
-        if (!daily) {
-          buckets.check.push({ name, note: 'HRMOSデータ未取得' });
-          continue;
-        }
-        const segment = daily.segment_display_title || '';
-        const hasIn = !!daily.stamping_start_at;
-        const hasOut = !!daily.stamping_end_at;
+        // segment（休暇判定）は work_outputs から取得（dailyがない場合は未確定として扱う）
+        const segment = daily?.segment_display_title || '';
+        // 実打刻は stamp_logs から取得（リアルタイム）
+        const stamps = stampsByUid.get(hrUser.id) || { in: null, out: null };
+        const hasIn  = !!stamps.in;
+        const hasOut = !!stamps.out;
 
         if (isOut) {
           // 退勤日報（昨日のデータ）
-          if (!isWorkSegment(segment)) {
+          if (segment && !isWorkSegment(segment)) {
             buckets.leave.push({ name, segment });
           } else if (hasIn && !hasOut) {
-            buckets.submit.push({ name, time: daily.stamping_start_at });
+            buckets.submit.push({ name, time: stamps.in });
           } else if (hasIn && hasOut) {
-            buckets.report_only.push({ name, time: daily.stamping_end_at });
+            buckets.report_only.push({ name, time: stamps.out });
           } else {
             // 出勤打刻なし → カレンダー確認 → 休暇なら leave、なければ check
             const cal = await getCalendarVacation(dbQuery, email, targetDate);
@@ -279,10 +291,10 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
           }
         } else {
           // 出勤日報（当日のデータ）
-          if (!isWorkSegment(segment)) {
+          if (segment && !isWorkSegment(segment)) {
             buckets.leave.push({ name, segment });
           } else if (hasIn) {
-            buckets.submit.push({ name, time: daily.stamping_start_at });
+            buckets.submit.push({ name, time: stamps.in });
           } else if (absenceUsers.has(slackUser.user_id)) {
             buckets.leave.push({ name, segment: '欠勤連絡あり' });
           } else {

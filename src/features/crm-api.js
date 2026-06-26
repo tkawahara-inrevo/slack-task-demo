@@ -2410,7 +2410,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
                  lc.yomi_flow, lc.order_date, lc.rep,
                  lf.has_appo, lf.has_lost, lf.lost_reason
           FROM mv_lead_customers lc
-          JOIN mv_lead_flags lf ON lf.customer = lc.customer
+          JOIN mv_lead_flags lf ON lf.record_id = lc.record_id
         )
       `;
       // 追加フィルター（担当者・流入経路・アポ化済みのみ）
@@ -2679,7 +2679,7 @@ function registerChannelTargetsApi({ expressApp, authWithRole }) {
           SELECT lc.customer, lc.inflow_date, lc.source, lc.order_date,
                  lf.has_appo
           FROM mv_lead_customers lc
-          JOIN mv_lead_flags lf ON lf.customer = lc.customer
+          JOIN mv_lead_flags lf ON lf.record_id = lc.record_id
           WHERE lc.inflow_date IS NOT NULL AND lc.inflow_date != ''
             AND lc.inflow_date::date BETWEEN $1::date AND $2::date
             AND lc.source NOT LIKE '%' || chr(65533) || '%'

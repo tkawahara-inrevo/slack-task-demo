@@ -36,11 +36,19 @@ async function getCalendarVacation(dbQuery, email, dateYmd) {
       singleEvents: true,
       maxResults: 50,
     });
-    const kw = /有給|休暇|休日|国の代わり|全日|時間給|OOO|不在|代休|振休/;
     for (const ev of r.data.items || []) {
-      const isAllDay = !!ev.start?.date;
       const summary = ev.summary || '';
-      if (kw.test(summary) && isAllDay) {
+      const isAllDay = !!ev.start?.date;
+      // ① eventType=outOfOffice（不在予定）→ 確実に不在
+      if (ev.eventType === 'outOfOffice') {
+        return { absent: true, reason: summary || '不在設定' };
+      }
+      // ② 終日イベントで休暇系キーワード → 不在
+      if (isAllDay && /休|有給|OOO|不在|国の代わり/.test(summary)) {
+        return { absent: true, reason: summary };
+      }
+      // ③ 時間休/半休（非終日でも対応）
+      if (/時間休|半休/.test(summary)) {
         return { absent: true, reason: summary };
       }
     }

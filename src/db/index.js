@@ -606,6 +606,8 @@ async function dbEnsureSettingsSchema() {
   // deals: 締結見込み（ヨミS/A向けの営業の手動見込み）
   await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS settlement_forecast TEXT`).catch(() => {});  // '今月可能性あり' | '来月締結見込み'
   await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS forecast_confidence TEXT`).catch(() => {});  // '高' | '中' | '低'
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS forecast_amount BIGINT`).catch(() => {});      // 見込み入金額（円）
+  await dbQuery(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS forecast_payment_date DATE`).catch(() => {});  // 見込み入金日
 
   // 案件から自動生成される入金予定（kintone⑥の代替）
   await dbQuery(`

@@ -1689,6 +1689,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
               initialFee, monthlyFee, contractMonths, hiringTarget, employmentType,
               lostReason, status, memo, data, firstMeetingDate,
               settlementForecast, forecastConfidence, guaranteeCount, unitPrice,
+              forecastAmount, forecastPaymentDate,
               updatedAt, force } = req.body || {};
       const { rows: [existing] } = await dbQuery(
         `SELECT * FROM deals WHERE id=$1 AND team_id=$2`, [req.params.id, teamId]
@@ -1720,6 +1721,7 @@ function registerCrmApi({ expressApp, authWithRole }) {
           first_meeting_date=COALESCE($18::date, first_meeting_date),
           settlement_forecast=$19, forecast_confidence=$20,
           guarantee_count=$21, unit_price=$22,
+          forecast_amount=$23, forecast_payment_date=$24,
           updated_at=now()
         WHERE id=$1 AND team_id=$2 RETURNING *
       `, [req.params.id, teamId,
@@ -1734,7 +1736,9 @@ function registerCrmApi({ expressApp, authWithRole }) {
           settlementForecast!==undefined ? (settlementForecast||null) : existing.settlement_forecast,
           forecastConfidence!==undefined ? (forecastConfidence||null) : existing.forecast_confidence,
           guaranteeCount!==undefined ? (guaranteeCount===''||guaranteeCount==null?null:Number(guaranteeCount)) : existing.guarantee_count,
-          unitPrice!==undefined      ? (unitPrice===''||unitPrice==null?null:Number(unitPrice))                : existing.unit_price]);
+          unitPrice!==undefined      ? (unitPrice===''||unitPrice==null?null:Number(unitPrice))                : existing.unit_price,
+          forecastAmount!==undefined ? (forecastAmount===''||forecastAmount==null?null:Number(forecastAmount)) : existing.forecast_amount,
+          forecastPaymentDate!==undefined ? (forecastPaymentDate||null) : existing.forecast_payment_date]);
 
       // ヨミ変更ログ（deal_activities へ自動記録）
       if (newYomi !== existing.yomi && newYomi) {

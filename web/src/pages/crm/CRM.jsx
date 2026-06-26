@@ -178,7 +178,12 @@ function YomiPanel({ full = false }) {
     const [memoFocused, setMemoFocused] = useState(false);
     const [savingInline, setSavingInline] = useState(false);
     const isSA = d.yomi === 'A 70％' || d.yomi === 'S 90％';
-    const [fc, setFc] = useState({ settlement: d.settlement_forecast || '', confidence: d.forecast_confidence || '' });
+    const [fc, setFc] = useState({
+      settlement: d.settlement_forecast || '',
+      confidence: d.forecast_confidence || '',
+      amount: d.forecast_amount != null ? String(d.forecast_amount) : '',
+      paymentDate: d.forecast_payment_date ? String(d.forecast_payment_date).slice(0,10) : '',
+    });
 
     const saveInlineMemo = async () => {
       if (localMemo === memo) { setMemoFocused(false); return; }
@@ -190,14 +195,20 @@ function YomiPanel({ full = false }) {
       finally { setSavingInline(false); setMemoFocused(false); }
     };
 
-    const saveForecast = async (settlement, confidence) => {
-      setFc({ settlement, confidence });
+    const saveForecast = async (next) => {
+      const merged = { ...fc, ...next };
+      setFc(merged);
       try {
         await api.crmUpdateDeal(d.id, {
-          settlementForecast: settlement || null,
-          forecastConfidence: settlement === '来月締結見込み' ? (confidence || null) : null,
+          settlementForecast: merged.settlement || null,
+          forecastConfidence: merged.settlement === '来月締結見込み' ? (merged.confidence || null) : null,
+          forecastAmount: merged.amount === '' ? null : Number(merged.amount),
+          forecastPaymentDate: merged.paymentDate || null,
         });
-        d.settlement_forecast = settlement; d.forecast_confidence = confidence; // ローカル反映
+        d.settlement_forecast = merged.settlement;
+        d.forecast_confidence = merged.confidence;
+        d.forecast_amount = merged.amount === '' ? null : Number(merged.amount);
+        d.forecast_payment_date = merged.paymentDate || null;
       } catch (e) { console.error(e); }
     };
 
@@ -205,7 +216,7 @@ function YomiPanel({ full = false }) {
     const FC_COLORS = { '今月可能性あり':'#1e40af', '来月締結見込み':'#d97706' };
     const inlineForecast = isSA ? (
       <div onClick={e => e.stopPropagation()} style={{ marginTop:7, display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
-        <select value={fc.settlement} onChange={e => saveForecast(e.target.value, fc.confidence)}
+        <select value={fc.settlement} onChange={e => saveForecast({ settlement: e.target.value })}
           style={{ fontSize:'0.7rem', padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, background:'#fff',
             color: fc.settlement ? (FC_COLORS[fc.settlement]||'#0f172a') : '#94a3b8', fontWeight: fc.settlement?700:400 }}>
           <option value="">締結見込み 未設定</option>
@@ -213,7 +224,7 @@ function YomiPanel({ full = false }) {
           <option value="来月締結見込み">来月締結見込み</option>
         </select>
         {fc.settlement === '来月締結見込み' && (
-          <select value={fc.confidence} onChange={e => saveForecast(fc.settlement, e.target.value)}
+          <select value={fc.confidence} onChange={e => saveForecast({ confidence: e.target.value })}
             style={{ fontSize:'0.7rem', padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, background:'#fff', fontWeight:600,
               color: fc.confidence==='高'?'#dc2626':fc.confidence==='中'?'#d97706':fc.confidence==='低'?'#64748b':'#94a3b8' }}>
             <option value="">確度</option>
@@ -222,6 +233,16 @@ function YomiPanel({ full = false }) {
             <option value="低">確度: 低</option>
           </select>
         )}
+        <input type="date" value={fc.paymentDate}
+          onChange={e => setFc({ ...fc, paymentDate: e.target.value })}
+          onBlur={e => saveForecast({ paymentDate: e.target.value })}
+          title="見込み入金日"
+          style={{ fontSize:'0.7rem', padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, background:'#fff', color: fc.paymentDate ? '#0f172a' : '#94a3b8' }} />
+        <input type="number" value={fc.amount} placeholder="見込み額" min={0}
+          onChange={e => setFc({ ...fc, amount: e.target.value })}
+          onBlur={e => saveForecast({ amount: e.target.value })}
+          title="見込み入金額（円）"
+          style={{ width:110, fontSize:'0.7rem', padding:'3px 6px', border:'1px solid #e2e8f0', borderRadius:6, background:'#fff', color: fc.amount ? '#0f172a' : '#94a3b8' }} />
       </div>
     ) : null;
 

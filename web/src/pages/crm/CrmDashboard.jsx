@@ -225,6 +225,8 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         sales_memo: d.sales_memo || '',
         settlement_forecast: d.settlement_forecast || '',
         forecast_confidence: d.forecast_confidence || '',
+        forecast_amount: d.forecast_amount != null ? String(d.forecast_amount) : '',
+        forecast_payment_date: d.forecast_payment_date ? String(d.forecast_payment_date).slice(0,10) : '',
       });
     }).catch(() => onBack());
     api.crmDealPayments(dealRow.id).then(r => setHistory(r.payments || [])).catch(() => setHistory([]));
@@ -247,6 +249,8 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         salesMemo: form.sales_memo,
         settlementForecast: form.settlement_forecast || null,
         forecastConfidence: form.settlement_forecast === '来月締結見込み' ? (form.forecast_confidence || null) : null,
+        forecastAmount: form.forecast_amount === '' ? null : Number(form.forecast_amount),
+        forecastPaymentDate: form.forecast_payment_date || null,
         updatedAt: deal.updated_at, force: true,
       });
       onSaved && onSaved();
@@ -326,19 +330,27 @@ function DealQuickEdit({ dealRow, payment, onBack, onSaved }) {
         </>)}
       </div>
       {isSA && (
-        <div style={{ display:'grid', gridTemplateColumns: form.settlement_forecast==='来月締結見込み' ? '1fr 1fr' : '1fr', gap:9, padding:'9px', background:C.surface2, borderRadius:8 }}>
-          <div><label style={L}>締結見込み</label>
-            <select value={form.settlement_forecast} onChange={e=>setForm(f=>({...f,settlement_forecast:e.target.value}))} style={{...I,cursor:'pointer'}}>
-              <option value="">未設定</option>
-              <option value="今月可能性あり">今月可能性あり</option>
-              <option value="来月締結見込み">来月締結見込み</option>
-            </select></div>
-          {form.settlement_forecast==='来月締結見込み' && (
-            <div><label style={L}>確度</label>
-              <select value={form.forecast_confidence} onChange={e=>setForm(f=>({...f,forecast_confidence:e.target.value}))} style={{...I,cursor:'pointer'}}>
-                <option value="">-</option><option value="高">高</option><option value="中">中</option><option value="低">低</option>
+        <div style={{ padding:'9px', background:C.surface2, borderRadius:8, display:'flex', flexDirection:'column', gap:9 }}>
+          <div style={{ display:'grid', gridTemplateColumns: form.settlement_forecast==='来月締結見込み' ? '1fr 1fr' : '1fr', gap:9 }}>
+            <div><label style={L}>締結見込み</label>
+              <select value={form.settlement_forecast} onChange={e=>setForm(f=>({...f,settlement_forecast:e.target.value}))} style={{...I,cursor:'pointer'}}>
+                <option value="">未設定</option>
+                <option value="今月可能性あり">今月可能性あり</option>
+                <option value="来月締結見込み">来月締結見込み</option>
               </select></div>
-          )}
+            {form.settlement_forecast==='来月締結見込み' && (
+              <div><label style={L}>確度</label>
+                <select value={form.forecast_confidence} onChange={e=>setForm(f=>({...f,forecast_confidence:e.target.value}))} style={{...I,cursor:'pointer'}}>
+                  <option value="">-</option><option value="高">高</option><option value="中">中</option><option value="低">低</option>
+                </select></div>
+            )}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
+            <div><label style={L}>見込み入金日</label>
+              <input type="date" value={form.forecast_payment_date} onChange={e=>setForm(f=>({...f,forecast_payment_date:e.target.value}))} style={I} /></div>
+            <div><label style={L}>見込み額（円）</label>
+              <input type="number" value={form.forecast_amount} placeholder="例: 500000" onChange={e=>setForm(f=>({...f,forecast_amount:e.target.value}))} style={{...I,textAlign:'right'}} /></div>
+          </div>
         </div>
       )}
       <div><label style={L}>商談メモ</label>

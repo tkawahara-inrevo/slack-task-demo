@@ -605,62 +605,6 @@ export default function LeadsDashboard() {
             );
           })()}
 
-          {/* アポ化・受注・失注 統合グラフ */}
-          {(() => {
-            const sources = new Set([
-              ...(data.appoBySource||[]).map(r=>r.source),
-              ...(data.orderBySource||[]).map(r=>r.source),
-              ...(data.bySource||[]).filter(r=>r.lost_cnt>0).map(r=>r.source),
-            ]);
-            const merged = Array.from(sources).map(src => ({
-              source: src,
-              appo:  data.appoBySource?.find(r=>r.source===src)?.cnt || 0,
-              order: data.orderBySource?.find(r=>r.source===src)?.cnt || 0,
-              lost:  data.bySource?.find(r=>r.source===src)?.lost_cnt || 0,
-            })).sort((a,b) => (b.appo+b.order+b.lost)-(a.appo+a.order+a.lost));
-            return (
-              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'16px 12px', marginBottom:20 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, paddingLeft:8 }}>
-                  <span style={{ fontWeight:700, fontSize:'0.85rem' }}>アポ化・受注・失注 流入経路別</span>
-                  <span style={{ fontSize:'0.7rem', color:'#9ca3af' }}>クリックで詳細</span>
-                  <div style={{ marginLeft:'auto', display:'flex', gap:12, fontSize:'0.72rem' }}>
-                    <span><span style={{ display:'inline-block', width:10, height:10, background:'#3b82f6', borderRadius:2, marginRight:4 }}/>アポ化</span>
-                    <span><span style={{ display:'inline-block', width:10, height:10, background:'#10b981', borderRadius:2, marginRight:4 }}/>受注</span>
-                    <span><span style={{ display:'inline-block', width:10, height:10, background:'#ef4444', borderRadius:2, marginRight:4 }}/>失注</span>
-                  </div>
-                </div>
-                {merged.length === 0
-                  ? <div style={{ color:'#9ca3af', fontSize:'0.8rem', textAlign:'center', padding:16 }}>データなし</div>
-                  : (
-                    <ResponsiveContainer width="100%" height={Math.max(160, merged.length * 36)}>
-                      <BarChart data={merged} layout="vertical" margin={{ top:0, right:60, left:4, bottom:0 }}
-                        onClick={e => {
-                          const src = e?.activePayload?.[0]?.payload?.source;
-                          const key = e?.activePayload?.[0]?.dataKey;
-                          if (src) openDrill(src, key === 'order' ? 'order' : 'appo');
-                        }}
-                        style={{ cursor:'pointer' }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                        <XAxis type="number" tick={TICK} allowDecimals={false} />
-                        <YAxis type="category" dataKey="source" tick={{ fontSize:11, fill:'#6b7280' }} width={130} />
-                        <Tooltip formatter={(v, n) => [`${v}件`, n === 'appo' ? 'アポ化' : n === 'order' ? '受注' : '失注']} cursor={{ fill:'#f8fafc' }} />
-                        <Bar dataKey="appo"  fill="#3b82f6" radius={[0,0,0,0]} name="appo"  barSize={8}>
-                          <LabelList dataKey="appo"  position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
-                        </Bar>
-                        <Bar dataKey="order" fill="#10b981" radius={[0,0,0,0]} name="order" barSize={8}>
-                          <LabelList dataKey="order" position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
-                        </Bar>
-                        <Bar dataKey="lost"  fill="#ef4444" radius={[0,4,4,0]} name="lost"  barSize={8}>
-                          <LabelList dataKey="lost"  position="right" style={{ fontSize:10, fill:'#374151' }} formatter={v => v > 0 ? v : ''} />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )
-                }
-              </div>
-            );
-          })()}
-
           {/* 流入経路ドリルダウンパネル */}
           {drill && (
             <>

@@ -137,7 +137,8 @@
       "Bash(node -e \"const s=require\\('/tmp/hrmos-openapi.json'\\); const p=Object.keys\\(s.paths\\).filter\\(k => /stamp|work_output/.test\\(k\\)\\); console.log\\(JSON.stringify\\(p, null, 2\\)\\);\")",
       "Bash(curl -s \"https://ieyasu.co/docs/openapi.json\" -o C:/Users/takar/AppData/Local/Temp/claude/e--dev-slack-task-demo/3d701271-a635-4c63-975e-4e603cf5e4ec/scratchpad/hrmos-openapi.json)",
       "Bash(node -e \"const s=require\\('C:/Users/takar/AppData/Local/Temp/claude/e--dev-slack-task-demo/3d701271-a635-4c63-975e-4e603cf5e4ec/scratchpad/hrmos-openapi.json'\\); const p=Object.keys\\(s.paths\\).filter\\(k => /stamp|work_output/.test\\(k\\)\\); console.log\\(p.join\\('\\\\n'\\)\\);\")",
-      "Bash(node -e \"const s=require\\('C:/Users/takar/AppData/Local/Temp/claude/e--dev-slack-task-demo/3d701271-a635-4c63-975e-4e603cf5e4ec/scratchpad/hrmos-openapi.json'\\); for \\(const p of ['/stamp_logs/daily/{day}', '/stamp_logs/user/{user_id}', '/stamp_logs']\\) { console.log\\('===', p, '==='\\); console.log\\(JSON.stringify\\(s.paths[p], null, 2\\).slice\\(0, 2000\\)\\); }\")"
+      "Bash(node -e \"const s=require\\('C:/Users/takar/AppData/Local/Temp/claude/e--dev-slack-task-demo/3d701271-a635-4c63-975e-4e603cf5e4ec/scratchpad/hrmos-openapi.json'\\); for \\(const p of ['/stamp_logs/daily/{day}', '/stamp_logs/user/{user_id}', '/stamp_logs']\\) { console.log\\('===', p, '==='\\); console.log\\(JSON.stringify\\(s.paths[p], null, 2\\).slice\\(0, 2000\\)\\); }\")",
+      "Bash(grep -n \"^          {/\\\\*\\\\|^          }\\)\\(\\)}\" e:/dev/slack-task-demo/web/src/pages/crm/LeadsDashboard.jsx)"
     ]
   }
 }

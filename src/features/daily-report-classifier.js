@@ -118,11 +118,12 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
     return all;
   }
 
-  // 日付ヘルパー
+  // 日付ヘルパー: "YYYY-MM-DD" から前日を返す（TZ非依存の純粋日付計算）
   function yesterdayJstYmd(today) {
-    const d = new Date(`${today}T00:00:00+09:00`);
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
+    const [y, m, d] = today.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return dt.toISOString().slice(0, 10);
   }
 
   // 名前パース: 「姓 名/Romaji」形式の行のみ抽出

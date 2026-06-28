@@ -347,15 +347,7 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         buckets.leave,
         u => `• ${u.name}${u.segment ? `  _(${u.segment})_` : ''}`,
       );
-      // 退勤日報のみ: 「打刻はしてるが日報を出してない人」(参考、人事フォロー軽微)
-      if (isOut) {
-        addSection(
-          '📌 日報のみ未提出',
-          'HRMOSは打刻済 → 本人に日報のみ提出を依頼',
-          buckets.report_only,
-          u => `• ${u.name}${u.time ? `  _(${u.time} 退勤)_` : ''}`,
-        );
-      }
+      // 「日報のみ未提出」セクションは廃止（watcher 通知だけで十分なため）
 
       const threadTs = event.thread_ts || event.ts;
       await client.chat.postMessage({

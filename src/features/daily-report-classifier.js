@@ -250,10 +250,12 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         if (Number(s.stamp_type) === 2 && !entry.out) entry.out = hhmm;
       }
 
-      // Slack メール解決
-      async function getEmail(slackUserId) {
+      // Slack メール解決: ディレクトリの profile_json.email を優先（DB保持）、なければ API
+      async function getEmail(slackUser) {
+        const dirEmail = (slackUser.profile_json?.email || '').toLowerCase();
+        if (dirEmail) return dirEmail;
         try {
-          const u = await client.users.info({ user: slackUserId });
+          const u = await client.users.info({ user: slackUser.user_id });
           return (u.user?.profile?.email || '').toLowerCase();
         } catch { return null; }
       }
@@ -263,17 +265,20 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
       for (const name of names) {
         const slackUser = resolveSlackUser(name, dir);
         if (!slackUser) {
+          console.log(`[dr-classifier] resolve fail: ${name}`);
           buckets.check.push({ name, note: 'Slack ユーザー特定不可' });
           continue;
         }
-        const email = await getEmail(slackUser.user_id);
+        const email = await getEmail(slackUser);
         if (!email) {
-          buckets.check.push({ name });
+          console.log(`[dr-classifier] email fail: ${name} uid=${slackUser.user_id}`);
+          buckets.check.push({ name, note: 'メール未取得' });
           continue;
         }
         const hrUser = hrmosByEmail.get(email);
         if (!hrUser) {
-          buckets.check.push({ name });
+          console.log(`[dr-classifier] hrmos user fail: ${name} email=${email}`);
+          buckets.check.push({ name, note: 'HRMOSユーザー未紐付け' });
           continue;
         }
         const daily = dailyByUid.get(hrUser.id);

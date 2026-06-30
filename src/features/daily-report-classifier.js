@@ -144,8 +144,8 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
       line = line.replace(/^[-・•●◯○]\s*/, '');
       if (!line || line.length > 80) continue;
       let jp = null;
-      // パターン1: 「漢字+スラッシュ+Latin」
-      let m = line.match(/^([一-鿿ぁ-んァ-ヶー々〆〤\s]{2,20})\/[A-Za-z]/);
+      // パターン1: 「漢字+スラッシュ+Latin」（スラッシュ前後のスペース許容）
+      let m = line.match(/^([一-鿿ぁ-んァ-ヶー々〆〤\s]{2,20})\/\s*[A-Za-z]/);
       if (m) {
         jp = m[1].trim();
       } else {

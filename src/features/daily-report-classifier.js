@@ -134,19 +134,26 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
     return dt.toISOString().slice(0, 10);
   }
 
-  // 名前パース: 「姓 名/Romaji」形式の行のみ抽出
+  // 名前パース: 「姓 名/Romaji」または「姓名 Romaji」形式の行を抽出
   // 例: "外山 雄大/Yudai Toyama" → "外山 雄大"
+  //     "萩原隼人 Hayato Hagiwara" → "萩原隼人"
   function parseNames(text) {
     const names = [];
     for (const raw of text.split(/\r?\n+/)) {
       let line = raw.trim();
       line = line.replace(/^[-・•●◯○]\s*/, '');
       if (!line || line.length > 80) continue;
-      // 漢字/かな + スラッシュ + 半角英字 のパターン
-      const m = line.match(/^([一-鿿ぁ-んァ-ヶー々〆〤\s]{2,20})\/[A-Za-z]/);
-      if (!m) continue;
-      const jp = m[1].trim();
-      if (jp.length < 2) continue;
+      let jp = null;
+      // パターン1: 「漢字+スラッシュ+Latin」
+      let m = line.match(/^([一-鿿ぁ-んァ-ヶー々〆〤\s]{2,20})\/[A-Za-z]/);
+      if (m) {
+        jp = m[1].trim();
+      } else {
+        // パターン2: 「漢字 Latin」 (スペース区切り。漢字部分は内部スペース1個まで許容)
+        m = line.match(/^([一-鿿ぁ-んァ-ヶー々〆〤]+(?:\s[一-鿿ぁ-んァ-ヶー々〆〤]+)?)\s+[A-Za-z]/);
+        if (m) jp = m[1].trim();
+      }
+      if (!jp || jp.length < 2) continue;
       names.push(jp);
     }
     return names;

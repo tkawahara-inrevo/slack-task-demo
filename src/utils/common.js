@@ -288,6 +288,7 @@ function todayJstYmd() {
 }
 
 // タスク作成時の期限初期値: JST 15:00 以降は翌日、それ以前は今日
+// 土日祝日にあたる場合は次の営業日まで進める。
 // すべてのタスク作成ルート（モーダル / リアクション / キーワード）で共通使用
 function defaultDueYmd() {
   const now = new Date();
@@ -299,7 +300,12 @@ function defaultDueYmd() {
   const y = jst.getUTCFullYear();
   const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
   const d = String(jst.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  let ymd = `${y}-${m}-${d}`;
+  // 営業日でなければ次の営業日まで進める（土日祝→月/次営業日）
+  if (!isJpBusinessDayYmd(ymd)) {
+    ymd = nextJpBusinessDayFromYmd(ymd) || ymd;
+  }
+  return ymd;
 }
 
 function normalizeHandle(handle) {

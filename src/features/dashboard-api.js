@@ -2302,7 +2302,17 @@ function registerDashboardApi(deps) {
       if (action !== 'personalityCompleted') return res.status(400).json({ error: 'unknown_action' });
 
       // 名前正規化（全角スペース→半角、前後空白除去、スペース除去）
-      const normName = (n) => (n || '').replace(/　/g, ' ').trim();
+      // CJK 互換異体字を通常字に置換（Node の NFKC が変換しないため手動対応）
+      // よくある日本人姓の異体字を追加
+      const normalizeKanji = (s) => String(s || '')
+        .replace(/﨑/g, '崎')  // 﨑 → 崎
+        .replace(/髙/g, '高')  // 髙 → 高
+        .replace(/邊/g, '辺')  // 邊 → 辺
+        .replace(/邉/g, '辺')  // 邉 → 辺
+        .replace(/齊/g, '斉')  // 齊 → 斉
+        .replace(/齋/g, '斉')  // 齋 → 斉
+        .replace(/眞/g, '真'); // 眞 → 真
+      const normName = (n) => normalizeKanji(n).replace(/　/g, ' ').trim();
       const compactName = (n) => normName(n).replace(/\s+/g, '');
 
       // ① メールで検索

@@ -165,7 +165,8 @@
       "Bash(ssh -i ~/.ssh/lightsail-us-east-1.pem -o StrictHostKeyChecking=no ubuntu@3.222.101.208 \"sudo -u postgres psql -d slacktask -c \\\\\"SELECT id, name, email, stage, personality_status, personality_sent_at, personality_completed_at, personality_pdf_url IS NOT NULL AS has_pdf FROM recruitment_candidates WHERE personality_status='sent' OR personality_completed_at >= now\\(\\) - interval '3 days' ORDER BY personality_sent_at DESC NULLS LAST LIMIT 10;\\\\\"\")",
       "Bash(ssh -i ~/.ssh/lightsail-us-east-1.pem -o StrictHostKeyChecking=no ubuntu@3.222.101.208 \"pm2 logs slack-task --lines 5000 --nostream --out 2>&1 | grep -E '適性|personality|宮崎' | tail -15\")",
       "Bash(ssh -i ~/.ssh/lightsail-us-east-1.pem -o StrictHostKeyChecking=no ubuntu@3.222.101.208 \"pm2 logs slack-task --lines 5000 --nostream --err 2>&1 | grep -E '適性|personality|宮崎' | tail -15\")",
-      "Bash(node -e \"console.log\\('宮﨑'.normalize\\('NFKC'\\) === '宮崎'\\)\")"
+      "Bash(node -e \"console.log\\('宮﨑'.normalize\\('NFKC'\\) === '宮崎'\\)\")",
+      "Bash(git commit -m '適性診断webhook: CJK互換異体字（﨑/崎、髙/高等）のマッチング対応 *)"
     ]
   }
 }

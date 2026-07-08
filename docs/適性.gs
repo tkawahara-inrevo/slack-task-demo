@@ -216,7 +216,16 @@ function generatePdfForCandidate(candidateId, name) {
 
   if (respSheet && name) {
     const dataRange = respSheet.getDataRange().getValues();
-    const normName  = (n) => (n || '').replace(/　/g, ' ').replace(/\s+/g, '').trim();
+    // CJK互換異体字を通常字に置換（Node と同じルール。宮﨑→宮崎、髙→高、邊/邉→辺 等）
+    const normKanji = (n) => String(n || '')
+      .replace(/﨑/g, '崎')
+      .replace(/髙/g, '高')
+      .replace(/邊/g, '辺')
+      .replace(/邉/g, '辺')
+      .replace(/齊/g, '斉')
+      .replace(/齋/g, '斉')
+      .replace(/眞/g, '真');
+    const normName  = (n) => normKanji(n).replace(/　/g, ' ').replace(/\s+/g, '').trim();
     const targetName = normName(name);
 
     // 最新の回答から逆順で検索（同名が複数いる場合は最新を使用）

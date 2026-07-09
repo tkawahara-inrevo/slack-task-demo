@@ -241,7 +241,7 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
         getDailyForDate(token, targetDate),
         getStampLogsForDate(token, targetDate),
         getUserDir(teamId),
-        isIn ? getAbsenceUsers(client, KINTAI_NOTICE_CHANNEL_ID, targetDate) : Promise.resolve(new Set()),
+        getAbsenceUsers(client, KINTAI_NOTICE_CHANNEL_ID, targetDate),
       ]);
       const hrmosByEmail = new Map(hrmosUsers.map(u => [(u.email || '').toLowerCase(), u]));
       const dailyByUid = new Map(dailyAll.map(d => [d.user_id, d]));
@@ -304,6 +304,9 @@ function registerDailyReportClassifier({ app, dbQuery, todayJstYmd }) {
             buckets.submit.push({ name, time: stamps.in });
           } else if (hasIn && hasOut) {
             buckets.report_only.push({ name, time: stamps.out });
+          } else if (absenceUsers.has(slackUser.user_id)) {
+            // 対象日に勤怠連絡（欠勤）が投稿されていれば「出さなくてOK」
+            buckets.leave.push({ name, segment: '欠勤連絡あり' });
           } else {
             // 出勤打刻なし → カレンダー確認 → 休暇なら leave、なければ check
             const cal = await getCalendarVacation(dbQuery, email, targetDate);
